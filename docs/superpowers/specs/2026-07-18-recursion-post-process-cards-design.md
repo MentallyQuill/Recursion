@@ -138,8 +138,9 @@ Post-process Decks use the following canonical V1 shape:
 
 ### Editing
 
-- The starter deck is bundled and read-only.
-- Users duplicate the starter deck to edit it.
+- The starter deck is bundled and structurally read-only.
+- Its category and card enabled states remain operator-controllable.
+- Users duplicate the starter deck to edit its structure or content.
 - Users may create a blank custom deck.
 - Custom decks support rename, duplicate, and typed-confirmation delete.
 - Custom categories support create, rename, edit description, reorder, and delete with contained cards.
@@ -162,7 +163,9 @@ Post-processing is off by default.
   postProcessDecks: {
     version: 1,
     activeDeckId: "starter-post-process",
-    customDecks: {}
+    customDecks: {},
+    starterCategoryStates: {},
+    starterCardStates: {}
   }
 }
 ```
@@ -565,17 +568,16 @@ The panel reuses the Pre-process Card panel's geometry, deck bar, category rows,
 The header order is:
 
 ```text
-Post-process Cards                         [Off/On]
+Post-process Cards [summary] [Off/On] [As Swipe|Replace] [Unified|Progressive] [eye] [eye-off]
 [active deck selector]                 [deck actions]
-Apply          [As Swipe] [Replace]
-Rewrite Flow   [Unified]  [Progressive]
 ---------------------------------------------------
 ordered categories and cards
 ```
 
-- `Apply` and `Rewrite Flow` use compact segmented controls.
+- `Apply` and `Rewrite Flow` use compact segmented controls in the upper-right header immediately before the bulk eyes.
+- The open eye enables all runnable cards; the slashed eye disables all runnable cards.
 - The feature-level On/Off control is explicit and keyboard reachable.
-- Starter-deck edit actions are disabled with a tooltip directing the user to Duplicate.
+- Starter-deck structural edit actions are disabled with a tooltip directing the user to Duplicate; state controls remain enabled.
 - Category and card state uses open-eye/slashed-eye icons only; no eye-plus state.
 - Category rows show their effective runnable-card count.
 - Card rows show name and concise description; the full prompt appears in the editor.

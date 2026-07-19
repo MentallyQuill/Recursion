@@ -12,14 +12,17 @@ import { renderCompactBar } from '../../src/ui/bar.mjs';
 import {
   cardsPanelState,
   createDeckDragController,
-  renderDeckBar,
   renderDeckCard,
-  renderDeckCategory
+  renderDeckCategory,
+  renderDeckPanelHeader,
+  renderDeckToolbar
 } from '../../src/ui/cards-panel.mjs';
 import { providerSelector, providerStatusClass } from '../../src/ui/provider-panel.mjs';
 import { progressPanelState } from '../../src/ui/progress-panel.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from '../../src/settings.mjs';
+import { STARTER_POST_PROCESS_DECK_ID } from '../../src/post-process-decks.mjs';
+import { DEFAULT_PRE_PROCESS_DECK_ID } from '../../src/pre-process-decks.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 function fakeProviderControls(values = {}) {
@@ -77,6 +80,56 @@ assertEqual(compactBarPresentation.showFreshNextGeneration, false, 'compact bar 
 assertEqual(compactBarPresentation.postProcessLabel, 'Post-process Cards: On', 'compact bar presenter exposes Post-process feature state');
 assertEqual(progressPanelState({ progressRun: { title: 'Generating', steps: [{ id: 's1' }] } }).steps.length, 1, 'progress panel presenter exposes steps');
 assertEqual(cardsPanelState({ lastHand: { cards: [{ id: 'c1' }] } }).count, 1, 'cards panel presenter counts hand cards');
+{
+  const primitiveEl = (tagName, options = {}, children = []) => ({
+    tagName,
+    className: options.className || '',
+    attrs: options.attrs || {},
+    dataset: options.dataset || {},
+    text: options.text || '',
+    children: children.filter(Boolean)
+  });
+  const primitiveHeader = renderDeckPanelHeader({
+    el: primitiveEl,
+    title: 'Cards',
+    summary: '3/3 active',
+    controls: [primitiveEl('button', { dataset: { control: 'all-on' } })],
+    className: 'phase-head'
+  });
+  assert(primitiveHeader.className.includes('recursion-card-panel-head'), 'deck header always owns the shared panel-head class');
+  assert(primitiveHeader.className.includes('phase-head'), 'deck header retains its phase hook class');
+  assertEqual(primitiveHeader.children[1].className, 'recursion-card-panel-head-actions', 'summary and controls share one right action cluster');
+  assertEqual(primitiveHeader.children[1].children[0].className, 'recursion-card-panel-summary', 'summary is the first right-cluster item');
+
+  const primitiveToolbar = renderDeckToolbar({
+    el: primitiveEl,
+    selector: primitiveEl('select'),
+    actions: [primitiveEl('button')]
+  });
+  assertEqual(primitiveToolbar.className, 'recursion-card-panel-deck-bar', 'deck toolbar always owns the shared bar class');
+  assertEqual(primitiveToolbar.children[0].className, 'recursion-card-panel-deck-selector', 'selector uses the shared growable wrapper');
+  assertEqual(primitiveToolbar.children[1].className, 'recursion-card-panel-deck-actions', 'deck actions use the shared right cluster');
+
+  const readonlyCard = renderDeckCard({
+    el: primitiveEl,
+    card: { id: 'card-a' },
+    copy: primitiveEl('span'),
+    state: primitiveEl('span'),
+    actions: []
+  });
+  assert(!readonlyCard.className.includes('has-actions'), 'rows without authoring controls do not reserve an action rail');
+  assertEqual(readonlyCard.children.length, 1, 'rows without authoring controls do not render an empty action node');
+
+  const editableCard = renderDeckCard({
+    el: primitiveEl,
+    card: { id: 'card-b' },
+    copy: primitiveEl('span'),
+    state: primitiveEl('span'),
+    actions: [primitiveEl('button')]
+  });
+  assert(editableCard.className.includes('has-actions'), 'editable rows opt into the action rail');
+  assertEqual(editableCard.children.length, 2, 'editable rows render main and action regions');
+}
 {
   let heldCallback = null;
   let nextFrameId = 0;
@@ -816,16 +869,20 @@ assert(/\.reasoning-line-fill\s*\{[\s\S]*?rgba\(220,\s*220,\s*210,\s*\.52\)/.tes
 assert(/\.reasoning-node\.is-lit\s*\{[\s\S]*?rgba\(220,\s*220,\s*210,\s*\.62\)/.test(barImplementationReference), 'lit reasoning nodes use muted SillyTavern grey-white fill');
 assert(/\.recursion-reasoning-line-fill\s*\{[\s\S]*?var\(--SmartThemeBodyColor/.test(recursionCss), 'production reasoning fill derives from SillyTavern body color');
 assert(
-  /\.recursion-post-process-panel\s*\{[\s\S]*?display:\s*flex;[\s\S]*?overflow:\s*hidden;/.test(recursionCss),
-  'Post-process panel keeps its ordered deck list as the primary scroll surface'
+  /\.recursion-card-panel\s*\{[\s\S]*?display:\s*flex;[\s\S]*?overflow:\s*hidden;/.test(recursionCss),
+  'both card panels keep their ordered deck list as the primary scroll surface'
 );
 assert(
   /\.recursion-post-process-button:focus-visible[\s\S]*?outline:\s*1px solid/.test(recursionCss),
   'Post-process toolbar button has the shared visible keyboard focus outline'
 );
 assert(
-  /@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-post-process-panel\s*\{[\s\S]*?100dvh/.test(recursionCss),
-  'Post-process panel clamps to the dynamic mobile viewport'
+  /\.recursion-post-process-segment:hover,\s*[\r\n]+\.recursion-post-process-segment:focus-visible\s*\{[\s\S]*?background:[\s\S]*?outline:\s*1px solid/.test(recursionCss),
+  'Post-process Apply and Flow segments expose a visible hover and keyboard-focus highlight'
+);
+assert(
+  /@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-card-panel\s*\{[\s\S]*?100dvh/.test(recursionCss),
+  'both card panels clamp to the dynamic mobile viewport'
 );
 assert(recursionUi.includes('Post-process Cards'), 'production UI records the Post-process Cards surface');
 assert(!/recursion-settings-reasoning/.test(recursionCss), 'settings panel does not keep a duplicate reasoning chain stylesheet');
@@ -945,6 +1002,12 @@ assert(!/cards-button-label/.test(barImplementationReference), 'implementation r
 assert(/<button class="icon-button cards-button"[\s\S]*?<span class="sep" aria-hidden="true"><\/span>\s*<button class="activity-trigger status-array-button"/.test(barImplementationReference), 'implementation reference places icon-only Cards before the Hero Pixel Array trigger');
 assert(/\.recursion-power-toggle\s*\{[\s\S]*?flex:\s*0 0 24px;[\s\S]*?height:\s*24px;[\s\S]*?width:\s*24px;/.test(recursionCss), 'production power toggle uses the same compact geometry as the reference');
 assert(/\.recursion-cards-button\s*\{[\s\S]*?flex:\s*0 0 24px;[\s\S]*?width:\s*24px;/.test(recursionCss), 'production Cards scope button stays icon-only in the compact bar');
+assert(/\.recursion-process-cards-button\s*\{[\s\S]*?SmartThemeBodyColor[\s\S]*?opacity:\s*1;/.test(recursionCss), 'both process-card buttons share one theme-grey base color and opacity contract');
+assert(/\.recursion-process-cards-button-icon,[\s\S]*?flex:\s*0 0 17px;[\s\S]*?height:\s*17px;[\s\S]*?width:\s*17px;/.test(recursionCss), 'both process-card icons use the same 17px wrapper');
+assert(/const SVG_TAGS = new Set\(\[[^\]]*'g'/.test(recursionUi), 'process-card arrow groups are created in the SVG namespace so browsers render them');
+assert(/\.recursion-post-process-row-actions \.recursion-card-drag-region\s*\{[\s\S]*?margin-left:\s*8px;/.test(recursionCss), 'Post-process category and card action rails reserve the same pre-drag spacing as Pre-process');
+assert(/\.recursion-post-process-button\.is-off\s*\{[\s\S]*?opacity:\s*1;/.test(recursionCss), 'ordinary Post-process Off does not dim the shared cards icon');
+assert(!/\.recursion-post-process-button\.is-on,\s*\.recursion-post-process-button\[aria-expanded="true"\]/.test(recursionCss), 'opening an Off Post-process panel does not recolor the shared icon');
 assert(!/recursion-cards-button-label/.test(recursionUi), 'production Cards scope button has no visible label node');
 assert(/recursionCardDeckActivateAll:\s*''/.test(recursionUi), 'production Cards dropdown renders an activate-all deck action');
 assert(/recursionCardDeckDeactivateAll:\s*''/.test(recursionUi), 'production Cards dropdown renders a deactivate-all deck action');
@@ -967,10 +1030,13 @@ assert(/recursionCardDragHandle/.test(recursionUi) && /recursionCardDragId/.test
 assert(!/recursionCardMove/.test(recursionUi), 'production Card System removes explicit card move-mode controls');
 assert(!/recursionCardMoveTarget/.test(recursionUi) && !/recursionCardMoveCancel/.test(recursionUi), 'production Card System removes explicit move-mode target and cancel controls');
 assert(/moveCardToPosition/.test(recursionUi) && /moveCategoryToPosition/.test(recursionUi), 'production Card System commits drag drops through exact position helpers');
-assert(/let expandedCardCategoryKeys = new Set\(\)/.test(recursionUi), 'production Card System tracks category expansion as local UI state');
-assert(/function cardCategoryExpansionKey\(deckId, categoryId\)/.test(recursionUi), 'production Card System keys category expansion by deck and category');
+assert(!/expandedCardCategoryKeys|expandedPostProcessCategoryKeys/.test(recursionUi), 'both Card panels remove panel-local category expansion authority');
+assert(/preProcessCategoryExpanded/.test(recursionUi) && /setPreProcessCategoryExpanded/.test(recursionUi), 'Pre-process disclosure renders from and writes to global deck settings');
+assert(/postProcessCategoryExpanded/.test(recursionUi) && /setPostProcessCategoryExpanded/.test(recursionUi), 'Post-process disclosure renders from and writes to global deck settings');
+assert(!/setCardsPanelOpen\(open\)[\s\S]*?expandedCardCategoryKeys = new Set/.test(recursionUi), 'closing Pre-process Cards does not reset global disclosure state');
+assert(!/setPostProcessPanelOpen\(open\)[\s\S]*?expandedPostProcessCategoryKeys = null/.test(recursionUi), 'closing Post-process Cards does not reset global disclosure state');
 assert(/recursionCardCategoryToggle/.test(recursionUi) && /aria-expanded/.test(recursionUi), 'production Card System category headers are full-row disclosure toggles');
-assert(/recursion-card-deck-category-arrow/.test(recursionUi) && /categoryExpanded \? 'chevron-up' : 'chevron-down'/.test(recursionUi), 'production Card System renders down/up category disclosure arrows');
+assert(/renderDeckCategory/.test(recursionUi) && /categoryExpanded \? 'chevron-up' : 'chevron-down'/.test(recursionUi), 'production Card System renders shared down/up category disclosure arrows');
 assert(/if \(categoryExpanded\) \{[\s\S]*?for \(const card of categoryCards\)/.test(recursionUi), 'production Card System hides category cards while collapsed');
 assert(/recursionCardCategoryAction/.test(recursionUi), 'production Card System marks category action buttons so they do not toggle disclosure');
 assert(/Object\.hasOwn\(target\.dataset,\s*'recursionCardDeckSelect'\)/.test(recursionUi), 'production Card System deck selector handles empty-string data marker values');
@@ -987,13 +1053,13 @@ assert(/recursion-card-deck-actions/.test(recursionUi) && /recursion-card-deck-b
 assert(/recursionCardCategoryNew:[\s\S]*?recursion-card-deck-tool-label', text: 'Categories'/.test(recursionUi), 'production Card System keeps the labeled add-category tool row');
 assert(!/recursion-card-deck-tool-label', text: 'Cards'/.test(recursionUi), 'production Card System removes the global add-card tool row');
 assert(/recursionCardNew:\s*category\.id/.test(recursionUi) && /Create a new Card in category/.test(recursionUi), 'production Card System adds cards from the owning category action rail');
-assert(/\.recursion-card-deck-bar\s*\{[\s\S]*?flex-wrap:\s*nowrap;/.test(recursionCss)
-  && /\.recursion-card-deck-actions\s*\{[\s\S]*?margin-left:\s*auto;/.test(recursionCss), 'production Card Deck controls remain on one line with actions aligned right');
+assert(/\.recursion-card-panel-deck-bar\s*\{[\s\S]*?flex-wrap:\s*nowrap;/.test(recursionCss)
+  && /\.recursion-card-panel-deck-actions\s*\{[\s\S]*?margin-left:\s*auto;/.test(recursionCss), 'both Card Deck toolbars remain on one line with actions aligned right');
 assert(/\.recursion-card-deck-tools\s*\{[\s\S]*?justify-content:\s*flex-end;/.test(recursionCss)
   && /\.recursion-card-deck-tool-label\s*\{[\s\S]*?font-weight:\s*600;/.test(recursionCss), 'production Categories add control stays right-biased with a prominent label');
 assert(/\.recursion-card-deck-tools\s*\{[\s\S]*?grid-template-columns:\s*24px minmax\(0, 1fr\) var\(--recursion-card-action-rail-width\);/.test(recursionCss)
   && /recursion-card-deck-tool-add/.test(recursionUi), 'production Categories toolbar aligns its plus with category arrows and its label with category titles');
-assert(/\.recursion-card-deck-category-arrow\s*\{[\s\S]*?justify-self:\s*center;/.test(recursionCss)
+assert(/\.recursion-card-panel-disclosure\s*\{[\s\S]*?justify-self:\s*center;/.test(recursionCss)
   && !/\.recursion-card-deck-tool-add\s*\{[^}]*?(?:height:\s*22px|min-width:\s*22px|width:\s*22px)/.test(recursionCss), 'production Categories add button keeps standard size while its icon aligns with the category arrow');
 assert(!/recursion-card-move-cancel-slot/.test(recursionUi), 'production card/category tools row removes move-cancel controls');
 assert(/CARD_LONG_PRESS_MS/.test(recursionUi), 'production Card System defines explicit long-press threshold');
@@ -1025,13 +1091,27 @@ assert(/\.recursion-card-preview-checkbox\[type="checkbox"\]\s*\{[\s\S]*?appeara
 assert(/\.recursion-card-editor-preview-actions\s*\{[\s\S]*?display:\s*flex;[\s\S]*?justify-content:\s*end;/.test(recursionCss), 'production Card wand preview actions render side by side');
 assert(/recursionCategoryEditorSave/.test(recursionUi), 'production Category editor has icon-only save action');
 assert(/recursion-category-editor-inline/.test(recursionCss), 'production Category inline editor has compact graphite styling');
-assert(/recursion-card-deck-category-actions/.test(recursionCss), 'production Category actions are grouped to prevent mobile arrow wrapping');
-assert(/recursion-card-deck-category-copy/.test(recursionCss), 'production Category copy and actions use separate layout areas');
+assert(/\.recursion-card-panel-row-actions\s*\{[\s\S]*?flex-wrap:\s*nowrap;/.test(recursionCss), 'shared Category actions are grouped to prevent mobile arrow wrapping');
+assert(/\.recursion-card-panel-category-copy,/.test(recursionCss), 'shared Category copy and actions use separate layout areas');
 assert(/--recursion-card-action-rail-width:\s*124px;/.test(recursionCss), 'production Card System defines a shared action rail width for card and category rows');
 assert(!/cardSystemIconButton\('grip'/.test(recursionUi), 'production Card System drag handles do not use mini-button grip controls');
 assert(!/kind === 'grip'/.test(recursionUi), 'production Card System removes the old inline grip icon branch');
 assert(/recursion-card-drag-region/.test(recursionUi), 'production Card System renders drag handles as naked grab regions');
 assert(/recursion-card-drag-icon-\$\{kind\}/.test(recursionUi) && /cardDragHandle\('category'/.test(recursionUi) && /cardDragHandle\('card'/.test(recursionUi), 'production Card System renders distinct category and card handle icon spans');
+assert(/recursionPostProcessCategoryDragHandle:\s*category\.id/.test(recursionUi) && /recursionPostProcessCardDragHandle:\s*card\.id/.test(recursionUi), 'Post-process shared handles retain explicit category and card behavior selectors');
+assert(/recursionPostProcessCategoryCreate:[\s\S]*?recursion-card-deck-tool-label', text: 'Categories'/.test(recursionUi), 'Post-process uses the shared Categories creation row');
+assert(/recursionPostProcessCardCreate:\s*category\.id/.test(recursionUi) && /Create a new Card in category/.test(recursionUi), 'Post-process creates cards from the category header action rail');
+assert(!/recursion-post-process-add-card|text:\s*'Add Card'/.test(recursionUi), 'Post-process removes the bottom native Add Card control');
+assert(!/recursion-deck-drag-handle|text:\s*'⋮⋮'/.test(recursionUi), 'Post-process removes bespoke text drag handles');
+assert(!/category\.description \? \[el\('span'/.test(recursionUi), 'category descriptions are not rendered as visible category-header children');
+for (const tooltip of [
+  'Add the rewritten response as a new swipe while preserving the current response.',
+  'Replace the current response with the rewritten result.',
+  'Rewrite once using all enabled Post-process cards together.',
+  'Apply enabled Post-process categories in order, carrying each result forward.'
+]) {
+  assert(recursionUi.includes(tooltip), `Post-process segment includes approved tooltip: ${tooltip}`);
+}
 assert(/\.recursion-card-delete-slot \+ \.recursion-card-drag-region\s*\{[\s\S]*?margin-left:\s*8px;/.test(recursionCss), 'production Card System separates delete buttons from drag regions');
 assert(/\.recursion-card-drag-region\s*\{[\s\S]*?background:\s*transparent;[\s\S]*?border:\s*0;/.test(recursionCss), 'production Card System drag regions rest without button chrome');
 assert(/\.recursion-card-drag-icon-category\s*\{[\s\S]*?height:\s*22px;[\s\S]*?mask-image:\s*url\("\.\.\/assets\/icons\/card-system\/handle-category\.svg"\);[\s\S]*?width:\s*22px;/.test(recursionCss), 'production Card System category drag region uses the supplied large handle asset');
@@ -1057,9 +1137,9 @@ assert(!/recursion-card-drop-line/.test(recursionCss), 'production Card System n
 assert(/document\.addEventListener\?\.\('pointerup',\s*commitCardDrag,\s*true\)/.test(recursionUi), 'production Card System commits active drags from the document pointerup path');
 assert(/function cardDragReducedMotion/.test(recursionUi), 'production Card System exposes a reduced-motion guard for drag animations');
 assert(/const eased = ratio \* ratio/.test(recursionUi), 'production Card System auto-scroll ramps drag velocity quadratically near panel edges');
-assert(/\.recursion-card-deck-category-head\s*\{[\s\S]*?cursor:\s*pointer;[\s\S]*?grid-template-columns:\s*24px minmax\(0,\s*1fr\) var\(--recursion-card-action-rail-width\);/.test(recursionCss), 'production Category headers expose a full-row disclosure target with a left arrow column');
-assert(/\.recursion-card-deck-category-arrow\s*\{[\s\S]*?height:\s*22px;[\s\S]*?width:\s*22px;/.test(recursionCss), 'production Category disclosure arrows are larger than mini row actions');
-assert(/\.recursion-card-deck-card\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) var\(--recursion-card-action-rail-width\);/.test(recursionCss), 'production Card rows align actions to the same rail as category rows');
+assert(/\.recursion-card-panel-category-head\s*\{[\s\S]*?cursor:\s*pointer;[\s\S]*?grid-template-columns:\s*24px minmax\(0,\s*1fr\);/.test(recursionCss), 'shared Category headers expose a full-row disclosure target with a left arrow column');
+assert(/\.recursion-card-panel-disclosure\s*\{[\s\S]*?height:\s*22px;[\s\S]*?width:\s*22px;/.test(recursionCss), 'shared Category disclosure arrows are larger than mini row actions');
+assert(/\.recursion-card-panel-card\.has-actions\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) var\(--recursion-card-action-rail-width\);/.test(recursionCss), 'shared Card rows add the common action rail only when actions exist');
 assert(/viewBox:\s*'0 0 24 24'[\s\S]*recursionEditIcon:\s*''[\s\S]*M21\.2799 6\.40005L11\.7399 15\.94/.test(recursionUi), 'production Card System uses the supplied stroked SVG Repo edit icon for edit actions');
 assert(/svg\[data-recursion-edit-icon\],[\s\S]*?svg\[data-recursion-wand-icon\]\s*\{[\s\S]*?height:\s*13px;[\s\S]*?opacity:\s*\.82;[\s\S]*?width:\s*13px;/.test(recursionCss), 'production Card System normalizes supplied edit and wand SVG size and color weight');
 assert(/viewBox:\s*'0 0 24 24'[\s\S]*recursionWandIcon:\s*''[\s\S]*M4\.9996 7V11M9\.9996 2V6/.test(recursionUi), 'production Card System uses the supplied SVG Repo wand icon for card suggestions');
@@ -1083,7 +1163,15 @@ assert(/navigator\?\.vibrate/.test(recursionUi), 'production Card System can tri
 assert(/prefers-reduced-motion:\s*reduce/.test(recursionUi) || /prefers-reduced-motion:\s*reduce/.test(recursionCss), 'production Card System respects reduced-motion for haptics or motion styling');
 assert(!/recursionCardToggle:\s*card\.id/.test(recursionUi), 'production Card System does not render a separate eye visibility toggle');
 assert(/is-active/.test(recursionCss) && /is-inactive/.test(recursionCss) && /is-priority/.test(recursionCss), 'production Card System visually distinguishes active, inactive, and priority cards');
-assert(/\.recursion-card-deck-card\.is-active \.recursion-card-deck-card-status\s*\{[\s\S]*?color:\s*color-mix\(in srgb, var\(--recursion-accent\) 68%, transparent\);/.test(recursionCss), 'production Card System active eye uses the same toned cyan as the active card rail');
+assert(/\.recursion-card-panel-card\.is-active \.recursion-card-panel-state-marker\s*\{[\s\S]*?color:\s*color-mix\(in srgb, var\(--recursion-accent\) 68%, transparent\);/.test(recursionCss), 'both Card panels use the same toned cyan active eye');
+assert(
+  /const cardCopy = el\('span',[\s\S]*?recursion-card-deck-card-description[\s\S]*?card\.description \|\| 'No description\.'/.test(recursionUi),
+  'Pre-process cards use the shared empty-description fallback'
+);
+assert(
+  !/\.recursion-card-panel-card-description\s*\{[^}]*(?:line-clamp|max-height|overflow:\s*(?:auto|scroll)|text-overflow:\s*ellipsis)/.test(recursionCss),
+  'shared card descriptions wrap without clamping or nested scrolling'
+);
 assert(/svg\[data-recursion-card-state-icon="eye-priority"\]\s*\{[\s\S]*?transform:\s*translateY\(1px\);/.test(recursionCss), 'production Card System nudges the priority eye down to align with active and inactive eyes');
 assert(!/className:\s*'recursion-card-scope-notice'/.test(recursionUi), 'production Cards dropdown does not render transient local notice rows');
 assert(/showCardSystemStatus/.test(recursionUi), 'production Card System routes action feedback through the main bar status area');
@@ -1163,7 +1251,7 @@ assert(!/\.recursion-story-form-button\s*\{[\s\S]*?max-width:\s*88px;/.test(recu
 assert(/\.recursion-story-form-text\s*\{[\s\S]*?max-width:\s*none;/.test(recursionCss), 'desktop story form text is not ellipsized');
 assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-story-form-button\s*\{[\s\S]*?min-width:\s*36px;/.test(recursionCss), 'mobile story form button uses a compact fixed shorthand width');
 assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-mobile-status-drawer:not\(\[hidden\]\)\s*\{[\s\S]*?display:\s*flex;/.test(recursionCss), 'mobile status drawer displays below the bar when status text is active');
-assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-card-deck-category-head\s*\{[\s\S]*?grid-template-columns:\s*24px minmax\(0,\s*1fr\)\s+auto;/.test(recursionCss), 'mobile Cards panel keeps category disclosure arrows and action clusters attached to category headers');
+assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-card-panel-category-head\.has-actions\s*\{[\s\S]*?grid-template-columns:\s*24px minmax\(0,\s*1fr\)\s+auto;/.test(recursionCss), 'mobile card panels keep category disclosure arrows and action clusters attached to category headers');
 assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-brief-card\s*\{[\s\S]*?grid-template-columns:\s*1fr;/.test(recursionCss), 'mobile Last Brief cards use one-column rows');
 assert(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-provider-openai-fields\s*\{[\s\S]*?grid-template-columns:\s*1fr;/.test(recursionCss), 'mobile provider endpoint fields collapse to one column');
 assert(/mobile status drawer/.test(uiSpec), 'UI spec documents the mobile status drawer');
@@ -2181,22 +2269,143 @@ try {
   assert(!fakeDocument.textTree(root.querySelector('[data-recursion-bar]')).includes('RECURSION'), 'compact bar does not render the Recursion wordmark');
   assert(root.querySelector('[data-recursion-mode-button]'), 'compact bar renders an icon-only mode button');
   assert(root.querySelector('[data-recursion-pre-process-cards-button]'), 'compact bar exposes the Pre-process Cards control');
+  assert(root.querySelector('[data-recursion-pre-process-cards-button]').className.includes('recursion-process-cards-button'), 'Pre-process Cards uses the shared process-card button class');
+  assert(root.querySelector('[data-recursion-pre-process-cards-button]').children[0].className.includes('recursion-process-cards-button-icon'), 'Pre-process Cards uses the shared 17px icon wrapper');
+  assertEqual(root.querySelector('[data-recursion-pre-process-cards-button]').querySelectorAll('rect').length, 3, 'Pre-process Cards uses the shared stacked-cards outline');
+  assertEqual(root.querySelector('[data-recursion-pre-process-cards-button]').querySelector('[data-recursion-process-cards-arrow]')?.dataset.recursionProcessCardsArrow, 'pre', 'Pre-process Cards overlays the left-facing process arrow');
+  assertEqual(root.querySelector('[data-recursion-pre-process-cards-button]').querySelectorAll('[data-recursion-process-cards-arrow-layer]').length, 2, 'Pre-process arrow preserves the supplied fill and outline layers');
+  assertEqual(
+    root.querySelector('[data-recursion-pre-process-cards-button]').querySelector('[data-recursion-process-cards-arrow]').getAttribute('transform'),
+    'rotate(180 11 12)',
+    'Pre-process arrow rotates the supplied right-facing SVG path 180 degrees'
+  );
+  assertEqual(
+    root.querySelector('[data-recursion-pre-process-cards-button]').querySelector('[data-recursion-process-cards-arrow]').parentNode.getAttribute('transform'),
+    'translate(6.16 .72) scale(.44)',
+    'Pre-process arrow uses the enlarged legible transform'
+  );
   assertEqual(
     root.querySelector('[data-recursion-pre-process-cards-button]').getAttribute('aria-label'),
     'Pre-process Cards',
     'Pre-process Cards control uses the approved accessible name'
   );
+  assertEqual(
+    root.querySelector('[data-recursion-pre-process-cards-button]').getAttribute('title'),
+    'Pre-process Cards: guide the response before generation.',
+    'Pre-process Cards exposes concise phase-specific hover help'
+  );
   assert(root.querySelector('[data-recursion-post-process-cards-button]'), 'compact bar replaces Enhancements with Post-process Cards');
+  assert(root.querySelector('[data-recursion-post-process-cards-button]').className.includes('recursion-process-cards-button'), 'Post-process Cards uses the shared process-card button class');
+  assert(root.querySelector('[data-recursion-post-process-cards-button]').children[0].className.includes('recursion-process-cards-button-icon'), 'Post-process Cards uses the shared 17px icon wrapper');
+  assertEqual(root.querySelector('[data-recursion-post-process-cards-button]').querySelectorAll('rect').length, 3, 'Post-process Cards uses the shared stacked-cards outline');
+  assertEqual(root.querySelector('[data-recursion-post-process-cards-button]').querySelector('[data-recursion-process-cards-arrow]')?.dataset.recursionProcessCardsArrow, 'post', 'Post-process Cards overlays the supplied right-facing process arrow');
+  assertEqual(root.querySelector('[data-recursion-post-process-cards-button]').querySelectorAll('[data-recursion-process-cards-arrow-layer]').length, 2, 'Post-process arrow preserves the supplied fill and outline layers');
+  assertEqual(
+    root.querySelector('[data-recursion-post-process-cards-button]').querySelector('[data-recursion-process-cards-arrow]').parentNode.getAttribute('transform'),
+    'translate(6.16 .72) scale(.44)',
+    'Post-process arrow uses the same enlarged transform'
+  );
+  assertEqual(
+    root.querySelector('[data-recursion-post-process-cards-button]').getAttribute('title'),
+    'Post-process Cards: rewrite the response after generation.',
+    'Post-process Cards exposes concise phase-specific hover help instead of duplicating its On/Off state'
+  );
   assert(!root.querySelector('[data-recursion-enhancements-button]'), 'compact bar removes the Enhancements selector');
   assert(root.querySelector('[data-recursion-post-process-panel]'), 'Post-process Cards panel exposes the stable panel selector');
   assert(root.querySelector('[data-recursion-post-process-enabled]'), 'Post-process panel exposes the feature On/Off control');
+  assert(
+    fakeDocument.textTree(root.querySelector('[data-recursion-post-process-header]')).includes('Off'),
+    'disabled Post-process header reports the global Off state'
+  );
+  assert(
+    !/\d+\/\d+ active/.test(fakeDocument.textTree(root.querySelector('[data-recursion-post-process-header]'))),
+    'disabled Post-process header does not claim enabled card selections are active'
+  );
+  assertEqual(
+    root.querySelector('[data-recursion-post-process-enabled]').textContent,
+    '',
+    'Post-process feature toggle is icon-only'
+  );
+  assert(
+    root.querySelector('[data-recursion-post-process-enabled-icon]')?.querySelector('svg'),
+    'Post-process feature toggle uses the shared power symbol'
+  );
+  assertEqual(
+    root.querySelector('[data-recursion-post-process-enabled]').getAttribute('title'),
+    'Turn Post-process Cards on',
+    'Post-process feature symbol explains the action on hover'
+  );
   assert(root.querySelector('[data-recursion-post-process-deck-select]'), 'Post-process panel exposes an independent deck selector');
   assert(root.querySelector('[data-recursion-post-process-apply-as-swipe]'), 'Post-process panel exposes As Swipe');
   assert(root.querySelector('[data-recursion-post-process-apply-replace]'), 'Post-process panel exposes Replace');
   assert(root.querySelector('[data-recursion-post-process-flow-unified]'), 'Post-process panel exposes Unified');
   assert(root.querySelector('[data-recursion-post-process-flow-progressive]'), 'Post-process panel exposes Progressive');
+  assertEqual(root.querySelector('[data-recursion-post-process-apply-as-swipe]').getAttribute('title'), 'Add the rewritten response as a new swipe while preserving the current response.', 'As Swipe exposes the approved tooltip');
+  assertEqual(root.querySelector('[data-recursion-post-process-apply-replace]').getAttribute('title'), 'Replace the current response with the rewritten result.', 'Replace exposes the approved tooltip');
+  assertEqual(root.querySelector('[data-recursion-post-process-flow-unified]').getAttribute('title'), 'Rewrite once using all enabled Post-process cards together.', 'Unified exposes the approved tooltip');
+  assertEqual(root.querySelector('[data-recursion-post-process-flow-progressive]').getAttribute('title'), 'Apply enabled Post-process categories in order, carrying each result forward.', 'Progressive exposes the approved tooltip');
+  assert(root.querySelector('[data-recursion-post-process-activate-all]'), 'Post-process panel exposes an enable-all eye action');
+  assert(root.querySelector('[data-recursion-post-process-deactivate-all]'), 'Post-process panel exposes a disable-all slashed-eye action');
+  const prePanel = root.querySelector('[data-recursion-cards-panel]');
+  const postPanel = root.querySelector('[data-recursion-post-process-panel]');
+  for (const panel of [prePanel, postPanel]) {
+    assert(panel.className.includes('recursion-card-panel'), 'both phases use the shared panel shell');
+  }
+  assert(root.querySelector('[data-recursion-post-process-header]').className.includes('recursion-card-panel-head'), 'Post-process uses the shared header');
+  assert(root.querySelector('[data-recursion-post-process-deck-bar]').className.includes('recursion-card-panel-deck-bar'), 'Post-process uses the shared deck toolbar');
+  assert(root.querySelector('[data-recursion-post-process-list]').className.includes('recursion-card-panel-list'), 'Post-process uses the shared list');
+  assert(postPanel.children.some((child) => child.className?.includes('recursion-card-panel-foot')), 'Post-process uses the shared footer');
+  assertDeepEqual(
+    root.querySelector('[data-recursion-post-process-header-actions]').children
+      .map((child) => child.dataset?.recursionPostProcessControl)
+      .filter(Boolean),
+    ['enabled', 'apply', 'flow', 'activate-all', 'deactivate-all'],
+    'Post-process header keeps compact feature, Apply, and Flow toggles immediately left of the two bulk eyes'
+  );
+  assertDeepEqual(
+    root.querySelector('[data-recursion-post-process-deck-bar]').children[1].children.map((node) => (
+      Object.keys(node.dataset || {}).find((key) => key.startsWith('recursionPostProcessDeck'))
+    )),
+    [
+      'recursionPostProcessDeckNew',
+      'recursionPostProcessDeckDuplicate',
+      'recursionPostProcessDeckEdit',
+      'recursionPostProcessDeckDelete'
+    ],
+    'Post-process deck actions match the Pre-process New, Duplicate, Rename, Delete order'
+  );
+  assert(
+    root.querySelector('[data-recursion-post-process-deck-select]').className.includes('recursion-input')
+      && root.querySelector('[data-recursion-post-process-deck-select]').className.includes('recursion-select'),
+    'Post-process selector uses the same input skin as Pre-process'
+  );
+  assert(
+    !root.querySelector('[data-recursion-post-process-header]').textContent.includes('structure read-only'),
+    'read-only structure is communicated by disabled authoring controls rather than unique header copy'
+  );
   assertEqual(root.querySelectorAll('[data-recursion-post-process-category]').length, 2, 'starter Post-process Deck renders two ordered categories');
   assertEqual(root.querySelectorAll('[data-recursion-post-process-card]').length, 6, 'starter Post-process Deck renders six ordered cards');
+  assertEqual(root.querySelectorAll('[data-recursion-post-process-category-toggle]').length, 0, 'Post-process category headers omit the phase-only visibility eye');
+  assertEqual(root.querySelectorAll('[data-recursion-post-process-card-toggle]').length, 6, 'Post-process card rows retain their binary visibility eyes');
+  assert(
+    root.querySelector('[data-recursion-post-process-category]').children[0]?.className.includes('recursion-post-process-category-head'),
+    'Post-process category modifiers preserve the shared category header class'
+  );
+  for (const category of root.querySelectorAll('[data-recursion-post-process-category]')) {
+    assert(category.children[0]?.className.includes('recursion-card-panel-category-head'), 'both phases use the shared category header');
+    assert(category.children[0]?.children[0]?.querySelector('svg'), 'both phases use the shared category disclosure icon');
+    assert(category.children.some((child) => child.className?.includes('recursion-card-panel-category-body')), 'both phases use the shared category body');
+  }
+  for (const card of root.querySelectorAll('[data-recursion-post-process-card]')) {
+    assert(card.className.includes('recursion-card-panel-card'), 'Post-process cards use the shared card row');
+    assert(!card.className.includes('has-actions'), 'read-only Post-process cards omit the empty action rail');
+    assert(card.children[0]?.className.includes('recursion-card-panel-card-main'), 'Post-process cards expose the shared full-row state control');
+    assert(card.children[0]?.children.some((child) => child.className?.includes('recursion-card-panel-state-marker')), 'Post-process cards use the shared unboxed eye marker');
+    assert(!card.children.some((child) => child.className?.includes('recursion-card-panel-row-actions')), 'read-only Post-process cards do not render an empty action wrapper');
+  }
+  assert(!root.querySelectorAll('[data-recursion-post-process-category]').some((category) => (
+    category.children[0]?.children.some((child) => child.className?.includes('recursion-post-process-expander'))
+  )), 'Post-process categories remove the literal plus/minus expander');
   assertEqual(root.querySelectorAll('[data-recursion-post-process-drag-handle]').length, 0, 'read-only starter deck hides drag handles');
   assert(root.querySelector('[data-recursion-mode-menu]'), 'compact bar renders the mode selector menu');
   assert(root.querySelector('[data-recursion-pipeline-button]'), 'compact bar renders an icon-only pipeline button');
@@ -2480,16 +2689,36 @@ try {
   assert(root.querySelector('[data-recursion-post-process-deck-new]'), 'Post-process Deck exposes the stable new-deck selector');
   assertEqual(root.querySelector('[data-recursion-post-process-deck-edit]').disabled, true, 'starter Post-process Deck edit is read-only');
   assertEqual(root.querySelector('[data-recursion-post-process-deck-delete]').disabled, true, 'starter Post-process Deck delete is read-only');
-  assertEqual(root.querySelector('[data-recursion-post-process-category-toggle]').disabled, true, 'starter category toggles are read-only');
-  assertEqual(root.querySelector('[data-recursion-post-process-card-toggle]').disabled, true, 'starter card toggles are read-only');
+  assertEqual(root.querySelector('[data-recursion-post-process-category-toggle]'), null, 'starter category headers do not expose visibility controls');
+  assertEqual(root.querySelector('[data-recursion-post-process-card-toggle]').disabled, false, 'starter card state remains operator-controllable');
+  assertEqual(root.querySelector('[data-recursion-post-process-deactivate-all]').disabled, false, 'Post-process slashed eye stays available while starter cards are enabled');
+  root.querySelector('[data-recursion-post-process-deactivate-all]').click();
+  assert(
+    Object.values(settingsUpdates.at(-1).postProcessDecks.starterCardStates).every((enabled) => enabled === false),
+    'Post-process slashed eye disables every starter card'
+  );
+  root.querySelector('[data-recursion-post-process-activate-all]').click();
+  assert(
+    Object.values(settingsUpdates.at(-1).postProcessDecks.starterCategoryStates).every((enabled) => enabled === true),
+    'Post-process open eye enables every starter category'
+  );
   const expandedPostProcessCount = () => root.querySelectorAll('[data-recursion-post-process-category-expand]')
     .filter((button) => button.getAttribute('aria-expanded') === 'true')
     .length;
   assertEqual(expandedPostProcessCount(), 2, 'Post-process categories default expanded on the initial panel render');
+  const firstPostProcessCategoryId = root.querySelectorAll('[data-recursion-post-process-category-expand]')[0].dataset.recursionPostProcessCategoryExpand;
   root.querySelectorAll('[data-recursion-post-process-category-expand]')[0].click();
   assertEqual(expandedPostProcessCount(), 1, 'collapsing the first Post-process category leaves only the second open');
+  assertEqual(
+    settingsUpdates.at(-1).postProcessDecks.categoryExpansion[STARTER_POST_PROCESS_DECK_ID][firstPostProcessCategoryId],
+    false,
+    'Post-process disclosure writes the collapsed category to global deck settings'
+  );
   ui.update();
   assertEqual(expandedPostProcessCount(), 1, 'a partial Post-process disclosure state persists across rerender');
+  root.querySelector('[data-recursion-post-process-cards-button]').click();
+  root.querySelector('[data-recursion-post-process-cards-button]').click();
+  assertEqual(expandedPostProcessCount(), 1, 'Post-process disclosure survives panel close and reopen');
   root.querySelectorAll('[data-recursion-post-process-category-expand]')
     .find((button) => button.getAttribute('aria-expanded') === 'true')
     .click();
@@ -2506,43 +2735,57 @@ try {
   ui.update();
   assert(root.querySelectorAll('[data-recursion-post-process-category-drag-handle]').length >= 2, 'editable duplicate exposes category drag handles');
   assert(root.querySelectorAll('[data-recursion-post-process-card-drag-handle]').length >= 6, 'editable duplicate exposes card drag handles');
+  assert(root.querySelector('[data-recursion-post-process-category-drag-handle]').className.includes('recursion-card-drag-region-category'), 'editable Post-process category uses the shared category handle visual');
+  assert(root.querySelector('[data-recursion-post-process-card-drag-handle]').className.includes('recursion-card-drag-region-card'), 'editable Post-process card uses the shared card handle visual');
+  assert(root.querySelector('[data-recursion-post-process-category-create]').className.includes('recursion-card-deck-tool-add'), 'editable Post-process deck uses the shared category creation plus');
+  assert(root.querySelector('[data-recursion-post-process-card-create]'), 'editable Post-process category exposes a header create-card plus');
+  assertEqual(root.querySelectorAll('[data-recursion-post-process-category-toggle]').length, 0, 'editable Post-process category headers also omit visibility eyes');
+  const customPostCategoryActions = root.querySelector('[data-recursion-post-process-category]').children[0].children
+    .find((child) => child.className?.includes('recursion-card-panel-row-actions'));
+  assert(
+    customPostCategoryActions.className.includes('recursion-post-process-row-actions'),
+    'editable Post-process category actions receive the same phase rail class as card actions'
+  );
+  assertDeepEqual(
+    customPostCategoryActions.children.map((node) => Object.keys(node.dataset || {})
+      .find((key) => key.startsWith('recursionPostProcess'))),
+    [
+      'recursionPostProcessCardCreate',
+      'recursionPostProcessCategoryEdit',
+      'recursionPostProcessCategoryDelete',
+      'recursionPostProcessCategoryDragHandle'
+    ],
+    'editable Post-process category actions match the Pre-process Create, Edit, Delete, Drag positions'
+  );
+  const customPostCardActions = root.querySelector('[data-recursion-post-process-card]').children
+    .find((child) => child.className?.includes('recursion-card-panel-row-actions'));
+  assertDeepEqual(
+    customPostCardActions.children.map((node) => Object.keys(node.dataset || {})
+      .find((key) => key.startsWith('recursionPostProcess'))),
+    [
+      'recursionPostProcessCardEdit',
+      'recursionPostProcessCardDuplicate',
+      'recursionPostProcessCardDelete',
+      'recursionPostProcessCardDragHandle'
+    ],
+    'editable Post-process card actions match the Pre-process Edit, Duplicate, Delete, Drag positions'
+  );
+  assertEqual(root.querySelectorAll('.recursion-post-process-add-card').length, 0, 'editable Post-process categories have no bottom Add Card block');
   assertEqual(root.querySelectorAll('[data-recursion-post-process-drag-handle]').length, 0, 'Post-process drag handles have no ambiguous generic selector');
   assertEqual(root.querySelector('[data-recursion-post-process-deck-edit]').disabled, false, 'custom Post-process Deck can be renamed');
-  const customCategoryToggle = root.querySelector('[data-recursion-post-process-category-toggle]');
   const customCategoryExpander = root.querySelector('[data-recursion-post-process-category-expand]');
   const customCategoryHandle = root.querySelector('[data-recursion-post-process-category-drag-handle]');
   const customCardToggleTooltip = root.querySelector('[data-recursion-post-process-card-toggle]');
   const customCardHandle = root.querySelector('[data-recursion-post-process-card-drag-handle]');
-  for (const controlWithTooltip of [customCategoryToggle, customCategoryExpander, customCategoryHandle, customCardToggleTooltip, customCardHandle]) {
+  for (const controlWithTooltip of [customCategoryHandle, customCardToggleTooltip, customCardHandle]) {
     assertEqual(
       controlWithTooltip.getAttribute('title'),
       controlWithTooltip.getAttribute('aria-label'),
       'icon-only Post-process controls expose a title matching their accessible name'
     );
   }
-  const customCategoryId = customCategoryToggle.dataset.recursionPostProcessCategoryToggle;
-  const customDeckBeforeCategoryOff = view.settings.postProcessDecks.customDecks[view.settings.postProcessDecks.activeDeckId];
-  const savedChildStates = Object.fromEntries(
-    Object.values(customDeckBeforeCategoryOff.cards)
-      .filter((card) => card.categoryId === customCategoryId)
-      .map((card) => [card.id, card.enabled])
-  );
-  customCategoryToggle.click();
-  const customDeckAfterCategoryOff = view.settings.postProcessDecks.customDecks[view.settings.postProcessDecks.activeDeckId];
-  assertDeepEqual(
-    Object.fromEntries(
-      Object.values(customDeckAfterCategoryOff.cards)
-        .filter((card) => card.categoryId === customCategoryId)
-        .map((card) => [card.id, card.enabled])
-    ),
-    savedChildStates,
-    'turning a Post-process category Off preserves saved child card states'
-  );
-  assertEqual(
-    root.querySelector('[data-recursion-post-process-card-toggle]').getAttribute('data-effective-state'),
-    'off',
-    'category Off exposes each child card as effectively Off'
-  );
+  assertEqual(customCategoryExpander.getAttribute('title'), null, 'an empty Post-process category description produces no hover title');
+  assert(customCategoryExpander.getAttribute('aria-label').includes('Natural Prose'), 'Post-process category disclosure keeps an accessible name without a description tooltip');
   root.querySelector('[data-recursion-post-process-panel]').scrollTop = 120;
   root.querySelector('[data-recursion-post-process-category-create]').click();
   assert(root.querySelector('[data-recursion-post-process-card-editor]'), 'new category opens the shared Post-process editor');
@@ -2605,21 +2848,27 @@ try {
   );
 
   const deckDeleteLauncher = root.querySelector('[data-recursion-post-process-deck-delete]');
-  const customDeckName = view.settings.postProcessDecks.customDecks[customPostProcessDeckId].name;
   root.querySelector('[data-recursion-post-process-panel]').scrollTop = 120;
   deckDeleteLauncher.click();
-  const deckDeleteDialog = root.querySelector('[data-recursion-post-process-delete-confirm]');
-  assertEqual(root.querySelector('[data-recursion-post-process-panel]').scrollTop, 0, 'opening Post-process delete confirmation keeps the fixed panel shell header visible');
-  assertEqual(deckDeleteDialog.getAttribute('role'), 'alertdialog', 'deck delete confirmation uses alertdialog semantics');
-  assertEqual(deckDeleteDialog.getAttribute('aria-label'), `Delete ${customDeckName}`, 'deck delete confirmation is labeled with the deck name');
-  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-delete-text]'), 'deck delete confirmation focuses its typed-name input');
-  root.querySelector('[data-recursion-post-process-delete-cancel]').click();
-  assertEqual(root.querySelector('[data-recursion-post-process-delete-confirm]'), null, 'deck delete Cancel closes only the confirmation');
+  const deckDeleteInline = root.querySelector('[data-recursion-post-process-deck-delete-confirm-ui]');
+  const postProcessDeckBar = root.querySelector('[data-recursion-post-process-deck-bar]');
+  assert(deckDeleteInline, 'Post-process deck delete renders an inline typed confirmation');
+  assert(deckDeleteInline.className.includes('recursion-card-deck-delete-confirm'), 'Post-process deck delete reuses the Pre-process inline confirmation UI');
+  assertEqual(deckDeleteInline.parentNode, postProcessDeckBar.children[1], 'Post-process deck delete confirmation appears to the right of the deck selector');
+  assertEqual(root.querySelector('[data-recursion-post-process-delete-confirm]'), null, 'Post-process deck delete does not open the category/card alert dialog');
+  assertEqual(root.querySelector('[data-recursion-post-process-deck-delete-text]').getAttribute('placeholder'), 'delete', 'Post-process deck delete asks for the word delete');
+  assertEqual(root.querySelector('[data-recursion-post-process-deck-delete-confirm]').disabled, true, 'Post-process deck delete confirm starts disabled');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-deck-delete-text]'), 'Post-process deck delete focuses its inline input');
+  root.querySelector('[data-recursion-post-process-deck-delete-text]').value = view.settings.postProcessDecks.customDecks[customPostProcessDeckId].name;
+  root.querySelector('[data-recursion-post-process-deck-delete-text]').dispatchEvent({ type: 'input' });
+  assertEqual(root.querySelector('[data-recursion-post-process-deck-delete-confirm]').disabled, true, 'typing the deck name no longer confirms Post-process deck deletion');
+  root.querySelector('[data-recursion-post-process-deck-delete-cancel]').click();
+  assertEqual(root.querySelector('[data-recursion-post-process-deck-delete-confirm-ui]'), null, 'deck delete Cancel closes only the inline confirmation');
   assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'deck delete Cancel keeps the Post-process panel open');
   assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-deck-delete]'), 'deck delete Cancel restores its exact launcher');
   root.querySelector('[data-recursion-post-process-deck-delete]').click();
   fakeDocument.body.keydown({ key: 'Escape' });
-  assertEqual(root.querySelector('[data-recursion-post-process-delete-confirm]'), null, 'document Escape closes the deck delete confirmation');
+  assertEqual(root.querySelector('[data-recursion-post-process-deck-delete-confirm-ui]'), null, 'document Escape closes the inline deck delete confirmation');
   assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'document Escape keeps the panel open after deck delete dismissal');
   assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-deck-delete]'), 'document Escape restores the exact deck delete launcher');
 
@@ -2697,8 +2946,11 @@ try {
   root.querySelector('[data-recursion-post-process-delete-commit]').click();
   assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-category-create]'), 'successful category deletion focuses New Category');
   root.querySelector('[data-recursion-post-process-deck-delete]').click();
-  root.querySelector('[data-recursion-post-process-delete-text]').value = customDeckName;
-  root.querySelector('[data-recursion-post-process-delete-commit]').click();
+  const postProcessDeckDeleteInput = root.querySelector('[data-recursion-post-process-deck-delete-text]');
+  postProcessDeckDeleteInput.value = 'DeLeTe';
+  postProcessDeckDeleteInput.dispatchEvent({ type: 'input' });
+  assertEqual(root.querySelector('[data-recursion-post-process-deck-delete-confirm]').disabled, false, 'Post-process deck delete accepts delete case-insensitively');
+  root.querySelector('[data-recursion-post-process-deck-delete-confirm]').click();
   assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'successful deck deletion keeps the Post-process panel open');
   assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-deck-select]'), 'successful deck deletion focuses the surviving deck selector');
 
@@ -2890,6 +3142,11 @@ try {
   ui.update();
   root.querySelector('[data-recursion-cards-button]').click();
   assertEqual(root.querySelector('[data-recursion-cards-panel]').hidden, false, 'Cards button opens card scope dropdown');
+  assertEqual(
+    root.querySelector('[data-recursion-cards-panel]').children[0]?.children[0]?.textContent,
+    'Pre-Process Cards',
+    'Pre-process dropdown uses the explicit Pre-Process Cards title'
+  );
   assertEqual(root.querySelector('[data-recursion-mobile-status-drawer]').hidden, true, 'opening Cards hides the mobile status drawer');
   root.querySelector('[data-recursion-mode-button]').click({ ignoreStopPropagation: true });
   assertEqual(root.querySelector('[data-recursion-cards-panel]').hidden, true, 'mode button closes Cards dropdown on the same first click');
@@ -2928,36 +3185,86 @@ try {
   assert(root.querySelector('[data-recursion-card-deck-activate-all]'), 'Cards dropdown renders an activate-all deck action');
   assert(root.querySelector('[data-recursion-card-deck-deactivate-all]'), 'Cards dropdown renders a deactivate-all deck action');
   assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').disabled, true, 'Activate-all action is disabled when every runnable deck card is normal active');
-  assertEqual(root.querySelector('[data-recursion-card-deck-deactivate-all]').disabled, true, 'Deactivate-all action is disabled on the read-only Default deck');
+  assertEqual(root.querySelector('[data-recursion-card-deck-deactivate-all]').disabled, false, 'Deactivate-all action remains available on the structurally read-only Default deck');
   assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').textContent, '', 'Cards deck activate-all action is icon-only');
   assertEqual(root.querySelector('[data-recursion-card-deck-deactivate-all]').textContent, '', 'Cards deck deactivate-all action is icon-only');
-  assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').getAttribute('aria-label'), 'Duplicate this read-only Card Deck to edit cards.', 'read-only activate-all action explains the edit guard');
-  assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').getAttribute('title'), 'Duplicate this read-only Card Deck to edit cards.', 'read-only activate-all title explains the edit guard');
-  assertEqual(root.querySelector('[data-recursion-card-deck-deactivate-all]').getAttribute('aria-label'), 'Duplicate this read-only Card Deck to edit cards.', 'read-only deactivate-all action explains the edit guard');
+  assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').getAttribute('aria-label'), 'All runnable cards are already Active.', 'disabled activate-all action explains the no-op');
+  assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').getAttribute('title'), 'All runnable cards are already Active.', 'disabled activate-all title explains the no-op');
+  assertEqual(root.querySelector('[data-recursion-card-deck-deactivate-all]').getAttribute('aria-label'), 'Set all runnable cards to Inactive.', 'Default deck deactivate-all action explains its state change');
   assertEqual(root.querySelectorAll('[data-recursion-card-scope-family]').length, 0, 'Cards dropdown removes legacy Card Scope family rows');
   assertEqual(root.querySelectorAll('[data-recursion-card-scope-sub-item-toggle]').length, 0, 'Cards dropdown removes legacy Card Scope sub-item rows');
   assertEqual(root.querySelectorAll('[data-recursion-card-deck-category]').length, CARD_SCOPE_CATALOG.length, 'Cards dropdown renders Default deck categories as the primary surface');
+  assert(root.querySelector('[data-recursion-card-deck-bar]').className.includes('recursion-card-panel-deck-bar'), 'Pre-process uses the shared deck toolbar');
+  assert(root.querySelector('[data-recursion-card-deck-list]').className.includes('recursion-card-panel-list'), 'Pre-process uses the shared list');
+  assert(root.querySelector('[data-recursion-cards-panel]').children.some((child) => child.className?.includes('recursion-card-panel-head')), 'Pre-process uses the shared header');
+  assert(root.querySelector('[data-recursion-cards-panel]').children.some((child) => child.className?.includes('recursion-card-panel-foot')), 'Pre-process uses the shared footer');
   assertEqual(root.querySelectorAll('[data-recursion-card-id]').length, 0, 'Cards dropdown defaults categories to collapsed instead of rendering every card');
   assertEqual(root.querySelector('[data-recursion-card-category-toggle]').getAttribute('aria-expanded'), 'false', 'collapsed category headers expose aria-expanded false');
-  assert(root.querySelector('[data-recursion-card-category-toggle]').children[0]?.className.includes('recursion-card-deck-category-arrow'), 'collapsed category headers render a disclosure arrow');
+  assertEqual(root.querySelector('[data-recursion-card-category-toggle]').getAttribute('title'), CARD_SCOPE_CATALOG[0].description, 'Pre-process category description is available as hover text');
+  assert(root.querySelector('[data-recursion-card-category-toggle]').getAttribute('aria-label').includes(CARD_SCOPE_CATALOG[0].description), 'Pre-process category description remains in the accessible disclosure label');
+  assert(root.querySelector('[data-recursion-card-category-toggle]').children[0]?.className.includes('recursion-card-panel-disclosure'), 'collapsed category headers render the shared disclosure arrow');
   const defaultDeckText = fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]'));
+  assert(!defaultDeckText.includes(CARD_SCOPE_CATALOG[0].description), 'Pre-process category descriptions are absent from visible category copy');
   assert(defaultDeckText.includes('34/34 active'), 'Cards header summarizes active cards in the active deck');
   assert(!defaultDeckText.includes('Default is read-only'), 'Cards dropdown removes read-only status notice rows');
+  const firstPreCategoryId = root.querySelector('[data-recursion-card-category-toggle]').dataset.recursionCardCategoryToggle;
   root.querySelector('[data-recursion-card-category-toggle]').click();
   assertEqual(root.querySelector('[data-recursion-card-category-toggle]').getAttribute('aria-expanded'), 'true', 'clicking the category header expands the category');
+  assertEqual(
+    settingsUpdates.at(-1).preProcessDecks.categoryExpansion[DEFAULT_PRE_PROCESS_DECK_ID][firstPreCategoryId],
+    true,
+    'Pre-process disclosure writes the expanded category to global deck settings'
+  );
+  root.querySelector('[data-recursion-pre-process-cards-button]').click();
+  root.querySelector('[data-recursion-pre-process-cards-button]').click();
+  assertEqual(root.querySelector('[data-recursion-card-category-toggle]').getAttribute('aria-expanded'), 'true', 'Pre-process disclosure survives panel close and reopen');
   assert(root.querySelectorAll('[data-recursion-card-id]').length > 0, 'expanded category renders its cards');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('beat constraint'), 'expanded category renders Default deck card names');
+  const firstPreCard = root.querySelector('[data-recursion-card-id]');
+  const firstPreCopy = firstPreCard.children[0].children[0];
+  assert(
+    firstPreCopy.children.some((child) => child.className?.includes('recursion-card-panel-card-description')),
+    'Pre-process cards render the shared description element'
+  );
+  assert(
+    fakeDocument.textTree(firstPreCard).includes('Tracks the current place, nearby routes, exposure, pressure, and immediate relevance.'),
+    'Pre-process cards show concise bundled description copy'
+  );
+  const defaultCardToggle = root.querySelector('[data-recursion-card-toggle-row]');
+  const defaultCardId = defaultCardToggle.dataset.recursionCardToggleRow;
+  assert(
+    defaultCardToggle.getAttribute('aria-label').includes('location/situation.')
+      && defaultCardToggle.getAttribute('aria-label').includes('Tracks the current place'),
+    'Pre-process card row accessibility name includes its visible name and description'
+  );
+  const firstPreDescription = firstPreCopy.children.find((child) => child.className?.includes('recursion-card-panel-card-description'));
+  firstPreDescription.click();
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], 'priority', 'clicking wrapped description text promotes a bundled Default card to Priority');
+  root.querySelector('[data-recursion-card-toggle-row]').click();
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], 'off', 'second Auto row tap turns a bundled Default card Off');
+  root.querySelector('[data-recursion-card-toggle-row]').click();
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], undefined, 'third Auto row tap restores a bundled Default card to normal Active');
+  root.querySelector('[data-recursion-card-deck-deactivate-all]').click();
+  assert(
+    Object.values(settingsUpdates.at(-1).preProcessDecks.defaultCardStates).every((state) => state === 'off'),
+    'Default deck slashed eye disables every runnable card'
+  );
+  assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').disabled, false, 'Default deck open eye enables after bulk disable');
+  root.querySelector('[data-recursion-card-deck-activate-all]').click();
+  assertDeepEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates, {}, 'Default deck open eye restores every runnable card to normal Active');
 
   root.querySelector('[data-recursion-card-deck-duplicate]').click();
   const duplicatedDeckId = settingsUpdates.at(-1).preProcessDecks.activeDeckId;
   let duplicatedDeck = settingsUpdates.at(-1).preProcessDecks.customDecks[duplicatedDeckId];
   const disableCardId = Object.keys(duplicatedDeck.cards)[0];
+  const disableCardCategoryId = duplicatedDeck.cards[disableCardId].categoryId;
   duplicatedDeck = {
     ...duplicatedDeck,
     cards: {
       ...duplicatedDeck.cards,
       [disableCardId]: {
         ...duplicatedDeck.cards[disableCardId],
+        description: '',
         selectionState: 'off'
       }
     }
@@ -2976,6 +3283,17 @@ try {
     }
   };
   ui.update();
+  const disabledCardCategoryToggle = root.querySelectorAll('[data-recursion-card-category-toggle]')
+    .find((node) => node.dataset.recursionCardCategoryToggle === disableCardCategoryId);
+  if (disabledCardCategoryToggle.getAttribute('aria-expanded') !== 'true') {
+    disabledCardCategoryToggle.click();
+  }
+  const emptyDescriptionCard = root.querySelectorAll('[data-recursion-card-id]')
+    .find((node) => node.dataset.recursionCardId === disableCardId);
+  assert(
+    fakeDocument.textTree(emptyDescriptionCard).includes('No description.'),
+    'custom Pre-process cards with an empty description show the shared fallback'
+  );
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('33/34 active'), 'Cards header reflects inactive cards in the active deck');
   assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').disabled, false, 'Activate-all action enables when any runnable deck card is inactive');
   assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').getAttribute('title'), 'Set all runnable cards to Active.', 'enabled activate-all action explains active deck restoration');
@@ -2986,7 +3304,6 @@ try {
   view = { ...view, settings: { ...view.settings, preProcessDecks: allDeckUpdate }, activity: { phase: 'idle' }, progressRun: null };
   ui.update();
   assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').disabled, true, 'Activate-all action disables again after all runnable cards are normal active');
-  root.querySelector('[data-recursion-card-category-toggle]').click();
   root.querySelector('[data-recursion-card-toggle-row]').click();
   const priorityUpdate = settingsUpdates.at(-1).preProcessDecks;
   assertEqual(priorityUpdate.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'priority', 'Auto row tap promotes active card to Priority');
@@ -3536,6 +3853,35 @@ try {
   }
   root.querySelector('[data-recursion-settings-tab-providers]').click({ ignoreStopPropagation: true });
   assertDeepEqual(titleAttributes(root), [], 'disabled tooltips stay removed after settings tab rerender');
+  view = {
+    ...view,
+    settings: {
+      ...view.settings,
+      ui: { ...view.settings.ui, tooltipsEnabled: true }
+    }
+  };
+  ui.update();
+  if (root.querySelector('[data-recursion-post-process-panel]').hidden === true) {
+    root.querySelector('[data-recursion-post-process-cards-button]').click();
+  }
+  assertEqual(
+    root.querySelector('[data-recursion-post-process-apply-as-swipe]').getAttribute('title'),
+    'Add the rewritten response as a new swipe while preserving the current response.',
+    're-enabling global tooltips restores Post-process segment hover text without remount'
+  );
+  view = {
+    ...view,
+    settings: {
+      ...view.settings,
+      ui: { ...view.settings.ui, tooltipsEnabled: false }
+    }
+  };
+  ui.update();
+  root.querySelector('[data-recursion-post-process-cards-button]').click();
+  if (root.querySelector('[data-recursion-settings-panel]').hidden === true) {
+    root.querySelector('[data-recursion-actions]').click({ isTrusted: false });
+  }
+  root.querySelector('[data-recursion-settings-tab-providers]').click({ ignoreStopPropagation: true });
 
   root.querySelector('[data-recursion-provider-source-utility]').value = 'openai-compatible';
   root.querySelector('[data-recursion-provider-profile-utility]').value = 'utility-profile';

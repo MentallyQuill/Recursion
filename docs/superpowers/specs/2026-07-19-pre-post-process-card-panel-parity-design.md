@@ -47,8 +47,8 @@ Post-process Cards  [deck summary]  [Off/On] [As Swipe | Replace] [Unified | Pro
 - The slashed-eye bulk action disables every runnable card in the active
   Post-process Deck.
 - Bulk actions are disabled when they would make no change.
-- The bundled starter deck remains read-only. Its bulk actions explain that
-  the deck must be duplicated before editing.
+- The bundled starter deck remains structurally read-only, but its category,
+  card, and bulk enabled states remain operator-controllable.
 - The global feature gate, Apply, Flow, and both bulk eye actions stay in the
   upper-right action cluster.
 
@@ -120,7 +120,7 @@ Automated UI coverage must prove:
 1. Post-process header control order and paired-toggle state.
 2. Post-process bulk enable and bulk disable behavior.
 3. No-op bulk actions render disabled.
-4. Starter-deck bulk actions remain read-only.
+4. Starter-deck state and bulk actions work without enabling structural edits.
 5. Pre-process three-state and Manual two-state card cycles work after the
    Post-process integration.
 6. Pre-process bulk eye actions work after the store rename.

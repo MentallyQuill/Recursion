@@ -12,8 +12,6 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 ![Auto and Manual mode controls](../../assets/documentation/renders/recursion-operator-mode-controls.png)
 
-![Enhancements menu with Repair, Recompose, Redirect, and editorial result state](../../assets/documentation/renders/recursion-operator-editorial-recovery-states.png)
-
 ![Tense & PoV two-axis selector with Auto, tense, and point-of-view choices](../../assets/documentation/renders/recursion-operator-story-form-controls.png)
 
 ![Recursion Bar states](../../assets/documentation/renders/recursion-operator-bar-states.png)
@@ -46,7 +44,7 @@ The Recursion Bar is the normal control surface. It sits near the chat surface a
 - power toggle;
 - icon-only Pipeline control: Standard, Rapid, or Fused;
 - icon-only mode control: Auto or Manual;
-- icon-only Enhancement control: Off, Repair, Recompose, or Redirect, applied As Swipe or Replace; enabled modes run one card-aware Generation Review across pacing, subtext, scene fidelity, and anti-slop;
+- adjacent icon-only Pre-process Cards and Post-process Cards controls;
 - compact Tense & PoV control;
 - Hero Pixel Array plus current-step text;
 - command slot: Stop generation while active, Regenerate icon while idle;
@@ -58,11 +56,13 @@ The bar should be stable. Status changes should not repeatedly resize the transc
 
 The Pipeline control is a small icon-only dropdown immediately to the left of the Mode button. `Standard` uses the full foreground Arbiter, card, hand, compose, validate, and install path on send. `Rapid` warms a provider-generated card packet in the background and uses a short provider delta on send. `Fused` keeps the foreground Arbiter and shared deck/hand/compose/install path, but asks one provider call to generate all requested cards as a bundle. The selected icon updates on the bar, and the dropdown follows the compact Mode-menu pattern. Pipeline is not duplicated in Settings.
 
-The Enhancement control sits immediately to the right of Cards and uses the upgrade icon. It is grey when `Off`. A single selected Enhancement reviews the completed response against the generation-time Prompt Packet, installed cards, scene context, story form, character evidence, and anti-slop profile. It returns only validated local dialogue or prose replacements, never a full-message rewrite. `As Swipe` keeps the original as one swipe and selects the enhanced swipe; `Replace` replaces the active assistant text only after its bounded patches validate. The configured context-message count controls the bounded, sender-aware context window. Ordinary Repair/Recompose work uses Reasoner only when ready and otherwise follows Utility fallback. Redirect uses Utility at Low and requires ready Reasoner at Medium, High, and Ultra.
+Pre-process Cards and Post-process Cards sit together immediately to the right of Mode. Both use the stacked-card icon with a small inset arrow: left for work before generation and right for work after generation. Pre-process controls the evidence and guidance deck. Post-process controls an independent ordered rewrite deck and is grey when its top-level feature is Off.
 
-The progress menu shows the review, card influence, anti-slop, patch application, and swipe result. Green means a verified outcome, purple means a validated cache reuse, gray means waiting or not applicable, yellow is an explicit recoverable caution, and red is a failure with a reason. When a provider response is malformed or has an incomplete card-outcome ledger, Recursion may make one total correction request. It never adds a second correction because a parser retry and a review-ledger retry are the same budget. A safe patch may still appear as an enhanced swipe after unresolved card coverage, but the parent is reported as `partial-failed` and the unresolved card rows remain red; it is never presented as a successful Enhancement.
+When Post-process is On, Recursion synthesizes contextual guidance from the enabled Post-process cards, then gives that guidance to SillyTavern's native quiet generation path so the active host preset and model remain the prose writer. `As Swipe` preserves the original and selects the final rewritten swipe; `Replace` withholds replacement until the operation completes successfully. Unified performs one combined guidance-and-rewrite operation. Progressive performs one operation per runnable category and continues from the last valid draft after a category failure.
 
-The Tense & PoV control sits in the compact left-side control cluster after Enhancements. Leave it on `Auto` for normal play. In Auto, the Utility Arbiter infers the active story form from the latest visible assistant narration first, using the pending user message only when no assistant narration exists. Use a forced option only when the Arbiter is clearly steering card evidence or guidance toward the wrong form. The menu now uses two axes: Past or Present tense, then first person, second person, third-person limited, third-person omniscient, or mixed POV. A forced selection creates a high-confidence user story-form override for card prompts, guidance composition, Rapid artifacts, and Prompt Packet metadata; it does not rewrite the transcript, change SillyTavern character data, or add style coaching beyond the story-form contract.
+The progress menu shows `Post-processing response`, guidance synthesis, SillyTavern rewrite, category progress for Progressive, and final swipe or replacement. Green means complete, gray means skipped, amber means retry/recovery or a committed partial Progressive result, and red identifies a failed category or Unified operation. A Unified failure leaves the original response selected. A partial Progressive result is committed As Swipe even when Replace was configured.
+
+The Tense & PoV control sits in the compact left-side control cluster after Post-process Cards. Leave it on `Auto` for normal play. In Auto, the Utility Arbiter infers the active story form from the latest visible assistant narration first, using the pending user message only when no assistant narration exists. Use a forced option only when the Arbiter is clearly steering card evidence or guidance toward the wrong form. The menu now uses two axes: Past or Present tense, then first person, second person, third-person limited, third-person omniscient, or mixed POV. A forced selection creates a high-confidence user story-form override for card prompts, guidance composition, Rapid artifacts, and Prompt Packet metadata; it does not rewrite the transcript, change SillyTavern character data, or add style coaching beyond the story-form contract.
 
 The command slot changes by state. Stop generation appears only while Recursion is preparing a prompt or the SillyTavern generation that Recursion prepared is still running. It uses the same idea as SillyTavern's native Stop control: one click stops the host generation, aborts Recursion provider work, prevents late prompt installation, clears Recursion-owned prompt lanes, and marks the canceled attempt as skipped instead of failed. It is not the power toggle; use power when you want Recursion off for future sends.
 
@@ -112,7 +112,7 @@ Main controls:
 
 - Play: a Behavior section containing Strength, Min Cards, Max Cards, Prompt Footprint, and Focus.
 - Providers: collapsible Utility and Reasoner provider setup, test controls, and session key controls.
-- Advanced: collapsible Injection, UI, Enhancements, Retention, and Diagnostics sections covering final prompt injection placement/role/depth, progress row limits, enhancement context length, Recursion-owned cap settings, safe excerpts, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point. Reset Defaults at the bottom restores Play and Advanced settings after confirmation while preserving providers, session-only provider keys, custom decks and scope, compact-bar settings, and viewer visibility.
+- Advanced: collapsible Injection, UI, Post-process, Retention, and Diagnostics sections covering final prompt injection placement/role/depth, progress row limits, Post-process context length, Recursion-owned cap settings, safe excerpts, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point. Reset Defaults at the bottom restores Play and Advanced settings after confirmation while preserving providers, session-only provider keys, custom decks and scope, compact-bar settings, and viewer visibility.
 
 The dropdown arrow opens Last Brief. The ellipsis opens options. The Hero Pixel Array or current-step status opens progress.
 
@@ -141,7 +141,7 @@ The Full Viewer is the complete observatory. It should include:
 
 ## Cards, Decks, And Focus
 
-The Cards control is the operator surface for deciding which scene questions Recursion may prepare. The bundled Default Deck contains the fixed V1 catalog. Duplicate it when you want to edit categories, author cards, change order, or use bulk state actions.
+The Pre-process Cards control is the operator surface for deciding which scene questions Recursion may prepare. The bundled Default Deck contains the fixed V1 catalog. Its card states and both bulk eye actions work immediately. Duplicate it only when you want to edit categories, author cards, or change structure and order.
 
 ### Card states
 
@@ -151,13 +151,29 @@ Editable cards use one eye-state cycle:
 - `active`: a normal candidate;
 - `priority`: selected ahead of normal active cards in Auto.
 
-Auto cycles `off → active → priority → off`. Manual cycles `off → active → off`, because selected Manual families are already forced. The deck header can set all runnable cards active or off; draft cards are left unchanged and the Default Deck must be duplicated before editing.
+Auto cycles `off → active → priority → off`. Manual cycles `off → active → off`, because selected Manual families are already forced. The deck header open eye sets all runnable cards active and clears Priority; the slashed eye sets all runnable cards off. Draft cards are left unchanged. These state controls work on the Default Deck even though its content and organization are read-only.
 
 ### Decks and authored cards
 
-Custom decks can be created, renamed, duplicated, and deleted. Within an editable deck, create categories and authored cards, edit their names and content, duplicate or delete them, and drag category/card handles to reorder or move cards between categories. Card Assist can propose bounded authored-card content; review it before committing it to the deck.
+Custom decks can be created, renamed, duplicated, and deleted. In either card panel, deleting a custom deck opens the same inline confirmation to the right of the deck selector; type `delete`, then use the confirm icon. Within an editable deck, create categories and authored cards, edit their names and content, duplicate or delete them, and drag category/card handles to reorder or move cards between categories. Card Assist can propose bounded authored-card content; review it before committing it to the deck.
 
 The deck is configuration and authoring state. It is separate from the disposable scene-local generated card cache and from the turn hand selected for one prompt.
+
+Deck selection, card participation state, and each category's expanded/collapsed state are global extension settings. They remain the same when you close and reopen a dropdown, change chats, reload SillyTavern, or remount the extension. Category descriptions stay out of the visible list and appear on hover when UI tooltips are enabled; card descriptions remain visible beneath card names.
+
+### Post-process Cards
+
+Post-process Cards uses the same compact deck layout after generation. Its cards are binary On/Off rewrite instructions rather than Pre-process selection candidates. In the upper-right header:
+
+- `Off` / `On` controls the entire Post-process feature;
+- `As Swipe` / `Replace` chooses how the rewritten response is applied;
+- `Unified` / `Progressive` chooses one combined pass or sequential card passes;
+- the open eye enables all runnable cards;
+- the slashed eye disables all runnable cards.
+
+The bundled Starter Post-process Deck is structurally read-only, but its category, card, and bulk enabled states are editable. Duplicate it only to rename, add, remove, reorder, or rewrite deck content.
+
+Editable Post-process decks use the same compact `Categories` plus row as Pre-process. Add cards with the plus in the owning category header. Category and card rows use different drag-handle shapes so their reorder targets remain visually distinct.
 
 ### Scope and caps
 
@@ -173,30 +189,15 @@ Last Brief shows the latest selected hand, card families, state/emphasis, concis
 
 ![Last Brief hand inspection with selected cards, omissions, and packet metadata](../../assets/documentation/renders/recursion-card-hand-inspection.png)
 
-## Enhancements
+## Post-processing
 
-Enhancement is a post-generation review of the assistant response that just landed. It uses the frozen response source, bounded visible context, generation-time Prompt Packet, installed card lineage, story form, character evidence, and anti-slop profile. It does not ask the provider to rewrite an entire message blindly.
+Post-processing revises the completed assistant response according to the active Post-process Deck. It uses the frozen response, bounded visible context, generation-time Prompt Packet, ordered enabled categories, and ordered enabled cards.
 
-The menu offers:
+Recursion's Utility lane synthesizes guidance at Low and Medium; Reasoner does so at High and Ultra. That sidecar call does not write prose. SillyTavern's native quiet generation path receives the guidance and writes the revised response with the active host preset, character, lore, model, and normal context.
 
-- `Off`: do not review the response.
-- `Repair`: apply bounded local patches when the response is mostly sound.
-- `Recompose`: allow a larger evidence-backed restructuring while preserving the source contract.
-- `Redirect`: replace a failed trajectory only when diagnosis can establish a supported source failure and a concrete replacement objective.
+Unified performs one guidance synthesis and one host rewrite for all runnable categories. Progressive performs one guidance synthesis and one host rewrite per runnable category in deck order. Guidance and host rewrite each receive one same-path retry. A failed Unified operation writes nothing. A failed Progressive category is reported and skipped while later categories continue from the last valid draft.
 
-Choose `As Swipe` to keep the original and select the accepted enhancement, or `Replace` to replace the active assistant text after validation. A successful operation requires exact source/target binding, safe non-overlapping patches, valid evidence references, and complete installed-card outcomes. Redirect also requires all verification checks to pass. A provider result with safe patches but unresolved card coverage is `partial-failed`, not success; unsafe or stale patches are discarded.
-
-At Medium, High, or Ultra, Redirect remains visible but unavailable until the
-Reasoner provider card shows `Ready`. The row explains whether to configure or
-test Reasoner and offers the matching action. If an already-selected Redirect
-loses readiness before the next send, Recursion warns before host generation,
-lets the original response generate normally, then settles Redirect `skipped`
-without diagnosis, writer, or verifier calls. Low Redirect continues through
-Utility.
-
-The progress menu shows the editorial diagnosis, candidate, verification, and settlement rows. Red rows include a user-safe reason such as `provider-failed`, `validation-failed`, `partial-failed`, `requires-regeneration`, or `skipped/no-eligible-target`. These states describe Recursion's review; they do not erase or downgrade the original SillyTavern generation.
-
-![Enhancement menu with experimental Redirect and verified editorial result](../../assets/documentation/renders/recursion-operator-editorial-recovery-states.png)
+Choose `As Swipe` to preserve the original and select the final rewritten swipe. Choose `Replace` to replace the selected assistant response only after complete success. A partial Progressive result always falls back to As Swipe so the original remains available. Intermediate Progressive drafts never enter chat persistence.
 
 ## Modes
 
@@ -302,7 +303,7 @@ Operator settings should stay broad. Pipeline, Mode, and Reasoning Level live in
 - Providers: collapsible Utility and Reasoner setup in the settings panel.
 - Advanced / Injection: final-prompt injection compatibility controls: Placement `In Prompt | In Chat`, Role `System | User | Assistant`, and Depth `0..10`.
 - Advanced / UI: progress row limits.
-- Advanced / Enhancements: context messages for post-generation enhancement passes, default `13`, range `0..35`.
+- Advanced / Post-process: context messages for Post-process guidance synthesis, default `13`, range `0..35`.
 - Advanced / Retention: Source Messages, Source Text Budget, Provider Messages, Scene Caches / Chat, Scene Caches Total, Swipe Variants / Scene, and Journal Entries.
 - Advanced / Diagnostics: safe excerpts, Reset Scene Cache, Clear Run Journal, and Export Diagnostics.
 
@@ -349,7 +350,8 @@ Provider fields auto-save when changed. Source changes switch the visible field 
 Utility must be configured for normal operation. Reasoner can remain
 unconfigured; if Medium, High, or Ultra is selected while Reasoner is not ready,
 Recursion keeps the selected Reasoning Level and falls back through Utility for
-ordinary work. Medium+ Redirect remains unavailable. See
+ordinary Pre-process work. High and Ultra Post-process guidance require a ready
+Reasoner lane and fail soft without crossing to Utility. See
 [Provider Setup](PROVIDER_SETUP.md).
 
 ## First Run
@@ -358,7 +360,7 @@ Use this first-run path:
 
 1. Enable Recursion and confirm the bar mounts.
 2. Configure Utility.
-3. Configure and test Reasoner only when you need Medium/High/Ultra synthesis or Medium+ Redirect.
+3. Configure and test Reasoner when you need Medium/High/Ultra synthesis or High/Ultra Post-process guidance.
 4. Confirm the power toggle is on.
 5. Leave Tense & PoV on Auto unless the active chat needs a forced story form.
 6. Set Pipeline to Standard, then set mode to Auto.
@@ -397,7 +399,7 @@ Expected behavior:
 - Rapid invalid output or mandatory gap: escalate the current turn to Standard.
 - Bar Regenerate: arm one fresh-next-generation token without starting provider or host generation; the next send or swipe consumes it once, bypasses cached cards, Rapid warm, Fused bundle reuse, and same-turn/swipe packet reuse for that run, then returns to the selected pipeline.
 - Card failure: omit failed cards and keep valid siblings.
-- Reasoner unconfigured, untested, unhealthy, or missing credentials: compose ordinary work with Utility; skip Medium+ Redirect before Editorial calls.
+- Reasoner unconfigured, untested, unhealthy, or missing credentials: compose ordinary Pre-process work with Utility when policy allows; fail High/Ultra Post-process guidance soft without crossing lanes.
 - Player Stop / host generation stop, including the Recursion Bar Stop generation button: abort active Recursion work, stop the host generation when the SillyTavern stop seam is available, clear owned prompt keys, and show skipped/canceled progress rather than a provider warning.
 - Storage write failure: continue with memory state when safe and report a warning.
 - Prompt install failure: allow SillyTavern generation to continue without Recursion guidance.

@@ -43,7 +43,9 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   preProcessDecks: {
     version: PRE_PROCESS_DECK_SETTINGS_VERSION,
     activeDeckId: DEFAULT_PRE_PROCESS_DECK_ID,
-    customDecks: {}
+    customDecks: {},
+    defaultCardStates: {},
+    categoryExpansion: {}
   },
   strength: 'balanced',
   minCards: 3,
@@ -62,7 +64,10 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   postProcessDecks: {
     version: POST_PROCESS_DECK_SETTINGS_VERSION,
     activeDeckId: STARTER_POST_PROCESS_DECK_ID,
-    customDecks: {}
+    customDecks: {},
+    starterCategoryStates: {},
+    starterCardStates: {},
+    categoryExpansion: {}
   },
   injection: {
     placement: 'in_prompt',

@@ -20,7 +20,10 @@ import {
   normalizePostProcessDeck,
   normalizePostProcessDeckSettings,
   getActivePostProcessDeck,
-  orderedRunnablePostProcessCategories
+  orderedRunnablePostProcessCategories,
+  postProcessCategoryExpanded,
+  setPostProcessCategoryExpanded,
+  setAllPostProcessCardsEnabled
 } from '../../src/post-process-decks.mjs';
 import { assert, assertDeepEqual as deepEqual, assertEqual as equal } from '../../tests/helpers/assert.mjs';
 
@@ -39,6 +42,57 @@ assert(starter.bundled && starter.readonly, 'starter is bundled and read-only');
 assert(Object.values(starter.categories).every((category) => category.enabled === true), 'starter categories default On');
 assert(Object.values(starter.cards).every((card) => card.enabled === true), 'starter cards default On');
 
+const normalizedStarterStates = normalizePostProcessDeckSettings({
+  activeDeckId: STARTER_POST_PROCESS_DECK_ID,
+  starterCategoryStates: {
+    'natural-prose': false,
+    missing: false
+  },
+  starterCardStates: {
+    'cut-echoes': false,
+    missing: false
+  }
+}, { now });
+deepEqual(normalizedStarterStates.starterCategoryStates, { 'natural-prose': false }, 'starter category overrides keep only known categories');
+deepEqual(normalizedStarterStates.starterCardStates, { 'cut-echoes': false }, 'starter card overrides keep only known cards');
+const overlaidStarter = getActivePostProcessDeck(normalizedStarterStates, { now });
+equal(overlaidStarter.categories['natural-prose'].enabled, false, 'starter category overrides apply to the active deck');
+equal(overlaidStarter.cards['cut-echoes'].enabled, false, 'starter card overrides apply to the active deck');
+assert(overlaidStarter.readonly, 'starter state overrides do not make bundled content structurally editable');
+equal(
+  postProcessCategoryExpanded(normalizedStarterStates, STARTER_POST_PROCESS_DECK_ID, 'natural-prose'),
+  true,
+  'Post-process categories default expanded when no operator override exists'
+);
+const collapsedStarterSettings = setPostProcessCategoryExpanded(
+  normalizedStarterStates,
+  STARTER_POST_PROCESS_DECK_ID,
+  'natural-prose',
+  false,
+  { now }
+);
+equal(
+  postProcessCategoryExpanded(
+    normalizePostProcessDeckSettings(JSON.parse(JSON.stringify(collapsedStarterSettings)), { now }),
+    STARTER_POST_PROCESS_DECK_ID,
+    'natural-prose'
+  ),
+  false,
+  'Post-process category collapse survives serialized settings normalization'
+);
+
+const starterOff = setAllPostProcessCardsEnabled(
+  { activeDeckId: STARTER_POST_PROCESS_DECK_ID, customDecks: {} },
+  false,
+  { now }
+);
+assert(Object.values(starterOff.starterCardStates).every((state) => state === false), 'starter bulk Off persists every card state');
+assert(Object.values(getActivePostProcessDeck(starterOff, { now }).cards).every((card) => card.enabled === false), 'starter bulk Off disables every card');
+const starterOn = setAllPostProcessCardsEnabled(starterOff, true, { now });
+assert(Object.values(starterOn.starterCardStates).every((state) => state === true), 'starter bulk On persists every card state');
+assert(Object.values(getActivePostProcessDeck(starterOn, { now }).cards).every((card) => card.enabled === true), 'starter bulk On enables every card');
+assert(Object.values(getActivePostProcessDeck(starterOn, { now }).categories).every((category) => category.enabled === true), 'starter bulk On enables every category containing runnable cards');
+
 const mutatedStarter = createStarterPostProcessDeck({ now });
 mutatedStarter.categories['natural-prose'].name = 'Changed';
 equal(createStarterPostProcessDeck({ now }).categories['natural-prose'].name, 'Natural Prose', 'starter data is deeply cloned');
@@ -46,12 +100,19 @@ equal(createStarterPostProcessDeck({ now }).categories['natural-prose'].name, 'N
 let settings = createCustomPostProcessDeck({}, { name: '  Revision   Rules  ', now });
 const customId = settings.activeDeckId;
 equal(settings.customDecks[customId].name, 'Revision Rules', 'create custom deck normalizes name');
+settings = setPostProcessCategoryExpanded(settings, customId, 'general', false, { now });
 settings = duplicatePostProcessDeck(settings, customId, { now });
 const duplicatedId = settings.activeDeckId;
 assert(settings.customDecks[duplicatedId] && !settings.customDecks[duplicatedId].readonly, 'duplicate creates an editable custom deck');
+equal(
+  postProcessCategoryExpanded(settings, duplicatedId, settings.customDecks[duplicatedId].categoryOrder[0]),
+  false,
+  'duplicated Post-process decks inherit source category expansion under remapped ids'
+);
 settings = deleteCustomPostProcessDeck(settings, duplicatedId);
 equal(settings.activeDeckId, STARTER_POST_PROCESS_DECK_ID, 'deleting active custom deck selects starter');
 assert(!settings.customDecks[duplicatedId], 'custom deck delete removes deck');
+equal(settings.categoryExpansion[duplicatedId], undefined, 'deleting a Post-process deck prunes its category expansion');
 
 let deck = settings.customDecks[customId];
 deck = createPostProcessCategory(deck, { name: 'Finish', description: 'Complete the response.', now });
@@ -110,6 +171,18 @@ const normalized = normalizePostProcessDeckSettings({
 equal(normalized.version, POST_PROCESS_DECK_SETTINGS_VERSION, 'settings normalize to V1');
 equal(normalized.activeDeckId, STARTER_POST_PROCESS_DECK_ID, 'unknown active deck falls back to starter');
 assert(!('enhancements' in normalized), 'old enhancement settings are ignored');
+deepEqual(
+  normalizePostProcessDeckSettings({
+    activeDeckId: customId,
+    customDecks: { [customId]: settings.customDecks[customId] },
+    categoryExpansion: {
+      [customId]: { general: false, missing: false },
+      missingDeck: { missing: false }
+    }
+  }, { now }).categoryExpansion,
+  { [customId]: { general: false } },
+  'Post-process normalization prunes deleted category and deck expansion entries'
+);
 const active = getActivePostProcessDeck({ ...settings, activeDeckId: customId });
 active.name = 'Mutated';
 assert(getActivePostProcessDeck({ ...settings, activeDeckId: customId }).name !== 'Mutated', 'custom deck reads are deeply cloned');

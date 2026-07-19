@@ -1564,9 +1564,6 @@
 
 .recursion-cards-panel {
   backdrop-filter: blur(12px);
-  display: block;
-  max-height: min(64vh, 560px);
-  overflow: auto;
   padding: 0;
 }
 
@@ -1586,13 +1583,16 @@
 }
 
 .recursion-post-process-button.is-off {
-  opacity: .48;
+  opacity: 1;
 }
 
-.recursion-post-process-button.is-on,
-.recursion-post-process-button[aria-expanded="true"] {
+.recursion-post-process-button.is-on {
   color: var(--recursion-accent);
   opacity: 1;
+}
+
+.recursion-post-process-button[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--recursion-panel) 82%, var(--recursion-hover));
 }
 
 .recursion-post-process-button.is-partial {
@@ -1603,33 +1603,33 @@
   color: var(--recursion-error);
 }
 
+.recursion-process-cards-button {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 76%, transparent);
+  opacity: 1;
+}
+
+.recursion-process-cards-button-icon,
 .recursion-post-process-icon {
-  background: currentColor;
-  display: block;
-  height: 15px;
-  mask: url("../assets/icons/upgrade.svg") center / contain no-repeat;
-  width: 15px;
-}
-
-.recursion-post-process-panel {
-  display: flex;
-  flex-direction: column;
-  max-height: min(72vh, 620px);
-  overflow: hidden;
-}
-
-.recursion-post-process-head {
   align-items: center;
-  border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #555) 70%, transparent);
-  display: flex;
-  flex: 0 0 auto;
-  gap: 7px;
-  min-height: 34px;
-  padding: 6px 9px;
+  display: inline-flex;
+  flex: 0 0 17px;
+  height: 17px;
+  justify-content: center;
+  width: 17px;
 }
 
-.recursion-post-process-head .recursion-post-process-enabled {
-  margin-left: auto;
+.recursion-process-cards-button-icon svg,
+.recursion-process-cards-icon {
+  display: block;
+  height: 17px;
+  overflow: visible;
+  width: 17px;
+}
+
+.recursion-post-process-header-control {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
 }
 
 .recursion-deck-summary,
@@ -1639,8 +1639,6 @@
   font-size: 10px;
 }
 
-.recursion-post-process-deck-row,
-.recursion-post-process-create-row,
 .recursion-post-process-option-row {
   align-items: center;
   display: flex;
@@ -1650,17 +1648,6 @@
   padding: 4px 9px;
 }
 
-.recursion-post-process-deck-row,
-.recursion-post-process-options {
-  border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #555) 55%, transparent);
-}
-
-.recursion-post-process-deck-row .recursion-card-deck-select {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.recursion-post-process-deck-actions,
 .recursion-post-process-row-actions,
 .recursion-post-process-editor-actions {
   align-items: center;
@@ -1678,32 +1665,60 @@
   width: auto;
 }
 
-.recursion-post-process-options {
-  flex: 0 0 auto;
-  padding: 3px 0;
-}
-
-.recursion-post-process-option-row > span:first-child {
-  flex: 0 0 82px;
-  font-size: 11.5px;
-}
-
 .recursion-post-process-segments {
   display: inline-flex;
   min-width: 0;
 }
 
 .recursion-post-process-segment,
-.recursion-post-process-enabled,
-.recursion-post-process-state {
+.recursion-post-process-enabled {
   background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #242424) 90%, transparent);
   border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #555) 72%, transparent);
   border-radius: 5px;
   color: inherit;
   font: inherit;
-  font-size: 11.5px;
+  font-size: 9.5px;
+  line-height: 1;
+  min-height: 20px;
+  padding: 3px 5px;
+  white-space: nowrap;
+}
+
+.recursion-post-process-enabled {
+  align-items: center;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 22px;
+  height: 22px;
+  justify-content: center;
+  line-height: 1;
   min-height: 22px;
-  padding: 3px 7px;
+  padding: 0;
+  width: 22px;
+}
+
+.recursion-post-process-enabled-icon {
+  align-items: center;
+  display: inline-flex;
+  height: 16px;
+  justify-content: center;
+  pointer-events: none;
+  width: 16px;
+}
+
+.recursion-post-process-segment:hover,
+.recursion-post-process-segment:focus-visible {
+  background: color-mix(in srgb, var(--recursion-panel) 72%, var(--recursion-hover));
+  border-color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 28%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 20%, transparent);
+  outline-offset: -1px;
+}
+
+.recursion-post-process-enabled:hover,
+.recursion-post-process-enabled:focus-visible {
+  background: color-mix(in srgb, var(--recursion-panel) 72%, var(--recursion-hover));
+  outline: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 28%, transparent);
+  outline-offset: 1px;
 }
 
 .recursion-post-process-segment + .recursion-post-process-segment {
@@ -1718,97 +1733,18 @@
 }
 
 .recursion-post-process-segment.is-selected,
-.recursion-post-process-enabled.is-on,
-.recursion-post-process-state.is-on {
+.recursion-post-process-enabled.is-on {
   border-color: color-mix(in srgb, var(--recursion-accent) 55%, transparent);
   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--recursion-accent) 72%, transparent);
   color: color-mix(in srgb, var(--recursion-accent) 82%, var(--SmartThemeBodyColor, #ddd));
 }
 
-.recursion-post-process-enabled.is-off,
-.recursion-post-process-state.is-off {
+.recursion-post-process-enabled.is-off {
   opacity: .62;
 }
 
-.recursion-post-process-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-}
-
-.recursion-post-process-category {
-  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #555) 48%, transparent);
-}
-
-.recursion-post-process-category-head {
-  align-items: center;
-  display: grid;
-  gap: 5px;
-  grid-template-columns: 24px auto minmax(0, 1fr) auto;
-  min-height: 30px;
-  padding: 3px 7px;
-}
-
-.recursion-post-process-expander {
-  background: transparent;
-  border: 0;
-  color: inherit;
-  font: inherit;
-  height: 24px;
-  padding: 0;
-  width: 24px;
-}
-
-.recursion-post-process-category-copy,
-.recursion-post-process-card-copy {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.recursion-post-process-category-name,
-.recursion-post-process-card-name {
-  font-size: 11.5px;
-  line-height: 1.2;
-}
-
-.recursion-post-process-card {
-  align-items: center;
-  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #555) 35%, transparent);
-  display: grid;
-  gap: 7px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  min-height: 30px;
-  padding: 4px 7px 4px 35px;
-}
-
-.recursion-post-process-category.is-off .recursion-post-process-card {
+.recursion-post-process-category.is-inactive .recursion-post-process-card {
   opacity: .58;
-}
-
-.recursion-post-process-add-card,
-.recursion-post-process-create-row .recursion-button {
-  font-size: 10px;
-  min-height: 22px;
-}
-
-.recursion-post-process-add-card {
-  margin: 4px 7px 6px 35px;
-}
-
-.recursion-deck-drag-handle {
-  background: transparent;
-  border: 0;
-  border-left: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #555) 58%, transparent);
-  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 60%, transparent);
-  cursor: grab;
-  font: inherit;
-  height: 22px;
-  margin-left: 3px;
-  padding: 0 4px 0 7px;
-  touch-action: none;
 }
 
 .recursion-post-process-editor,
@@ -1856,40 +1792,6 @@
   width: 24px;
 }
 
-.recursion-cards-head,
-.recursion-cards-foot {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  min-height: 34px;
-  padding: 7px 9px;
-}
-
-.recursion-cards-head {
-  justify-content: space-between;
-}
-
-.recursion-cards-head-actions {
-  align-items: center;
-  display: inline-flex;
-  gap: 7px;
-  justify-content: flex-end;
-  min-width: 0;
-}
-
-.recursion-cards-summary,
-.recursion-cards-foot {
-  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 50%, transparent);
-  font-size: 10.5px;
-}
-
-.recursion-cards-summary {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .recursion-cards-all-button {
   appearance: none;
   background: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 3.5%, transparent);
@@ -1917,7 +1819,6 @@
   opacity: .42;
 }
 
-.recursion-card-deck-bar,
 .recursion-card-deck-tools {
   align-items: center;
   border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
@@ -1925,10 +1826,6 @@
   gap: 5px;
   min-width: 0;
   padding: 6px 9px;
-}
-
-.recursion-card-deck-bar {
-  flex-wrap: nowrap;
 }
 
 .recursion-card-deck-tools {
@@ -1947,33 +1844,10 @@
   grid-column: 2;
 }
 
-.recursion-card-deck-select {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.recursion-card-deck-selector {
-  align-items: center;
-  display: inline-flex;
-  flex: 1 1 auto;
-  gap: 6px;
-  min-width: 0;
-}
-
 .recursion-card-deck-label {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);
   flex: 0 0 auto;
   font-size: 11px;
-}
-
-.recursion-card-deck-actions {
-  align-items: center;
-  display: inline-flex;
-  flex: 0 0 auto;
-  gap: 4px;
-  justify-content: end;
-  margin-left: auto;
-  min-width: 0;
 }
 
 .recursion-card-deck-tool-group {
@@ -2016,38 +1890,6 @@
   white-space: nowrap;
 }
 
-.recursion-card-deck-list {
-  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
-  display: grid;
-  --recursion-card-drag-ease: cubic-bezier(.2, 0, .18, 1);
-  --recursion-card-drag-settle: cubic-bezier(.22, .9, .28, 1);
-  --recursion-card-drag-lift-ms: 100ms;
-  --recursion-card-drag-drop-ms: 140ms;
-}
-
-.recursion-card-deck-category {
-  --recursion-card-action-rail-width: 124px;
-  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 6%, transparent);
-  display: grid;
-  gap: 4px;
-  padding: 7px 9px;
-}
-
-.recursion-card-deck-category-head {
-  align-items: center;
-  cursor: pointer;
-  display: grid;
-  gap: 6px;
-  grid-template-columns: 24px minmax(0, 1fr) var(--recursion-card-action-rail-width);
-  min-width: 0;
-}
-
-.recursion-card-deck-category-head:hover,
-.recursion-card-deck-category-head:focus-visible {
-  background: color-mix(in srgb, var(--recursion-panel) 80%, var(--recursion-hover));
-  outline: none;
-}
-
 .recursion-enhancements-apply-choice.is-disabled,
 .recursion-enhancements-apply-choice:disabled {
   cursor: not-allowed;
@@ -2070,102 +1912,6 @@
 
 .recursion-redirect-test-reasoner[hidden] {
   display: none;
-}
-
-.recursion-card-deck-category-arrow {
-  align-items: center;
-  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);
-  display: inline-flex;
-  height: 22px;
-  justify-content: center;
-  justify-self: center;
-  width: 22px;
-}
-
-.recursion-card-deck-category-arrow svg {
-  display: block;
-  height: 18px;
-  width: 18px;
-}
-
-.recursion-card-deck-category-copy {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.recursion-card-deck-category-copy strong {
-  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 76%, transparent);
-  font-size: 11px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.recursion-card-deck-category-copy span {
-  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 42%, transparent);
-  font-size: 10px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.recursion-card-deck-category-actions {
-  align-items: center;
-  display: inline-flex;
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
-  gap: 4px;
-  justify-content: end;
-  width: var(--recursion-card-action-rail-width);
-}
-
-.recursion-card-deck-card {
-  --recursion-card-action-rail-width: 124px;
-  align-items: center;
-  background: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 3%, transparent);
-  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 8%, transparent);
-  border-radius: 5px;
-  color: inherit;
-  display: grid;
-  font: inherit;
-  gap: 6px;
-  grid-template-columns: minmax(0, 1fr) var(--recursion-card-action-rail-width);
-  min-height: 26px;
-  padding: 3px 4px;
-  text-align: left;
-}
-
-.recursion-card-deck-card-main {
-  align-items: center;
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
-  display: grid;
-  gap: 6px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  min-width: 0;
-  padding: 1px 2px;
-  text-align: left;
-}
-
-.recursion-card-deck-card-main:hover,
-.recursion-card-deck-card-main:focus-visible {
-  background: color-mix(in srgb, var(--recursion-panel) 80%, var(--recursion-hover));
-  outline: none;
-}
-
-.recursion-card-deck-card-actions {
-  align-items: center;
-  display: inline-flex;
-  flex-wrap: nowrap;
-  gap: 4px;
-  justify-content: end;
-  width: var(--recursion-card-action-rail-width);
 }
 
 .recursion-card-drag-region {
@@ -2325,16 +2071,285 @@
   outline-offset: -1px;
 }
 
-.recursion-card-deck-card-name {
-  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 72%, transparent);
-  font-size: 11px;
+.recursion-card-deck-card-status svg[data-recursion-card-state-icon="eye-priority"] {
+  transform: translateY(1px);
+}
+
+.recursion-card-deck-card.is-draft .recursion-card-deck-card-status {
+  color: color-mix(in srgb, var(--recursion-warning) 74%, var(--SmartThemeBodyColor, #ddd));
+}
+
+.recursion-card-deck-card.is-delete-pending,
+.recursion-card-deck-category.is-delete-pending > .recursion-card-deck-category-head {
+  background: color-mix(in srgb, var(--recursion-danger) 10%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--recursion-danger) 32%, transparent);
+  outline-offset: -1px;
+}
+
+/* Shared Pre/Post Card Deck panel contract. Phase classes are behavior hooks only. */
+.recursion-card-panel {
+  --recursion-card-action-rail-width: 124px;
+  display: flex;
+  flex-direction: column;
+  max-height: min(72vh, 620px);
+  overflow: hidden;
+}
+
+.recursion-card-panel-head {
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #555) 70%, transparent);
+  display: flex;
+  flex: 0 0 auto;
+  gap: 7px;
+  min-height: 34px;
+  padding: 6px 9px;
+}
+
+.recursion-card-panel-head-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  justify-content: flex-end;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.recursion-card-panel-summary {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 50%, transparent);
+  font-size: 10.5px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.recursion-card-deck-card-status {
+.recursion-card-panel-deck-bar {
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #555) 55%, transparent);
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 5px;
+  min-height: 30px;
+  min-width: 0;
+  padding: 4px 9px;
+}
+
+.recursion-card-panel-deck-selector {
+  align-items: center;
+  display: inline-flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+}
+
+.recursion-card-panel-deck-selector > .recursion-card-deck-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.recursion-card-panel-deck-actions {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  justify-content: flex-end;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.recursion-card-panel-list {
+  --recursion-card-drag-ease: cubic-bezier(.2, 0, .18, 1);
+  --recursion-card-drag-settle: cubic-bezier(.22, .9, .28, 1);
+  --recursion-card-drag-lift-ms: 100ms;
+  --recursion-card-drag-drop-ms: 140ms;
+  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.recursion-card-panel-foot {
+  align-items: center;
+  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 50%, transparent);
+  display: flex;
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  gap: 8px;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 7px 9px;
+}
+
+.recursion-card-panel-category {
+  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 6%, transparent);
+  display: grid;
+  gap: 4px;
+  padding: 7px 9px;
+}
+
+.recursion-card-panel-category-head {
+  align-items: center;
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 24px minmax(0, 1fr);
+  min-height: 24px;
+  min-width: 0;
+  padding: 0;
+}
+
+.recursion-card-panel-category-head.has-state,
+.recursion-card-panel-category-head.has-actions {
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+}
+
+.recursion-card-panel-category-head.has-state.has-actions {
+  grid-template-columns: 24px minmax(0, 1fr) auto var(--recursion-card-action-rail-width);
+}
+
+.recursion-card-panel-category-head:hover,
+.recursion-card-panel-category-head:focus-visible {
+  background: color-mix(in srgb, var(--recursion-panel) 80%, var(--recursion-hover));
+  outline: none;
+}
+
+.recursion-card-panel-disclosure {
+  align-items: center;
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  justify-self: center;
+  width: 22px;
+}
+
+.recursion-card-panel-disclosure svg {
+  display: block;
+  height: 18px;
+  width: 18px;
+}
+
+.recursion-card-panel-category-copy,
+.recursion-card-panel-card-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.recursion-card-panel-category-copy strong,
+.recursion-card-panel-card-name {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 76%, transparent);
+  font-size: 11px;
+  line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recursion-card-panel-category-copy > span,
+.recursion-card-panel-card-description {
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 42%, transparent);
+  font-size: 10px;
+  line-height: 1.2;
+  min-width: 0;
+}
+
+.recursion-card-panel-category-state {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 44%, transparent);
+  cursor: pointer;
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  width: 22px;
+}
+
+.recursion-card-panel-category-state.is-on {
+  color: color-mix(in srgb, var(--recursion-accent) 68%, transparent);
+}
+
+.recursion-card-panel-category-state.is-off {
+  opacity: .62;
+}
+
+.recursion-card-panel-row-actions {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 4px;
+  justify-content: flex-end;
+  width: var(--recursion-card-action-rail-width);
+}
+
+.recursion-post-process-row-actions .recursion-card-drag-region {
+  margin-left: 8px;
+}
+
+.recursion-card-panel-category-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.recursion-card-panel-category-body[hidden] {
+  display: none;
+}
+
+.recursion-card-panel-card {
+  align-items: center;
+  background: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 3%, transparent);
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 8%, transparent);
+  border-radius: 5px;
+  color: inherit;
+  display: grid;
+  font: inherit;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 26px;
+  padding: 3px 4px;
+  text-align: left;
+}
+
+.recursion-card-panel-card.has-actions {
+  grid-template-columns: minmax(0, 1fr) var(--recursion-card-action-rail-width);
+}
+
+.recursion-card-panel-card-main {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 1px 2px;
+  text-align: left;
+  width: 100%;
+}
+
+.recursion-card-panel-card-main:hover,
+.recursion-card-panel-card-main:focus-visible {
+  background: color-mix(in srgb, var(--recursion-panel) 80%, var(--recursion-hover));
+  outline: none;
+}
+
+.recursion-card-panel-state-marker {
   align-items: center;
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 44%, transparent);
   display: inline-flex;
@@ -2344,60 +2359,40 @@
   width: 16px;
 }
 
-.recursion-card-deck-card-status svg {
+.recursion-card-panel-state-marker svg {
   display: block;
   height: 15px;
   width: 15px;
 }
 
-.recursion-card-deck-card-status svg[data-recursion-card-state-icon] {
-  color: currentColor;
-  flex: 0 0 15px;
-}
-
-.recursion-card-deck-card-status svg[data-recursion-card-state-icon="eye-priority"] {
-  transform: translateY(1px);
-}
-
-.recursion-card-deck-card.is-draft .recursion-card-deck-card-status {
-  color: color-mix(in srgb, var(--recursion-warning) 74%, var(--SmartThemeBodyColor, #ddd));
-}
-
-.recursion-card-deck-card.is-active {
+.recursion-card-panel-card.is-active {
   border-color: color-mix(in srgb, var(--recursion-accent) 28%, transparent);
   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--recursion-accent) 68%, transparent);
 }
 
-.recursion-card-deck-card.is-active .recursion-card-deck-card-status {
+.recursion-card-panel-card.is-active .recursion-card-panel-state-marker {
   color: color-mix(in srgb, var(--recursion-accent) 68%, transparent);
 }
 
-.recursion-card-deck-card.is-inactive {
+.recursion-card-panel-card.is-inactive {
   border-color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 7%, transparent);
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 58%, transparent);
 }
 
-.recursion-card-deck-card.is-inactive .recursion-card-deck-card-status {
+.recursion-card-panel-card.is-inactive .recursion-card-panel-state-marker {
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 38%, transparent);
 }
 
-.recursion-card-deck-card.is-priority {
+.recursion-card-panel-card.is-priority {
   border-color: color-mix(in srgb, #8eefff 46%, transparent);
   box-shadow:
     inset 3px 0 0 #8eefff,
     inset 0 0 0 1px color-mix(in srgb, #8eefff 22%, transparent);
 }
 
-.recursion-card-deck-card.is-priority .recursion-card-deck-card-name,
-.recursion-card-deck-card.is-priority .recursion-card-deck-card-status {
+.recursion-card-panel-card.is-priority .recursion-card-panel-card-name,
+.recursion-card-panel-card.is-priority .recursion-card-panel-state-marker {
   color: #8eefff;
-}
-
-.recursion-card-deck-card.is-delete-pending,
-.recursion-card-deck-category.is-delete-pending > .recursion-card-deck-category-head {
-  background: color-mix(in srgb, var(--recursion-danger) 10%, transparent);
-  outline: 1px solid color-mix(in srgb, var(--recursion-danger) 32%, transparent);
-  outline-offset: -1px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2502,11 +2497,6 @@
   font-size: 10.5px;
   line-height: 1.25;
   overflow-wrap: anywhere;
-}
-
-.recursion-cards-foot {
-  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 7%, transparent);
-  justify-content: space-between;
 }
 
 .recursion-card-scope-notice {
@@ -3629,36 +3619,45 @@
     font-size: 11.5px;
   }
 
-  .recursion-post-process-panel {
+  .recursion-card-panel {
     max-height: min(72dvh, calc(100dvh - 46px));
     width: min(100%, 100dvw);
   }
 
-  .recursion-post-process-deck-row,
+  .recursion-card-panel-head {
+    flex-wrap: wrap;
+  }
+
+  .recursion-card-panel-head-actions {
+    flex: 1 0 100%;
+    margin-left: 0;
+  }
+
+  .recursion-card-panel-deck-bar,
   .recursion-post-process-option-row {
     align-items: stretch;
     flex-wrap: wrap;
   }
 
-  .recursion-post-process-deck-row .recursion-card-deck-select {
+  .recursion-card-panel-deck-selector {
     flex-basis: 100%;
   }
 
-  .recursion-post-process-category-head {
-    grid-template-columns: 24px auto minmax(0, 1fr);
+  .recursion-card-panel-category-head.has-actions {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
   }
 
-  .recursion-post-process-category-head .recursion-post-process-row-actions {
-    grid-column: 3;
+  .recursion-card-panel-category-head.has-state.has-actions {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
   }
 
-  .recursion-post-process-card {
-    grid-template-columns: auto minmax(0, 1fr);
-    padding-left: 28px;
+  .recursion-card-panel-category-head.has-state.has-actions .recursion-card-panel-row-actions {
+    grid-column: 2 / -1;
+    justify-self: end;
   }
 
-  .recursion-post-process-card .recursion-post-process-row-actions {
-    grid-column: 2;
+  .recursion-card-panel-card.has-actions {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .recursion-button {
@@ -3677,11 +3676,6 @@
   .recursion-cards-foot,
   .recursion-settings-header {
     flex-wrap: wrap;
-  }
-
-  .recursion-card-deck-category-head {
-    align-items: start;
-    grid-template-columns: 24px minmax(0, 1fr) auto;
   }
 
   .recursion-card-editor-prompt {

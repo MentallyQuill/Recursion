@@ -1,9 +1,45 @@
 import { CARD_SCOPE_CATALOG, CARD_SCOPE_VERSION } from './card-scope.mjs';
 
 export const DEFAULT_PRE_PROCESS_DECK_ID = 'default';
-export const PRE_PROCESS_DECK_SETTINGS_VERSION = 1;
+export const PRE_PROCESS_DECK_SETTINGS_VERSION = 2;
 export const NEW_CARD_NAME = 'New Card';
 export const CARD_SELECTION_STATES = Object.freeze(['off', 'active', 'priority']);
+export const DEFAULT_PRE_PROCESS_CARD_DESCRIPTIONS = Object.freeze({
+  'sceneFrameCard:locationSituation': 'Tracks the current place, nearby routes, exposure, pressure, and immediate relevance.',
+  'sceneFrameCard:immediateDirection': 'Shows where the next beat is heading without deciding future plot.',
+  'sceneFrameCard:beatConstraint': 'Defines the hard response boundary, timing limit, or pending payoff.',
+  'activeCastCard:presentCharacters': 'Tracks who can act, observe, interrupt, or receive attention now.',
+  'activeCastCard:visibleState': 'Tracks observable conditions, posture, injuries, moods, constraints, and capabilities.',
+  'activeCastCard:speakerRoles': 'Tracks who speaks, listens, is addressed, or controls the exchange.',
+  'characterMotivationCard:visibleGoals': 'Turns established visible goals into pressure shaping the next response.',
+  'characterMotivationCard:pressures': 'Tracks external, social, tactical, and emotional pressures shaping current behavior.',
+  'characterMotivationCard:hesitationPosture': 'Tracks visible reluctance, confidence, uncertainty, guardedness, and restraint.',
+  'dialogueRelationshipCard:tension': 'Tracks current friction, trust, leverage, intimacy, threats, and usable subtext.',
+  'dialogueRelationshipCard:promisesConflicts': 'Tracks promises, refusals, debts, threats, disagreements, and active obligations.',
+  'dialogueRelationshipCard:voiceConstraints': 'Tracks address, formality, secrecy, taboo wording, and who may speak.',
+  'socialSubtextCard:humorIrony': 'Reads humor and irony as signals of intimacy, pressure, or deflection.',
+  'socialSubtextCard:veiledPressure': 'Tracks implied threats, warnings, coercion, and consequences beneath polite language.',
+  'socialSubtextCard:invitationBoundary': 'Tracks flirtation, permission, discomfort, refusal, and boundaries against further pressure.',
+  'socialSubtextCard:statusFace': 'Tracks dominance, deference, rank, embarrassment, face-saving, and forced yielding.',
+  'sceneConstraintsCard:hardLimits': 'Tracks injuries, blocked routes, missing objects, choices, and other plausibility limits.',
+  'sceneConstraintsCard:spatialConstraints': 'Tracks movement, reach, visibility, distance, access, and blocked routes.',
+  'sceneConstraintsCard:timelineOrder': 'Tracks cause, effect, sequence, reveal order, and what has happened.',
+  'knowledgeSecretsCard:concealedFacts': 'Guards hidden truths from premature dialogue, narration, confirmation, or implication.',
+  'knowledgeSecretsCard:knowsSuspects': 'Tracks who knows, suspects, misunderstands, or must remain unaware.',
+  'knowledgeSecretsCard:revealBoundaries': 'Defines what the next response must not reveal, confirm, or imply.',
+  'clocksConsequencesCard:deadlinesCountdowns': 'Tracks active time pressure, countdowns, scheduled events, and closing opportunities.',
+  'clocksConsequencesCard:delayedConsequences': 'Tracks effects from earlier choices that remain pending or arrive later.',
+  'clocksConsequencesCard:escalationTriggers': 'Tracks conditions that worsen the scene, shift its phase, or demand action.',
+  'environmentAffordancesCard:spatialLayout': 'Tracks relative positions of actors, barriers, exits, cover, and key places.',
+  'environmentAffordancesCard:sensoryTexture': 'Tracks sensory signals affecting grounding, attention, danger, context, and action.',
+  'environmentAffordancesCard:hazardsAffordances': 'Tracks usable objects, obstacles, threats, exits, cover, tools, and opportunities.',
+  'possessionsItemsCard:heldCarriedItems': 'Tracks important objects being held, worn, carried, hidden, missing, or controlled.',
+  'possessionsItemsCard:itemLocationControl': 'Tracks where items are and who can access, use, move, or withhold them.',
+  'possessionsItemsCard:itemAffordancesRisks': 'Tracks what items enable and the risks or limits they carry.',
+  'openThreadsCard:unresolvedQuestions': 'Tracks visible questions that remain unanswered and may affect the next response.',
+  'openThreadsCard:pendingActions': 'Tracks promised, attempted, interrupted, or requested actions still awaiting completion.',
+  'openThreadsCard:nearTermPressures': 'Tracks immediate obligations, looming problems, and choices shaping the next beat.'
+});
 
 function nowIso() {
   return new Date().toISOString();
@@ -93,7 +129,7 @@ export function createDefaultCardDeck({ now = nowIso() } = {}) {
           id: cardId,
           categoryId,
           name: subItem.label,
-          description: subItem.description,
+          description: DEFAULT_PRE_PROCESS_CARD_DESCRIPTIONS[cardId] || subItem.description,
           promptText: subItem.description,
           builtinFamily: entry.family,
           builtinRoleId: entry.role,
@@ -309,20 +345,91 @@ function resolveActiveDeckId(activeDeckId, customDecks) {
   return DEFAULT_PRE_PROCESS_DECK_ID;
 }
 
+function normalizeDefaultCardStates(value) {
+  const source = isObject(value) ? value : {};
+  const cards = createDefaultCardDeck().cards;
+  const states = {};
+  for (const cardId of Object.keys(cards)) {
+    const state = String(source[cardId] || '').trim().toLowerCase();
+    if (CARD_SELECTION_STATES.includes(state) && state !== 'active') states[cardId] = state;
+  }
+  return states;
+}
+
+function normalizeCategoryExpansion(value, customDecks) {
+  const source = isObject(value) ? value : {};
+  const decks = {
+    [DEFAULT_PRE_PROCESS_DECK_ID]: createDefaultCardDeck(),
+    ...customDecks
+  };
+  const normalized = {};
+  for (const [deckId, deck] of Object.entries(decks)) {
+    const deckSource = isObject(source[deckId]) ? source[deckId] : {};
+    const expanded = Object.fromEntries(
+      Object.keys(deck.categories || {})
+        .filter((categoryId) => deckSource[categoryId] === true)
+        .map((categoryId) => [categoryId, true])
+    );
+    if (Object.keys(expanded).length) normalized[deckId] = expanded;
+  }
+  return normalized;
+}
+
+function defaultDeckWithSelectionStates(states = {}) {
+  const deck = createDefaultCardDeck();
+  const cards = Object.fromEntries(Object.entries(deck.cards).map(([cardId, card]) => [
+    cardId,
+    {
+      ...card,
+      selectionState: CARD_SELECTION_STATES.includes(states[cardId])
+        ? states[cardId]
+        : card.selectionState
+    }
+  ]));
+  return { ...deck, cards };
+}
+
 export function normalizeCardDeckSettings(input = {}) {
   const source = isObject(input) ? input : {};
   const customDecks = normalizeCustomDecks(source.customDecks);
   return {
     version: PRE_PROCESS_DECK_SETTINGS_VERSION,
     activeDeckId: resolveActiveDeckId(source.activeDeckId, customDecks),
-    customDecks
+    customDecks,
+    defaultCardStates: normalizeDefaultCardStates(source.defaultCardStates),
+    categoryExpansion: normalizeCategoryExpansion(source.categoryExpansion, customDecks)
   };
+}
+
+export function preProcessCategoryExpanded(settings = {}, deckId = '', categoryId = '') {
+  const normalized = normalizeCardDeckSettings(settings);
+  const cleanDeckId = String(deckId || '').trim();
+  const cleanCategoryId = normalizeId(categoryId);
+  return normalized.categoryExpansion[cleanDeckId]?.[cleanCategoryId] === true;
+}
+
+export function setPreProcessCategoryExpanded(settings = {}, deckId = '', categoryId = '', expanded = false) {
+  const normalized = normalizeCardDeckSettings(settings);
+  const cleanDeckId = String(deckId || '').trim();
+  const cleanCategoryId = normalizeId(categoryId);
+  const decks = {
+    [DEFAULT_PRE_PROCESS_DECK_ID]: createDefaultCardDeck(),
+    ...normalized.customDecks
+  };
+  if (!decks[cleanDeckId]?.categories?.[cleanCategoryId]) return normalized;
+  const categoryExpansion = cloneJson(normalized.categoryExpansion);
+  const deckExpansion = { ...(categoryExpansion[cleanDeckId] || {}) };
+  if (expanded === true) deckExpansion[cleanCategoryId] = true;
+  else delete deckExpansion[cleanCategoryId];
+  if (Object.keys(deckExpansion).length) categoryExpansion[cleanDeckId] = deckExpansion;
+  else delete categoryExpansion[cleanDeckId];
+  return normalizeCardDeckSettings({ ...normalized, categoryExpansion });
 }
 
 export function getAllCardDecks(settings = {}) {
   const normalized = normalizeCardDeckSettings(settings.preProcessDecks);
   return {
-    [DEFAULT_PRE_PROCESS_DECK_ID]: createDefaultCardDeck(),
+    [DEFAULT_PRE_PROCESS_DECK_ID]: defaultDeckWithSelectionStates(normalized.defaultCardStates),
     ...normalized.customDecks
   };
 }
@@ -349,6 +456,20 @@ export function upsertCustomCardDeck(settings = {}, deck) {
       [normalized.id]: normalized
     }
   });
+}
+
+export function updateActivePreProcessDeckSelection(settings = {}, nextDeck = {}) {
+  const source = normalizeCardDeckSettings(settings);
+  if (nextDeck?.id !== DEFAULT_PRE_PROCESS_DECK_ID) {
+    return upsertCustomCardDeck({ preProcessDecks: source }, nextDeck);
+  }
+  const bundled = createDefaultCardDeck();
+  const defaultCardStates = {};
+  for (const cardId of Object.keys(bundled.cards)) {
+    const state = cardSelectionState(nextDeck.cards?.[cardId] || bundled.cards[cardId]);
+    if (state !== 'active') defaultCardStates[cardId] = state;
+  }
+  return normalizeCardDeckSettings({ ...source, defaultCardStates });
 }
 
 export function createCustomCardDeck(settings = {}, { name = 'New Deck', description = '' } = {}) {
@@ -409,7 +530,7 @@ export function duplicateCardDeck(settings = {}, deckId = '') {
       .map((cardId) => cardIdMap[cardId])
       .filter(Boolean);
   }
-  return upsertCustomCardDeck(settings, {
+  let duplicatedSettings = upsertCustomCardDeck(settings, {
     ...cloneJson(sourceDeck),
     id,
     name: duplicateDeckName(sourceDeck.name, source.customDecks),
@@ -423,6 +544,18 @@ export function duplicateCardDeck(settings = {}, deckId = '') {
     createdAt: now,
     updatedAt: now
   });
+  for (const sourceCategoryId of sourceDeck.categoryOrder || []) {
+    const targetCategoryId = categoryIdMap[sourceCategoryId] || sourceCategoryId;
+    if (preProcessCategoryExpanded(source, sourceDeck.id, sourceCategoryId)) {
+      duplicatedSettings = setPreProcessCategoryExpanded(
+        duplicatedSettings,
+        id,
+        targetCategoryId,
+        true
+      );
+    }
+  }
+  return duplicatedSettings;
 }
 
 export function deleteCustomCardDeck(settings = {}, deckId = '') {
@@ -576,6 +709,23 @@ export function updateCard(deck, cardId, patch = {}) {
 }
 
 export function updateCardSelectionState(deck, cardId, selectionState) {
+  if (deck?.id === DEFAULT_PRE_PROCESS_DECK_ID) {
+    const id = Object.prototype.hasOwnProperty.call(deck.cards || {}, cardId)
+      ? cardId
+      : normalizeId(cardId);
+    const current = deck.cards?.[id];
+    if (!current) return deck;
+    return {
+      ...deck,
+      cards: {
+        ...deck.cards,
+        [id]: {
+          ...current,
+          selectionState: normalizedCardSelectionState({ selectionState })
+        }
+      }
+    };
+  }
   return updateCard(deck, cardId, { selectionState });
 }
 

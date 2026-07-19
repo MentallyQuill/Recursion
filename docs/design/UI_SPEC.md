@@ -31,16 +31,16 @@ Recursion should use its own chat-attached top bar instead of adopting the Direc
 Default desktop shape:
 
 ```text
-[power] [pipeline icon] [mode icon] [cards] [enhancement] [tense/PoV] | [Hero Pixel Array] Selecting turn hand... [stop]    [reasoning] v | ...
+[power] [pipeline icon] [mode icon] [pre cards] [post cards] [tense/PoV] | [Hero Pixel Array] Selecting turn hand... [stop]    [reasoning] v | ...
 ```
 
 Narrow/mobile shape:
 
 ```text
-[power] [pipeline] [mode] [cards] [enhancement] [form] | [Hero Pixel Array] Selecting... [stop]     v | ...
+[power] [pipeline] [mode] [pre cards] [post cards] [form] | [Hero Pixel Array] Selecting... [stop]     v | ...
 ```
 
-The desktop bar uses one compact row with distinct zones for power, pipeline, mode, card scope, Generation Review and Enhancement, story form, progress, reasoning level, last-brief preview, and options. It should feel like a thin SillyTavern-native top bar, not a detached plugin dashboard.
+The desktop bar uses one compact row with distinct zones for power, pipeline, mode, Pre-process Cards, Post-process Cards, story form, progress, reasoning level, last-brief preview, and options. It should feel like a thin SillyTavern-native top bar, not a detached plugin dashboard.
 
 The exact copyable HTML/CSS snapshot for this V1 bar lives in `docs/design/RECURSION_BAR_IMPLEMENTATION_REFERENCE.md`. Treat that file as the implementation reference for reproducing the current mock in SillyTavern: it captures the final class names, inline SVG icons, Hero Pixel Array, progress menu, mode menu, Last Brief dropdown, Prompt Packet panel, metachips, and 12px active progress spinner treatment.
 
@@ -49,10 +49,10 @@ Recursion chrome should use explicit compact font sizing instead of inheriting S
 Canonical desktop layout:
 
 ```text
-[power] [pipeline] [mode arrows] [cards] [enhancement] [form] | [blocks] Selecting turn hand... [stop] [reasoning] v | ...
-[power] [pipeline] [mode arrows] [cards] [enhancement] [form] | [blocks] Installing prompt...   [stop] [reasoning] v | ...
-[power] [pipeline] [mode arrows] [cards] [enhancement] [form] | [blocks] Manual scope active...  [reasoning] Cards v | ...
-[power-off] [pipeline] [mode arrows] [cards] [enhancement-off] [form] |                         [reasoning] v | ...
+[power] [pipeline] [mode arrows] [pre cards] [post cards] [form] | [blocks] Selecting turn hand... [stop] [reasoning] v | ...
+[power] [pipeline] [mode arrows] [pre cards] [post cards] [form] | [blocks] Installing prompt...   [stop] [reasoning] v | ...
+[power] [pipeline] [mode arrows] [pre cards] [post cards] [form] | [blocks] Manual scope active...  [reasoning] Cards v | ...
+[power-off] [pipeline] [mode arrows] [pre cards] [post cards-off] [form] |                         [reasoning] v | ...
 ```
 
 The first control is a dedicated icon-only power toggle. It uses the same power icon shape as the mode menu previously used and is the only control that enables or disables Recursion. It must expose matching accessible label and hover tooltip copy (`Turn Recursion off` / `Turn Recursion on`). When disabled, Recursion clears or avoids installed prompt entries and does not inspect chat for prompt compilation.
@@ -156,24 +156,42 @@ Reference mode selector CSS:
 }
 ```
 
-The card scope selector is an icon-only stacked-cards button in the left bar flow. It sits immediately to the right of Mode and to the left of Enhancements. Its accessible label and tooltip carry the meaning; it must not render a visible `Cards` title or selected-count text in the compact bar.
+Pre-process Cards and Post-process Cards are adjacent icon-only controls in the left bar flow. They sit immediately to the right of Mode and immediately to the left of Tense & PoV. Both use the same three-layer stacked-card outline. A small directional arrow is inset into the front card: left-facing for Pre-process and right-facing for Post-process. The arrow uses the supplied triangular path, a theme grey-white outline, and a fill matching the bar background. Their hover copy is concise and phase-specific: `Pre-process Cards: guide the response before generation.` and `Post-process Cards: rewrite the response after generation.` Tooltips remain governed by the global Tooltips setting. Accessible labels carry the full phase names and may additionally expose operational state; neither button renders visible title or count text in the compact bar.
 
-Enhancement is an icon-only upgrade button immediately to the right of Cards and immediately to the left of Tense & PoV. It uses the repo-local `assets/icons/upgrade.svg` mask icon and opens a compact dropdown with one on/off state and an apply segmented control:
+Both card dropdowns belong to one visual family. Post-process adopts the Pre-process header, deck row, category disclosure, compact bordered card rows, state markers, and right-aligned action geometry rather than presenting a separate settings form. The phase-specific state contracts remain distinct:
 
-- Apply: `As Swipe` keeps the original output, adds an enhanced sibling swipe, and selects it; `Replace` replaces the active output with the enhanced text.
-- `Off`: leave SillyTavern output unchanged.
-- `On`: run one card-aware Generation Review and Enhancement against the frozen host response. It reviews prose, dialogue, pacing, subtext, scene/card fidelity, and anti-slop together, then returns only validated local dialogue or prose patches.
+Pre-process and Post-process card rows show a concise description beneath the card name. Descriptions wrap to natural height without line clamps, ellipsis, per-card scrolling, or tooltip-only disclosure. Bundled Pre-process descriptions are concise UI copy and do not replace or shorten the canonical prompt text used at runtime. Custom descriptions render unchanged, with `No description.` as the empty-state fallback.
 
-The Enhancements selector labels the Redirect option as
-`Redirect (Experimental)`. `Redirect` remains the primary 11.5px row label,
-while `Experimental` renders inline at the muted 10px helper scale. The
-qualifier is presentational and accessible copy only; the stored setting
-remains `redirect`, and active-mode status surfaces continue to use
-`Redirect`.
+Category descriptions are different from card descriptions: neither phase renders category descriptions as visible header copy. When tooltips are enabled, the disclosure header uses the category description as its hover title. When tooltips are disabled, that title is absent while the category name and description remain in the accessible disclosure label.
 
-When set to `Off`, the Enhancement icon uses the same muted/grey disabled treatment as the off power toggle. The compact bar does not expose a Recast-style pass editor. The only numeric Enhancement setting belongs in Advanced settings as context message count.
+- Pre-process cards cycle `Inactive → Active → Priority → Inactive` in Auto and `Inactive → Active → Inactive` in Manual.
+- Post-process cards remain binary `On` / `Off` through card-row eyes. Persisted category state remains part of the deck contract and bulk actions, but Post-process category headers expose no visibility eye or state-marker column.
+- Bundled Default and Starter deck names, content, category structure, and order are read-only.
+- Bundled operator state remains writable. Individual card controls and both bulk eye actions work without duplicating the deck.
 
-The Tense & PoV selector sits immediately to the right of Enhancements and before the Hero Pixel Array separator. It is a compact text button because its state must remain legible: `Auto` on desktop and mobile when automatic story-form detection is active, or a shortened forced label such as `Pa1`, `Pa2`, `Pa3L`, `Pa3O`, `PaM`, `Pr1`, `Pr2`, `Pr3L`, `Pr3O`, or `PrM` when the operator forces a story form. The accessible label and tooltip must expand the state as `Tense & PoV: Auto`, `Tense & PoV: Past 3rd Limited`, `Tense & PoV: Present Mixed`, and equivalent options.
+All operator-selected deck state is global Recursion extension state: active Pre-process and Post-process deck IDs, Pre-process card Active/Priority/Inactive state, Post-process category/card On/Off state, and per-deck category disclosure. It survives dropdown close/reopen, chat changes, UI remounts, and page reloads. Pre-process categories default collapsed and Post-process categories default expanded until changed. New categories start expanded, duplicated decks inherit disclosure, and deleted decks/categories prune obsolete disclosure entries.
+
+Custom deck deletion is identical in both phases. Clicking the deck trash action replaces the right-side deck action rail with the shared inline confirmation beside the deck selector: a text box with `delete` placeholder, visible `type delete` hint, confirm icon disabled until the entered value equals `delete` case-insensitively, and cancel icon. Enter confirms only when valid; Escape cancels. Deck deletion never uses the category/card alert-dialog confirmation or require typing the deck name.
+
+Editable Post-process decks use the same `Categories` plus row as Pre-process. Every editable category carries a compact create-card plus in its header action rail. Category actions follow Create, Edit, Delete, Drag; card actions follow Edit, Duplicate, Delete, Drag. Both rails use the same fixed width and reserved pre-drag spacing as Pre-process so corresponding controls align horizontally. Category and card drag regions use their distinct shared handle assets; no bottom `Add Card` button or native light button block appears.
+
+The Pre-process dropdown header title is `Pre-Process Cards`. The Post-process header places its compact controls at the upper right in this order:
+
+1. global feature Off/On as an icon-only power symbol matching the main bar power control;
+2. Apply: `As Swipe` / `Replace`;
+3. Flow: `Unified` / `Progressive`;
+4. open eye to enable all runnable cards;
+5. slashed eye to disable all runnable cards.
+
+`As Swipe` keeps the original output, adds the rewritten output as a sibling swipe, and selects it. `Replace` replaces the active output with the rewritten text. `Unified` applies the active cards in one rewrite pass. `Progressive` applies them sequentially. Bulk actions are disabled only when no runnable card exists or the requested state is already satisfied.
+
+Every Apply and Flow segment uses the compact graphite hover and keyboard-focus highlight so both selected and unselected choices visibly respond before activation.
+
+When the global Post-process feature is Off, the header summary reads `Off`; it must not report preserved per-card selections as active. Turning the feature back on restores the active-card count without changing those selections.
+
+When Post-process is `Off`, the bar icon uses the same muted disabled treatment as the off power toggle. Its active, partial, and failed runtime colors may still use the standard Recursion semantic colors without changing the shared icon geometry.
+
+The Tense & PoV selector sits immediately to the right of Post-process Cards and before the Hero Pixel Array separator. It is a compact text button because its state must remain legible: `Auto` on desktop and mobile when automatic story-form detection is active, or a shortened forced label such as `Pa1`, `Pa2`, `Pa3L`, `Pa3O`, `PaM`, `Pr1`, `Pr2`, `Pr3L`, `Pr3O`, or `PrM` when the operator forces a story form. The accessible label and tooltip must expand the state as `Tense & PoV: Auto`, `Tense & PoV: Past 3rd Limited`, `Tense & PoV: Present Mixed`, and equivalent options.
 
 The selector menu contains one `Auto` row and two forced axes:
 
@@ -185,7 +203,7 @@ The layout is intentionally asymmetric. Tense has only two short choices, so a s
 
 Selecting `Auto` stores no forced story form and closes the menu. Selecting a tense or POV stores a complete forced story form by combining that axis with the currently forced other axis. If the current value is `Auto`, the missing forced axis defaults to `past-third-limited`: choosing `Present` from `Auto` stores `present-third-limited`, and choosing `Mixed` from `Auto` stores `past-mixed`. Forced-axis clicks keep the menu open so the operator can adjust both axes. The UI must not present this as a style preset or prose rewrite feature. It is a correction control for the existing story-form prompt contract. The menu should close on outside click or `Esc`, and should follow the same compact SillyTavern-native treatment as the Pipeline and Mode menus.
 
-Inside the Cards dropdown, the header shows `Cards`, the active deck summary, and two compact icon-only deck actions. The open-eye action sets every runnable card in the editable active deck to normal Active and clears Priority. The slashed-eye action sets every runnable card in the editable active deck to Inactive. Draft cards are unchanged. The bundled Default deck is read-only, so both bulk actions are disabled there and explain that the deck must be duplicated before editing.
+Inside the Pre-process Cards dropdown, the header shows `Cards`, the active deck summary, and two compact icon-only state actions. The open-eye action sets every runnable card in the active deck to normal Active and clears Priority. The slashed-eye action sets every runnable card in the active deck to Inactive. Draft cards are unchanged. These actions work on the bundled Default deck through its persisted operator-state overlay; only structural authoring controls require duplication.
 
 For Card Deck rows, the visible state marker has three compact participation states. Inactive uses the supplied muted slashed-eye icon and no cyan rail. Active uses the supplied open-eye icon with the standard cyan left rail/card highlight. Priority uses the supplied eye-plus icon with a stronger bright-cyan rail/highlight; it means `forced into Auto hand before backfill`. Check and X are reserved for accept/cancel/delete-confirm actions, not card state. Priority is only a runtime force signal in Auto. Manual treats Priority cards as Active because Manual already forces selected cards directly.
 
@@ -263,18 +281,9 @@ The Hero Pixel Array and progress menu must render from the same normalized `pro
 
 Fused progress treats `Fused card bundle` as the single parent row for the bundle provider call. The bundle provider role must not also appear as a child row. Fused child rows appear only after there is material card-family progress, such as accepted bundle items under `Fused card bundle` or repaired siblings under `Utility card batch`; the menu must not seed speculative pending children for every requested family while the bundle is still unresolved.
 
-Enhancement is one post-generation provider pass with a top-level `Generation review` row. Low and Medium route it through Utility; High and Ultra route it through Reasoner when that lane is available. SillyTavern's original response remains visible while review runs; Recursion never hides or replaces streaming text before the review has produced a validated revision. While running, compact current-step text is `Reviewing generated response...`; it must not reuse `Utility card batch`, seed prompt-install rows, or imply that a card batch is running. The progress tree owns `Card and scene fidelity`, card-outcome children, `Narrative execution`, `Anti-slop`, `Applying revisions`, and `Enhanced swipe`/`Replace` outcome rows. A failed review is a red review row with its reason, while the already installed `Recursion prompt ready` state remains green and the original response stays selected.
+Post-processing uses a top-level `Post-processing response` row. Unified owns child rows for guidance synthesis, SillyTavern host rewrite, and final As Swipe/Replace application. Progressive owns one category row per runnable category, each with guidance and host-rewrite children, followed by final application. Low and Medium synthesize guidance through Utility; High and Ultra use Reasoner. Host prose always comes from SillyTavern's native quiet generation path, never from the sidecar lane.
 
-Editorial Redirect is the routing exception: Low uses Utility for the Redirect
-writer and verifier. Medium, High, and Ultra require a `ready` Reasoner
-capability before host generation begins. When Reasoner is not ready, Redirect
-remains visibly unavailable, the pending turn records one concise pre-generation
-warning, and the post-generation pass settles `skipped` without diagnosis,
-writer, or verifier calls. A ready Medium+ Redirect makes at most two actual
-Reasoner writer calls and never falls back to Utility. Two failed writer attempts
-leave the original response selected and surface a failed red status.
-
-An unchanged or unsafe review result must not append a duplicate enhanced swipe. Parser/schema recovery and review-semantic recovery share one external correction budget. A recovered valid result is amber with a compact retry reason; incomplete installed-card coverage after that one budget is `partial-failed`, with red unresolved card children. Validation failures and provider failures are terminal failures, not amber cautions.
+The original response remains visible until a complete rewritten result is ready. A Unified failure keeps the original selected and writes nothing. A failed Progressive category is red while later categories may continue from the last valid draft; a committed partial result is amber and always uses As Swipe even when Replace was configured. Stop, chat change, edit, delete, swipe, or character/group change invalidates stale work and prevents late commits.
 
 The compact bar, progress panel, and cards panel should consume stable presenter state derived from the shared Recursion view model. DOM rendering may remain in the main UI module while presenter modules stay pure and testable.
 
@@ -852,7 +861,7 @@ Provider setup lives in the Providers tab. Detailed activity and prompt inspecti
 
 The Last Brief dropdown is the lightweight trust surface. It opens from the dedicated dropdown-arrow button on the right side of the Recursion Bar. It does not open from the ellipsis options button.
 
-The displayed packet and cards remain available for unhurried review after Repair, Recompose, or Redirect settles, including when the Enhancement appends, replaces, selects, saves, or reuses a SillyTavern swipe. They remain visible until the user starts the next send, swipe generation, or regenerate action. Navigating to an already existing swipe does not clear the panel because no next prompt packet is being prepared. Once a new host generation is accepted, the old rows may transition to `Preparing next prompt packet`; the next successful installation replaces them with the new committed Last Brief.
+The displayed packet and cards remain available for unhurried review after Post-processing settles, including when it appends a swipe or replaces the selected response. They remain visible until the user starts the next send, swipe generation, or regenerate action. Navigating to an already existing swipe does not clear the panel because no next prompt packet is being prepared. Once a new host generation is accepted, the old rows may transition to `Preparing next prompt packet`; the next successful installation replaces them with the new committed Last Brief.
 
 The dropdown uses the full width of the Recursion Bar so card text has room to breathe. It should remain visually attached to the bar and use SillyTavern-native popup styling: dark surface, hairline border, subtle elevation, compact rows, and restrained hover/focus states.
 
@@ -1190,7 +1199,7 @@ Pipeline, Mode, and Reasoning Level belong to the compact bar controls and must 
 - High: Reasoner Arbiter, Reasoner for high-priority card families, Utility for other card families, and Reasoner guidance composition; card pressure capped at Normal Cards.
 - Ultra: Reasoner-heavy Arbiter, card generation, and guidance composition with card pressure raised/capped at Max Cards.
 
-`reasoningLevel` is persisted as `low | medium | high | ultra`, default `medium`. It is the authoritative user-facing provider-bias setting. Low keeps ordinary work on Utility. Medium, High, and Ultra use Reasoner only for policy-selected work when its derived capability is `ready`; otherwise ordinary work falls back to Utility without changing the selected level. Medium+ Redirect is stricter and remains unavailable until Reasoner is `ready`.
+`reasoningLevel` is persisted as `low | medium | high | ultra`, default `medium`. It is the authoritative user-facing provider-bias setting. Low keeps ordinary work on Utility. Medium, High, and Ultra use Reasoner only for policy-selected work when its derived capability is `ready`; otherwise ordinary Pre-process work falls back to Utility without changing the selected level. Post-process guidance is lane-sticky: Low and Medium use Utility, High and Ultra require Reasoner, and failed same-lane attempts fail soft without crossing lanes.
 
 Providers contains the complete provider setup surface in collapsible lane sections:
 
@@ -1278,11 +1287,6 @@ Changing a capability-bearing field increments `configRevision` and makes prior
 health evidence stale. Health results may change capability state but never
 rewrite provider configuration.
 
-For Medium, High, and Ultra, the Redirect row stays visible when Reasoner is not
-ready but is disabled with a concise reason and a lane-local `Test Reasoner` or
-`Configure Reasoner` action. Clicking the unavailable row leaves the current
-Enhancement mode unchanged. Low keeps Redirect available through Utility.
-
 ## Visual System
 
 The visual direction is SillyTavern-native graphite:
@@ -1326,9 +1330,9 @@ Avoid:
 
 ## Empty, Error, And Provider States
 
-## Editorial Maturity And Failure States
+## Post-process Failure States
 
-The Enhancement menu must label `Redirect` as experimental while the contract is pre-alpha. The label is explanatory, not decorative: Redirect has stricter evidence and verification requirements than Repair or Recompose and may legitimately end with no write. Progress rows use severity consistently: green for verified completion, purple for validated reuse, gray for skipped/not applicable, yellow only for recoverable caution, and red for a failure with a concise reason. Do not hide a red reason behind a generic "Enhancement failed" label.
+Post-process progress rows use severity consistently: green for verified completion, purple for validated reuse, gray for skipped/not applicable, yellow only for retry, recovery, or a committed partial Progressive result, and red for a failed category or Unified operation with a concise reason. Do not hide a red reason behind a generic failure label.
 
 Empty states should be short and action-oriented.
 
@@ -1339,7 +1343,7 @@ Examples:
 - Provider missing: `Utility provider is not ready.`
 - Reasoner untested: `Reasoner untested. Utility composed.`
 - Reasoner unhealthy: `Reasoner unhealthy. Utility composed.`
-- Medium+ Redirect blocked: `Redirect unavailable. Test Reasoner before using Redirect.`
+- Post-process guidance unavailable: `Post-process guidance failed. Original response preserved.`
 
 Provider failures should fail soft. The UI should show the issue, preserve any usable cached scene state, and allow the main generation to continue without Recursion when needed.
 

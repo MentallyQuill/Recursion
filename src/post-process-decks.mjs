@@ -1,4 +1,4 @@
-export const POST_PROCESS_DECK_SETTINGS_VERSION = 1;
+export const POST_PROCESS_DECK_SETTINGS_VERSION = 2;
 export const STARTER_POST_PROCESS_DECK_ID = 'starter-post-process';
 
 const STARTER_CATEGORIES = [
@@ -105,6 +105,32 @@ export function normalizePostProcessDeck(raw, fallbackId = '', { now = nowIso(),
   return { id, name: normalizePostProcessName(raw.name) || 'Custom Deck', description: String(raw.description || '').trim(), bundled: false, readonly: false, categoryOrder, categories, cardOrderByCategory: normalizeCardOrder(raw.cardOrderByCategory, cards, categoryOrder), cards, createdAt: String(raw.createdAt || now), updatedAt: String(raw.updatedAt || now) };
 }
 
+function normalizeStarterStates(value, knownIds) {
+  const source = isObject(value) ? value : {};
+  return Object.fromEntries(knownIds
+    .filter((id) => typeof source[id] === 'boolean')
+    .map((id) => [id, source[id]]));
+}
+
+function normalizeCategoryExpansion(value, customDecks, starter) {
+  const source = isObject(value) ? value : {};
+  const decks = {
+    [STARTER_POST_PROCESS_DECK_ID]: starter,
+    ...customDecks
+  };
+  const normalized = {};
+  for (const [deckId, deck] of Object.entries(decks)) {
+    const deckSource = isObject(source[deckId]) ? source[deckId] : {};
+    const collapsed = Object.fromEntries(
+      Object.keys(deck.categories || {})
+        .filter((categoryId) => deckSource[categoryId] === false)
+        .map((categoryId) => [categoryId, false])
+    );
+    if (Object.keys(collapsed).length) normalized[deckId] = collapsed;
+  }
+  return normalized;
+}
+
 export function normalizePostProcessDeckSettings(raw = {}, { now = nowIso() } = {}) {
   const customDecks = {};
   for (const [fallbackId, deck] of Object.entries(isObject(raw?.customDecks) ? raw.customDecks : {})) {
@@ -112,12 +138,105 @@ export function normalizePostProcessDeckSettings(raw = {}, { now = nowIso() } = 
     if (normalized) customDecks[normalized.id] = normalized;
   }
   const activeDeckId = normalizePostProcessId(raw?.activeDeckId);
-  return { version: POST_PROCESS_DECK_SETTINGS_VERSION, activeDeckId: customDecks[activeDeckId] ? activeDeckId : STARTER_POST_PROCESS_DECK_ID, customDecks };
+  const starter = createStarterPostProcessDeck({ now });
+  return {
+    version: POST_PROCESS_DECK_SETTINGS_VERSION,
+    activeDeckId: customDecks[activeDeckId] ? activeDeckId : STARTER_POST_PROCESS_DECK_ID,
+    customDecks,
+    starterCategoryStates: normalizeStarterStates(raw?.starterCategoryStates, Object.keys(starter.categories)),
+    starterCardStates: normalizeStarterStates(raw?.starterCardStates, Object.keys(starter.cards)),
+    categoryExpansion: normalizeCategoryExpansion(raw?.categoryExpansion, customDecks, starter)
+  };
+}
+
+export function postProcessCategoryExpanded(settings = {}, deckId = '', categoryId = '', { now = nowIso() } = {}) {
+  const normalized = normalizePostProcessDeckSettings(settings, { now });
+  const cleanDeckId = normalizePostProcessId(deckId);
+  const cleanCategoryId = normalizePostProcessId(categoryId);
+  return normalized.categoryExpansion[cleanDeckId]?.[cleanCategoryId] !== false;
+}
+
+export function setPostProcessCategoryExpanded(
+  settings = {},
+  deckId = '',
+  categoryId = '',
+  expanded = true,
+  { now = nowIso() } = {}
+) {
+  const normalized = normalizePostProcessDeckSettings(settings, { now });
+  const cleanDeckId = normalizePostProcessId(deckId);
+  const cleanCategoryId = normalizePostProcessId(categoryId);
+  const decks = {
+    [STARTER_POST_PROCESS_DECK_ID]: createStarterPostProcessDeck({ now }),
+    ...normalized.customDecks
+  };
+  if (!decks[cleanDeckId]?.categories?.[cleanCategoryId]) return normalized;
+  const categoryExpansion = clone(normalized.categoryExpansion);
+  const deckExpansion = { ...(categoryExpansion[cleanDeckId] || {}) };
+  if (expanded === false) deckExpansion[cleanCategoryId] = false;
+  else delete deckExpansion[cleanCategoryId];
+  if (Object.keys(deckExpansion).length) categoryExpansion[cleanDeckId] = deckExpansion;
+  else delete categoryExpansion[cleanDeckId];
+  return normalizePostProcessDeckSettings({ ...normalized, categoryExpansion }, { now });
 }
 
 export function getActivePostProcessDeck(settings = {}, { now = nowIso() } = {}) {
   const normalized = normalizePostProcessDeckSettings(settings, { now });
-  return clone(normalized.customDecks[normalized.activeDeckId] || createStarterPostProcessDeck({ now }));
+  if (normalized.customDecks[normalized.activeDeckId]) return clone(normalized.customDecks[normalized.activeDeckId]);
+  const starter = createStarterPostProcessDeck({ now });
+  for (const [categoryId, enabled] of Object.entries(normalized.starterCategoryStates)) {
+    starter.categories[categoryId].enabled = enabled;
+  }
+  for (const [cardId, enabled] of Object.entries(normalized.starterCardStates)) {
+    starter.cards[cardId].enabled = enabled;
+  }
+  return clone(starter);
+}
+
+export function updateActivePostProcessDeckState(settings = {}, nextDeck = {}, { now = nowIso() } = {}) {
+  const source = normalizePostProcessDeckSettings(settings, { now });
+  if (nextDeck?.id !== STARTER_POST_PROCESS_DECK_ID) {
+    const normalizedDeck = normalizePostProcessDeck(nextDeck, nextDeck?.id, { now });
+    if (!normalizedDeck) return source;
+    return normalizePostProcessDeckSettings({
+      ...source,
+      activeDeckId: normalizedDeck.id,
+      customDecks: {
+        ...source.customDecks,
+        [normalizedDeck.id]: normalizedDeck
+      }
+    }, { now });
+  }
+  const starter = createStarterPostProcessDeck({ now });
+  const starterCategoryStates = Object.fromEntries(Object.keys(starter.categories).map((categoryId) => [
+    categoryId,
+    nextDeck.categories?.[categoryId]?.enabled !== false
+  ]));
+  const starterCardStates = Object.fromEntries(Object.keys(starter.cards).map((cardId) => [
+    cardId,
+    nextDeck.cards?.[cardId]?.enabled !== false
+  ]));
+  return normalizePostProcessDeckSettings({
+    ...source,
+    starterCategoryStates,
+    starterCardStates
+  }, { now });
+}
+
+export function setAllPostProcessCardsEnabled(settings = {}, enabled = true, { now = nowIso() } = {}) {
+  const source = normalizePostProcessDeckSettings(settings, { now });
+  const deck = getActivePostProcessDeck(source, { now });
+  const next = clone(deck);
+  for (const category of Object.values(next.categories)) {
+    const eligible = Object.values(next.cards).filter((card) => (
+      card.categoryId === category.id
+      && normalizePostProcessName(card.name)
+      && String(card.promptText || '').trim()
+    ));
+    if (enabled && eligible.length) category.enabled = true;
+    for (const card of eligible) card.enabled = enabled;
+  }
+  return updateActivePostProcessDeckState(source, next, { now });
 }
 
 export function createCustomPostProcessDeck(settings = {}, { name = 'Custom Deck', description = '', now = nowIso() } = {}) {
@@ -137,7 +256,23 @@ export function duplicatePostProcessDeck(settings = {}, deckId = '', { now = now
   const categories = Object.fromEntries(Object.values(source.categories).map((category) => { const nextId = categoryIdMap[category.id]; return [nextId, { ...clone(category), id: nextId, createdAt: now, updatedAt: now }]; }));
   const cards = Object.fromEntries(Object.values(source.cards).map((card) => { const nextId = cardIdMap[card.id]; return [nextId, { ...clone(card), id: nextId, categoryId: categoryIdMap[card.categoryId], createdAt: now, updatedAt: now }]; }));
   const deck = normalizePostProcessDeck({ ...clone(source), id, name: uniqueName(source.name, Object.values(normalized.customDecks).map((entry) => entry.name), 'Custom Deck'), bundled: false, readonly: false, categoryOrder: source.categoryOrder.map((oldId) => categoryIdMap[oldId]), categories, cardOrderByCategory: Object.fromEntries(source.categoryOrder.map((oldId) => [categoryIdMap[oldId], (source.cardOrderByCategory[oldId] || []).map((cardId) => cardIdMap[cardId])])), cards, createdAt: now, updatedAt: now }, id, { now });
-  return { ...normalized, activeDeckId: id, customDecks: { ...normalized.customDecks, [id]: deck } };
+  let duplicatedSettings = normalizePostProcessDeckSettings({
+    ...normalized,
+    activeDeckId: id,
+    customDecks: { ...normalized.customDecks, [id]: deck }
+  }, { now });
+  for (const sourceCategoryId of source.categoryOrder) {
+    if (!postProcessCategoryExpanded(normalized, source.id, sourceCategoryId, { now })) {
+      duplicatedSettings = setPostProcessCategoryExpanded(
+        duplicatedSettings,
+        id,
+        categoryIdMap[sourceCategoryId],
+        false,
+        { now }
+      );
+    }
+  }
+  return duplicatedSettings;
 }
 
 export function deleteCustomPostProcessDeck(settings = {}, deckId = '') {
@@ -145,18 +280,44 @@ export function deleteCustomPostProcessDeck(settings = {}, deckId = '') {
   const id = normalizePostProcessId(deckId);
   if (!normalized.customDecks[id]) return normalized;
   const customDecks = { ...normalized.customDecks }; delete customDecks[id];
-  return { ...normalized, activeDeckId: normalized.activeDeckId === id ? STARTER_POST_PROCESS_DECK_ID : normalized.activeDeckId, customDecks };
+  return normalizePostProcessDeckSettings({
+    ...normalized,
+    activeDeckId: normalized.activeDeckId === id ? STARTER_POST_PROCESS_DECK_ID : normalized.activeDeckId,
+    customDecks
+  });
 }
 
 function editDeck(deck, mutate, now) { const normalized = normalizePostProcessDeck(deck, deck?.id, { now }) || deck; const next = mutate(clone(normalized)); return normalizePostProcessDeck({ ...next, updatedAt: now }, normalized.id, { now }) || normalized; }
 export function createPostProcessCategory(deck, { name = 'New Category', description = '', now = nowIso() } = {}) { return editDeck(deck, (next) => { const id = generatedId('category', next.categories); next.categories[id] = { id, name: uniqueName(name, Object.values(next.categories).map((category) => category.name), 'New Category'), description: String(description).trim(), enabled: true, createdAt: now, updatedAt: now }; next.categoryOrder.push(id); next.cardOrderByCategory[id] = []; return next; }, now); }
 export function updatePostProcessCategory(deck, categoryId, patch = {}) { const now = patch.now || nowIso(); return editDeck(deck, (next) => { const id = normalizePostProcessId(categoryId); if (!next.categories[id]) return next; next.categories[id] = { ...next.categories[id], name: normalizePostProcessName(patch.name ?? next.categories[id].name) || next.categories[id].name, description: String(patch.description ?? next.categories[id].description).trim(), updatedAt: now }; return next; }, now); }
-export function togglePostProcessCategory(deck, categoryId, enabled, { now = nowIso() } = {}) { return editDeck(deck, (next) => { const id = normalizePostProcessId(categoryId); if (next.categories[id]) next.categories[id] = { ...next.categories[id], enabled: enabled !== false, updatedAt: now }; return next; }, now); }
+export function togglePostProcessCategory(deck, categoryId, enabled, { now = nowIso() } = {}) {
+  const id = normalizePostProcessId(categoryId);
+  if (deck?.id === STARTER_POST_PROCESS_DECK_ID) {
+    const next = clone(deck);
+    if (next.categories?.[id]) next.categories[id] = { ...next.categories[id], enabled: enabled !== false, updatedAt: now };
+    return next;
+  }
+  return editDeck(deck, (next) => {
+    if (next.categories[id]) next.categories[id] = { ...next.categories[id], enabled: enabled !== false, updatedAt: now };
+    return next;
+  }, now);
+}
 export function reorderPostProcessCategories(deck, movingId, beforeId = '', { now = nowIso() } = {}) { return editDeck(deck, (next) => { const moving = normalizePostProcessId(movingId); const before = normalizePostProcessId(beforeId); if (!next.categories[moving]) return next; const order = next.categoryOrder.filter((id) => id !== moving); order.splice(before && order.includes(before) ? order.indexOf(before) : order.length, 0, moving); next.categoryOrder = order; return next; }, now); }
 export function deletePostProcessCategory(deck, categoryId, { now = nowIso() } = {}) { return editDeck(deck, (next) => { const id = normalizePostProcessId(categoryId); if (!next.categories[id] || next.categoryOrder.length <= 1) return next; delete next.categories[id]; delete next.cardOrderByCategory[id]; next.categoryOrder = next.categoryOrder.filter((entry) => entry !== id); for (const cardId of Object.keys(next.cards)) if (next.cards[cardId].categoryId === id) delete next.cards[cardId]; return next; }, now); }
 export function createPostProcessCard(deck, categoryId, { name = 'New Card', description = '', promptText = '', now = nowIso() } = {}) { return editDeck(deck, (next) => { const category = normalizePostProcessId(categoryId); if (!next.categories[category]) return next; const id = generatedId('card', next.cards); next.cards[id] = { id, categoryId: category, name: normalizePostProcessName(name), description: String(description).trim(), promptText: String(promptText).trim(), enabled: true, createdAt: now, updatedAt: now }; next.cardOrderByCategory[category].push(id); return next; }, now); }
 export function updatePostProcessCard(deck, cardId, patch = {}) { const now = patch.now || nowIso(); return editDeck(deck, (next) => { const id = normalizePostProcessId(cardId); if (!next.cards[id]) return next; next.cards[id] = { ...next.cards[id], name: normalizePostProcessName(patch.name ?? next.cards[id].name), description: String(patch.description ?? next.cards[id].description).trim(), promptText: String(patch.promptText ?? next.cards[id].promptText).trim(), updatedAt: now }; return next; }, now); }
-export function togglePostProcessCard(deck, cardId, enabled, { now = nowIso() } = {}) { return editDeck(deck, (next) => { const id = normalizePostProcessId(cardId); if (next.cards[id]) next.cards[id] = { ...next.cards[id], enabled: enabled !== false, updatedAt: now }; return next; }, now); }
+export function togglePostProcessCard(deck, cardId, enabled, { now = nowIso() } = {}) {
+  const id = normalizePostProcessId(cardId);
+  if (deck?.id === STARTER_POST_PROCESS_DECK_ID) {
+    const next = clone(deck);
+    if (next.cards?.[id]) next.cards[id] = { ...next.cards[id], enabled: enabled !== false, updatedAt: now };
+    return next;
+  }
+  return editDeck(deck, (next) => {
+    if (next.cards[id]) next.cards[id] = { ...next.cards[id], enabled: enabled !== false, updatedAt: now };
+    return next;
+  }, now);
+}
 export function duplicatePostProcessCard(deck, cardId, { now = nowIso() } = {}) { return editDeck(deck, (next) => { const id = normalizePostProcessId(cardId); const source = next.cards[id]; if (!source) return next; const copyId = generatedId('card', next.cards); next.cards[copyId] = { ...clone(source), id: copyId, name: uniqueName(source.name, Object.values(next.cards).filter((card) => card.categoryId === source.categoryId).map((card) => card.name), 'Card'), createdAt: now, updatedAt: now }; next.cardOrderByCategory[source.categoryId].push(copyId); return next; }, now); }
 export function deletePostProcessCard(deck, cardId, { now = nowIso() } = {}) { return editDeck(deck, (next) => { const id = normalizePostProcessId(cardId); const card = next.cards[id]; if (!card) return next; delete next.cards[id]; next.cardOrderByCategory[card.categoryId] = next.cardOrderByCategory[card.categoryId].filter((entry) => entry !== id); return next; }, now); }
 export function movePostProcessCard(deck, cardId, categoryId, index = Infinity, { now = nowIso() } = {}) { return editDeck(deck, (next) => { const id = normalizePostProcessId(cardId); const target = normalizePostProcessId(categoryId); const card = next.cards[id]; if (!card || !next.categories[target]) return next; next.cardOrderByCategory[card.categoryId] = next.cardOrderByCategory[card.categoryId].filter((entry) => entry !== id); const order = next.cardOrderByCategory[target]; const at = Number.isFinite(Number(index)) ? Math.max(0, Math.min(order.length, Math.round(Number(index)))) : order.length; order.splice(at, 0, id); next.cards[id] = { ...card, categoryId: target, updatedAt: now }; return next; }, now); }

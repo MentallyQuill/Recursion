@@ -24,9 +24,12 @@ import {
   moveCategoryToPosition,
   nextCardSelectionState,
   normalizeCardDeckSettings,
+  preProcessCategoryExpanded,
+  setPreProcessCategoryExpanded,
   updateCard,
   updateCardSelectionState,
   updateCategory,
+  updateActivePreProcessDeckSelection,
   upsertCustomCardDeck
 } from './pre-process-decks.mjs';
 import {
@@ -44,9 +47,12 @@ import {
   normalizePostProcessDeckSettings,
   orderedPostProcessCards,
   orderedPostProcessCategories,
+  postProcessCategoryExpanded,
   reorderPostProcessCategories,
+  setAllPostProcessCardsEnabled,
+  setPostProcessCategoryExpanded,
   togglePostProcessCard,
-  togglePostProcessCategory,
+  updateActivePostProcessDeckState,
   updatePostProcessCard,
   updatePostProcessCategory
 } from './post-process-decks.mjs';
@@ -61,9 +67,10 @@ import { DEFAULT_RETENTION_SETTINGS, RETENTION_LIMITS } from './retention-policy
 import { createUiActionStatus } from './ui/action-status.mjs';
 import {
   createDeckDragController,
-  renderDeckBar,
   renderDeckCard,
-  renderDeckCategory
+  renderDeckCategory,
+  renderDeckPanelHeader,
+  renderDeckToolbar
 } from './ui/cards-panel.mjs';
 import { providerSelector, providerStatusClass, readProviderDraftFromControls } from './ui/provider-panel.mjs';
 import { activityLabel, createRecursionViewModel } from './ui/view-model.mjs';
@@ -73,9 +80,11 @@ export { activityLabel, createRecursionViewModel };
 const VALID_SEVERITIES = new Set(['info', 'success', 'warning', 'error']);
 const STANDBY_STATUS_TIMEOUT_MS = 4000;
 const LAST_BRIEF_CLEAR_ANIMATION_MS = 160;
+const PRE_PROCESS_CARDS_TOOLTIP = 'Pre-process Cards: guide the response before generation.';
+const POST_PROCESS_CARDS_TOOLTIP = 'Post-process Cards: rewrite the response after generation.';
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const SVG_TAGS = new Set(['svg', 'rect', 'path', 'circle']);
+const SVG_TAGS = new Set(['svg', 'rect', 'path', 'circle', 'g']);
 const MODE_MENU_OPTIONS = Object.freeze([
   {
     value: 'auto',
@@ -438,9 +447,7 @@ function modeIconSvg(kind) {
   }
   if (kind === 'cards') {
     return el('svg', { attrs: { width: '17', height: '17', viewBox: '0 0 17 17', 'aria-hidden': 'true' } }, [
-      el('rect', { attrs: { x: '3', y: '5', width: '8', height: '9', rx: '1.7', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', opacity: '.45' } }),
-      el('rect', { attrs: { x: '5', y: '3', width: '8', height: '9', rx: '1.7', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', opacity: '.70' } }),
-      el('rect', { attrs: { x: '7', y: '1.5', width: '8', height: '9', rx: '1.7', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25' } })
+      ...stackedCardsIconRects()
     ]);
   }
   if (kind === 'power') {
@@ -457,6 +464,51 @@ function modeIconSvg(kind) {
   return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true' } }, [
     el('path', { attrs: { d: 'M1.6 8s2.4-4 6.4-4 6.4 4 6.4 4-2.4 4-6.4 4-6.4-4-6.4-4Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25' } }),
     el('circle', { attrs: { cx: '8', cy: '8', r: '2', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25' } })
+  ]);
+}
+
+function stackedCardsIconRects() {
+  return [
+    el('rect', { attrs: { x: '3', y: '5', width: '8', height: '9', rx: '1.7', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', opacity: '.45' } }),
+    el('rect', { attrs: { x: '5', y: '3', width: '8', height: '9', rx: '1.7', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', opacity: '.70' } }),
+    el('rect', { attrs: { x: '7', y: '1.5', width: '8', height: '9', rx: '1.7', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25' } })
+  ];
+}
+
+function processCardsIconSvg(direction) {
+  const pre = direction === 'pre';
+  return el('svg', {
+    className: 'recursion-process-cards-icon',
+    attrs: { width: '17', height: '17', viewBox: '0 0 17 17', 'aria-hidden': 'true' }
+  }, [
+    ...stackedCardsIconRects(),
+    el('g', { attrs: { transform: 'translate(6.16 .72) scale(.44)' } }, [
+      el('g', {
+        attrs: { transform: pre ? 'rotate(180 11 12)' : undefined },
+        dataset: { recursionProcessCardsArrow: pre ? 'pre' : 'post' }
+      }, [
+        el('path', {
+          attrs: {
+            d: 'M17,12,5,21V3Z',
+            fill: 'var(--recursion-bg, #202020)',
+            stroke: 'none'
+          },
+          dataset: { recursionProcessCardsArrowLayer: 'fill' }
+        }),
+        el('path', {
+          attrs: {
+            d: 'M17,12,5,21V3Z',
+            fill: 'none',
+            stroke: 'var(--SmartThemeBodyColor, #ddd)',
+            'stroke-width': '1.15',
+            'stroke-linecap': 'round',
+            'stroke-linejoin': 'round',
+            'vector-effect': 'non-scaling-stroke'
+          },
+          dataset: { recursionProcessCardsArrowLayer: 'outline' }
+        })
+      ])
+    ])
   ]);
 }
 
@@ -1656,9 +1708,9 @@ function syncStaticTooltips(root, model) {
   root.dataset.recursionTooltips = 'on';
   setTooltip(root.querySelector('[data-recursion-pipeline-button]'), true, `Pipeline: ${model.pipelineLabel}`);
   setTooltip(root.querySelector('[data-recursion-mode-button]'), true, `Mode: ${model.modeLabel}`);
-  setTooltip(root.querySelector('[data-recursion-post-process-cards-button]'), true, `Post-process Cards: ${model.postProcess?.enabled ? 'On' : 'Off'}`);
+  setTooltip(root.querySelector('[data-recursion-post-process-cards-button]'), true, POST_PROCESS_CARDS_TOOLTIP);
   setTooltip(root.querySelector('[data-recursion-story-form-button]'), true, `Tense & PoV: ${root.querySelector('[data-recursion-story-form]')?.textContent || 'Auto'}`);
-  setTooltip(root.querySelector('[data-recursion-cards-button]'), true, 'Open card scope selector. Auto treats scope as preference; Manual uses scope as a strict whitelist.');
+  setTooltip(root.querySelector('[data-recursion-cards-button]'), true, PRE_PROCESS_CARDS_TOOLTIP);
   setTooltip(root.querySelector('[data-recursion-status-trigger]'), true, 'Open generation progress');
   setTooltip(root.querySelector('[data-recursion-fresh-next-generation]'), true, FRESH_NEXT_GENERATION_TOOLTIP);
   setTooltip(root.querySelector('[data-recursion-hand-toggle]'), true, 'Open last brief preview');
@@ -2009,7 +2061,6 @@ function deckCardSummary(deck) {
 }
 
 function activateAllRunnableDeckCards(deck) {
-  if (deck?.readonly) return deck;
   let nextDeck = deck;
   for (const card of Object.values(asObject(deck?.cards))) {
     const status = getDeckCardStatus(card);
@@ -2021,7 +2072,6 @@ function activateAllRunnableDeckCards(deck) {
 }
 
 function deactivateAllRunnableDeckCards(deck) {
-  if (deck?.readonly) return deck;
   let nextDeck = deck;
   for (const card of Object.values(asObject(deck?.cards))) {
     const status = getDeckCardStatus(card);
@@ -2167,10 +2217,6 @@ function deleteConfirmFor(state, type, deckId, id) {
   return state?.type === type && state?.deckId === deckId && state?.id === id;
 }
 
-function cardCategoryExpansionKey(deckId, categoryId) {
-  return `${cleanText(deckId)}:${cleanText(categoryId)}`;
-}
-
 function isDeckDeleteConfirmationValid(value) {
   return cleanText(value).trim().toLowerCase() === 'delete';
 }
@@ -2198,18 +2244,20 @@ function deleteActionSlot(type, id, pending) {
   ]);
 }
 
-function cardDragHandle(kind, id, label, { disabled = false } = {}) {
+function cardDragHandle(kind, id, label, { disabled = false, dataset = {}, draggable = false } = {}) {
   return el('button', {
     className: `recursion-card-drag-region recursion-card-drag-region-${kind}`,
     attrs: {
       type: 'button',
       title: label,
       'aria-label': label,
-      disabled: disabled ? 'disabled' : undefined
+      disabled: disabled ? 'disabled' : undefined,
+      draggable: draggable ? 'true' : undefined
     },
     dataset: {
       recursionCardDragHandle: kind,
-      recursionCardDragId: id
+      recursionCardDragId: id,
+      ...dataset
     }
   }, [
     el('span', {
@@ -2219,10 +2267,15 @@ function cardDragHandle(kind, id, label, { disabled = false } = {}) {
   ]);
 }
 
-function renderDeckDeleteConfirm(activeDeck, deckDeleteState = null) {
+function renderDeckDeleteConfirm(activeDeck, deckDeleteState = null, {
+  uiDataset = 'recursionCardDeckDeleteConfirmUi',
+  textDataset = 'recursionCardDeckDeleteText',
+  confirmDataset = 'recursionCardDeckDeleteConfirm',
+  cancelDataset = 'recursionCardDeckDeleteCancel'
+} = {}) {
   const value = cleanText(deckDeleteState?.value);
   const valid = isDeckDeleteConfirmationValid(value);
-  return el('span', { className: 'recursion-card-deck-delete-confirm', dataset: { recursionCardDeckDeleteConfirmUi: activeDeck.id } }, [
+  return el('span', { className: 'recursion-card-deck-delete-confirm', dataset: { [uiDataset]: activeDeck.id } }, [
     el('input', {
       className: 'recursion-input recursion-card-deck-delete-input',
       attrs: {
@@ -2234,15 +2287,15 @@ function renderDeckDeleteConfirm(activeDeck, deckDeleteState = null) {
         spellcheck: 'false',
         'aria-label': 'Type delete to confirm Card Deck deletion'
       },
-      dataset: { recursionCardDeckDeleteText: activeDeck.id }
+      dataset: { [textDataset]: activeDeck.id }
     }),
     el('span', { className: 'recursion-card-deck-delete-hint', text: 'type delete' }),
-    cardSystemIconButton('check', valid ? 'Confirm Card Deck delete' : 'Type delete to confirm.', { recursionCardDeckDeleteConfirm: activeDeck.id }, { danger: true, disabled: !valid }),
-    cardSystemIconButton('x', 'Cancel Card Deck delete', { recursionCardDeckDeleteCancel: activeDeck.id })
+    cardSystemIconButton('check', valid ? 'Confirm Card Deck delete' : 'Type delete to confirm.', { [confirmDataset]: activeDeck.id }, { danger: true, disabled: !valid }),
+    cardSystemIconButton('x', 'Cancel Card Deck delete', { [cancelDataset]: activeDeck.id })
   ]);
 }
 
-function renderCardsPanel(panel, view, model, notice = '', editorState = null, categoryEditorState = null, deleteState = null, deckDeleteState = null, deckRenameState = null, expandedCategoryKeys = new Set()) {
+function renderCardsPanel(panel, view, model, notice = '', editorState = null, categoryEditorState = null, deleteState = null, deckDeleteState = null, deckRenameState = null) {
   panel.replaceChildren();
   const preProcessDecks = normalizeCardDeckSettings(view.settings?.preProcessDecks);
   const deckView = { ...view.settings, preProcessDecks };
@@ -2250,30 +2303,30 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
   const decks = Object.values(getAllCardDecks(deckView));
   const counts = deckCardCounts(activeDeck);
   const summary = deckCardSummary(activeDeck);
-  const activateAllDisabled = activeDeck.readonly || counts.eligible === 0 || counts.allNormalActive;
-  const deactivateAllDisabled = activeDeck.readonly || counts.eligible === 0 || counts.active === 0;
-  const readonlyBulkTitle = 'Duplicate this read-only Card Deck to edit cards.';
+  const activateAllDisabled = counts.eligible === 0 || counts.allNormalActive;
+  const deactivateAllDisabled = counts.eligible === 0 || counts.active === 0;
   const deckDeletePending = deckDeleteState?.deckId === activeDeck.id && !activeDeck.readonly;
   const deckRenamePending = deckRenameState?.deckId === activeDeck.id && !activeDeck.readonly;
-  const activateAllTitle = activeDeck.readonly
-    ? readonlyBulkTitle
-    : activateAllDisabled
+  const tooltipsEnabled = view.settings?.ui?.tooltipsEnabled !== false;
+  const activateAllTitle = activateAllDisabled
       ? 'All runnable cards are already Active.'
       : 'Set all runnable cards to Active.';
-  const deactivateAllTitle = activeDeck.readonly
-    ? readonlyBulkTitle
-    : deactivateAllDisabled
+  const deactivateAllTitle = deactivateAllDisabled
       ? 'All runnable cards are already Inactive.'
       : 'Set all runnable cards to Inactive.';
 
-  panel.appendChild(el('div', { className: 'recursion-cards-head' }, [
-    el('span', { className: 'recursion-dropdown-title', text: 'Cards' }),
-    el('span', { className: 'recursion-cards-head-actions' }, [
-      el('span', { className: 'recursion-cards-summary', text: summary }),
+  panel.appendChild(renderDeckPanelHeader({
+    el,
+    className: 'recursion-cards-head',
+    actionsClassName: 'recursion-cards-head-actions',
+    title: 'Pre-Process Cards',
+    summary,
+    controls: [
       cardSystemIconButton('eye-active', activateAllTitle, { recursionCardDeckActivateAll: '' }, { disabled: activateAllDisabled }),
       cardSystemIconButton('eye-inactive', deactivateAllTitle, { recursionCardDeckDeactivateAll: '' }, { disabled: deactivateAllDisabled })
-    ])
-  ]));
+    ],
+    dataset: { recursionCardPanelHeader: 'pre' }
+  }));
   const deckActions = deckDeletePending
     ? [renderDeckDeleteConfirm(activeDeck, deckDeleteState)]
     : deckRenamePending
@@ -2304,13 +2357,15 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
         selected: deck.id === activeDeck.id ? 'selected' : undefined
       }
     })));
-  const deckBarChildren = [
-    el('span', { className: 'recursion-card-deck-selector' }, [
-      deckSelector
-    ]),
-    el('span', { className: 'recursion-card-deck-actions' }, deckActions)
-  ];
-  panel.appendChild(el('div', { className: 'recursion-card-deck-bar', dataset: { recursionCardDeckBar: '' } }, deckBarChildren));
+  panel.appendChild(renderDeckToolbar({
+    el,
+    className: 'recursion-card-deck-bar',
+    selector: deckSelector,
+    actions: deckActions,
+    selectorClassName: 'recursion-card-deck-selector',
+    actionsClassName: 'recursion-card-deck-actions',
+    dataset: { recursionCardDeckBar: '' }
+  }));
   if (!activeDeck.readonly) {
     panel.appendChild(el('div', { className: 'recursion-card-deck-tools' }, [
       cardSystemIconButton('plus', 'Create a new Category', { recursionCardCategoryNew: activeDeck.id, recursionCardDeckToolAdd: '' }, { className: 'recursion-card-deck-tool-add' }),
@@ -2318,14 +2373,13 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
     ]));
   }
 
-  const deckList = el('div', { className: 'recursion-card-deck-list', dataset: { recursionCardDeckList: '' } });
+  const deckList = el('div', { className: 'recursion-card-panel-list recursion-card-deck-list', dataset: { recursionCardDeckList: '' } });
   for (const category of orderedDeckCategories(activeDeck)) {
-    const categoryKey = cardCategoryExpansionKey(activeDeck.id, category.id);
     const categoryCards = orderedDeckCards(activeDeck, category.id);
     const runnableCategoryCards = categoryCards.filter((card) => getDeckCardStatus(card).runnable);
     const priorityCategoryCards = runnableCategoryCards.filter((card) => cardSelectionState(card) === 'priority');
     const categoryDensityWarning = runnableCategoryCards.length >= 5;
-    const categoryExpanded = expandedCategoryKeys?.has?.(categoryKey) === true;
+    const categoryExpanded = preProcessCategoryExpanded(preProcessDecks, activeDeck.id, category.id);
     const categoryDeletePending = deleteConfirmFor(deleteState, 'category', activeDeck.id, category.id);
     const categoryActions = !activeDeck.readonly ? [
       cardSystemIconButton('plus', 'Create a new Card in category', { recursionCardNew: category.id }),
@@ -2333,19 +2387,7 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
       deleteActionSlot('category', category.id, categoryDeletePending),
       cardDragHandle('category', category.id, 'Drag to reorder category', { disabled: categoryDeletePending })
     ] : [];
-    const section = el('section', { className: `recursion-card-deck-category ${categoryExpanded ? 'is-expanded' : 'is-collapsed'} ${categoryDeletePending ? 'is-delete-pending' : ''}`, dataset: { recursionCardCategory: category.id, recursionCardDeckCategory: category.id, recursionCardCategoryExpanded: categoryExpanded ? 'true' : 'false' } }, [
-      el('div', { className: 'recursion-card-deck-category-head', attrs: { role: 'button', tabindex: '0', 'aria-expanded': categoryExpanded ? 'true' : 'false', title: categoryExpanded ? 'Collapse category' : 'Expand category' }, dataset: { recursionCardCategoryToggle: category.id } }, [
-        el('span', { className: 'recursion-card-deck-category-arrow', attrs: { 'aria-hidden': 'true' } }, [cardSystemIconSvg(categoryExpanded ? 'chevron-up' : 'chevron-down')]),
-        el('span', { className: 'recursion-card-deck-category-copy' }, [
-          el('strong', { text: category.name }),
-          el('span', { text: `${runnableCategoryCards.length} source card${runnableCategoryCards.length === 1 ? '' : 's'}${priorityCategoryCards.length ? ` - ${priorityCategoryCards.length} priority` : ''}${categoryDensityWarning ? ' - focus may be diluted' : ''}` }),
-          ...(category.description ? [el('span', { text: category.description })] : [])
-        ]),
-        el('span', { className: 'recursion-card-deck-category-actions', dataset: { recursionCardCategoryAction: '' } }, categoryActions)
-      ])
-    ]);
-    const categoryEditor = renderCategoryEditorInline(activeDeck, category, categoryEditorState);
-    if (categoryEditor) section.appendChild(categoryEditor);
+    const categoryBody = [];
     if (categoryExpanded) {
       for (const card of categoryCards) {
         const cardDeletePending = deleteConfirmFor(deleteState, 'card', activeDeck.id, card.id);
@@ -2356,33 +2398,67 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
           deleteActionSlot('card', card.id, cardDeletePending),
           cardDragHandle('card', card.id, 'Drag to reorder card or move to another category', { disabled: cardDeletePending })
         ] : [];
-        const cardRow = el('div', {
-          className: `recursion-card-deck-card ${presentation.className} ${cardDeletePending ? 'is-delete-pending' : ''}`,
-          attrs: { title: card.description || presentation.title },
-          dataset: { recursionCardId: card.id }
-        }, [
-          el('button', {
-            className: 'recursion-card-deck-card-main',
-            attrs: { type: 'button', title: presentation.title, 'aria-label': `${presentation.label}. ${presentation.title}` },
-            dataset: { recursionCardToggleRow: card.id }
-          }, [
-            el('span', { className: 'recursion-card-deck-card-name', text: card.name || NEW_CARD_NAME }),
-            el('span', {
-              className: 'recursion-card-deck-card-status',
-              attrs: { title: presentation.title, 'aria-label': presentation.label }
-            }, [cardSystemIconSvg(presentation.icon)])
-          ]),
-          el('span', { className: 'recursion-card-deck-card-actions' }, cardActions)
+        const cardName = card.name || NEW_CARD_NAME;
+        const cardDescription = card.description || 'No description.';
+        const cardCopy = el('span', { className: 'recursion-card-panel-card-copy recursion-card-deck-card-copy' }, [
+          el('span', { className: 'recursion-card-panel-card-name recursion-card-deck-card-name', text: cardName }),
+          el('span', {
+            className: 'recursion-card-panel-card-description recursion-card-deck-card-description',
+            text: cardDescription
+          })
         ]);
-        section.appendChild(cardRow);
+        const stateMarker = el('span', {
+          className: 'recursion-card-panel-state-marker recursion-card-deck-card-status',
+          attrs: { title: presentation.title, 'aria-label': presentation.label }
+        }, [cardSystemIconSvg(presentation.icon)]);
+        const cardRow = renderDeckCard({
+          el,
+          className: `recursion-card-deck-card ${presentation.className} ${cardDeletePending ? 'is-delete-pending' : ''}`,
+          card,
+          copy: cardCopy,
+          state: stateMarker,
+          actions: cardActions,
+          attrs: { title: cardDescription },
+          dataset: { recursionCardId: card.id },
+          mainAttrs: {
+            title: presentation.title,
+            'aria-label': `${cardName}. ${cardDescription} ${presentation.label}. ${presentation.title}`
+          },
+          mainDataset: { recursionCardToggleRow: card.id },
+          mainClassName: 'recursion-card-deck-card-main',
+          actionsClassName: 'recursion-card-deck-card-actions'
+        });
+        categoryBody.push(cardRow);
         const inlineEditor = renderCardEditorInline(activeDeck, card, editorState);
-        if (inlineEditor) section.appendChild(inlineEditor);
+        if (inlineEditor) categoryBody.push(inlineEditor);
       }
     }
+    const categoryEditor = renderCategoryEditorInline(activeDeck, category, categoryEditorState);
+    const section = renderDeckCategory({
+      el,
+      className: `recursion-card-deck-category ${categoryDeletePending ? 'is-delete-pending' : ''}`,
+      category,
+      expanded: categoryExpanded,
+      disclosure: cardSystemIconSvg(categoryExpanded ? 'chevron-up' : 'chevron-down'),
+      copy: el('span', { className: 'recursion-card-panel-category-copy recursion-card-deck-category-copy' }, [
+        el('strong', { text: category.name }),
+        el('span', { text: `${runnableCategoryCards.length} source card${runnableCategoryCards.length === 1 ? '' : 's'}${priorityCategoryCards.length ? ` - ${priorityCategoryCards.length} priority` : ''}${categoryDensityWarning ? ' - focus may be diluted' : ''}` })
+      ]),
+      actions: categoryActions,
+      auxiliary: categoryEditor ? [categoryEditor] : [],
+      body: categoryBody,
+      dataset: { recursionCardCategory: category.id, recursionCardDeckCategory: category.id, recursionCardCategoryExpanded: categoryExpanded ? 'true' : 'false' },
+      headerDataset: { recursionCardCategoryToggle: category.id },
+      actionsDataset: { recursionCardCategoryAction: '' },
+      headerClassName: 'recursion-card-deck-category-head',
+      bodyClassName: 'recursion-card-deck-category-body',
+      headerTitle: tooltipsEnabled ? category.description : '',
+      headerAriaLabel: `${categoryExpanded ? 'Collapse' : 'Expand'} ${category.name}${category.description ? `. ${category.description}` : ''}`
+    });
     deckList.appendChild(section);
   }
   panel.appendChild(deckList);
-  panel.appendChild(el('div', { className: 'recursion-cards-foot' }, [
+  panel.appendChild(el('footer', { className: 'recursion-card-panel-foot recursion-cards-foot' }, [
     el('span', { text: 'Active Card Deck is global. Draft cards do not run.' }),
     el('span', { className: 'recursion-mini-chip', text: 'Esc' })
   ]));
@@ -2410,16 +2486,38 @@ function upsertPostProcessDeckSettings(settings = {}, deck = {}) {
   });
 }
 
-function postProcessSegment(label, value, selected, dataset) {
+function postProcessSegment(label, value, selected, dataset, title = '', tooltipsEnabled = true) {
   return el('button', {
     className: selected ? 'recursion-post-process-segment is-selected' : 'recursion-post-process-segment',
     text: label,
     attrs: {
       type: 'button',
+      title: tooltipsEnabled ? title : undefined,
+      'aria-label': label,
       'aria-pressed': selected ? 'true' : 'false'
     },
     dataset: { [dataset]: '' }
   });
+}
+
+function postProcessCardCounts(deck = {}) {
+  let eligible = 0;
+  let active = 0;
+  let enabled = 0;
+  for (const category of orderedPostProcessCategories(deck)) {
+    for (const card of orderedPostProcessCards(deck, category.id)) {
+      if (!cleanText(card.name) || !cleanText(card.promptText)) continue;
+      eligible += 1;
+      if (card.enabled !== false) enabled += 1;
+      if (category.enabled !== false && card.enabled !== false) active += 1;
+    }
+  }
+  return {
+    active,
+    enabled,
+    eligible,
+    allActive: eligible > 0 && active === eligible
+  };
 }
 
 function postProcessEditor(editorState = {}, deck = {}) {
@@ -2488,23 +2586,16 @@ function postProcessEditor(editorState = {}, deck = {}) {
 }
 
 function postProcessDeleteConfirmation(deleteState = {}, deck = {}) {
-  const isDeck = deleteState.kind === 'deck';
-  const item = isDeck
-    ? deck
-    : deleteState.kind === 'category'
-      ? deck.categories?.[deleteState.id]
-      : deck.cards?.[deleteState.id];
+  const item = deleteState.kind === 'category'
+    ? deck.categories?.[deleteState.id]
+    : deck.cards?.[deleteState.id];
   const name = cleanText(item?.name, 'this item');
   return el('div', {
     className: 'recursion-post-process-delete-confirm',
     attrs: { role: 'alertdialog', 'aria-label': `Delete ${name}` },
     dataset: { recursionPostProcessDeleteConfirm: '' }
   }, [
-    el('span', { text: isDeck ? `Type ${name} to delete this deck.` : `Delete ${name}?` }),
-    isDeck ? el('input', {
-      attrs: { type: 'text', 'aria-label': `Type ${name} to confirm` },
-      dataset: { recursionPostProcessDeleteText: '' }
-    }) : null,
+    el('span', { text: `Delete ${name}?` }),
     el('div', { className: 'recursion-post-process-editor-actions' }, [
       el('button', { className: 'recursion-button', text: 'Cancel', attrs: { type: 'button' }, dataset: { recursionPostProcessDeleteCancel: '' } }),
       el('button', { className: 'recursion-button is-danger', text: 'Delete', attrs: { type: 'button' }, dataset: { recursionPostProcessDeleteCommit: '' } })
@@ -2515,7 +2606,7 @@ function postProcessDeleteConfirmation(deleteState = {}, deck = {}) {
 function renderPostProcessPanel(panel, view, {
   editorState = null,
   deleteState = null,
-  expandedCategoryKeys = null
+  deckDeleteState = null
 } = {}) {
   const deckSettings = normalizePostProcessDeckSettings(view.settings?.postProcessDecks);
   const deck = getActivePostProcessDeck(deckSettings);
@@ -2525,10 +2616,13 @@ function renderPostProcessPanel(panel, view, {
     rewriteFlow: view.settings?.postProcess?.rewriteFlow === 'progressive' ? 'progressive' : 'unified'
   };
   const decks = allPostProcessDecks(deckSettings);
+  const counts = postProcessCardCounts(deck);
+  const deckDeletePending = deckDeleteState?.deckId === deck.id && !deck.readonly;
+  const tooltipsEnabled = view.settings?.ui?.tooltipsEnabled !== false;
   panel.replaceChildren();
 
   const selector = el('select', {
-    className: 'recursion-card-deck-select',
+    className: 'recursion-input recursion-select recursion-card-deck-select',
     attrs: { 'aria-label': 'Post-process Deck' },
     dataset: { recursionPostProcessDeckSelect: '' }
   }, decks.map((entry) => el('option', {
@@ -2538,14 +2632,54 @@ function renderPostProcessPanel(panel, view, {
 
   const enabledButton = el('button', {
     className: postProcess.enabled ? 'recursion-post-process-enabled is-on' : 'recursion-post-process-enabled is-off',
-    text: postProcess.enabled ? 'On' : 'Off',
     attrs: {
       type: 'button',
+      title: tooltipsEnabled ? `Turn Post-process Cards ${postProcess.enabled ? 'off' : 'on'}` : undefined,
       'aria-label': `Post-process Cards ${postProcess.enabled ? 'On' : 'Off'}`,
       'aria-pressed': postProcess.enabled ? 'true' : 'false'
     },
     dataset: { recursionPostProcessEnabled: '' }
-  });
+  }, [
+    el('span', {
+      className: 'recursion-post-process-enabled-icon',
+      attrs: { 'aria-hidden': 'true' },
+      dataset: { recursionPostProcessEnabledIcon: '' }
+    }, [modeIconSvg('power')])
+  ]);
+  const enabledControl = el('span', {
+    className: 'recursion-post-process-header-control',
+    dataset: { recursionPostProcessControl: 'enabled' }
+  }, [enabledButton]);
+  const applyControl = el('span', {
+    className: 'recursion-post-process-header-control recursion-post-process-segments',
+    attrs: { role: 'group', 'aria-label': 'Apply Post-process result' },
+    dataset: { recursionPostProcessControl: 'apply' }
+  }, [
+    postProcessSegment('As Swipe', 'as-swipe', postProcess.applyMode === 'as-swipe', 'recursionPostProcessApplyAsSwipe', 'Add the rewritten response as a new swipe while preserving the current response.', tooltipsEnabled),
+    postProcessSegment('Replace', 'replace', postProcess.applyMode === 'replace', 'recursionPostProcessApplyReplace', 'Replace the current response with the rewritten result.', tooltipsEnabled)
+  ]);
+  const flowControl = el('span', {
+    className: 'recursion-post-process-header-control recursion-post-process-segments',
+    attrs: { role: 'group', 'aria-label': 'Post-process rewrite flow' },
+    dataset: { recursionPostProcessControl: 'flow' }
+  }, [
+    postProcessSegment('Unified', 'unified', postProcess.rewriteFlow === 'unified', 'recursionPostProcessFlowUnified', 'Rewrite once using all enabled Post-process cards together.', tooltipsEnabled),
+    postProcessSegment('Progressive', 'progressive', postProcess.rewriteFlow === 'progressive', 'recursionPostProcessFlowProgressive', 'Apply enabled Post-process categories in order, carrying each result forward.', tooltipsEnabled)
+  ]);
+  const activateAllDisabled = counts.eligible === 0 || counts.allActive;
+  const deactivateAllDisabled = counts.eligible === 0 || counts.enabled === 0;
+  const activateAllButton = cardSystemIconButton(
+    'eye-active',
+    activateAllDisabled ? 'All runnable Post-process cards are already enabled.' : 'Enable all runnable Post-process cards.',
+    { recursionPostProcessActivateAll: '', recursionPostProcessControl: 'activate-all' },
+    { disabled: activateAllDisabled }
+  );
+  const deactivateAllButton = cardSystemIconButton(
+    'eye-inactive',
+    deactivateAllDisabled ? 'All runnable Post-process cards are already disabled.' : 'Disable all runnable Post-process cards.',
+    { recursionPostProcessDeactivateAll: '', recursionPostProcessControl: 'deactivate-all' },
+    { disabled: deactivateAllDisabled }
+  );
 
   const duplicateButton = cardSystemIconButton('copy', 'Duplicate Post-process Deck', { recursionPostProcessDeckDuplicate: '' });
   const blankButton = cardSystemIconButton('plus', 'Create blank Post-process Deck', { recursionPostProcessDeckNew: '' });
@@ -2562,160 +2696,122 @@ function renderPostProcessPanel(panel, view, {
     { disabled: deck.readonly, danger: !deck.readonly }
   );
 
-  panel.appendChild(renderDeckBar({
+  panel.appendChild(renderDeckPanelHeader({
     el,
     className: 'recursion-post-process-head',
     title: 'Post-process Cards',
-    summary: deck.readonly ? 'Starter deck (read-only)' : '',
-    actions: [enabledButton],
-    dataset: { recursionPostProcessHeader: '' }
+    actionsClassName: 'recursion-post-process-head-actions',
+    summary: postProcess.enabled ? `${counts.active}/${counts.eligible} active` : 'Off',
+    controls: [enabledControl, applyControl, flowControl, activateAllButton, deactivateAllButton],
+    dataset: { recursionPostProcessHeader: '' },
+    actionsDataset: { recursionPostProcessHeaderActions: '' }
   }));
-  panel.appendChild(el('div', { className: 'recursion-post-process-deck-row' }, [
+  panel.appendChild(renderDeckToolbar({
+    el,
+    className: 'recursion-post-process-deck-row',
     selector,
-    el('div', { className: 'recursion-post-process-deck-actions' }, [duplicateButton, blankButton, renameButton, deleteButton])
-  ]));
-  panel.appendChild(el('div', { className: 'recursion-post-process-options' }, [
-    el('div', { className: 'recursion-post-process-option-row' }, [
-      el('span', { text: 'Apply' }),
-      el('div', { className: 'recursion-post-process-segments', attrs: { role: 'group', 'aria-label': 'Apply Post-process result' } }, [
-        postProcessSegment('As Swipe', 'as-swipe', postProcess.applyMode === 'as-swipe', 'recursionPostProcessApplyAsSwipe'),
-        postProcessSegment('Replace', 'replace', postProcess.applyMode === 'replace', 'recursionPostProcessApplyReplace')
-      ])
-    ]),
-    el('div', { className: 'recursion-post-process-option-row' }, [
-      el('span', { text: 'Rewrite Flow' }),
-      el('div', { className: 'recursion-post-process-segments', attrs: { role: 'group', 'aria-label': 'Post-process rewrite flow' } }, [
-        postProcessSegment('Unified', 'unified', postProcess.rewriteFlow === 'unified', 'recursionPostProcessFlowUnified'),
-        postProcessSegment('Progressive', 'progressive', postProcess.rewriteFlow === 'progressive', 'recursionPostProcessFlowProgressive')
-      ])
-    ])
-  ]));
-
+    actions: deckDeletePending
+      ? [renderDeckDeleteConfirm(deck, deckDeleteState, {
+        uiDataset: 'recursionPostProcessDeckDeleteConfirmUi',
+        textDataset: 'recursionPostProcessDeckDeleteText',
+        confirmDataset: 'recursionPostProcessDeckDeleteConfirm',
+        cancelDataset: 'recursionPostProcessDeckDeleteCancel'
+      })]
+      : [blankButton, duplicateButton, renameButton, deleteButton],
+    selectorClassName: 'recursion-post-process-deck-selector',
+    actionsClassName: 'recursion-post-process-deck-actions',
+    dataset: { recursionPostProcessDeckBar: '' }
+  }));
   if (!deck.readonly) {
-    panel.appendChild(el('div', { className: 'recursion-post-process-create-row' }, [
-      el('button', {
-        className: 'recursion-button',
-        text: 'New Category',
-        attrs: { type: 'button' },
-        dataset: { recursionPostProcessCategoryCreate: '' }
-      })
+    panel.appendChild(el('div', { className: 'recursion-card-deck-tools' }, [
+      cardSystemIconButton('plus', 'Create a new Category', { recursionPostProcessCategoryCreate: '', recursionPostProcessDeckToolAdd: '' }, { className: 'recursion-card-deck-tool-add' }),
+      el('span', { className: 'recursion-card-deck-tool-label', text: 'Categories' })
     ]));
   }
 
-  const list = el('div', { className: 'recursion-post-process-list', dataset: { recursionPostProcessList: '' } });
+  const list = el('div', { className: 'recursion-card-panel-list recursion-post-process-list', dataset: { recursionPostProcessList: '' } });
   for (const category of orderedPostProcessCategories(deck)) {
-    const expanded = expandedCategoryKeys === null || expandedCategoryKeys.has(category.id);
+    const expanded = postProcessCategoryExpanded(deckSettings, deck.id, category.id);
     const cards = orderedPostProcessCards(deck, category.id);
     const runnableCount = cards.filter((card) => category.enabled !== false && card.enabled !== false && cleanText(card.name) && cleanText(card.promptText)).length;
-    const categoryToggleLabel = `${category.name}: ${category.enabled === false ? 'Off' : 'On'}`;
-    const categoryToggle = el('button', {
-      className: category.enabled === false ? 'recursion-post-process-state is-off' : 'recursion-post-process-state is-on',
-      attrs: {
-        type: 'button',
-        'aria-label': categoryToggleLabel,
-        title: categoryToggleLabel,
-        'aria-pressed': category.enabled === false ? 'false' : 'true',
-        ...(deck.readonly ? { disabled: '', 'aria-disabled': 'true' } : {})
-      },
-      dataset: { recursionPostProcessCategoryToggle: category.id }
-    }, [cardSystemIconSvg(category.enabled === false ? 'eye-off' : 'eye')]);
-    const expanderLabel = `${expanded ? 'Collapse' : 'Expand'} ${category.name}`;
-    const expander = el('button', {
-      className: 'recursion-post-process-expander',
-      text: expanded ? '−' : '+',
-      attrs: { type: 'button', 'aria-label': expanderLabel, title: expanderLabel, 'aria-expanded': expanded ? 'true' : 'false' },
-      dataset: { recursionPostProcessCategoryExpand: category.id }
-    });
     const categoryActions = deck.readonly ? [] : [
+      cardSystemIconButton('plus', 'Create a new Card in category', { recursionPostProcessCardCreate: category.id }),
       cardSystemIconButton('pencil', `Edit ${category.name}`, { recursionPostProcessCategoryEdit: category.id }),
       cardSystemIconButton('trash', `Delete ${category.name}`, { recursionPostProcessCategoryDelete: category.id }, { danger: true }),
-      el('button', {
-        className: 'recursion-deck-drag-handle',
-        text: '⋮⋮',
-        attrs: {
-          type: 'button',
-          draggable: 'true',
-          'aria-label': `Reorder category ${category.name}`,
-          title: `Reorder category ${category.name}`
-        },
+      cardDragHandle('category', category.id, `Reorder category ${category.name}`, {
+        draggable: true,
         dataset: { recursionPostProcessCategoryDragHandle: category.id }
       })
     ];
     const cardRows = cards.map((card) => {
       const effectiveOn = category.enabled !== false && card.enabled !== false;
       const cardToggleLabel = `${card.name || 'Unnamed card'}: saved ${card.enabled === false ? 'Off' : 'On'}${category.enabled === false ? ', effectively Off because category is Off' : ''}`;
-      const cardToggle = el('button', {
-        className: card.enabled === false ? 'recursion-post-process-state is-off' : 'recursion-post-process-state is-on',
-        attrs: {
-          type: 'button',
-          'aria-label': cardToggleLabel,
-          title: cardToggleLabel,
-          'aria-pressed': card.enabled === false ? 'false' : 'true',
-          'data-effective-state': effectiveOn ? 'on' : 'off',
-          ...(deck.readonly ? { disabled: '', 'aria-disabled': 'true' } : {})
-        },
-        dataset: { recursionPostProcessCardToggle: card.id }
-      }, [cardSystemIconSvg(card.enabled === false ? 'eye-off' : 'eye')]);
       const actions = deck.readonly ? [] : [
         cardSystemIconButton('pencil', `Edit ${card.name || 'card'}`, { recursionPostProcessCardEdit: card.id }),
         cardSystemIconButton('copy', `Duplicate ${card.name || 'card'}`, { recursionPostProcessCardDuplicate: card.id }),
         cardSystemIconButton('trash', `Delete ${card.name || 'card'}`, { recursionPostProcessCardDelete: card.id }, { danger: true }),
-        el('button', {
-          className: 'recursion-deck-drag-handle',
-          text: '⋮⋮',
-          attrs: {
-            type: 'button',
-            draggable: 'true',
-            'aria-label': `Reorder card ${card.name || 'card'}`,
-            title: `Reorder card ${card.name || 'card'}`
-          },
+        cardDragHandle('card', card.id, `Reorder card ${card.name || 'card'}`, {
+          draggable: true,
           dataset: { recursionPostProcessCardDragHandle: card.id }
         })
       ];
       return renderDeckCard({
         el,
-        className: `recursion-post-process-card${effectiveOn ? ' is-on' : ' is-off'}`,
+        className: `recursion-post-process-card ${effectiveOn ? 'is-active' : 'is-inactive'}`,
         card,
+        copy: el('span', { className: 'recursion-card-panel-card-copy recursion-post-process-card-copy' }, [
+          el('span', { className: 'recursion-card-panel-card-name recursion-post-process-card-name', text: card.name || 'Unnamed card' }),
+          el('span', { className: 'recursion-card-panel-card-description recursion-post-process-card-description', text: card.description || 'No description.' })
+        ]),
+        state: el('span', {
+          className: 'recursion-card-panel-state-marker recursion-post-process-card-status',
+          attrs: {
+            title: cardToggleLabel,
+            'aria-label': card.enabled === false ? 'Off' : 'On',
+            'data-effective-state': effectiveOn ? 'on' : 'off'
+          }
+        }, [cardSystemIconSvg(card.enabled === false ? 'eye-off' : 'eye')]),
+        actions,
         dataset: { recursionPostProcessCard: card.id },
-        children: [
-          cardToggle,
-          el('span', { className: 'recursion-post-process-card-copy' }, [
-            el('span', { className: 'recursion-post-process-card-name', text: card.name || 'Unnamed card' }),
-            el('span', { className: 'recursion-post-process-card-description', text: card.description || 'No description.' })
-          ]),
-          el('span', { className: 'recursion-post-process-row-actions' }, actions)
-        ]
+        mainAttrs: {
+          title: cardToggleLabel,
+          'aria-label': cardToggleLabel,
+          'aria-pressed': card.enabled === false ? 'false' : 'true',
+          'data-effective-state': effectiveOn ? 'on' : 'off'
+        },
+        mainDataset: { recursionPostProcessCardToggle: card.id },
+        mainClassName: 'recursion-post-process-card-main',
+        actionsClassName: 'recursion-post-process-row-actions'
       });
     });
-    if (!deck.readonly) {
-      cardRows.push(el('button', {
-        className: 'recursion-post-process-add-card',
-        text: 'Add Card',
-        attrs: { type: 'button' },
-        dataset: { recursionPostProcessCardCreate: category.id }
-      }));
-    }
     list.appendChild(renderDeckCategory({
       el,
-      className: `recursion-post-process-category${category.enabled === false ? ' is-off' : ' is-on'}`,
+      className: `recursion-post-process-category ${category.enabled === false ? 'is-inactive' : 'is-active'}`,
       category,
       expanded,
+      disclosure: cardSystemIconSvg(expanded ? 'chevron-up' : 'chevron-down'),
+      copy: el('span', { className: 'recursion-card-panel-category-copy recursion-post-process-category-copy' }, [
+        el('strong', { className: 'recursion-post-process-category-name', text: category.name }),
+        el('span', { className: 'recursion-post-process-category-meta', text: `${runnableCount} runnable card${runnableCount === 1 ? '' : 's'}` })
+      ]),
+      actions: categoryActions,
+      actionsClassName: 'recursion-post-process-row-actions',
+      body: cardRows,
       dataset: { recursionPostProcessCategory: category.id },
-      header: [
-        expander,
-        categoryToggle,
-        el('span', { className: 'recursion-post-process-category-copy' }, [
-          el('span', { className: 'recursion-post-process-category-name', text: category.name }),
-          el('span', { className: 'recursion-post-process-category-meta', text: `${runnableCount} runnable card${runnableCount === 1 ? '' : 's'}` })
-        ]),
-        el('span', { className: 'recursion-post-process-row-actions' }, categoryActions)
-      ],
-      body: cardRows
+      headerDataset: { recursionPostProcessCategoryExpand: category.id },
+      headerClassName: 'recursion-post-process-category-head',
+      bodyClassName: 'recursion-post-process-category-body',
+      headerTitle: tooltipsEnabled ? category.description : '',
+      headerAriaLabel: `${expanded ? 'Collapse' : 'Expand'} ${category.name}${category.description ? `. ${category.description}` : ''}`
     }));
   }
   panel.appendChild(list);
   if (editorState) panel.appendChild(postProcessEditor(editorState, deck));
   if (deleteState) panel.appendChild(postProcessDeleteConfirmation(deleteState, deck));
+  panel.appendChild(el('footer', { className: 'recursion-card-panel-foot recursion-post-process-foot' }, [
+    el('span', { text: 'Active Post-process Deck is global. Structure-only changes require a custom deck.' }),
+    el('span', { className: 'recursion-mini-chip', text: 'Esc' })
+  ]));
 }
 
 function settingsSelectRow(label, datasetName, value, options, tooltip = '', tooltipsEnabled = true) {
@@ -3803,19 +3899,19 @@ function buildRoot() {
         MODE_MENU_OPTIONS.map(modeMenuChoice))
     ]),
     el('button', {
-      className: 'recursion-cards-button',
-      attrs: { type: 'button', 'aria-label': 'Pre-process Cards', 'aria-expanded': 'false', title: 'Pre-process Cards' },
+      className: 'recursion-cards-button recursion-process-cards-button',
+      attrs: { type: 'button', 'aria-label': 'Pre-process Cards', 'aria-expanded': 'false', title: PRE_PROCESS_CARDS_TOOLTIP },
       dataset: { recursionCardsButton: '', recursionPreProcessCardsButton: '' }
     }, [
-      el('span', { className: 'recursion-cards-button-icon', attrs: { 'aria-hidden': 'true' } }, [modeIconSvg('cards')])
+      el('span', { className: 'recursion-cards-button-icon recursion-process-cards-button-icon', attrs: { 'aria-hidden': 'true' } }, [processCardsIconSvg('pre')])
     ]),
     el('div', { className: 'recursion-post-process-cluster' }, [
       el('button', {
-        className: 'recursion-icon-button recursion-post-process-button is-off',
-        attrs: { type: 'button', 'aria-label': 'Post-process Cards: Off', 'aria-expanded': 'false', title: 'Post-process Cards: Off' },
+        className: 'recursion-icon-button recursion-post-process-button recursion-process-cards-button is-off',
+        attrs: { type: 'button', 'aria-label': 'Post-process Cards: Off', 'aria-expanded': 'false', title: POST_PROCESS_CARDS_TOOLTIP },
         dataset: { recursionPostProcessCardsButton: '' }
       }, [
-        el('span', { className: 'recursion-post-process-icon', attrs: { 'aria-hidden': 'true' } })
+        el('span', { className: 'recursion-post-process-icon recursion-process-cards-button-icon', attrs: { 'aria-hidden': 'true' } }, [processCardsIconSvg('post')])
       ])
     ]),
     el('div', { className: 'recursion-story-form-cluster' }, [
@@ -3920,14 +4016,14 @@ function buildRoot() {
   hand.hidden = true;
 
   const cardsPanel = el('div', {
-    className: 'recursion-cards-panel',
+    className: 'recursion-cards-panel recursion-card-panel',
     attrs: { 'aria-label': 'Pre-process Cards' },
     dataset: { recursionCardsPanel: '' }
   });
   cardsPanel.hidden = true;
 
   const postProcessPanel = el('div', {
-    className: 'recursion-cards-panel recursion-post-process-panel',
+    className: 'recursion-cards-panel recursion-card-panel recursion-post-process-panel',
     attrs: { 'aria-label': 'Post-process Cards' },
     dataset: { recursionPostProcessPanel: '' }
   });
@@ -4082,7 +4178,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   let cardDragUpdateFrame = 0;
   let pendingCardDragEvent = null;
   let cardPromptResizeState = null;
-  let expandedCardCategoryKeys = new Set();
+  let pendingPreProcessDecks = null;
   let cardsPanelRenderKey = '';
   let postProcessPanelRenderKey = '';
   let postProcessEditorState = null;
@@ -4090,7 +4186,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   let postProcessDeckDeleteState = null;
   let postProcessEditorFocusReturn = null;
   let postProcessDeleteFocusReturn = null;
-  let expandedPostProcessCategoryKeys = null;
+  let pendingPostProcessDecks = null;
   let postProcessDragState = null;
   let cardLongPressTimer = null;
   let cardLongPressPointer = null;
@@ -4181,16 +4277,33 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       ),
       success: postProcessControlResolver(successSelector, successDatasetKey, successValue)
     };
-    if (state.kind === 'deck') postProcessDeckDeleteState = state;
+    if (state.kind === 'deck') postProcessDeckDeleteState = { deckId: state.id, value: '' };
     else postProcessDeleteState = state;
     postProcessPanelRenderKey = '';
     renderPostProcessPanelForView(currentView());
     focusNode(postProcessPanel.querySelector(
       state.kind === 'deck'
-        ? '[data-recursion-post-process-delete-text]'
+        ? '[data-recursion-post-process-deck-delete-text]'
         : '[data-recursion-post-process-delete-cancel]'
     ));
-    postProcessPanel.scrollTop = 0;
+    if (state.kind !== 'deck') postProcessPanel.scrollTop = 0;
+  }
+
+  function commitPostProcessDeckDelete(deckId, value) {
+    if (!isDeckDeleteConfirmationValid(value)) return false;
+    postProcessDeckDeleteState = null;
+    runAction(
+      applyPostProcessDeckSettings(
+        deleteCustomPostProcessDeck(currentView().settings?.postProcessDecks, deckId),
+        'Post-process Deck deleted.'
+      ),
+      () => {
+        postProcessPanelRenderKey = '';
+        if (!postProcessPanel.hidden) renderPostProcessPanelForView(currentView());
+        restorePostProcessDeleteFocus({ success: true });
+      }
+    );
+    return true;
   }
 
   function restorePostProcessDeleteFocus({ success = false } = {}) {
@@ -4624,7 +4737,6 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       cardScopeNotice = '';
       cardDeleteConfirmState = null;
       deckDeleteConfirmState = null;
-      expandedCardCategoryKeys = new Set();
       cardsPanelRenderKey = '';
     }
     if (open) {
@@ -4650,7 +4762,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     postProcessButton?.classList?.toggle?.('is-failed', failed);
     const label = `Post-process Cards: ${enabled ? 'On' : 'Off'}`;
     postProcessButton?.setAttribute('aria-label', label);
-    setTooltip(postProcessButton, view.settings?.ui?.tooltipsEnabled !== false, label);
+    setTooltip(postProcessButton, view.settings?.ui?.tooltipsEnabled !== false, POST_PROCESS_CARDS_TOOLTIP);
   }
 
   function setPostProcessPanelOpen(open) {
@@ -4673,7 +4785,6 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       postProcessDeckDeleteState = null;
       postProcessEditorFocusReturn = null;
       postProcessDeleteFocusReturn = null;
-      expandedPostProcessCategoryKeys = null;
       postProcessPanelRenderKey = '';
     }
     if (open) {
@@ -4712,7 +4823,29 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (pendingCardScope && cardScopeKey(pendingCardScope) === cardScopeKey(scope)) pendingCardScope = null;
   }
 
-  function cardsPanelViewKey(view, notice = '', editorState = null, categoryState = null, deckDeleteState = null, deckRenameState = null, expandedKeys = new Set()) {
+  function viewWithPendingDeckSettings(view) {
+    const source = asObject(view);
+    const settings = asObject(source.settings);
+    const currentPre = normalizeCardDeckSettings(settings.preProcessDecks);
+    const currentPost = normalizePostProcessDeckSettings(settings.postProcessDecks);
+    if (pendingPreProcessDecks && stableStringify(currentPre) === stableStringify(pendingPreProcessDecks)) {
+      pendingPreProcessDecks = null;
+    }
+    if (pendingPostProcessDecks && stableStringify(currentPost) === stableStringify(pendingPostProcessDecks)) {
+      pendingPostProcessDecks = null;
+    }
+    if (!pendingPreProcessDecks && !pendingPostProcessDecks) return view;
+    return {
+      ...source,
+      settings: {
+        ...settings,
+        preProcessDecks: pendingPreProcessDecks || currentPre,
+        postProcessDecks: pendingPostProcessDecks || currentPost
+      }
+    };
+  }
+
+  function cardsPanelViewKey(view, notice = '', editorState = null, categoryState = null, deckDeleteState = null, deckRenameState = null) {
     const settings = asObject(asObject(view).settings);
     return stableStringify({
       notice: cleanText(notice),
@@ -4734,18 +4867,17 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       } : null,
       deleteConfirm: cardDeleteConfirmState,
       deckDeleteConfirm: deckDeleteState ? { deckId: deckDeleteState.deckId } : null,
-      deckRename: deckRenameState ? { deckId: deckRenameState.deckId } : null,
-      expandedCategories: [...expandedKeys].sort()
+      deckRename: deckRenameState ? { deckId: deckRenameState.deckId } : null
     });
   }
 
   function renderCardsPanelForView(view, notice = cardScopeNotice) {
     if (cardDragState?.started) return;
-    const effectiveView = viewWithPendingCardScope(view);
-    const nextRenderKey = cardsPanelViewKey(effectiveView, notice, cardEditorState, categoryEditorState, deckDeleteConfirmState, deckRenameState, expandedCardCategoryKeys);
+    const effectiveView = viewWithPendingDeckSettings(viewWithPendingCardScope(view));
+    const nextRenderKey = cardsPanelViewKey(effectiveView, notice, cardEditorState, categoryEditorState, deckDeleteConfirmState, deckRenameState);
     if (cardsPanelRenderKey === nextRenderKey) return;
     cardsPanelRenderKey = nextRenderKey;
-    renderCardsPanel(cardsPanel, effectiveView, createRecursionViewModel(effectiveView), notice, cardEditorState, categoryEditorState, cardDeleteConfirmState, deckDeleteConfirmState, deckRenameState, expandedCardCategoryKeys);
+    renderCardsPanel(cardsPanel, effectiveView, createRecursionViewModel(effectiveView), notice, cardEditorState, categoryEditorState, cardDeleteConfirmState, deckDeleteConfirmState, deckRenameState);
   }
 
   function postProcessPanelViewKey(view) {
@@ -4753,21 +4885,22 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     return stableStringify({
       postProcess: settings.postProcess,
       postProcessDecks: normalizePostProcessDeckSettings(settings.postProcessDecks),
+      tooltipsEnabled: settings.ui?.tooltipsEnabled !== false,
       editor: postProcessEditorState,
       deleteState: postProcessDeleteState,
-      deckDeleteState: postProcessDeckDeleteState ? { kind: 'deck' } : null,
-      expanded: expandedPostProcessCategoryKeys === null ? null : [...expandedPostProcessCategoryKeys].sort()
+      deckDeleteState: postProcessDeckDeleteState ? { deckId: postProcessDeckDeleteState.deckId } : null
     });
   }
 
   function renderPostProcessPanelForView(view = currentView()) {
-    const nextKey = postProcessPanelViewKey(view);
+    const effectiveView = viewWithPendingDeckSettings(view);
+    const nextKey = postProcessPanelViewKey(effectiveView);
     if (postProcessPanelRenderKey === nextKey) return;
     postProcessPanelRenderKey = nextKey;
-    renderPostProcessPanel(postProcessPanel, view, {
+    renderPostProcessPanel(postProcessPanel, effectiveView, {
       editorState: postProcessEditorState,
-      deleteState: postProcessDeleteState || postProcessDeckDeleteState,
-      expandedCategoryKeys: expandedPostProcessCategoryKeys
+      deleteState: postProcessDeleteState,
+      deckDeleteState: postProcessDeckDeleteState
     });
   }
 
@@ -4779,11 +4912,24 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   }
 
   function applyPostProcessDeckSettings(postProcessDecks, status = '') {
-    const patch = { postProcessDecks: normalizePostProcessDeckSettings(postProcessDecks) };
+    const incoming = normalizePostProcessDeckSettings(postProcessDecks);
+    const next = normalizePostProcessDeckSettings({
+      ...incoming,
+      categoryExpansion: pendingPostProcessDecks?.categoryExpansion || incoming.categoryExpansion
+    });
+    pendingPostProcessDecks = next;
+    const patch = { postProcessDecks: next };
     const action = runtime?.updateSettings?.(patch);
     postProcessPanelRenderKey = '';
     if (status) showCardSystemStatus(status);
     renderPostProcessPanelForView(currentView());
+    if (action) {
+      Promise.resolve(action).catch(() => {
+        if (pendingPostProcessDecks === next) pendingPostProcessDecks = null;
+        postProcessPanelRenderKey = '';
+        renderPostProcessPanelForView(currentView());
+      });
+    }
     return action;
   }
 
@@ -4812,12 +4958,28 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     pendingCardScope = null;
     cardScopeNotice = '';
     const statusLabel = cleanText(notice);
-    const action = runtime?.updateSettings?.({ preProcessDecks: normalizeCardDeckSettings(preProcessDecks) });
+    const incoming = normalizeCardDeckSettings(preProcessDecks);
+    const next = normalizeCardDeckSettings({
+      ...incoming,
+      categoryExpansion: pendingPreProcessDecks?.categoryExpansion || incoming.categoryExpansion
+    });
+    pendingPreProcessDecks = next;
+    cardsPanelRenderKey = '';
+    const action = runtime?.updateSettings?.({ preProcessDecks: next });
+    renderCardsPanelForView(currentView());
     if (!action) {
       if (statusLabel) showCardSystemStatus(statusLabel);
       return;
     }
-    runAction(action, () => {
+    const guardedAction = typeof action?.then === 'function'
+      ? action.catch((error) => {
+        if (pendingPreProcessDecks === next) pendingPreProcessDecks = null;
+        cardsPanelRenderKey = '';
+        renderCardsPanelForView(currentView());
+        throw error;
+      })
+      : action;
+    runAction(guardedAction, () => {
       renderCardsPanelForView(currentView());
       if (statusLabel) uiActionStatus.set(statusLabel);
       update();
@@ -4919,20 +5081,23 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   }
 
   function expandCardCategory(deckId, categoryId) {
-    const key = cardCategoryExpansionKey(deckId, categoryId);
-    if (!key || expandedCardCategoryKeys.has(key)) return;
-    expandedCardCategoryKeys = new Set(expandedCardCategoryKeys);
-    expandedCardCategoryKeys.add(key);
+    const settings = pendingPreProcessDecks
+      || normalizeCardDeckSettings(currentView().settings?.preProcessDecks);
+    if (preProcessCategoryExpanded(settings, deckId, categoryId)) return;
+    applyCardDeckSettings(setPreProcessCategoryExpanded(settings, deckId, categoryId, true));
   }
 
   function toggleCardCategory(deck, categoryId) {
     if (!deck?.id || !categoryId) return;
-    const key = cardCategoryExpansionKey(deck.id, categoryId);
-    expandedCardCategoryKeys = new Set(expandedCardCategoryKeys);
-    if (expandedCardCategoryKeys.has(key)) expandedCardCategoryKeys.delete(key);
-    else expandedCardCategoryKeys.add(key);
+    const settings = pendingPreProcessDecks
+      || normalizeCardDeckSettings(currentView().settings?.preProcessDecks);
+    applyCardDeckSettings(setPreProcessCategoryExpanded(
+      settings,
+      deck.id,
+      categoryId,
+      !preProcessCategoryExpanded(settings, deck.id, categoryId)
+    ));
     cardHaptic(8);
-    renderCardsPanelForView(currentView());
   }
 
   function editCategory(deck, categoryId) {
@@ -5908,8 +6073,26 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   postProcessPanel.addEventListener?.('change', (event) => {
     const select = closestDatasetElement(event?.target, 'recursionPostProcessDeckSelect', postProcessPanel);
     if (!select) return;
+    postProcessDeckDeleteState = null;
     const settings = normalizePostProcessDeckSettings(currentView().settings?.postProcessDecks);
     runAction(applyPostProcessDeckSettings({ ...settings, activeDeckId: cleanText(select.value) }, 'Post-process Deck selected.'));
+  });
+  postProcessPanel.addEventListener?.('input', (event) => {
+    const target = event?.target;
+    if (!target?.dataset || !Object.hasOwn(target.dataset, 'recursionPostProcessDeckDeleteText')) return;
+    postProcessDeckDeleteState = {
+      deckId: target.dataset.recursionPostProcessDeckDeleteText,
+      value: target.value || ''
+    };
+    const confirm = postProcessPanel.querySelector?.('[data-recursion-post-process-deck-delete-confirm]');
+    if (confirm) {
+      const valid = isDeckDeleteConfirmationValid(target.value);
+      confirm.disabled = !valid;
+      if (valid) confirm.removeAttribute?.('disabled');
+      else confirm.setAttribute?.('disabled', 'disabled');
+      confirm.setAttribute?.('title', valid ? 'Confirm Card Deck delete' : 'Type delete to confirm.');
+      confirm.setAttribute?.('aria-label', valid ? 'Confirm Card Deck delete' : 'Type delete to confirm.');
+    }
   });
   postProcessPanel.addEventListener?.('submit', (event) => {
     if (!closestDatasetElement(event?.target, 'recursionPostProcessCardEditor', postProcessPanel)) return;
@@ -6000,6 +6183,24 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     postProcessDragState = null;
   });
   postProcessPanel.addEventListener?.('keydown', (event) => {
+    const deckDeleteInput = closestDatasetElement(
+      event?.target,
+      'recursionPostProcessDeckDeleteText',
+      postProcessPanel
+    );
+    if (deckDeleteInput) {
+      if (event?.key === 'Escape') {
+        consumeClickEvent(event);
+        dismissPostProcessDeleteConfirmation();
+      } else if (event?.key === 'Enter' && isDeckDeleteConfirmationValid(deckDeleteInput.value)) {
+        consumeClickEvent(event);
+        commitPostProcessDeckDelete(
+          deckDeleteInput.dataset.recursionPostProcessDeckDeleteText,
+          deckDeleteInput.value
+        );
+      }
+      return;
+    }
     if (event?.key === 'Escape') {
       consumeClickEvent(event);
       const editorWasOpen = Boolean(postProcessEditorState);
@@ -6015,6 +6216,18 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       }
       if (editorWasOpen) restorePostProcessEditorFocus();
       else if (!deleteWasOpen && !postProcessPanel.hidden) focusNode(postProcessPanel.querySelector('[data-recursion-post-process-deck-select]'));
+      return;
+    }
+    const categoryHead = closestDatasetElement(
+      event?.target,
+      'recursionPostProcessCategoryExpand',
+      postProcessPanel
+    );
+    if (categoryHead === event?.target && ['Enter', ' '].includes(event?.key)) {
+      consumeClickEvent(event);
+      togglePostProcessCategoryExpansion(
+        categoryHead.dataset.recursionPostProcessCategoryExpand
+      );
       return;
     }
     const handle = closestPostProcessDragHandle(event?.target);
@@ -6060,6 +6273,29 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       if (!postProcessPanel.hidden) renderPostProcessPanelForView(currentView());
       after?.();
     });
+  }
+
+  function mutateActivePostProcessDeckState(mutator, status = '') {
+    const view = currentView();
+    const deckSettings = normalizePostProcessDeckSettings(view.settings?.postProcessDecks);
+    const deck = getActivePostProcessDeck(deckSettings);
+    const nextDeck = mutator(deck);
+    applyPostProcessDeckSettings(
+      updateActivePostProcessDeckState(deckSettings, nextDeck),
+      status
+    );
+  }
+
+  function togglePostProcessCategoryExpansion(id) {
+    const settings = pendingPostProcessDecks
+      || normalizePostProcessDeckSettings(currentView().settings?.postProcessDecks);
+    const deck = getActivePostProcessDeck(settings);
+    applyPostProcessDeckSettings(setPostProcessCategoryExpanded(
+      settings,
+      deck.id,
+      id,
+      !postProcessCategoryExpanded(settings, deck.id, id)
+    ));
   }
 
   function savePostProcessEditor() {
@@ -6119,6 +6355,22 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       consumeClickEvent(event);
       runAction(applyPostProcessSettings({ rewriteFlow: 'progressive' }, 'Progressive rewrite flow selected.'));
     }
+    const postProcessActivateAll = control('recursionPostProcessActivateAll');
+    if (postProcessActivateAll && postProcessActivateAll.disabled !== true) {
+      consumeClickEvent(event);
+      applyPostProcessDeckSettings(
+        setAllPostProcessCardsEnabled(currentView().settings?.postProcessDecks, true),
+        'All Post-process cards enabled.'
+      );
+    }
+    const postProcessDeactivateAll = control('recursionPostProcessDeactivateAll');
+    if (postProcessDeactivateAll && postProcessDeactivateAll.disabled !== true) {
+      consumeClickEvent(event);
+      applyPostProcessDeckSettings(
+        setAllPostProcessCardsEnabled(currentView().settings?.postProcessDecks, false),
+        'All Post-process cards disabled.'
+      );
+    }
     if (control('recursionPostProcessDeckDuplicate')) {
       consumeClickEvent(event);
       const settings = normalizePostProcessDeckSettings(currentView().settings?.postProcessDecks);
@@ -6156,36 +6408,21 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       }
     }
     const postCategoryExpand = control('recursionPostProcessCategoryExpand');
-    if (postCategoryExpand) {
+    const postCategoryAction = control('recursionPostProcessCardCreate')
+      || control('recursionPostProcessCategoryEdit')
+      || control('recursionPostProcessCategoryDelete')
+      || control('recursionPostProcessCategoryDragHandle');
+    if (postCategoryExpand && !postCategoryAction) {
       consumeClickEvent(event);
-      const id = postCategoryExpand.dataset.recursionPostProcessCategoryExpand;
-      if (expandedPostProcessCategoryKeys === null) {
-        expandedPostProcessCategoryKeys = new Set();
-        for (const category of orderedPostProcessCategories(getActivePostProcessDeck(currentView().settings?.postProcessDecks))) {
-          expandedPostProcessCategoryKeys.add(category.id);
-        }
-      }
-      if (expandedPostProcessCategoryKeys.has(id)) expandedPostProcessCategoryKeys.delete(id);
-      else expandedPostProcessCategoryKeys.add(id);
-      postProcessPanelRenderKey = '';
-      renderPostProcessPanelForView(currentView());
-    }
-    const postCategoryToggle = control('recursionPostProcessCategoryToggle');
-    if (postCategoryToggle && postCategoryToggle.disabled !== true) {
-      consumeClickEvent(event);
-      const id = postCategoryToggle.dataset.recursionPostProcessCategoryToggle;
-      const deck = getActivePostProcessDeck(currentView().settings?.postProcessDecks);
-      mutateActivePostProcessDeck(
-        (source) => togglePostProcessCategory(source, id, source.categories?.[id]?.enabled === false),
-        deck.categories?.[id]?.enabled === false ? 'Post-process category On.' : 'Post-process category Off.'
-      );
+      togglePostProcessCategoryExpansion(postCategoryExpand.dataset.recursionPostProcessCategoryExpand);
+      return;
     }
     const postCardToggle = control('recursionPostProcessCardToggle');
     if (postCardToggle && postCardToggle.disabled !== true) {
       consumeClickEvent(event);
       const id = postCardToggle.dataset.recursionPostProcessCardToggle;
       const deck = getActivePostProcessDeck(currentView().settings?.postProcessDecks);
-      mutateActivePostProcessDeck(
+      mutateActivePostProcessDeckState(
         (source) => togglePostProcessCard(source, id, source.cards?.[id]?.enabled === false),
         deck.cards?.[id]?.enabled === false ? 'Post-process card On.' : 'Post-process card Off.'
       );
@@ -6279,28 +6516,25 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       consumeClickEvent(event);
       dismissPostProcessDeleteConfirmation();
     }
+    const postProcessDeckDeleteConfirm = control('recursionPostProcessDeckDeleteConfirm');
+    if (postProcessDeckDeleteConfirm && postProcessDeckDeleteConfirm.disabled !== true) {
+      consumeClickEvent(event);
+      const value = postProcessPanel.querySelector?.('[data-recursion-post-process-deck-delete-text]')?.value
+        || postProcessDeckDeleteState?.value
+        || '';
+      commitPostProcessDeckDelete(
+        postProcessDeckDeleteConfirm.dataset.recursionPostProcessDeckDeleteConfirm,
+        value
+      );
+    }
+    if (control('recursionPostProcessDeckDeleteCancel')) {
+      consumeClickEvent(event);
+      dismissPostProcessDeleteConfirmation();
+    }
     if (control('recursionPostProcessDeleteCommit')) {
       consumeClickEvent(event);
-      const deck = getActivePostProcessDeck(currentView().settings?.postProcessDecks);
-      const state = postProcessDeckDeleteState || postProcessDeleteState;
-      if (state?.kind === 'deck') {
-        const typedInput = postProcessPanel.querySelector('[data-recursion-post-process-delete-text]');
-        const typed = cleanText(typedInput?.value);
-        if (typed === deck.name) {
-          postProcessDeckDeleteState = null;
-          runAction(
-            applyPostProcessDeckSettings(deleteCustomPostProcessDeck(currentView().settings?.postProcessDecks, deck.id), 'Post-process Deck deleted.'),
-            () => {
-              postProcessPanelRenderKey = '';
-              if (!postProcessPanel.hidden) renderPostProcessPanelForView(currentView());
-              restorePostProcessDeleteFocus({ success: true });
-            }
-          );
-        } else {
-          showCardSystemStatus(`Type ${deck.name} to confirm deletion.`, 'warning');
-          focusNode(typedInput);
-        }
-      } else if (state?.kind === 'category') {
+      const state = postProcessDeleteState;
+      if (state?.kind === 'category') {
         postProcessDeleteState = null;
         mutateActivePostProcessDeck(
           (source) => deletePostProcessCategory(source, state.id),
@@ -6475,7 +6709,10 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       consumeClickEvent(event);
       const view = currentView();
       const deck = getActiveCardDeck(view.settings);
-      if (!deck.readonly) applyCardDeckSettings(upsertCustomCardDeck(view.settings, activateAllRunnableDeckCards(deck)), 'All cards set Active.');
+      applyCardDeckSettings(
+        updateActivePreProcessDeckSelection(view.settings?.preProcessDecks, activateAllRunnableDeckCards(deck)),
+        'All cards set Active.'
+      );
     }
     const cardDeckDeactivateAll = control('recursionCardDeckDeactivateAll');
     if (cardDeckDeactivateAll && cardDeckDeactivateAll.disabled !== true) {
@@ -6483,7 +6720,10 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       consumeClickEvent(event);
       const view = currentView();
       const deck = getActiveCardDeck(view.settings);
-      if (!deck.readonly) applyCardDeckSettings(upsertCustomCardDeck(view.settings, deactivateAllRunnableDeckCards(deck)), 'All cards disabled.');
+      applyCardDeckSettings(
+        updateActivePreProcessDeckSelection(view.settings?.preProcessDecks, deactivateAllRunnableDeckCards(deck)),
+        'All cards disabled.'
+      );
     }
     const categoryToggle = control('recursionCardCategoryToggle');
     const categoryAction = control('recursionCardCategoryAction');
@@ -6577,9 +6817,17 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       panelRerenderClickEvents?.add(event);
       consumeClickEvent(event);
       const view = currentView();
-      const deck = getActiveCardDeck(view.settings);
+      const baseSettings = pendingPreProcessDecks
+        || normalizeCardDeckSettings(view.settings?.preProcessDecks);
+      const deck = getActiveCardDeck({ preProcessDecks: baseSettings });
       if (!deck.readonly) {
-        applyCardDeckSettings(upsertCustomCardDeck(view.settings, createCategory(deck)), 'Category created.');
+        const nextDeck = createCategory(deck);
+        const categoryId = nextDeck.categoryOrder.find((id) => !deck.categories?.[id]);
+        let nextSettings = upsertCustomCardDeck({ preProcessDecks: baseSettings }, nextDeck);
+        if (categoryId) {
+          nextSettings = setPreProcessCategoryExpanded(nextSettings, nextDeck.id, categoryId, true);
+        }
+        applyCardDeckSettings(nextSettings, 'Category created.');
       }
     }
     const categoryEdit = control('recursionCardCategoryEdit');
@@ -6635,11 +6883,14 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       const deck = getActiveCardDeck(view.settings);
       const card = asObject(deck.cards)[cardToggleRow.dataset.recursionCardToggleRow];
       const status = getDeckCardStatus(card);
-      if (card && !deck.readonly && (status.runnable || status.reason === 'disabled')) {
+      if (card && (status.runnable || status.reason === 'disabled')) {
         cardHaptic(6);
         const nextState = nextCardSelectionState(card, normalizeMode(view.settings?.mode));
         applyCardDeckSettings(
-          upsertCustomCardDeck(view.settings, updateCardSelectionState(deck, card.id, nextState)),
+          updateActivePreProcessDeckSelection(
+            view.settings?.preProcessDecks,
+            updateCardSelectionState(deck, card.id, nextState)
+          ),
           cardSelectionResultStatus(nextState)
         );
       } else if (card && !status.runnable) {

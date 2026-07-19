@@ -1,5 +1,6 @@
 import {
   PRE_PROCESS_DECK_SETTINGS_VERSION,
+  DEFAULT_PRE_PROCESS_CARD_DESCRIPTIONS,
   DEFAULT_PRE_PROCESS_DECK_ID,
   NEW_CARD_NAME,
   cardNameWarning,
@@ -15,6 +16,7 @@ import {
   duplicateCard,
   duplicateCardDeck,
   duplicateDeckName,
+  getActiveCardDeck,
   getDeckCardStatus,
   activeCardDeckEligibility,
   cardSelectionState,
@@ -26,9 +28,13 @@ import {
   normalizeCardDeckSettings,
   normalizeCustomDeck,
   nextCardSelectionState,
+  preProcessCategoryExpanded,
   reorderCategories,
   reorderCards,
-  serializeCustomCardDecksForExport
+  serializeCustomCardDecksForExport,
+  setPreProcessCategoryExpanded,
+  updateActivePreProcessDeckSelection,
+  updateCardSelectionState
 } from '../../src/pre-process-decks.mjs';
 import { normalizeSettings } from '../../src/settings.mjs';
 import { CARD_SCOPE_CATALOG } from '../../src/card-scope.mjs';
@@ -46,7 +52,35 @@ assertEqual(
   CARD_SCOPE_CATALOG.reduce((sum, entry) => sum + entry.subItems.length, 0),
   'Default deck has one generated card per Card Scope sub-item'
 );
-
+const catalogCardIds = CARD_SCOPE_CATALOG
+  .flatMap((entry) => entry.subItems.map((subItem) => `${entry.role}:${subItem.key}`))
+  .sort();
+assertDeepEqual(
+  Object.keys(DEFAULT_PRE_PROCESS_CARD_DESCRIPTIONS).sort(),
+  catalogCardIds,
+  'Bundled display descriptions cover exactly the generated Card Scope cards'
+);
+for (const card of Object.values(defaultDeck.cards)) {
+  const words = card.description.trim().split(/\s+/);
+  assert(
+    words.length >= 8 && words.length <= 16,
+    `${card.id} bundled display description stays within 8-16 words`
+  );
+  const source = CARD_SCOPE_CATALOG
+    .find((entry) => entry.family === card.builtinFamily)
+    ?.subItems.find((item) => card.selectedSubItems.includes(item.key));
+  assert(source, `${card.id} resolves its canonical Card Scope source`);
+  assertEqual(card.promptText, source.description, `${card.id} keeps canonical prompt text`);
+  assert(
+    card.description !== card.promptText,
+    `${card.id} bundled display copy stays independent from canonical prompt text`
+  );
+}
+assertEqual(
+  defaultDeck.cards['sceneFrameCard:locationSituation'].description,
+  'Tracks the current place, nearby routes, exposure, pressure, and immediate relevance.',
+  'Default location card uses concise display copy'
+);
 const firstCatalog = CARD_SCOPE_CATALOG[0];
 const firstCategoryId = firstCatalog.family.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 const firstCardId = `${firstCatalog.role}:${firstCatalog.subItems[0].key}`;
@@ -164,6 +198,50 @@ const normalizedDecks = normalizeCardDeckSettings({
 assertEqual(normalizedDecks.version, PRE_PROCESS_DECK_SETTINGS_VERSION, 'card deck settings version is 1');
 assertEqual(normalizedDecks.activeDeckId, customDeck.id, 'active custom deck preserved');
 assertEqual(normalizeCardDeckSettings({ activeDeckId: 'missing', customDecks: {} }).activeDeckId, DEFAULT_PRE_PROCESS_DECK_ID, 'missing active deck falls back to Default');
+assertEqual(
+  preProcessCategoryExpanded(normalizedDecks, customDeck.id, customDeck.categoryOrder[0]),
+  false,
+  'Pre-process categories default collapsed when no operator override exists'
+);
+const expandedPreProcess = setPreProcessCategoryExpanded(
+  normalizedDecks,
+  customDeck.id,
+  customDeck.categoryOrder[0],
+  true
+);
+assertEqual(
+  preProcessCategoryExpanded(
+    normalizeCardDeckSettings(JSON.parse(JSON.stringify(expandedPreProcess))),
+    customDeck.id,
+    customDeck.categoryOrder[0]
+  ),
+  true,
+  'Pre-process category expansion survives serialized settings normalization'
+);
+
+const normalizedBundledStates = normalizeCardDeckSettings({
+  activeDeckId: DEFAULT_PRE_PROCESS_DECK_ID,
+  defaultCardStates: {
+    [firstCardId]: 'priority',
+    missing: 'off',
+    invalid: 'unknown'
+  }
+});
+assertDeepEqual(
+  normalizedBundledStates.defaultCardStates,
+  { [firstCardId]: 'priority' },
+  'bundled selection overrides keep only known cards and valid states'
+);
+const defaultWithPriority = getActiveCardDeck({ preProcessDecks: normalizedBundledStates });
+assertEqual(defaultWithPriority.cards[firstCardId].selectionState, 'priority', 'bundled selection overrides are applied to the active Default deck');
+assertEqual(defaultWithPriority.readonly, true, 'bundled selection overrides do not make Default structurally editable');
+
+const defaultStateUpdate = updateActivePreProcessDeckSelection(
+  normalizedBundledStates,
+  updateCardSelectionState(defaultWithPriority, firstCardId, 'off')
+);
+assertEqual(defaultStateUpdate.defaultCardStates[firstCardId], 'off', 'Default card state changes persist in the bundled state overlay');
+assertDeepEqual(defaultStateUpdate.customDecks, {}, 'Default card state changes do not create a custom structural deck');
 
 assertEqual(duplicateDeckName('My Deck', { a: { name: 'My Deck' }, b: { name: 'My Deck Copy' } }), 'My Deck Copy 2', 'duplicate deck names increment');
 assertEqual(duplicateCardName('Scene Anchor Copy', [{ name: 'Scene Anchor' }, { name: 'Scene Anchor Copy' }]), 'Scene Anchor Copy 2', 'duplicate card names avoid Copy Copy');
@@ -190,7 +268,9 @@ assertEqual(ignoredLegacy.cardDecks, undefined, 'legacy cardDecks are omitted fr
 assertDeepEqual(ignoredLegacy.preProcessDecks, {
   version: PRE_PROCESS_DECK_SETTINGS_VERSION,
   activeDeckId: DEFAULT_PRE_PROCESS_DECK_ID,
-  customDecks: {}
+  customDecks: {},
+  defaultCardStates: {},
+  categoryExpansion: {}
 }, 'legacy card settings are ignored rather than migrated');
 
 const createdDecks = createCustomCardDeck({}, { name: 'Story Rules' });
@@ -202,6 +282,27 @@ const duplicatedDeck = duplicatedDefault.customDecks[duplicatedDefault.activeDec
 assertEqual(duplicatedDeck.name, 'Default Deck Copy', 'duplicating Default Deck creates an editable copy');
 assertEqual(duplicatedDeck.readonly, false, 'duplicated bundled deck is editable');
 assertEqual(Object.keys(duplicatedDeck.cards).length, CARD_SCOPE_CATALOG.reduce((sum, entry) => sum + entry.subItems.length, 0), 'duplicated Default retains bundled cards');
+
+const sourceCategoryId = customDeck.categoryOrder[0];
+const duplicateSourceSettings = setPreProcessCategoryExpanded(
+  normalizeCardDeckSettings({
+    activeDeckId: customDeck.id,
+    customDecks: { [customDeck.id]: customDeck }
+  }),
+  customDeck.id,
+  sourceCategoryId,
+  true
+);
+const duplicatedExpandedSettings = duplicateCardDeck(
+  { preProcessDecks: duplicateSourceSettings },
+  customDeck.id
+);
+const duplicatedExpandedDeck = duplicatedExpandedSettings.customDecks[duplicatedExpandedSettings.activeDeckId];
+assertEqual(
+  preProcessCategoryExpanded(duplicatedExpandedSettings, duplicatedExpandedDeck.id, duplicatedExpandedDeck.categoryOrder[0]),
+  true,
+  'duplicated Pre-process decks inherit source category expansion'
+);
 
 const withDraft = createDraftCard(duplicatedDeck, duplicatedDeck.categoryOrder[0]);
 const draftCard = Object.values(withDraft.cards).find((card) => card.name === NEW_CARD_NAME);
@@ -287,5 +388,23 @@ assert(!Object.values(withoutCategory.cardOrderByCategory || {}).some((order) =>
 const deleted = deleteCustomCardDeck({ preProcessDecks: duplicatedDefault }, duplicatedDefault.activeDeckId);
 assertEqual(deleted.activeDeckId, DEFAULT_PRE_PROCESS_DECK_ID, 'deleting active custom deck falls back to Default');
 assertEqual(deleted.customDecks[duplicatedDefault.activeDeckId], undefined, 'delete removes custom deck');
+assertEqual(deleted.categoryExpansion[duplicatedDefault.activeDeckId], undefined, 'deleting a Pre-process deck prunes its category expansion');
+
+const stalePreProcessExpansion = normalizeCardDeckSettings({
+  activeDeckId: customDeck.id,
+  customDecks: { [customDeck.id]: customDeck },
+  categoryExpansion: {
+    [customDeck.id]: {
+      [sourceCategoryId]: true,
+      missing: true
+    },
+    missingDeck: { missing: true }
+  }
+});
+assertDeepEqual(
+  stalePreProcessExpansion.categoryExpansion,
+  { [customDeck.id]: { [sourceCategoryId]: true } },
+  'Pre-process normalization prunes deleted category and deck expansion entries'
+);
 
 console.log('[pass] pre-process-decks');

@@ -67,7 +67,10 @@ assertDeepEqual(DEFAULT_RECURSION_SETTINGS.postProcess, {
 assertDeepEqual(DEFAULT_RECURSION_SETTINGS.postProcessDecks, {
   version: POST_PROCESS_DECK_SETTINGS_VERSION,
   activeDeckId: STARTER_POST_PROCESS_DECK_ID,
-  customDecks: {}
+  customDecks: {},
+  starterCategoryStates: {},
+  starterCardStates: {},
+  categoryExpansion: {}
 }, 'post-process deck defaults are exact');
 assertDeepEqual(normalizeSettings({}).postProcess, DEFAULT_RECURSION_SETTINGS.postProcess, 'post-process remains Off by default');
 assertEqual(normalizeSettings({}).postProcess.enabled, false, 'post-process feature defaults Off');

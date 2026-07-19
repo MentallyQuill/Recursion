@@ -1,6 +1,6 @@
 # Post-process Action Rail Parity Design
 
-**Date:** 2026-07-19  
+**Date:** 2026-07-19
 **Status:** Approved design, awaiting written-spec review
 
 ## Goal

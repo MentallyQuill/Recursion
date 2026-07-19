@@ -77,6 +77,70 @@ assertEqual(compactBarPresentation.showFreshNextGeneration, false, 'compact bar 
 assertEqual(compactBarPresentation.postProcessLabel, 'Post-process Cards: On', 'compact bar presenter exposes Post-process feature state');
 assertEqual(progressPanelState({ progressRun: { title: 'Generating', steps: [{ id: 's1' }] } }).steps.length, 1, 'progress panel presenter exposes steps');
 assertEqual(cardsPanelState({ lastHand: { cards: [{ id: 'c1' }] } }).count, 1, 'cards panel presenter counts hand cards');
+{
+  let heldCallback = null;
+  let nextFrameId = 0;
+  const frames = new Map();
+  const cancelledFrames = [];
+  const moves = [];
+  const scrollHost = {
+    scrollTop: 20,
+    getBoundingClientRect: () => ({ top: 100, bottom: 300 })
+  };
+  const dragController = createDeckDragController({
+    holdMs: 180,
+    setTimer(callback) {
+      heldCallback = callback;
+      return 1;
+    },
+    clearTimer() {
+      heldCallback = null;
+    },
+    requestFrame(callback) {
+      const id = ++nextFrameId;
+      frames.set(id, callback);
+      return id;
+    },
+    cancelFrame(id) {
+      cancelledFrames.push(id);
+      frames.delete(id);
+    },
+    onCategoryMove: (categoryId, beforeId) => moves.push({ categoryId, beforeId })
+  });
+  const runFrame = () => {
+    const entry = frames.entries().next().value;
+    assert(entry, 'continuous edge scrolling schedules another animation frame');
+    frames.delete(entry[0]);
+    entry[1]();
+  };
+
+  dragController.begin({ kind: 'category', id: 'category-a' }, { touch: true });
+  assertEqual(dragController.active(), null, 'touch drag waits for the short hold');
+  assertEqual(typeof heldCallback, 'function', 'touch drag exposes a cancellable hold callback');
+  heldCallback();
+  assertEqual(dragController.active().id, 'category-a', 'touch drag activates after the hold');
+  dragController.setEdgeScroll({ host: scrollHost, clientY: 292 });
+  runFrame();
+  const firstScrollTop = scrollHost.scrollTop;
+  assert(firstScrollTop > 20, 'touch drag scrolls while held stationary near the lower edge');
+  runFrame();
+  assert(scrollHost.scrollTop > firstScrollTop, 'touch edge scroll continues across animation frames without pointer movement');
+  assertEqual(dragController.drop({ beforeId: 'category-b' }), true, 'active touch drag drops normally after continuous scrolling');
+  assertDeepEqual(moves.at(-1), { categoryId: 'category-a', beforeId: 'category-b' }, 'drop preserves the requested category target');
+  assertEqual(frames.size, 0, 'drop cancels the edge-scroll animation loop');
+
+  dragController.begin({ kind: 'category', id: 'category-a' }, { touch: true });
+  heldCallback();
+  dragController.setEdgeScroll({ host: scrollHost, clientY: 108 });
+  dragController.cancel();
+  assertEqual(frames.size, 0, 'cancel tears down the edge-scroll animation loop');
+  assert(cancelledFrames.length >= 2, 'drop and cancel both cancel scheduled animation frames');
+
+  dragController.begin({ kind: 'category', id: 'category-a' }, { touch: true });
+  dragController.destroy();
+  assertEqual(heldCallback, null, 'destroy tears down a pending touch hold');
+  assertEqual(dragController.active(), null, 'destroy leaves no active drag');
+}
 const savedProviderDraft = {
   source: 'host-connection-profile',
   hostConnectionProfileId: 'saved-profile',
@@ -759,8 +823,6 @@ assert(
   /@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.recursion-post-process-panel\s*\{[\s\S]*?100dvh/.test(recursionCss),
   'Post-process panel clamps to the dynamic mobile viewport'
 );
-assert(/postProcessDragController\.begin\(postProcessDragState,\s*\{\s*touch:\s*true\s*\}\)/.test(recursionUi), 'mobile Post-process drag starts through the short-hold controller');
-assert(/list\.scrollTop[\s\S]*?event\.clientY[\s\S]*?list\.scrollTop/.test(recursionUi), 'mobile Post-process drag edge-scrolls the ordered deck list');
 assert(recursionUi.includes('Post-process Cards'), 'production UI records the Post-process Cards surface');
 assert(!/recursion-settings-reasoning/.test(recursionCss), 'settings panel does not keep a duplicate reasoning chain stylesheet');
 assert(!/settingsReasoningLevelRow|recursionSettingReasoningChoice|MODE_OPTIONS/.test(recursionUi), 'settings panel does not keep duplicate mode or reasoning handlers');
@@ -1318,7 +1380,7 @@ function createFakeDocument() {
       if (name === 'class') this.className = String(value);
       if (name === 'role') this.role = String(value);
       if (name === 'aria-label') this.ariaLabel = String(value);
-      if (name === 'value') this.value = String(value);
+      if (name === 'value' && this.tagName !== 'TEXTAREA') this.value = String(value);
       if (name === 'type') this.type = String(value);
       if (name === 'tabindex') this.tabIndex = Number(value);
       if (name === 'disabled') this.disabled = true;
@@ -2398,6 +2460,8 @@ try {
   root.querySelector('[data-recursion-post-process-cards-button]').click();
   assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'Post-process Cards button opens the panel');
   assertEqual(root.querySelector('[data-recursion-post-process-cards-button]').getAttribute('aria-expanded'), 'true', 'Post-process Cards button reflects open panel');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-deck-select]'), 'opening Post-process Cards focuses its deck selector');
+  assert(root.querySelector('[data-recursion-post-process-progress]'), 'generation status exposes the stable Post-process progress selector');
   root.querySelector('[data-recursion-post-process-enabled]').click();
   assertDeepEqual(settingsUpdates.at(-1), { postProcess: { enabled: true } }, 'Post-process feature toggles On independently');
   root.querySelector('[data-recursion-post-process-apply-replace]').click();
@@ -2409,7 +2473,8 @@ try {
     'Post-process Rewrite Flow selects Progressive'
   );
   assertEqual(root.querySelector('[data-recursion-post-process-panel]').hidden, false, 'segmented controls keep the Post-process panel open');
-  assertEqual(root.querySelector('[data-recursion-post-process-deck-rename]').disabled, true, 'starter Post-process Deck rename is read-only');
+  assert(root.querySelector('[data-recursion-post-process-deck-new]'), 'Post-process Deck exposes the stable new-deck selector');
+  assertEqual(root.querySelector('[data-recursion-post-process-deck-edit]').disabled, true, 'starter Post-process Deck edit is read-only');
   assertEqual(root.querySelector('[data-recursion-post-process-deck-delete]').disabled, true, 'starter Post-process Deck delete is read-only');
   assertEqual(root.querySelector('[data-recursion-post-process-category-toggle]').disabled, true, 'starter category toggles are read-only');
   assertEqual(root.querySelector('[data-recursion-post-process-card-toggle]').disabled, true, 'starter card toggles are read-only');
@@ -2419,9 +2484,22 @@ try {
   assert(!postProcessDeckPatch.preProcessDecks, 'Post-process deck actions do not mutate the Pre-process deck store');
   const customPostProcessDeckId = postProcessDeckPatch.postProcessDecks.activeDeckId;
   ui.update();
-  assert(root.querySelectorAll('[data-recursion-post-process-drag-handle]').length >= 8, 'editable duplicate exposes category and card drag handles');
-  assertEqual(root.querySelector('[data-recursion-post-process-deck-rename]').disabled, false, 'custom Post-process Deck can be renamed');
+  assert(root.querySelectorAll('[data-recursion-post-process-category-drag-handle]').length >= 2, 'editable duplicate exposes category drag handles');
+  assert(root.querySelectorAll('[data-recursion-post-process-card-drag-handle]').length >= 6, 'editable duplicate exposes card drag handles');
+  assertEqual(root.querySelectorAll('[data-recursion-post-process-drag-handle]').length, 0, 'Post-process drag handles have no ambiguous generic selector');
+  assertEqual(root.querySelector('[data-recursion-post-process-deck-edit]').disabled, false, 'custom Post-process Deck can be renamed');
   const customCategoryToggle = root.querySelector('[data-recursion-post-process-category-toggle]');
+  const customCategoryExpander = root.querySelector('[data-recursion-post-process-category-expand]');
+  const customCategoryHandle = root.querySelector('[data-recursion-post-process-category-drag-handle]');
+  const customCardToggleTooltip = root.querySelector('[data-recursion-post-process-card-toggle]');
+  const customCardHandle = root.querySelector('[data-recursion-post-process-card-drag-handle]');
+  for (const controlWithTooltip of [customCategoryToggle, customCategoryExpander, customCategoryHandle, customCardToggleTooltip, customCardHandle]) {
+    assertEqual(
+      controlWithTooltip.getAttribute('title'),
+      controlWithTooltip.getAttribute('aria-label'),
+      'icon-only Post-process controls expose a title matching their accessible name'
+    );
+  }
   const customCategoryId = customCategoryToggle.dataset.recursionPostProcessCategoryToggle;
   const customDeckBeforeCategoryOff = view.settings.postProcessDecks.customDecks[view.settings.postProcessDecks.activeDeckId];
   const savedChildStates = Object.fromEntries(
@@ -2447,6 +2525,7 @@ try {
   );
   root.querySelector('[data-recursion-post-process-category-create]').click();
   assert(root.querySelector('[data-recursion-post-process-card-editor]'), 'new category opens the shared Post-process editor');
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-editor-name]'), 'category editor focuses its name field');
   root.querySelector('[data-recursion-post-process-editor-name]').value = 'Polish';
   root.querySelector('[data-recursion-post-process-editor-description]').value = 'Final polish pass.';
   root.querySelector('[data-recursion-post-process-editor-save]').click();
@@ -2457,25 +2536,51 @@ try {
   );
   const polishCategory = Object.values(view.settings.postProcessDecks.customDecks[view.settings.postProcessDecks.activeDeckId].categories)
     .find((category) => category.name === 'Polish');
+  const polishEditButton = root.querySelectorAll('[data-recursion-post-process-category-edit]')
+    .find((button) => button.dataset.recursionPostProcessCategoryEdit === polishCategory.id);
+  polishEditButton.click();
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-editor-name]'), 'editing a category focuses its name field');
+  root.querySelector('[data-recursion-post-process-editor-name]').value = 'Polish revised';
+  root.querySelector('[data-recursion-post-process-editor-save]').click();
+  const revisedPolishCategory = view.settings.postProcessDecks.customDecks[view.settings.postProcessDecks.activeDeckId].categories[polishCategory.id];
+  assertEqual(revisedPolishCategory.description, 'Final polish pass.', 'editing an existing category preserves its textarea description without retyping it');
   root.querySelectorAll('[data-recursion-post-process-card-create]')
-    .find((button) => button.dataset.recursionPostProcessCardCreate === polishCategory.id)
+    .find((button) => button.dataset.recursionPostProcessCardCreate === revisedPolishCategory.id)
     .click();
+  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-editor-name]'), 'card editor focuses its name field');
   root.querySelector('[data-recursion-post-process-editor-name]').value = 'Tighten';
   root.querySelector('[data-recursion-post-process-editor-description]').value = 'Make each line carry weight.';
-  root.querySelector('[data-recursion-post-process-editor-prompt]').value = 'Remove filler while preserving meaning and voice.';
+  root.querySelector('[data-recursion-post-process-card-prompt]').value = 'Remove filler while preserving meaning and voice.';
   root.querySelector('[data-recursion-post-process-editor-save]').click();
   assert(
     Object.values(view.settings.postProcessDecks.customDecks[view.settings.postProcessDecks.activeDeckId].cards)
       .some((card) => card.name === 'Tighten' && card.promptText.includes('Remove filler')),
     'card editor creates a user-authored Post-process prompt'
   );
-  const firstPostProcessHandle = root.querySelector('[data-recursion-post-process-drag-handle]');
+  const tightenCard = Object.values(view.settings.postProcessDecks.customDecks[view.settings.postProcessDecks.activeDeckId].cards)
+    .find((card) => card.name === 'Tighten');
+  const tightenEditButton = root.querySelectorAll('[data-recursion-post-process-card-edit]')
+    .find((button) => button.dataset.recursionPostProcessCardEdit === tightenCard.id);
+  tightenEditButton.click();
+  root.querySelector('[data-recursion-post-process-editor-name]').value = 'Tighten revised';
+  root.querySelector('[data-recursion-post-process-editor-save]').click();
+  const revisedTightenCard = view.settings.postProcessDecks.customDecks[view.settings.postProcessDecks.activeDeckId].cards[tightenCard.id];
+  assertEqual(revisedTightenCard.description, 'Make each line carry weight.', 'editing an existing card preserves its textarea description without retyping it');
+  assertEqual(revisedTightenCard.promptText, 'Remove filler while preserving meaning and voice.', 'editing an existing card preserves its textarea prompt without retyping it');
+  const firstPostProcessHandle = root.querySelector('[data-recursion-post-process-category-drag-handle]');
   firstPostProcessHandle.keydown({ key: 'ArrowDown' });
   assert(settingsUpdates.at(-1).postProcessDecks, 'keyboard drag-handle movement persists ordered Post-process deck state');
-  root.querySelector('[data-recursion-post-process-card-edit]').click();
+  const cancelEditButton = root.querySelector('[data-recursion-post-process-card-edit]');
+  const cancelEditCardId = cancelEditButton.dataset.recursionPostProcessCardEdit;
+  cancelEditButton.click();
   root.querySelector('[data-recursion-post-process-card-editor]').keydown({ key: 'Escape' });
   assertEqual(root.querySelector('[data-recursion-post-process-card-editor]'), null, 'Escape cancels the active Post-process editor');
-  assertEqual(fakeDocument.activeElement, root.querySelector('[data-recursion-post-process-cards-button]'), 'Escape returns focus to the Post-process Cards trigger');
+  assertEqual(
+    fakeDocument.activeElement,
+    root.querySelectorAll('[data-recursion-post-process-card-edit]')
+      .find((button) => button.dataset.recursionPostProcessCardEdit === cancelEditCardId),
+    'Escape returns focus to the card editor launcher'
+  );
   const postProcessDeckSelect = root.querySelector('[data-recursion-post-process-deck-select]');
   postProcessDeckSelect.value = 'starter-post-process';
   postProcessDeckSelect.dispatchEvent({ type: 'change' });

@@ -603,16 +603,23 @@ data-recursion-post-process-cards-button
 data-recursion-post-process-panel
 data-recursion-post-process-enabled
 data-recursion-post-process-deck-select
+data-recursion-post-process-deck-duplicate
+data-recursion-post-process-deck-new
+data-recursion-post-process-deck-edit
+data-recursion-post-process-deck-delete
 data-recursion-post-process-apply-as-swipe
 data-recursion-post-process-apply-replace
 data-recursion-post-process-flow-unified
 data-recursion-post-process-flow-progressive
 data-recursion-post-process-category
 data-recursion-post-process-category-toggle
+data-recursion-post-process-category-drag-handle
 data-recursion-post-process-card
 data-recursion-post-process-card-toggle
+data-recursion-post-process-card-drag-handle
 data-recursion-post-process-card-editor
-data-recursion-post-process-drag-handle
+data-recursion-post-process-card-prompt
+data-recursion-post-process-progress
 ```
 
 ## Diagnostics and Privacy

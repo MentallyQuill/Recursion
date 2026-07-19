@@ -88,27 +88,88 @@ export function renderDeckCard(options = {}) {
 export function createDeckDragController({
   onCategoryMove = () => {},
   onCardMove = () => {},
-  holdMs = 180
+  holdMs = 180,
+  edgePx = 32,
+  scrollStep = 14,
+  setTimer = (callback, delay) => setTimeout(callback, delay),
+  clearTimer = (timer) => clearTimeout(timer),
+  requestFrame = (callback) => typeof requestAnimationFrame === 'function'
+    ? requestAnimationFrame(callback)
+    : setTimeout(callback, 16),
+  cancelFrame = (frame) => typeof cancelAnimationFrame === 'function'
+    ? cancelAnimationFrame(frame)
+    : clearTimeout(frame)
 } = {}) {
   let active = null;
   let holdTimer = null;
+  let edgeScrollFrame = null;
+  let edgeScrollHost = null;
+  let edgeScrollDirection = 0;
+  let destroyed = false;
+
+  function stopEdgeScroll() {
+    if (edgeScrollFrame !== null) cancelFrame(edgeScrollFrame);
+    edgeScrollFrame = null;
+    edgeScrollHost = null;
+    edgeScrollDirection = 0;
+  }
 
   function clear() {
-    if (holdTimer !== null) clearTimeout(holdTimer);
+    if (holdTimer !== null) clearTimer(holdTimer);
     holdTimer = null;
+    stopEdgeScroll();
     active = null;
   }
 
   function begin(detail = {}, { touch = false } = {}) {
+    if (destroyed) return false;
     clear();
     if (!touch) {
       active = detail;
-      return;
+      return true;
     }
-    holdTimer = setTimeout(() => {
+    holdTimer = setTimer(() => {
       active = detail;
       holdTimer = null;
     }, Math.max(0, Number(holdMs) || 0));
+    return true;
+  }
+
+  function scheduleEdgeScroll() {
+    if (!active || !edgeScrollHost || edgeScrollDirection === 0 || edgeScrollFrame !== null) return;
+    edgeScrollFrame = requestFrame(() => {
+      edgeScrollFrame = null;
+      if (!active || !edgeScrollHost || edgeScrollDirection === 0) return;
+      edgeScrollHost.scrollTop = Math.max(
+        0,
+        Number(edgeScrollHost.scrollTop || 0) + (edgeScrollDirection * Math.max(1, Number(scrollStep) || 1))
+      );
+      scheduleEdgeScroll();
+    });
+  }
+
+  function setEdgeScroll({ host = null, clientY = 0 } = {}) {
+    if (!active || !host) {
+      stopEdgeScroll();
+      return false;
+    }
+    const rect = host.getBoundingClientRect?.();
+    const pointerY = Number(clientY);
+    const threshold = Math.max(0, Number(edgePx) || 0);
+    const direction = rect && pointerY < Number(rect.top) + threshold
+      ? -1
+      : rect && pointerY > Number(rect.bottom) - threshold
+        ? 1
+        : 0;
+    if (direction === 0) {
+      stopEdgeScroll();
+      return false;
+    }
+    if (edgeScrollHost !== host || edgeScrollDirection !== direction) stopEdgeScroll();
+    edgeScrollHost = host;
+    edgeScrollDirection = direction;
+    scheduleEdgeScroll();
+    return true;
   }
 
   function drop(target = {}) {
@@ -126,10 +187,18 @@ export function createDeckDragController({
     return false;
   }
 
+  function destroy() {
+    clear();
+    destroyed = true;
+  }
+
   return {
     begin,
     cancel: clear,
     drop,
-    active: () => active
+    active: () => active,
+    setEdgeScroll,
+    stopEdgeScroll,
+    destroy
   };
 }

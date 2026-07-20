@@ -1456,6 +1456,48 @@ assertEqual(connectionProfileCalls[1].maxTokens, 512, 'host connection profile r
 assert(typeof connectionProfileCalls[0].parameters.signal?.addEventListener === 'function', 'connection profile service receives abort-capable provider signal');
 assertEqual(connectionProfileCalls[0].parameters.signal.aborted, false, 'connection profile service receives active provider signal');
 
+const unlistedProfileCalls = [];
+const unlistedProfileHost = createSillyTavernHost({
+  contextFactory: () => ({
+    chatId: 'unlisted-profile-chat',
+    chat: [],
+    ConnectionManagerRequestService: {
+      async sendRequest(profileId, messages, maxTokens, requestOptions, parameters) {
+        unlistedProfileCalls.push({ profileId, messages, maxTokens, requestOptions, parameters });
+        return {
+          text: JSON.stringify({
+            schema: 'recursion.postProcessGuidance.v1',
+            snapshotHash: 'unlisted-profile-snapshot',
+            sourceHash: 'unlisted-profile-source',
+            guidanceText: 'Preserve the scene state and answer the newest user turn directly.'
+          })
+        };
+      }
+    }
+  }),
+  settingsRoot: {
+    recursion: {
+      reasoningLevel: 'medium',
+      providers: {
+        utility: {
+          source: 'host-connection-profile',
+          hostConnectionProfileId: 'saved-but-unlisted-profile',
+          maxTokens: 512
+        }
+      }
+    }
+  }
+});
+const unlistedProfileResult = await createGenerationRouter({ client: unlistedProfileHost.providerClient }).generate('postProcessGuidanceUtility', {
+  prompt: 'Synthesize post-process guidance through a callable saved profile.',
+  snapshotHash: 'unlisted-profile-snapshot',
+  sourceHash: 'unlisted-profile-source',
+  reasoningLevel: 'medium'
+});
+assertEqual(unlistedProfileResult.ok, true, 'production calls may use a saved profile even when synchronous profile enumeration is unavailable');
+assertEqual(unlistedProfileCalls.length, 1, 'callable unlisted profile reaches ConnectionManagerRequestService');
+assertEqual(unlistedProfileCalls[0].profileId, 'saved-but-unlisted-profile', 'callable unlisted profile preserves its saved profile id');
+
 const deepSeekProfileCalls = [];
 const deepSeekProfileHost = createSillyTavernHost({
   contextFactory: () => ({
@@ -1569,6 +1611,16 @@ const currentModelHost = createSillyTavernHost({
     chat: [],
     generateRaw: async (request) => {
       currentModelRawCalls.push(request);
+      if (request.jsonSchema?.name === 'recursion_postProcessGuidance_v1') {
+        return {
+          text: JSON.stringify({
+            schema: 'recursion.postProcessGuidance.v1',
+            snapshotHash: request.jsonSchema.value.properties.snapshotHash.const,
+            sourceHash: request.jsonSchema.value.properties.sourceHash.const,
+            guidanceText: 'Continue from the established scene state and answer the newest turn.'
+          })
+        };
+      }
       return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };
     },
     ConnectionManagerRequestService: {
@@ -1592,15 +1644,42 @@ const currentModelHost = createSillyTavernHost({
     }
   }
 });
-const currentModelRouted = await createGenerationRouter({ client: currentModelHost.providerClient }).generate('utilityArbiter', { prompt: 'Use current model.' });
+const currentModelRouted = await createGenerationRouter({ client: currentModelHost.providerClient }).generate('utilityArbiter', {
+  prompt: 'Use current model.',
+  snapshotHash: 'current-model-schema-snapshot'
+});
 assertEqual(currentModelRouted.ok, true, 'host current model routes successfully with stale profile id');
 assertEqual(currentModelProfileCalls.length, 0, 'host current model does not call connection profile service with stale profile id');
 assertEqual(currentModelRawCalls.length, 1, 'host current model uses generateRaw when available');
 assertEqual(currentModelRawCalls[0].providerSource, 'host-current-model', 'host current model source is passed to generateRaw');
+assertEqual(currentModelRawCalls[0].jsonSchema.name, 'recursion_utilityArbiter_v1', 'host current model receives the normalized machine JSON schema envelope');
+assertEqual(
+  currentModelRawCalls[0].jsonSchema.value.properties.snapshotHash.const,
+  'current-model-schema-snapshot',
+  'host current model machine JSON schema preserves request identity constraints'
+);
 assertEqual(
   Object.prototype.hasOwnProperty.call(currentModelRawCalls[0], 'hostConnectionProfileId'),
   false,
   'host current model generateRaw request omits stale profile id'
+);
+const currentModelPostProcess = await createGenerationRouter({ client: currentModelHost.providerClient }).generate('postProcessGuidanceUtility', {
+  prompt: 'Synthesize current-model post-process guidance.',
+  snapshotHash: 'current-model-post-process-snapshot',
+  sourceHash: 'current-model-post-process-source',
+  reasoningLevel: 'medium'
+});
+assertEqual(currentModelPostProcess.ok, true, 'host current model returns valid post-process guidance through the normalized schema path');
+assertEqual(currentModelRawCalls[1].jsonSchema.name, 'recursion_postProcessGuidance_v1', 'host current model post-process call receives the named schema envelope');
+assertEqual(
+  currentModelRawCalls[1].jsonSchema.value.properties.snapshotHash.const,
+  'current-model-post-process-snapshot',
+  'host current model post-process schema constrains snapshot identity'
+);
+assertEqual(
+  currentModelRawCalls[1].jsonSchema.value.properties.sourceHash.const,
+  'current-model-post-process-source',
+  'host current model post-process schema constrains source identity'
 );
 
 const stableSceneMessages = [{ mesid: 1, is_user: true, mes: 'First turn in the same scene.' }];

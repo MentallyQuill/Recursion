@@ -1946,14 +1946,14 @@ async function rejectedReasonerForState(state) {
 
 for (const state of ['unconfigured', 'untested', 'unhealthy']) {
   const rejected = await rejectedReasonerForState(state);
-  if (state === 'untested') {
-    assertEqual(rejected.result.ok, true, 'untested Reasoner proceeds with caution');
-    assertEqual(rejected.generationCalls.length, 1, 'untested Reasoner reaches the configured host');
-  } else {
-    assertEqual(rejected.result.ok, false, `${state} Reasoner returns failure result`);
-    assertEqual(rejected.result.error.code, 'RECURSION_PROVIDER_NOT_READY', `${state} Reasoner exposes stable readiness code`);
-    assertEqual(rejected.generationCalls.length, 0, `${state} Reasoner does not call host`);
+  if (state === 'unconfigured') {
+    assertEqual(rejected.result.ok, false, 'unconfigured Reasoner returns the adapter configuration failure');
+    assertEqual(rejected.result.error.code, 'RECURSION_PROVIDER_KEY_MISSING', 'unconfigured Reasoner exposes the precise adapter failure instead of a health-gate failure');
+    assertEqual(rejected.generationCalls.length, 0, 'unconfigured direct Reasoner does not call the host adapter');
+    continue;
   }
+  assertEqual(rejected.result.ok, true, `${state} Reasoner proceeds with advisory capability status`);
+  assertEqual(rejected.generationCalls.length, 1, `${state} Reasoner reaches the configured host`);
 }
 
 let missingKeyFetches = 0;

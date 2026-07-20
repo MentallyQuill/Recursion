@@ -1186,6 +1186,38 @@ if (false) {
   globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
   globalThis.SillyTavern = {
     getContext: () => ({
+      chatId: 'quiet-interceptor-bypass-chat',
+      chat: [{ mesid: 0, is_user: false, mes: 'Committed assistant before internal quiet generation.' }],
+      extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
+      extension_prompt_roles: { SYSTEM: 'SYSTEM' },
+      setExtensionPrompt() {},
+      async generateRaw(request = {}) {
+        prompts.push(String(request.prompt || ''));
+        return { text: '{}' };
+      }
+    })
+  };
+
+  await globalThis.recursionOnDelete();
+  const quietChat = [{ mesid: 0, is_user: false, mes: 'Internal quiet generation source.' }];
+  assertEqual(
+    await globalThis.recursionGenerationInterceptor(quietChat, undefined, undefined, 'quiet'),
+    quietChat,
+    'quiet generation interceptor returns the original chat'
+  );
+  assertEqual(prompts.length, 0, 'internal quiet generation bypasses Recursion prompt preparation');
+  await globalThis.recursionOnDelete();
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
+
+{
+  const prompts = [];
+  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.SillyTavern = {
+    getContext: () => ({
       chatId: 'pending-interceptor-chat',
       chat: [{ mesid: 0, is_user: false, mes: 'Committed assistant message.' }],
       extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
@@ -1672,8 +1704,11 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
     return result;
   };
   let runCalls = 0;
+  let originalTerminalReturned = false;
+  let writerStartedAfterTerminalReturn = false;
   activeRuntime.runPostProcessForLatestAssistant = async () => {
     runCalls += 1;
+    writerStartedAfterTerminalReturn = originalTerminalReturned;
     await writerGate;
     writerSettled = true;
     return { ok: true, committed: true };
@@ -1694,7 +1729,10 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
     swipes: [sourceText],
     swipe_info: [{ extra: {} }]
   });
-  const firstEnd = eventSource.emit('generation_ended', { mesid: 1 });
+  const firstEnd = eventSource.emit('generation_ended', { mesid: 1 })
+    .then(() => {
+      originalTerminalReturned = true;
+    });
   await waitUntil(
     () => lockStarted && finalizationClaims === 1,
     'first terminal event did not claim finalization before the delayed control lock'
@@ -1712,11 +1750,18 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
 
   releaseLock();
   await waitUntil(() => runCalls === 1, 'claimed finalization did not start one Post-process writer after lock');
+  assertEqual(writerStartedAfterTerminalReturn, true, 'Post-process writer starts only after the native generation-ended dispatch returns');
   assertEqual(writerSettled, false, 'Post-process writer remains pending behind the writer gate');
   assertEqual(fake.controlEvents.filter((event) => event === 'unlock').length, 0, 'controls stay locked while the Post-process writer is pending');
   assertEqual(warmCalls, 0, 'Rapid warming waits for the Post-process writer to settle');
   releaseWriter();
   await Promise.all([firstEnd, duplicateEnd]);
+  await waitUntil(
+    () => writerSettled
+      && fake.controlEvents.filter((event) => event === 'unlock').length === 1
+      && warmCalls === 1,
+    'deferred Post-process finalization did not settle after the writer completed'
+  );
   assertEqual(writerSettled, true, 'the one claimed Post-process writer settles');
   assertEqual(runCalls, 1, 'duplicate terminal events start exactly one Post-process writer');
   assertEqual(fake.controlEvents.filter((event) => event === 'unlock').length, 1, 'the claimed finalization unlocks controls exactly once');
@@ -1970,6 +2015,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
   assertEqual(runCalls, 0, 'mismatched terminal message id cannot consume the Post-process arm');
   assertEqual(activeRuntime.postProcessPending(), true, 'mismatched terminal event leaves the valid arm pending');
   await eventSource.emit('generation_ended', fake.context.chat.length);
+  await waitUntil(() => runCalls === 1, 'deferred matching terminal event did not start Post-process');
   assertEqual(runCalls, 1, 'SillyTavern chat-length terminal event consumes the matching arm exactly once');
 
   await globalThis.recursionOnDelete();
@@ -2023,6 +2069,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
   fake.context.chat[0].mes = 'The response begins here and continues with a decisive action.';
   fake.context.chat[0].swipes[0] = fake.context.chat[0].mes;
   await eventSource.emit('generation_ended', { mesid: 4 });
+  await waitUntil(() => continuationRuns === 1, 'deferred continuation terminal event did not start Post-process');
   assertEqual(continuationRuns, 1, 'same-message continuation with changed text is a valid newly landed target');
 
   await globalThis.recursionOnDelete();

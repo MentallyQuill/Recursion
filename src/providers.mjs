@@ -2166,11 +2166,7 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
       operation,
       host: providerCapabilityHost(host)
     });
-    if (
-      (resolvedRoleId === 'providerTest' && !capability.testable)
-      || (postProcessGuidanceRole && !capability.eligible)
-      || (lane === 'reasoner' && resolvedRoleId !== 'providerTest' && !capability.eligible)
-    ) {
+    if (resolvedRoleId === 'providerTest' && !capability.testable) {
       throw providerError(
         'RECURSION_PROVIDER_NOT_READY',
         capability.message,

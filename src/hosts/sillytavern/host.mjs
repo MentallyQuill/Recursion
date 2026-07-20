@@ -1389,7 +1389,7 @@ export function createSillyTavernHost({
           temperature: requestTemperature(request),
           topP: requestTopP(request),
           providerSource: request.providerSource,
-          jsonSchema: request.jsonSchema,
+          jsonSchema: requestJsonSchema(request) ?? request.jsonSchema,
           ...(reasoning
             ? {
                 reasoning,

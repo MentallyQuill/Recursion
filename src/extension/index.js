@@ -272,6 +272,14 @@ function invokeRuntimeCleanup(methodName, label, ...args) {
   });
 }
 
+function deferPostProcessFinalization(task) {
+  globalThis.setTimeout(() => {
+    Promise.resolve()
+      .then(task)
+      .catch((error) => warn('Deferred Post-process finalization failed.', error));
+  }, 0);
+}
+
 function registerHostEvents(nextRuntime, currentHost = host) {
   clearHostEventSubscriptions();
   const context = getSillyTavernContextSafe();
@@ -388,33 +396,42 @@ function registerHostEvents(nextRuntime, currentHost = host) {
               })
               .then((runReady) => {
                 if (runReady?.ready !== true) {
-                  return {
-                    ok: true,
-                    skipped: true,
-                    reason: runReady?.reason || 'post-process-arm-canceled'
-                  };
+                  return generationEnded()
+                    .finally(() => unlockPostProcessControls(currentHost))
+                    .then(() => ({
+                      ok: true,
+                      skipped: true,
+                      reason: runReady?.reason || 'post-process-arm-canceled'
+                    }));
                 }
-                return invokeRuntimeCleanup(
-                  'runPostProcessForLatestAssistant',
-                  'Post-processing failed.',
-                  {
-                    hostTriggered: true,
-                    operationToken: target.operationToken,
-                    reason: 'assistant-message-landed'
+                deferPostProcessFinalization(async () => {
+                  try {
+                    const result = await invokeRuntimeCleanup(
+                      'runPostProcessForLatestAssistant',
+                      'Post-processing failed.',
+                      {
+                        hostTriggered: true,
+                        operationToken: target.operationToken,
+                        reason: 'assistant-message-landed'
+                      }
+                    );
+                    shouldWarmRapid = result?.reason !== 'canceled';
+                    await generationEnded();
+                  } finally {
+                    await unlockPostProcessControls(currentHost);
                   }
-                ).then((result) => {
-                  shouldWarmRapid = result?.reason !== 'canceled';
-                  return result;
+                  lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
+                  if (!shouldWarmRapid) {
+                    return { ok: true, skipped: true, reason: 'post-process-warm-suppressed' };
+                  }
+                  return invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' });
                 });
-              })
-              .then(() => generationEnded())
-              .finally(() => unlockPostProcessControls(currentHost))
-              .then(() => {
                 lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
-                if (!shouldWarmRapid) {
-                  return { ok: true, skipped: true, reason: 'post-process-warm-suppressed' };
-                }
-                return invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' });
+                return {
+                  ok: true,
+                  scheduled: true,
+                  reason: 'post-process-deferred-until-generation-ended-return'
+                };
               });
           });
       }
@@ -598,6 +615,7 @@ async function teardownRecursion(label) {
 }
 
 export async function recursionGenerationInterceptor(chat, _contextSize, _abort, generationType = '') {
+  if (String(generationType || '').trim().toLowerCase() === 'quiet') return chat;
   const activeRuntime = bootstrapRecursion();
   if (!activeRuntime) return chat;
 

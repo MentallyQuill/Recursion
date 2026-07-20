@@ -155,12 +155,11 @@ Every operation checks source identity, stale-state boundaries, guidance shape, 
 ## Fast Start
 
 1. Install Recursion as a SillyTavern extension and refresh your browser.
-2. Configure and test the Utility provider.
-3. Add the optional Reasoner provider if you want deeper synthesis at higher reasoning levels.
-4. Start with the Standard pipeline while you confirm behavior in a scene.
-5. Use Auto for normal hands-off preparation, or Manual when you want explicit control.
-6. Open Last Brief after generation to inspect what Recursion prepared.
-7. If the completed reply needs revision, enable Post-process Cards, choose a starter deck, and try `Unified` with `As Swipe` first.
+2. Configure and test the Utility provider and Reasoner provider.
+3. Use Standard pipeline for fast-cheap-dumb models (<500B models, like Llama, Qwen, Gemma , GPT OSS, flash-lite models, o3-mini, etc). Use Fused pipeline for fast-lesscheap-smart models (>500B models, like Nemotron, Deepseek, and similar)
+4. Use Auto for normal hands-off preparation, or Manual when you want explicit control over what cards are pre-processed. Set cards to Priority for semi-auto.
+5. Open Last Brief after generation to inspect what Recursion prepared.
+6. If the completed reply needs further revision, enable Post-process Cards, choose a starter deck, and try `Unified` with `As Swipe` first.
 
 For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_WORKFLOW.md). For the full surface-by-surface guide, use the [Operator Manual](docs/user/RECURSION_OPERATOR_MANUAL.md).
 

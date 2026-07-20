@@ -135,6 +135,8 @@ Prompt packets include selected-card references, omissions, injection metadata, 
 
 Pre-process Cards are the scene-evidence deck used before the host writes a response. Post-process Cards are an independent ordered deck evaluated only after an assistant response lands. Post-process guidance is structured provider output; SillyTavern's native quiet-generation path is the only prose writer. Unified performs one guidance synthesis and one host rewrite for all enabled categories. Progressive rewrites category-by-category while carrying the latest valid draft forward. As Swipe appends the result as a selected swipe; Replace updates the selected response in place only after a complete successful run.
 
+![Pre-process guidance, SillyTavern generation, and optional Post-process refinement workflow](../../assets/documentation/renders/recursion-pre-and-post-process-flow.png)
+
 Post-process freezes the source response, bounded visible evidence, Pre-process packet, active Post-process deck, and operation settings before provider work. Guidance uses one sticky provider lane with at most one same-lane correction retry. Failed or stale work never commits a response mutation, and one sanitized Post-process marker records a successful settlement.
 
 ## Storage And Diagnostics

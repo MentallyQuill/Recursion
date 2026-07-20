@@ -59,6 +59,8 @@ prose writer.
 
 ### Unified
 
+![Unified Post-process flow from enabled revision cards through one guidance synthesis, one native host rewrite, and one final commit](../../assets/documentation/renders/recursion-post-process-unified-flow.png)
+
 ```text
 ordered runnable categories/cards
   -> one same-lane guidance synthesis (at most two attempts)
@@ -72,6 +74,8 @@ original draft, the ordered cards, synthesized guidance, and immutable writer
 boundaries; it returns only the revised assistant response.
 
 ### Progressive
+
+![Progressive Post-process flow carrying each successful category rewrite forward while preserving frozen evidence](../../assets/documentation/renders/recursion-post-process-progressive-flow.png)
 
 ```text
 frozen evidence + original draft + category 1

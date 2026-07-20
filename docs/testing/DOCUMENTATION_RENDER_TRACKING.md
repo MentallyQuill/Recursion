@@ -94,7 +94,7 @@ Explanatory pipeline, storage, provider, redaction, testing, card, prompt, host-
 
 ## Promoted Documentation Renders
 
-These assets are promoted documentation renders and may be embedded directly from `assets/documentation/renders/`. Live UI captures use the `live host` source type; the two overview infographics use `supplied screenshot` because they were provided as reviewed explanatory assets rather than captured from SillyTavern.
+These assets are promoted documentation renders and may be embedded directly from `assets/documentation/renders/`. Live UI captures use the `live host` source type; the four explanatory infographics use `supplied screenshot` because they were provided as reviewed assets rather than captured from SillyTavern.
 
 | Asset | Source Type | Current Primary Doc | Visual Scope |
 | --- | --- | --- | --- |
@@ -135,6 +135,9 @@ These assets are promoted documentation renders and may be embedded directly fro
 | `recursion-post-process-progressive-partial.png` | live host | `docs/user/RECURSION_OPERATOR_MANUAL.md`, `docs/testing/LIVE_SMOKE_TEST_PLAN.md` | Progressive Post-process partial settlement showing one failed category, retained latest valid draft, and safe swipe outcome. |
 | `recursion-provider-failure-reason-inline.png` | live host | `docs/user/PROVIDER_SETUP.md` | Normalized provider failure reason with Utility fallback and redacted status. |
 | `recursion-dynamic-card-selection.png` | supplied screenshot | `README.md`, `docs/technical/CARD_DECK_AND_HAND.md` | Full scene deck narrowed to a compact turn hand and converted into injected guidance, card evidence, and guardrails. |
+| `recursion-pre-and-post-process-flow.png` | supplied screenshot | `docs/technical/RECURSION_TECHNICAL_MANUAL.md` | Pre-process guidance, native SillyTavern generation, and optional Dialogue or Prose Post-process refinement leading to the final response. |
+| `recursion-post-process-unified-flow.png` | supplied screenshot | `docs/architecture/POST_PROCESS_CARDS_RUNTIME.md` | Enabled Post-process cards synthesized into one guidance packet, followed by one native host rewrite and one final commit. |
+| `recursion-post-process-progressive-flow.png` | supplied screenshot | `docs/architecture/POST_PROCESS_CARDS_RUNTIME.md` | Frozen evidence reused across ordered categories while each successful native host rewrite becomes the next writable draft. |
 
 ## Open Render Inventory
 

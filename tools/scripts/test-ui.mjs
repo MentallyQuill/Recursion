@@ -163,7 +163,7 @@ const uiActionStatus = createUiActionStatus();
 uiActionStatus.setFailure('', 'Copy failed.');
 assertEqual(
   uiActionStatus.current().label,
-  'Unexpected internal failure (RECURSION_UI_ACTION_FAILED).',
+  'Recursion hit an unexpected internal error.',
   'UI action status never presents a generic fallback as the failure reason'
 );
 uiActionStatus.set('Card prioritized.', 'success');
@@ -3128,7 +3128,32 @@ try {
     'routine progress rows omit visible reason copy'
   );
   assert(!routineProgressRow.className.includes('has-reason'), 'routine progress rows keep compact fixed-height geometry');
+  assertEqual(routineProgressRow.querySelector('[data-recursion-progress-action]').textContent, '', 'routine row omits action copy');
+  assert(!routineProgressRow.className.includes('has-action'), 'routine row keeps compact geometry');
   assert(routineProgressRow.getAttribute('title').includes(`Reason: ${routineReason}`), 'routine progress row tooltip retains its explanation');
+  const timeoutReason = 'The selected model connection did not respond before the time limit.';
+  const timeoutAction = 'Check the selected connection profile, then try again.';
+  view = {
+    ...view,
+    activity: { phase: 'settled', severity: 'error', label: 'Recursion could not prepare the prompt.' },
+    progressRun: {
+      runId: 'ui-readable-failure',
+      title: 'Issue',
+      steps: [{
+        id: 'composing-prompt-packet', label: 'Composing prompt packet', providerLane: 'utility', state: 'failed',
+        reason: timeoutReason, suggestedAction: timeoutAction, failureCode: 'RECURSION_PROVIDER_TIMEOUT'
+      }]
+    }
+  };
+  ui.update();
+  const timeoutRow = root.querySelectorAll('[data-recursion-progress-row]')
+    .find((row) => row.dataset.recursionProgressStepId === 'composing-prompt-packet');
+  assertEqual(timeoutRow.querySelector('[data-recursion-progress-reason]').textContent, timeoutReason, 'failed row shows readable reason');
+  assertEqual(timeoutRow.querySelector('[data-recursion-progress-action]').textContent, `Try: ${timeoutAction}`, 'failed row shows next action');
+  assert(timeoutRow.className.includes('has-action'), 'failed row expands for next action');
+  assert(timeoutRow.getAttribute('title').includes(`Reason: ${timeoutReason}`), 'tooltip repeats reason');
+  assert(timeoutRow.getAttribute('title').includes(`Try: ${timeoutAction}`), 'tooltip repeats action');
+  assert(!fakeDocument.textTree(timeoutRow).includes('RECURSION_PROVIDER_TIMEOUT'), 'ordinary row text hides diagnostic code');
   view = {
     ...view,
     activity: originalActivity,

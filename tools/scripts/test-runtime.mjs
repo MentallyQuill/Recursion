@@ -11311,20 +11311,29 @@ for (const scenario of [
   const { runtime } = createRuntimeHarness({
     settings: { mode: 'auto', reasonerUse: 'off' },
     snapshot: () => {
-      throw new Error('snapshot failed with Bearer crash-token, sk-crash-runtime, and private-secret');
+      throw Object.assign(
+        new Error('snapshot failed with Bearer crash-token, sk-crash-runtime, and private-secret'),
+        { code: 'RECURSION_SNAPSHOT_FAILED' }
+      );
     }
   });
-  let threw = false;
   let caughtError = null;
   try {
     await runtime.prepareForGeneration({ userMessage: 'Crash safely.' });
   } catch (error) {
-    threw = true;
     caughtError = error;
   }
-  assertEqual(threw, true, 'runtime failure still throws to caller');
+  const view = runtime.view();
+  assert(caughtError, 'runtime failure still throws to caller');
   assertNoSecretText(caughtError?.message || caughtError, 'runtime thrown error');
-  assertNoSecretText(runtime.view().activity.detail, 'runtime failure activity detail');
+  assertEqual(view.activity.phase, 'settled', 'runtime failure settles activity');
+  assertEqual(view.activity.severity, 'error', 'runtime failure is error severity');
+  assertEqual(view.activity.logicalStage, 'started', 'runtime failure captures active logical stage');
+  assertEqual(view.activity.detail.failure.code, 'RECURSION_SNAPSHOT_FAILED', 'runtime keeps diagnostic code');
+  assertEqual(view.activity.detail.failure.category, 'internal', 'unknown runtime exception stays internal');
+  assertEqual(view.activity.detail.failure.message, 'Recursion hit an unexpected internal error.', 'runtime exposes readable internal copy');
+  assertEqual(view.activity.detail.message, undefined, 'runtime no longer emits legacy detail.message');
+  assertNoSecretText(view.activity.detail, 'runtime failure activity detail');
 }
 
 {

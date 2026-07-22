@@ -232,13 +232,18 @@ assertEqual(outcomes.find((event) => event.runId === 'warning-run' && event.phas
 assertEqual(outcomes.find((event) => event.runId === 'error-run' && event.phase === 'settled').severity, 'error', 'error outcome maps to error severity');
 assertEqual(
   outcomes.find((event) => event.runId === 'warning-run' && event.phase === 'settled').detail.failure.message,
-  'Unexpected internal failure (RECURSION_ACTIVITY_REASON_MISSING).',
-  'warning settlement without a reason receives an explicit internal failure descriptor'
+  'Recursion hit an unexpected internal error.',
+  'warning settlement without a descriptor receives readable fallback copy'
 );
 assertEqual(
   outcomes.find((event) => event.runId === 'error-run' && event.phase === 'settled').detail.failure.message,
-  'Unexpected internal failure (RECURSION_ACTIVITY_REASON_MISSING).',
-  'error settlement without a reason receives an explicit internal failure descriptor'
+  'Recursion hit an unexpected internal error.',
+  'error settlement without a descriptor receives readable fallback copy'
+);
+assertEqual(
+  outcomes.find((event) => event.runId === 'error-run' && event.phase === 'settled').detail.failure.code,
+  'RECURSION_ACTIVITY_REASON_MISSING',
+  'missing descriptor retains its diagnostic sentinel code'
 );
 assertEqual(
   outcomes.find((event) => event.runId === 'explained-run' && event.phase === 'settled').detail.failure.message,
@@ -247,6 +252,20 @@ assertEqual(
 );
 assertEqual(outcomes.find((event) => event.runId === 'skipped-run' && event.phase === 'settled').severity, 'info', 'skipped outcome keeps neutral severity');
 assertEqual(outcomes.find((event) => event.runId === 'skipped-run' && event.phase === 'settled').outcome, 'skipped', 'skipped outcome is preserved');
+
+const legacyRun = outcomeReporter.start({ runId: 'legacy-message-run', label: 'Legacy run' });
+outcomeReporter.settle({
+  runId: legacyRun.runId,
+  outcome: 'error',
+  logicalStage: 'utilityComposing',
+  label: 'Legacy error',
+  detail: { message: 'Provider generation timed out after 120000ms.' }
+});
+const legacyEvent = outcomes.find((event) => event.runId === legacyRun.runId && event.phase === 'settled');
+assertEqual(legacyEvent.detail.failure.code, 'RECURSION_ACTIVITY_REASON_MISSING', 'legacy detail.message is not a supported descriptor');
+assertEqual(legacyEvent.detail.failure.stage, 'utilitycomposing', 'sentinel records the owning logical stage');
+assertEqual(legacyEvent.detail.failure.message, 'Recursion hit an unexpected internal error.', 'legacy raw message is not promoted to UI copy');
+assertEqual(legacyEvent.detail.message, undefined, 'legacy raw message is removed from unhealthy activity');
 
 const throwingReporter = createActivityReporter({
   onEvent: () => {

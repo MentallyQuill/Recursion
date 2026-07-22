@@ -296,8 +296,8 @@ const unexplainedFailureProgress = createProgressRunModel({
 });
 assertEqual(
   unexplainedFailureProgress.steps[0].reason,
-  'Unexpected internal failure (RECURSION_PROGRESS_REASON_MISSING).',
-  'unexplained failed progress receives an explicit internal reason'
+  'Recursion hit an unexpected internal error.',
+  'unexplained failed progress receives a readable internal reason'
 );
 
 const renamedCardProgress = createProgressRunModel({
@@ -1165,5 +1165,58 @@ assert(!manualSettledStepIds.includes('composing-prompt-packet'), 'settled manua
 assert(!manualSettledStepIds.includes('installing-recursion-prompt'), 'settled manual progress drops planned prompt-install step that never ran');
 assert(manualSettledWarningProgress.steps.some((step) => step.id === 'utility-card-batch' && step.state === 'warning'), 'settled manual progress keeps material warning rows');
 assertEqual(createHeroPixelBlocks(manualSettledWarningProgress).some((block) => block.state === 'pending'), false, 'settled manual progress does not leave empty hero pixels after ready');
+
+const readableTerminalFailure = createProgressRunModel({
+  activityHistory: [
+    { runId: 'readable-failure', phase: 'started', label: 'Reading current turn...', recordedAt: '1' },
+    { runId: 'readable-failure', phase: 'arbiterPlanning', label: 'Planning card pass...', recordedAt: '2' },
+    { runId: 'readable-failure', phase: 'cardBatchRunning', label: 'Utility card batch...', recordedAt: '3' },
+    {
+      runId: 'readable-failure', phase: 'settled', logicalStage: 'utilityComposing', severity: 'error', outcome: 'error',
+      label: 'Recursion could not prepare the prompt.',
+      detail: { failure: {
+        code: 'RECURSION_PROVIDER_TIMEOUT', stage: 'utility-composing', category: 'provider-timeout',
+        message: 'The selected model connection did not respond before the time limit.', retryable: true,
+        suggestedAction: 'Check the selected connection profile, then try again.'
+      } },
+      recordedAt: '4'
+    }
+  ],
+  activity: {
+    runId: 'readable-failure', phase: 'settled', logicalStage: 'utilityComposing', severity: 'error', outcome: 'error',
+    label: 'Recursion could not prepare the prompt.',
+    detail: { failure: {
+      code: 'RECURSION_PROVIDER_TIMEOUT', stage: 'utility-composing', category: 'provider-timeout',
+      message: 'The selected model connection did not respond before the time limit.', retryable: true,
+      suggestedAction: 'Check the selected connection profile, then try again.'
+    } },
+    recordedAt: '4'
+  }
+});
+const readableFailedStep = readableTerminalFailure.steps.find((step) => step.id === 'composing-prompt-packet');
+assert(readableFailedStep, 'failed settlement maps to its logical compose stage');
+assertEqual(readableFailedStep.state, 'failed', 'logical compose stage is failed');
+assertEqual(readableFailedStep.reason, 'The selected model connection did not respond before the time limit.', 'failed stage keeps readable reason');
+assertEqual(readableFailedStep.suggestedAction, 'Check the selected connection profile, then try again.', 'failed stage keeps suggested action');
+assertEqual(readableFailedStep.failureCode, 'RECURSION_PROVIDER_TIMEOUT', 'failed stage keeps diagnostic code');
+assert(!readableTerminalFailure.steps.some((step) => step.id === 'recursion-prompt-ready' && step.state === 'failed'), 'failed generic settlement never becomes prompt ready');
+assert(!readableTerminalFailure.currentStepText.includes('RECURSION_'), 'compact status excludes internal code');
+
+const unknownStageFailure = createProgressRunModel({
+  activityHistory: [{
+    runId: 'unknown-stage-failure', phase: 'settled', logicalStage: 'unknownStage', severity: 'error', outcome: 'error',
+    detail: { failure: { code: 'RECURSION_INTERNAL', stage: 'runtime', category: 'internal', message: 'Recursion hit an unexpected internal error.', retryable: false } },
+    recordedAt: '1'
+  }],
+  activity: {
+    runId: 'unknown-stage-failure', phase: 'settled', logicalStage: 'unknownStage', severity: 'error', outcome: 'error',
+    detail: { failure: { code: 'RECURSION_INTERNAL', stage: 'runtime', category: 'internal', message: 'Recursion hit an unexpected internal error.', retryable: false } },
+    recordedAt: '1'
+  }
+});
+const runtimeFallbackStep = unknownStageFailure.steps.find((step) => step.id === 'recursion-runtime');
+assert(runtimeFallbackStep, 'unknown logical stage creates runtime fallback step');
+assertEqual(runtimeFallbackStep.label, 'Preparing Recursion response', 'runtime fallback has readable label');
+assertEqual(runtimeFallbackStep.state, 'failed', 'runtime fallback step is failed');
 
 console.log('[pass] progress');

@@ -931,6 +931,24 @@
   display: none;
 }
 
+.recursion-step-action {
+  color: var(--SmartThemeEmColor, var(--recursion-muted));
+  font-size: 10px;
+  grid-column: 4 / -1;
+  line-height: 1.25;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 0 0 2px;
+}
+
+.recursion-step-action:empty {
+  display: none;
+}
+
+.recursion-step-row.has-action {
+  height: auto;
+}
+
 .recursion-step-row.child-row.has-nested {
   height: auto;
   min-height: var(--recursion-progress-child-row-height);

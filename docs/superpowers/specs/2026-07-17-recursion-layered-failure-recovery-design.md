@@ -126,8 +126,8 @@ export const FAILURE_CATEGORIES = Object.freeze([
 ```
 
 `src/failures.mjs` will own construction, sanitization, known provider-error
-mapping, and fallback handling. A fallback may say
-`Unexpected internal failure (RECURSION_...).` It may not settle as only
+mapping, and fallback handling. A fallback says
+`Recursion hit an unexpected internal error.` and retains its stable code only in diagnostics. It may not settle as only
 `Failed`, `Action failed`, or `Needs attention`.
 
 ## Runtime-Owned Structured Envelopes
@@ -328,6 +328,8 @@ Presentation:
 - A reason is never available only on hover.
 - Normal successful, cached, waiting, and canceled rows do not gain explanatory
   sublines.
+
+Readable terminal copy, logical-stage settlement routing, visible suggested actions, and diagnostic-only failure codes are further specified in `docs/superpowers/specs/2026-07-22-readable-failure-presentation-design.md`.
 
 This amends the current UI rule that places warning and failure explanations
 only in tooltip text. `DESIGN.md`, `docs/design/UI_SPEC.md`, production CSS, and

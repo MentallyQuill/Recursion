@@ -622,6 +622,8 @@ The Inspector may show the latest calls and validation status, but raw prompt/re
 
 Provider failures must degrade Recursion, not the chat.
 
+Provider failures cross the runtime/activity boundary only as normalized failure descriptors. Known errors use fixed, sanitized user copy; unknown provider errors say that the selected model connection could not complete the request. Timeout copy says `before the time limit` unless the classifier owns the exact effective duration. Provider retry and routing policy is unchanged.
+
 Utility failure:
 
 - retry the same Utility call once only for transient transport failures or timeout classes when the runtime still owns the current snapshot;

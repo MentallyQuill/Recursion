@@ -273,6 +273,8 @@ hash.
 
 Every `warn` or `error` journal entry must contain `details.failure` with the normalized fields `code`, `stage`, `category`, `message`, and `retryable`. The message must state a sanitized concrete cause. If a producer emits an unhealthy entry without one, the repository records `RECURSION_JOURNAL_REASON_MISSING` rather than allowing an unexplained failure to look complete. Activity events enforce the same invariant before UI publication. Skipped and player-canceled outcomes remain neutral and do not receive failure descriptors.
 
+Compact warning/failure UI consumes `failure.message` and optional `failure.suggestedAction`. Journals, the Full Viewer, and sanitized diagnostic exports retain `failure.code`, `stage`, and `category`. Internal codes must not be interpolated into ordinary progress reason/action text.
+
 Journal entries must not record:
 
 - API keys, authorization headers, cookies, or session tokens;

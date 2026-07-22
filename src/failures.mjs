@@ -25,6 +25,8 @@ const GENERIC_MESSAGES = new Set([
   'provider call failed',
   'provider generation failed'
 ]);
+const INTERNAL_FAILURE_MESSAGE = 'Recursion hit an unexpected internal error.';
+const INTERNAL_FAILURE_ACTION = 'Try again. If it keeps happening, copy the failure code from Diagnostics.';
 
 function compact(value = '', maxLength = 300) {
   const text = String(value ?? '').trim().replace(/\s+/g, ' ');
@@ -57,12 +59,10 @@ function redact(value = '') {
     .replace(/(["']?(?:api[_-]?key|authorization|token)["']?\s*[:=]\s*)["']?[^"',;\s}]+/gi, '$1[redacted]');
 }
 
-function normalizedMessage(value, code) {
+function normalizedMessage(value) {
   const message = compact(redact(value), 300);
   const generic = message.toLowerCase().replace(/[.!]+$/g, '');
-  if (!message || GENERIC_MESSAGES.has(generic)) {
-    return `Unexpected internal failure (${code}).`;
-  }
+  if (!message || GENERIC_MESSAGES.has(generic)) return INTERNAL_FAILURE_MESSAGE;
   return message;
 }
 
@@ -83,7 +83,7 @@ export function createFailure(input = {}) {
     code,
     stage: safeStage(source.stage),
     category,
-    message: normalizedMessage(source.message, code),
+    message: normalizedMessage(source.message),
     retryable: source.retryable === true,
     ...(attemptedRecovery ? { attemptedRecovery } : {}),
     ...(suggestedAction ? { suggestedAction } : {})
@@ -97,6 +97,16 @@ function errorCode(error = {}) {
 function errorStatus(error = {}) {
   const status = Number(error?.status || error?.statusCode || error?.response?.status || 0);
   return Number.isFinite(status) ? status : 0;
+}
+
+function looksLikeProviderFailure(error = {}) {
+  const code = errorCode(error);
+  const status = errorStatus(error);
+  const message = String(error?.message || error || '').toLowerCase();
+  return status >= 400
+    || code.startsWith('RECURSION_PROVIDER_')
+    || code.startsWith('RECURSION_JSON_')
+    || /timed?\s*out|timeout|rate limit|context length|finish_reason.?length/.test(message);
 }
 
 export function providerFailure(error = {}, context = {}) {
@@ -129,9 +139,9 @@ export function providerFailure(error = {}, context = {}) {
       code: 'RECURSION_PROVIDER_TIMEOUT',
       stage,
       category: 'provider-timeout',
-      message: 'Provider call timed out.',
+      message: 'The selected model connection did not respond before the time limit.',
       retryable: true,
-      suggestedAction: 'Retry the operation or increase the provider timeout.'
+      suggestedAction: 'Check the selected connection profile, then try again.'
     });
   }
   if (code === 'RECURSION_PROVIDER_TOKEN_LIMIT' || /token limit|context length|finish_reason.?length|max_tokens/.test(lower)) {
@@ -195,8 +205,9 @@ export function providerFailure(error = {}, context = {}) {
     code,
     stage,
     category: 'provider-request',
-    message: 'Provider call failed.',
-    retryable: error?.retryable === true
+    message: 'The selected model connection could not complete the request.',
+    retryable: error?.retryable === true,
+    suggestedAction: error?.retryable === true ? 'Try again.' : ''
   });
 }
 
@@ -216,6 +227,19 @@ export function failureFrom(value, fallback = {}) {
     retryable: source.retryable ?? defaults.retryable,
     attemptedRecovery: source.attemptedRecovery || defaults.attemptedRecovery,
     suggestedAction: source.suggestedAction || defaults.suggestedAction
+  });
+}
+
+export function failureFromError(error = {}, context = {}) {
+  const stage = context.stage || 'runtime';
+  if (looksLikeProviderFailure(error)) return providerFailure(error, { stage });
+  return createFailure({
+    code: error?.code || 'RECURSION_INTERNAL',
+    stage,
+    category: context.category || 'internal',
+    message: INTERNAL_FAILURE_MESSAGE,
+    retryable: false,
+    suggestedAction: INTERNAL_FAILURE_ACTION
   });
 }
 

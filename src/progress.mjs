@@ -81,6 +81,7 @@ const STEP_ORDER = [
   'reasoner-guidance',
   'installing-recursion-prompt',
   'clearing-recursion-prompt',
+  'recursion-runtime',
   'recursion-prompt-ready'
 ];
 
@@ -115,6 +116,7 @@ const STEP_DEFINITIONS = Object.freeze({
   'post-process-commit': { label: 'Adding Post-process swipe', providerLane: 'utility' },
   'installing-recursion-prompt': { label: 'Installing Recursion prompt', providerLane: 'utility' },
   'clearing-recursion-prompt': { label: 'Clearing Recursion prompt', providerLane: 'utility' },
+  'recursion-runtime': { label: 'Preparing Recursion response', providerLane: 'utility' },
   'recursion-prompt-ready': { label: 'Recursion prompt ready', providerLane: 'utility' }
 });
 
@@ -255,10 +257,7 @@ function usefulReasonText(value) {
 }
 
 function missingReason(source = {}) {
-  const code = safeDisplayText(asObject(source).failure?.code, 'RECURSION_PROGRESS_REASON_MISSING', 120)
-    .replace(/[^A-Z0-9_]+/gi, '_')
-    .toUpperCase();
-  return `Unexpected internal failure (${code || 'RECURSION_PROGRESS_REASON_MISSING'}).`;
+  return 'Recursion hit an unexpected internal error.';
 }
 
 function reasonFromSource(source, state, retryCount = 0, childSource = '') {
@@ -289,6 +288,18 @@ function aggregateReason(children = []) {
   const list = Array.isArray(children) ? children : [];
   const material = list.find((child) => ['failed', 'warning'].includes(child?.state) && safeReasonText(child?.reason));
   return safeReasonText(material?.reason);
+}
+
+function aggregateSuggestedAction(children = []) {
+  const child = (Array.isArray(children) ? children : [])
+    .find((entry) => ['failed', 'warning'].includes(entry?.state) && safeDisplayText(entry?.suggestedAction, '', 180));
+  return safeDisplayText(child?.suggestedAction, '', 180);
+}
+
+function aggregateFailureCode(children = []) {
+  const child = (Array.isArray(children) ? children : [])
+    .find((entry) => ['failed', 'warning'].includes(entry?.state) && safeDisplayText(entry?.failureCode, '', 120));
+  return safeDisplayText(child?.failureCode, '', 120);
 }
 
 function metaForState(state, source = '', reason = '', retryCount = 0) {
@@ -420,6 +431,43 @@ function isProviderSettledEvent(event) {
   return Boolean(roleStepId(event));
 }
 
+function eventFailure(event) {
+  return asObject(asObject(asObject(event).detail).failure);
+}
+
+function eventIsUnhealthy(event) {
+  const severity = cleanText(event?.severity).toLowerCase();
+  const outcome = cleanText(event?.outcome).toLowerCase();
+  return severity === 'warning'
+    || severity === 'error'
+    || outcome === 'warning'
+    || outcome === 'error';
+}
+
+function eventSuggestedAction(event) {
+  return safeDisplayText(eventFailure(event).suggestedAction, '', 180);
+}
+
+function eventFailureCode(event) {
+  return safeDisplayText(eventFailure(event).code, '', 120)
+    .replace(/[^A-Z0-9_]+/gi, '_')
+    .toUpperCase();
+}
+
+function applyEventFailureToChildren(value, event) {
+  const suggestedAction = eventSuggestedAction(event);
+  const failureCode = eventFailureCode(event);
+  const decorate = (child) => {
+    if (!child || !['warning', 'failed'].includes(cleanText(child.state).toLowerCase())) return child;
+    return {
+      ...child,
+      suggestedAction: child.suggestedAction || suggestedAction || null,
+      failureCode: child.failureCode || failureCode || null
+    };
+  };
+  return Array.isArray(value) ? value.map(decorate) : decorate(value);
+}
+
 function eventStepId(event) {
   const phase = cleanText(event.phase);
   const detail = asObject(event.detail);
@@ -442,6 +490,10 @@ function eventStepId(event) {
   }
   if (phase.startsWith('providerCall')) return roleStepId(event) || 'utility-card-batch';
   if (isProviderSettledEvent(event)) return roleStepId(event);
+  if (phase === 'settled' && eventIsUnhealthy(event)) {
+    const logicalStage = cleanText(event.logicalStage);
+    return PHASE_STEP_IDS[logicalStage] || 'recursion-runtime';
+  }
   return PHASE_STEP_IDS[phase] || null;
 }
 
@@ -688,6 +740,14 @@ function upsertStep(map, step) {
     ? aggregateParentState(mergeState(existing.state, step.state), next.children)
     : normalizeStateWithRetry(mergeState(existing.state, step.state), next.retryCount);
   next.reason = safeReasonText(step.reason) || safeReasonText(existing.reason) || aggregateReason(next.children) || reasonFromSource(next, next.state, next.retryCount);
+  next.suggestedAction = safeDisplayText(step.suggestedAction, '', 180)
+    || safeDisplayText(existing.suggestedAction, '', 180)
+    || aggregateSuggestedAction(next.children)
+    || null;
+  next.failureCode = safeDisplayText(step.failureCode, '', 120)
+    || safeDisplayText(existing.failureCode, '', 120)
+    || aggregateFailureCode(next.children)
+    || null;
   next.meta = metaForState(next.state, next.source, next.reason, next.retryCount);
   map.set(step.id, next);
 }
@@ -805,6 +865,10 @@ function normalizeChildStep(input, index = 0) {
     sourceRoleId: roleId || null,
     retryCount,
     reason: reason || null,
+    suggestedAction: safeDisplayText(source.suggestedAction, '', 180) || null,
+    failureCode: safeDisplayText(source.failureCode, '', 120)
+      .replace(/[^A-Z0-9_]+/gi, '_')
+      .toUpperCase() || null,
     order: Number.isFinite(Number(source.order)) ? Number(source.order) : index
   };
   if (children.length) step.children = children;
@@ -839,6 +903,14 @@ function normalizeStep(input, index = 0) {
     sourceRoleId: safeDisplayText(source.sourceRoleId || source.roleId, '', 80) || null,
     retryCount,
     reason: reason || null,
+    suggestedAction: safeDisplayText(source.suggestedAction, '', 180)
+      || aggregateSuggestedAction(children)
+      || null,
+    failureCode: (safeDisplayText(source.failureCode, '', 120)
+      || aggregateFailureCode(children))
+      .replace(/[^A-Z0-9_]+/gi, '_')
+      .toUpperCase()
+      || null,
     order: Number.isFinite(Number(source.order)) ? Number(source.order) : index
   };
   if (children.length) step.children = children;
@@ -1125,7 +1197,7 @@ function deriveProgressRun(view) {
       && (!runId || cleanText(current.runId) === runId);
     const eventOrder = order++;
     const state = eventState(event, eventKey === currentKey || providerConcurrent);
-    const child = childStepFromEvent(event, state, eventOrder);
+    const child = applyEventFailureToChildren(childStepFromEvent(event, state, eventOrder), event);
     const retryCount = eventRetryCount(event);
     const reason = eventReason(event, state);
     upsertStep(steps, normalizeStep({
@@ -1135,6 +1207,8 @@ function deriveProgressRun(view) {
       state,
       retryCount,
       reason,
+      suggestedAction: eventSuggestedAction(event),
+      failureCode: eventFailureCode(event),
       sourcePhase: event.phase,
       sourceRoleId: asObject(event.detail).roleId,
       children: Array.isArray(child) ? child : (child ? [child] : []),

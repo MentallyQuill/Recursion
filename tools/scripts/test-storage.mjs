@@ -78,8 +78,8 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   const journal = await repo.loadRunJournal('Failure Contract Chat');
   assertEqual(
     journal.entries[0].details.failure.message,
-    'Unexpected internal failure (RECURSION_JOURNAL_REASON_MISSING).',
-    'unexplained error journal entries receive an explicit internal descriptor'
+    'Recursion hit an unexpected internal error.',
+    'unexplained error journal entries receive a readable internal descriptor'
   );
   assertEqual(
     journal.entries[1].details.failure.message,

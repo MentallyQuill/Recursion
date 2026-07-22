@@ -1,4 +1,5 @@
 import { createActivityReporter } from './activity.mjs';
+import { failureFromError } from './failures.mjs';
 import {
   CARD_CATALOG,
   applyCardPlan,
@@ -6596,6 +6597,7 @@ export function createRecursionRuntime({
         return warmOutcome;
       }
       const safeError = runtimeError(error);
+      const failure = failureFromError(error, { stage: 'rapid-warm' });
       let failedRapid = null;
       const failedAt = nowIso();
       if (snapshot) {
@@ -6613,9 +6615,10 @@ export function createRecursionRuntime({
         runId,
         outcome: 'warning',
         phase: 'rapidWarmFailed',
+        logicalStage: 'rapidWarmFailed',
         label: 'Rapid warm failed.',
         chips: ['Rapid'],
-        detail: { message: safeError.message }
+        detail: { failure }
       });
       lastRapidWarmView = rapidWarmStatusView({
         ...lastRapidWarmView,
@@ -7922,12 +7925,17 @@ export function createRecursionRuntime({
       return installedResult;
     } catch (error) {
       if (!isActiveRun(runId)) return supersededResult(runId);
+      const activeActivity = safeCurrentActivity(activity);
+      const logicalStage = activeActivity?.phase || 'runtime';
       const safeError = runtimeError(error);
+      const failure = failureFromError(error, { stage: logicalStage });
       settleRuntimeActivity({
         runId,
+        phase: 'settled',
+        logicalStage,
         outcome: 'error',
-        label: 'Recursion runtime failed.',
-        detail: { message: safeError.message }
+        label: 'Recursion could not prepare the prompt.',
+        detail: { failure }
       });
       throw safeError;
     } finally {

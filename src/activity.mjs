@@ -98,11 +98,15 @@ function ensureUnhealthyFailure(event) {
   const failure = failureFrom(cause, {
     code: 'RECURSION_ACTIVITY_REASON_MISSING',
     stage: event.logicalStage || event.phase || 'activity',
-    category: 'internal'
+    category: 'internal',
+    message: 'Recursion hit an unexpected internal error.',
+    suggestedAction: 'Try again. If it keeps happening, copy the failure code from Diagnostics.'
   });
+  const descriptorDetail = { ...detail };
+  delete descriptorDetail.message;
   return {
     ...event,
-    detail: cleanStructured({ ...detail, failure }) ?? { failure }
+    detail: cleanStructured({ ...descriptorDetail, failure }) ?? { failure }
   };
 }
 

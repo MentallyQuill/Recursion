@@ -1,6 +1,7 @@
 import {
   createFailure,
   failureFrom,
+  failureFromError,
   failureReason,
   providerFailure
 } from '../../src/failures.mjs';
@@ -27,8 +28,9 @@ const timeout = providerFailure(
   { stage: 'editorial-transform' }
 );
 assertEqual(timeout.category, 'provider-timeout', 'timeout has stable category');
-assertEqual(timeout.message, 'Provider call timed out.', 'timeout is explicit');
+assertEqual(timeout.message, 'The selected model connection did not respond before the time limit.', 'timeout is explicit');
 assertEqual(timeout.retryable, true, 'timeout remains retryable');
+assertEqual(timeout.suggestedAction, 'Check the selected connection profile, then try again.', 'timeout gives a concrete next action');
 
 const length = providerFailure(
   { code: 'RECURSION_PROVIDER_TOKEN_LIMIT', message: 'finish_reason length' },
@@ -66,8 +68,39 @@ assertEqual(host.message, 'SillyTavern did not confirm the enhanced swipe.', 'ho
 const generic = failureFrom('Action failed.');
 assertEqual(generic.code, 'RECURSION_INTERNAL', 'generic failure uses internal code');
 assertEqual(generic.category, 'internal', 'generic failure uses internal category');
-assertEqual(generic.message, 'Unexpected internal failure (RECURSION_INTERNAL).', 'generic failure gains a real reason');
+assertEqual(generic.message, 'Recursion hit an unexpected internal error.', 'generic failure uses readable copy');
+assert(!generic.message.includes(generic.code), 'generic user copy excludes the internal code');
 assertEqual(failureReason(generic), generic.message, 'failureReason returns normalized message');
+
+const thrownTimeout = failureFromError(
+  Object.assign(new Error('Provider generation timed out after 120000ms.'), {
+    code: 'RECURSION_PROVIDER_TIMEOUT'
+  }),
+  { stage: 'utility-card-batch' }
+);
+assertEqual(thrownTimeout.code, 'RECURSION_PROVIDER_TIMEOUT', 'thrown timeout keeps stable code');
+assertEqual(thrownTimeout.category, 'provider-timeout', 'thrown timeout is provider timeout');
+assertEqual(thrownTimeout.message, 'The selected model connection did not respond before the time limit.', 'thrown timeout uses layman-safe copy');
+assertEqual(thrownTimeout.suggestedAction, 'Check the selected connection profile, then try again.', 'thrown timeout gives a concrete next action');
+assert(!thrownTimeout.message.includes('120000'), 'timeout UI copy excludes milliseconds');
+
+const thrownInternal = failureFromError(
+  Object.assign(new Error('C:\\private\\runtime\\packet.mjs:93 secret-value'), {
+    code: 'RECURSION_PACKET_INTERNAL'
+  }),
+  { stage: 'utility-composing' }
+);
+assertEqual(thrownInternal.code, 'RECURSION_PACKET_INTERNAL', 'internal failure keeps diagnostic code');
+assertEqual(thrownInternal.category, 'internal', 'unknown thrown error remains internal');
+assertEqual(thrownInternal.message, 'Recursion hit an unexpected internal error.', 'unknown thrown error hides technical text');
+assert(!JSON.stringify(thrownInternal).includes('C:\\private'), 'unknown failure excludes filesystem path');
+assert(!JSON.stringify(thrownInternal).includes('secret-value'), 'unknown failure excludes raw exception secret');
+
+const unknownProvider = providerFailure(
+  { code: 'RECURSION_PROVIDER_REMOTE_FAILURE', message: 'Remote adapter failed.' },
+  { stage: 'provider-call' }
+);
+assertEqual(unknownProvider.message, 'The selected model connection could not complete the request.', 'unknown provider failure remains readable');
 
 const bounded = createFailure({
   code: 'RECURSION_TEST',

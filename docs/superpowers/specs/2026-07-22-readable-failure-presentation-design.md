@@ -398,6 +398,22 @@ The visible progress reason is not reconstructed from those fields.
 - A runtime failure after completed card rows preserves those completed rows and
   fails the actual logical stage or the runtime fallback step.
 
+### Recovered Post-process rewrites
+
+When a SillyTavern Post-process rewrite succeeds on its second attempt, the
+successful category outcome retains the sanitized failure code from attempt
+one as `recoveredFailureCode`. The code is copied into the persisted
+`recursion.postProcessMarker.v1` category record and the bounded runtime
+diagnostics so later inspection can distinguish an empty rewrite, unchanged
+rewrite, timeout, or generic host failure.
+
+The recovered warning publishes a normalized `detail.failure` descriptor with
+cause-specific, past-tense copy. Because the retry already succeeded, the
+descriptor does not suggest retrying again and does not display the generic
+`copy the failure code` action. Raw exception messages, provider bodies,
+prompts, and response text remain excluded. This adds no per-attempt journal,
+synthetic failure hook, or new UI surface.
+
 ## Documentation Amendments
 
 Implementation updates these documents in place:

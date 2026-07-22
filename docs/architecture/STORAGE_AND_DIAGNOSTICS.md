@@ -275,6 +275,8 @@ Every `warn` or `error` journal entry must contain `details.failure` with the no
 
 Compact warning/failure UI consumes `failure.message` and optional `failure.suggestedAction`. Journals, the Full Viewer, and sanitized diagnostic exports retain `failure.code`, `stage`, and `category`. Internal codes must not be interpolated into ordinary progress reason/action text.
 
+Successful Post-process categories that required a second SillyTavern rewrite attempt retain `recoveredFailureCode` in bounded runtime diagnostics and the persisted `recursion.postProcessMarker.v1` category record. This field records only a stable `RECURSION_*` code; raw host exception messages, provider bodies, prompts, and response text remain excluded. The persisted code distinguishes empty, unchanged, timeout, and generic host failures after the retry has already recovered.
+
 Journal entries must not record:
 
 - API keys, authorization headers, cookies, or session tokens;

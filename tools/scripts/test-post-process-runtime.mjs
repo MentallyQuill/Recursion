@@ -334,8 +334,10 @@ test('5. Unified total guidance failure makes no host call and no commit', async
 });
 
 test('6. Unified host recovery reuses guidance and two identical host packets', async () => {
+  const events = [];
   const harness = createHarness({
-    hostPlan: [false, 'host retry rewrite']
+    hostPlan: [{ ok: true, text: '' }, 'host retry rewrite'],
+    activity: createActivityReporter({ onEvent: (event) => events.push(event) })
   });
   const result = await harness.runtime.runPostProcessForLatestAssistant();
   assertEqual(result.committed, true, 'host retry success commits');
@@ -351,6 +353,20 @@ test('6. Unified host recovery reuses guidance and two identical host packets', 
     harness.hostCalls[1].writerDirective,
     'host retry receives the identical writer directive'
   );
+  assertEqual(result.outcomes[0].recoveredFailureCode, 'RECURSION_POST_PROCESS_WRITER_EMPTY', 'successful retry retains the first host failure code');
+  assertEqual(result.diagnostics.categories[0].recoveredFailureCode, 'RECURSION_POST_PROCESS_WRITER_EMPTY', 'diagnostics retain the recovered failure code');
+  assertEqual(harness.commitCalls[0].marker.categories[0].recoveredFailureCode, 'RECURSION_POST_PROCESS_WRITER_EMPTY', 'persisted marker retains the recovered failure code');
+  const recoveredEvent = events.find((event) => (
+    event.phase === 'postProcessCategory'
+    && event.detail?.state === 'success'
+    && event.detail?.hostAttempts === 2
+  ));
+  assert(recoveredEvent, 'successful host retry publishes a recovered warning');
+  assertEqual(recoveredEvent.detail.failure.code, 'RECURSION_POST_PROCESS_WRITER_EMPTY', 'recovered warning uses the first host failure code');
+  assertEqual(recoveredEvent.detail.failure.category, 'host-mutation', 'recovered warning keeps the host boundary category');
+  assertEqual(recoveredEvent.detail.failure.message, 'The first SillyTavern rewrite returned no text; the retry succeeded.', 'recovered warning explains the completed retry');
+  assertEqual(recoveredEvent.detail.failure.suggestedAction, undefined, 'recovered warning does not tell the user to retry again');
+  assert(!JSON.stringify(recoveredEvent).includes('Host rewrite failed.'), 'recovered warning excludes raw host error text');
 });
 
 test('7. Unified total host failure makes no commit', async () => {

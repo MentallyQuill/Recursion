@@ -301,6 +301,8 @@ A successful generic `settled` event may complete `Recursion prompt ready`. A wa
 
 Successful provider work that required a retry is not plain green success. A successful retry is `warning` / amber with visible `retried` row meta and a safe reason such as `Provider card batch retried once before this card completed.` in tooltip/accessibility text. Parent rows follow the normal aggregation rule, so a batch containing retried-but-successful cards stays amber until superseded by a later clean run.
 
+A SillyTavern Post-process rewrite that succeeds on attempt two retains the first attempt's stable `recoveredFailureCode`. The category and retried host-rewrite child show fixed recovered copy for empty text, unchanged text, timeout, or generic host failure. Because recovery already succeeded, these rows omit `suggestedAction`; they must not tell the user to retry again or copy a code that was not persisted. The code remains diagnostic metadata and is also stored on the successful category in the Post-process marker.
+
 Swipes and other source mutations start a fresh visible run. The new run must not inherit warning or failed row state from the prior generation. If the new run only checks or invalidates stale cache metadata before planning, render that as `Checking scene cache` with neutral completed state. Actual `Reusing scene deck` rows are cache reads and must use `cached` / purple, not amber.
 
 `progressRun.steps[]` shape:

@@ -562,7 +562,7 @@ function childStepFromEvent(event, state, order = 0) {
         providerLane: event.providerLane || detail.lane || 'utility',
         state: guidanceState,
         retryCount: Math.max(0, guidanceAttempts - 1),
-        reason: guidanceState === 'failed' ? reason : '',
+        reason: ['warning', 'failed'].includes(guidanceState) ? reason : '',
         sourcePhase: phase,
         order
       }, order),
@@ -572,7 +572,7 @@ function childStepFromEvent(event, state, order = 0) {
         providerLane: 'utility',
         state: hostState,
         retryCount: Math.max(0, hostAttempts - 1),
-        reason: hostState === 'failed' ? reason : '',
+        reason: ['warning', 'failed'].includes(hostState) ? reason : '',
         sourcePhase: phase,
         order: order + 1
       }, order + 1)

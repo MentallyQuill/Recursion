@@ -236,6 +236,19 @@ function structuralFailureCode(result, fallback) {
   return safeCode(result?.error?.code, fallback);
 }
 
+function recoveredRewriteMessage(code) {
+  if (code === 'RECURSION_POST_PROCESS_WRITER_EMPTY') {
+    return 'The first SillyTavern rewrite returned no text; the retry succeeded.';
+  }
+  if (code === 'RECURSION_POST_PROCESS_WRITER_NOOP') {
+    return 'The first SillyTavern rewrite did not change the response; the retry succeeded.';
+  }
+  if (code === 'RECURSION_PROVIDER_TIMEOUT') {
+    return 'The first SillyTavern rewrite exceeded the time limit; the retry succeeded.';
+  }
+  return 'The first SillyTavern rewrite could not complete; the retry succeeded.';
+}
+
 function guidanceRequestForStage(stage, operation) {
   const request = {
     ...buildPostProcessGuidanceRequest(stage),
@@ -366,6 +379,7 @@ async function rewriteWithRetry(stage, guidance, operation, host) {
   const guidancePacket = buildPostProcessWriterPacket(stage, guidance.data);
   const writerDirective = buildWriterDirective(stage);
   let lastFailureCode = 'RECURSION_POST_PROCESS_WRITER_FAILED';
+  let recoveredFailureCode = '';
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     if (operation.signal.aborted) return { ok: false, canceled: true, attempts: attempt - 1 };
     let result;
@@ -386,12 +400,20 @@ async function rewriteWithRetry(stage, guidance, operation, host) {
     }
     if (operation.signal.aborted) return { ok: false, canceled: true, attempts: attempt };
     const text = usableRewrite(result, stage.draft);
-    if (text) return { ok: true, text, attempts: attempt };
+    if (text) {
+      return {
+        ok: true,
+        text,
+        attempts: attempt,
+        ...(recoveredFailureCode ? { recoveredFailureCode } : {})
+      };
+    }
     lastFailureCode = result?.ok === true
       ? (cleanText(result?.text)
           ? 'RECURSION_POST_PROCESS_WRITER_NOOP'
           : 'RECURSION_POST_PROCESS_WRITER_EMPTY')
       : structuralFailureCode(result, 'RECURSION_POST_PROCESS_WRITER_FAILED');
+    recoveredFailureCode = lastFailureCode;
   }
   return { ok: false, attempts: 2, failureCode: lastFailureCode };
 }
@@ -401,7 +423,8 @@ function successfulOutcome(category, guidance, rewrite) {
     categoryId: safeId(category.id, 'category'),
     status: 'success',
     guidanceAttempts: guidance.attempts,
-    hostAttempts: rewrite.attempts
+    hostAttempts: rewrite.attempts,
+    ...(rewrite.recoveredFailureCode ? { recoveredFailureCode: rewrite.recoveredFailureCode } : {})
   };
 }
 
@@ -488,7 +511,8 @@ async function runUnified(operation, dependencies) {
   }
   dependencies.stageCategory?.(operation, progressCategory, 'success', {
     guidanceAttempts: guidance.attempts,
-    hostAttempts: rewrite.attempts
+    hostAttempts: rewrite.attempts,
+    ...(rewrite.recoveredFailureCode ? { recoveredFailureCode: rewrite.recoveredFailureCode } : {})
   });
   return {
     candidate: rewrite.text,
@@ -557,6 +581,9 @@ function diagnosticCategories(outcomes = []) {
     status: outcome.status === 'success' ? 'success' : 'failed',
     guidanceAttempts: Number(outcome.guidanceAttempts || 0),
     hostAttempts: Number(outcome.hostAttempts || 0),
+    ...(outcome.recoveredFailureCode
+      ? { recoveredFailureCode: safeCode(outcome.recoveredFailureCode, 'RECURSION_POST_PROCESS_WRITER_FAILED') }
+      : {}),
     ...(outcome.failureStage ? { failureStage: outcome.failureStage } : {}),
     ...(outcome.failureCode ? { failureCode: safeCode(outcome.failureCode, 'RECURSION_POST_PROCESS_STAGE_FAILED') } : {})
   }));
@@ -699,6 +726,10 @@ export function createPostProcessRuntime({
     const failureStage = cleanText(details.failureStage);
     const failed = state === 'failed';
     const retried = Number(details.guidanceAttempts || 0) > 1 || Number(details.hostAttempts || 0) > 1;
+    const recoveredFailureCode = details.recoveredFailureCode
+      ? safeCode(details.recoveredFailureCode, 'RECURSION_POST_PROCESS_WRITER_FAILED')
+      : '';
+    const recoveredMessage = recoveredFailureCode ? recoveredRewriteMessage(recoveredFailureCode) : '';
     publish('stage', {
       runId: operation.operationId,
       operationId: operation.operationId,
@@ -715,7 +746,19 @@ export function createPostProcessRuntime({
         activeStage: cleanText(details.activeStage),
         guidanceAttempts: Number(details.guidanceAttempts || 0),
         hostAttempts: Number(details.hostAttempts || 0),
-        ...(retried ? { cautionReason: 'Post-process stage recovered after retry.' } : {}),
+        ...(retried ? { cautionReason: recoveredMessage || 'Post-process stage recovered after retry.' } : {}),
+        ...(recoveredFailureCode
+          ? {
+              recoveredFailureCode,
+              failure: {
+                code: recoveredFailureCode,
+                stage: 'post-process-host-rewrite',
+                category: 'host-mutation',
+                message: recoveredMessage,
+                retryable: false
+              }
+            }
+          : {}),
         ...(failureStage ? { failureStage } : {}),
         ...(failed
           ? {

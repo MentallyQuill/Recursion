@@ -221,6 +221,42 @@ assert(
   'completed Post-process stages leave no running Hero Pixel Array blocks'
 );
 
+const recoveredHostRewriteReason = 'The first SillyTavern rewrite returned no text; the retry succeeded.';
+const recoveredHostRewriteProgress = createProgressRunModel({
+  activityHistory: [{
+    runId: 'post-process-recovered-host',
+    phase: 'postProcessCategory',
+    severity: 'warning',
+    label: 'Natural Prose',
+    providerLane: 'utility',
+    detail: {
+      categoryId: 'natural-prose',
+      categoryName: 'Natural Prose',
+      state: 'success',
+      guidanceAttempts: 1,
+      hostAttempts: 2,
+      recoveredFailureCode: 'RECURSION_POST_PROCESS_WRITER_EMPTY',
+      cautionReason: recoveredHostRewriteReason,
+      failure: {
+        code: 'RECURSION_POST_PROCESS_WRITER_EMPTY',
+        stage: 'post-process-host-rewrite',
+        category: 'internal',
+        message: recoveredHostRewriteReason,
+        retryable: false
+      }
+    }
+  }],
+  activity: { phase: 'idle' }
+});
+const recoveredHostParent = recoveredHostRewriteProgress.steps.find((step) => step.id === 'post-process-category-natural-prose');
+const recoveredHostChild = recoveredHostParent.children.find((step) => step.id === 'natural-prose-host-rewrite');
+assertEqual(recoveredHostParent.reason, recoveredHostRewriteReason, 'recovered category shows the preserved first-attempt cause');
+assertEqual(recoveredHostParent.failureCode, 'RECURSION_POST_PROCESS_WRITER_EMPTY', 'recovered category retains diagnostic code');
+assertEqual(recoveredHostParent.suggestedAction, null, 'recovered category omits an unnecessary retry action');
+assertEqual(recoveredHostChild.reason, recoveredHostRewriteReason, 'retried host child shows the preserved first-attempt cause');
+assertEqual(recoveredHostChild.failureCode, 'RECURSION_POST_PROCESS_WRITER_EMPTY', 'retried host child retains diagnostic code');
+assertEqual(recoveredHostChild.suggestedAction, null, 'retried host child omits an unnecessary retry action');
+
 const explainedFailureProgress = createProgressRunModel({
   progressRun: {
     runId: 'explained-failure',

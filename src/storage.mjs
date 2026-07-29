@@ -2,6 +2,8 @@ import { cloneJson, makeId, nowIso, redact, safeId } from './core.mjs';
 import { failureFrom } from './failures.mjs';
 import { UNKNOWN_STORY_FORM, normalizeStoryForm } from './story-form.mjs';
 import { normalizeRetentionSettings } from './retention-policy.mjs';
+import { stableHash } from './execution/provenance.mjs';
+import { normalizePipelineRun } from './execution/checkpoints.mjs';
 
 const RECURSION_VERSION = '0.1.0-pre-alpha.5';
 const MAX_JOURNAL_ENTRIES = 500;
@@ -9,6 +11,16 @@ const DEFAULT_MAX_SCENE_CACHES_PER_CHAT = 3;
 const DEFAULT_MAX_SCENE_CACHES_TOTAL = 24;
 const SCENE_CACHE_KEY_PATTERN = /^recursion-scene-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v1\.json$/;
 const RUN_JOURNAL_KEY_PATTERN = /^recursion-run-journal-[A-Za-z0-9_.-]+\.v1\.json$/;
+const PIPELINE_RUN_KEY_PATTERN = /^recursion-pipeline-run-[A-Za-z0-9_.-]+\.v1\.json$/;
+const PIPELINE_ARTIFACT_KEY_PATTERN = /^recursion-pipeline-artifact-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+-v1\.json$/;
+const QUEUED_REPROCESS_KEY_PATTERN = /^recursion-queued-reprocess-[A-Za-z0-9_.-]+\.v1\.json$/;
+const INDEX_KINDS = new Set([
+  'sceneCache',
+  'runJournal',
+  'pipelineRun',
+  'pipelineArtifact',
+  'queuedReprocess'
+]);
 const DEFAULT_JOURNAL_EVENT = 'activity.stage_changed';
 const RAPID_WARM_STATUSES = new Set(['queued', 'warming', 'ready', 'stale', 'failed']);
 const UNSAFE_JOURNAL_TEXT_PATTERN = /\b(raw[-_\s]*prompt|rawPrompt|raw[-_\s]*response|rawResponse|provider[-_\s]*prompt|providerPrompt|provider[-_\s]*response|providerResponse|hidden[-_\s]*reasoning|hiddenReasoning|reasoning[-_\s]*(?:content|details)|reasoningContent|reasoningDetails|private[-_\s]*story[-_\s]*plan|privateStoryPlan|private[-_\s]*plan|privatePlan|session[-_\s]*id|sessionId|session[-_\s]*key\s*[:=]|sessionKey\s*[:=]|session[-_\s]*token|credentials?|password\s*[:=]|token\s*[:=]|api[-_\s]*key\s*[:=]|apiKey\s*[:=]|authorization\s*[:=]|set-cookie\s*[:=]|cookie\s*[:=]|bearer\s+[A-Za-z0-9._-]+|sk-[A-Za-z0-9_-]+)/i;
@@ -76,6 +88,24 @@ export function sceneCacheKey(chatKey, sceneKey) {
 
 export function runJournalKey(chatKey) {
   return `recursion-run-journal-${safeId(chatKey, 'chat')}.v1.json`;
+}
+
+export function pipelineRunKey(chatKey) {
+  return `recursion-pipeline-run-${safeId(chatKey, 'chat')}.v1.json`;
+}
+
+export function pipelineArtifactKey(chatKey, operationId, artifactId) {
+  return [
+    'recursion-pipeline-artifact',
+    safeId(chatKey, 'chat'),
+    safeId(operationId, 'operation'),
+    safeId(artifactId, 'artifact'),
+    'v1.json'
+  ].join('-');
+}
+
+export function queuedReprocessKey(chatKey) {
+  return `recursion-queued-reprocess-${safeId(chatKey, 'chat')}.v1.json`;
 }
 
 export function createMemoryStorageAdapter() {
@@ -653,33 +683,71 @@ function normalizeIndex(value = {}) {
 
 function normalizeIndexRecord(fallbackKey, value = {}) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  const kind = ['sceneCache', 'runJournal'].includes(source.kind) ? source.kind : null;
+  const kind = INDEX_KINDS.has(source.kind) ? source.kind : null;
   if (!kind) return null;
   const key = normalizeIndexKey(kind, source.key) || normalizeIndexKey(kind, fallbackKey);
   if (!key) return null;
-  return {
+  const base = {
     key,
     kind,
     chatKey: source.chatKey === undefined || source.chatKey === null ? null : safeId(source.chatKey, 'chat'),
     updatedAt: timestampValue(source.updatedAt)
   };
+  if (kind === 'pipelineRun') {
+    const operationId = safeIdentifier(source.operationId, '');
+    return operationId ? { ...base, operationId } : null;
+  }
+  if (kind === 'pipelineArtifact') {
+    const operationId = safeIdentifier(source.operationId, '');
+    const artifactId = safeIdentifier(source.artifactId, '');
+    if (!operationId || !artifactId) return null;
+    return {
+      ...base,
+      operationId,
+      artifactId,
+      artifactBytes: normalizeNonNegativeInteger(source.artifactBytes, 0)
+    };
+  }
+  return base;
 }
 
 function normalizeIndexKey(kind, value) {
   if (typeof value !== 'string' || !value || /[\\/]/.test(value)) return null;
   if (kind === 'sceneCache') return SCENE_CACHE_KEY_PATTERN.test(value) ? value : null;
   if (kind === 'runJournal') return RUN_JOURNAL_KEY_PATTERN.test(value) ? value : null;
+  if (kind === 'pipelineRun') return PIPELINE_RUN_KEY_PATTERN.test(value) ? value : null;
+  if (kind === 'pipelineArtifact') return PIPELINE_ARTIFACT_KEY_PATTERN.test(value) ? value : null;
+  if (kind === 'queuedReprocess') return QUEUED_REPROCESS_KEY_PATTERN.test(value) ? value : null;
   return null;
 }
 
 function indexKindForKey(key) {
   if (SCENE_CACHE_KEY_PATTERN.test(key)) return 'sceneCache';
   if (RUN_JOURNAL_KEY_PATTERN.test(key)) return 'runJournal';
+  if (PIPELINE_RUN_KEY_PATTERN.test(key)) return 'pipelineRun';
+  if (PIPELINE_ARTIFACT_KEY_PATTERN.test(key)) return 'pipelineArtifact';
+  if (QUEUED_REPROCESS_KEY_PATTERN.test(key)) return 'queuedReprocess';
   return null;
 }
 
 function isStorageObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeQueuedReprocessIntent(value) {
+  if (!isStorageObject(value) || value.schema !== 'recursion.queued-reprocess.v1') return null;
+  const mode = value.mode === 'full-fresh' ? 'full-fresh' : 'stage';
+  const stageIds = [...new Set(
+    (Array.isArray(value.stageIds) ? value.stageIds : [])
+      .map((stageId) => stringValue(stageId, '').trim())
+      .filter(Boolean)
+  )];
+  if (mode === 'stage' && stageIds.length === 0) return null;
+  return {
+    schema: 'recursion.queued-reprocess.v1',
+    mode,
+    stageIds
+  };
 }
 
 function indexRecordFromStoredRecord(key, value) {
@@ -708,14 +776,67 @@ function indexRecordFromStoredRecord(key, value) {
       updatedAt: timestampValue(value.updatedAt)
     };
   }
+  if (kind === 'pipelineRun') {
+    if (value.recordType !== 'recursion.pipelineRun') return null;
+    const chatKey = safeIdentifier(value.chatKey, '');
+    const operationId = safeIdentifier(value.operationId, '');
+    const manifest = normalizePipelineRun(value.manifest);
+    if (!chatKey || !operationId || !manifest || safeId(manifest.operationId, 'operation') !== operationId) {
+      return null;
+    }
+    return {
+      key,
+      kind,
+      chatKey,
+      updatedAt: timestampValue(value.updatedAt),
+      operationId
+    };
+  }
+  if (kind === 'pipelineArtifact') {
+    if (
+      value.recordType !== 'recursion.pipelineArtifact'
+      || !isStorageObject(value.artifact)
+      || typeof value.artifactHash !== 'string'
+    ) {
+      return null;
+    }
+    const chatKey = safeIdentifier(value.chatKey, '');
+    const operationId = safeIdentifier(value.operationId, '');
+    const artifactId = safeIdentifier(value.artifactId, '');
+    if (!chatKey || !operationId || !artifactId) return null;
+    return {
+      key,
+      kind,
+      chatKey,
+      updatedAt: timestampValue(value.updatedAt),
+      operationId,
+      artifactId,
+      artifactBytes: normalizeNonNegativeInteger(value.artifactBytes, 0)
+    };
+  }
+  if (kind === 'queuedReprocess') {
+    if (
+      value.recordType !== 'recursion.queuedReprocess'
+      || !normalizeQueuedReprocessIntent(value.intent)
+    ) {
+      return null;
+    }
+    const chatKey = safeIdentifier(value.chatKey, '');
+    if (!chatKey) return null;
+    return {
+      key,
+      kind,
+      chatKey,
+      updatedAt: timestampValue(value.updatedAt)
+    };
+  }
   return null;
 }
 
 function sameIndexRecord(left, right) {
-  return left?.key === right?.key
-    && left?.kind === right?.kind
-    && left?.chatKey === right?.chatKey
-    && left?.updatedAt === right?.updatedAt;
+  if (!left || !right) return false;
+  const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort();
+  return keys.every((key) => left[key] === right[key]);
 }
 
 function rawIndexRequiresRewrite(rawIndex, normalizedIndex) {
@@ -728,7 +849,7 @@ function rawIndexRequiresRewrite(rawIndex, normalizedIndex) {
   for (const [key, record] of Object.entries(normalizedIndex.records)) {
     const rawRecord = rawIndex.records[key];
     if (!rawRecord || !sameIndexRecord(rawRecord, record)) return true;
-    if (Object.keys(rawRecord).length !== 4) return true;
+    if (Object.keys(rawRecord).sort().join('|') !== Object.keys(record).sort().join('|')) return true;
   }
   return false;
 }
@@ -767,7 +888,7 @@ async function discoverStorageKeys(storage) {
 function repairDiagnostic(action, entry) {
   return redactSecretText(redact({
     action,
-    kind: ['sceneCache', 'runJournal'].includes(entry?.kind) ? entry.kind : 'unknown',
+    kind: INDEX_KINDS.has(entry?.kind) ? entry.kind : 'unknown',
     chatKey: safeOptionalMetadataText(entry?.chatKey, 160),
     reason: safeOptionalMetadataText(entry?.reason, 80)
   }));
@@ -977,11 +1098,27 @@ export function createStorageRepository({
     };
   }
 
-  async function writeIndexEntry(key, kind, chatKey = null) {
+  async function writeIndexEntry(key, kind, chatKey = null, metadata = {}) {
     const index = normalizeIndex(await storage.readJson(SYSTEM_INDEX_KEY));
-    index.records[key] = { key, kind, chatKey, updatedAt: nowIso() };
+    const record = normalizeIndexRecord(key, {
+      key,
+      kind,
+      chatKey,
+      updatedAt: nowIso(),
+      ...metadata
+    });
+    if (!record) throw new TypeError('Storage index entry is invalid.');
+    index.records[key] = record;
     index.updatedAt = nowIso();
     return storage.writeJson(SYSTEM_INDEX_KEY, index);
+  }
+
+  async function writeAuxiliaryIndexEntry(key, kind, chatKey = null, metadata = {}) {
+    try {
+      return storageWriteStatus(await writeIndexEntry(key, kind, chatKey, metadata));
+    } catch {
+      return { persisted: false };
+    }
   }
 
   async function removeIndexEntry(key) {
@@ -1182,6 +1319,232 @@ export function createStorageRepository({
     return clean;
   }
 
+  async function loadPipelineArtifact(chatKey, operationId, artifactId) {
+    const key = pipelineArtifactKey(chatKey, operationId, artifactId);
+    const record = await storage.readJson(key);
+    if (
+      !isStorageObject(record)
+      || record.recordType !== 'recursion.pipelineArtifact'
+      || record.schemaVersion !== 1
+      || record.chatKey !== safeId(chatKey, 'chat')
+      || record.operationId !== safeId(operationId, 'operation')
+      || record.artifactId !== safeId(artifactId, 'artifact')
+      || !isStorageObject(record.artifact)
+      || typeof record.artifactHash !== 'string'
+    ) {
+      return null;
+    }
+    const artifact = cloneJsonValue(record.artifact, null);
+    if (!artifact || await stableHash(artifact) !== record.artifactHash) return null;
+    return artifact;
+  }
+
+  async function savePipelineArtifact(chatKey, operationId, artifactId, artifact) {
+    const key = pipelineArtifactKey(chatKey, operationId, artifactId);
+    const artifactBody = cloneJsonValue(artifact, null);
+    if (!isStorageObject(artifactBody)) {
+      throw new TypeError('Pipeline artifacts must be JSON objects.');
+    }
+    const artifactHash = await stableHash(artifactBody);
+    const artifactBytes = new TextEncoder().encode(JSON.stringify(artifactBody)).byteLength;
+    const record = baseRecord('recursion.pipelineArtifact', {
+      chatKey: safeId(chatKey, 'chat'),
+      operationId: safeId(operationId, 'operation'),
+      artifactId: safeId(artifactId, 'artifact'),
+      artifactHash,
+      artifactBytes,
+      artifact: artifactBody
+    });
+    const writeResult = await storage.writeJson(key, record);
+    if (storageWriteStatus(writeResult).persisted === false) {
+      throw new Error('Pipeline artifact write failed.');
+    }
+    const persistedRecord = await storage.readJson(key);
+    if (
+      !persistedRecord
+      || persistedRecord.artifactHash !== artifactHash
+      || await stableHash(persistedRecord.artifact) !== artifactHash
+    ) {
+      throw new Error('Pipeline artifact write verification failed.');
+    }
+    await writeAuxiliaryIndexEntry(key, 'pipelineArtifact', safeId(chatKey, 'chat'), {
+      operationId: safeId(operationId, 'operation'),
+      artifactId: safeId(artifactId, 'artifact'),
+      artifactBytes
+    });
+    return {
+      kind: 'logical-storage',
+      key,
+      hash: artifactHash
+    };
+  }
+
+  async function loadPipelineRun(chatKey) {
+    const key = pipelineRunKey(chatKey);
+    const record = await storage.readJson(key);
+    if (
+      !isStorageObject(record)
+      || record.recordType !== 'recursion.pipelineRun'
+      || record.schemaVersion !== 1
+      || record.chatKey !== safeId(chatKey, 'chat')
+    ) {
+      return null;
+    }
+    return normalizePipelineRun(record.manifest);
+  }
+
+  async function savePipelineRun(chatKey, manifest) {
+    const normalized = normalizePipelineRun(manifest);
+    if (!normalized || safeId(normalized.chatKey, 'chat') !== safeId(chatKey, 'chat')) {
+      throw new TypeError('Pipeline manifest does not match the requested chat.');
+    }
+    const key = pipelineRunKey(chatKey);
+    const record = baseRecord('recursion.pipelineRun', {
+      chatKey: safeId(chatKey, 'chat'),
+      operationId: safeId(normalized.operationId, 'operation'),
+      manifest: normalized
+    });
+    const writeResult = await storage.writeJson(key, record);
+    if (storageWriteStatus(writeResult).persisted === false) {
+      throw new Error('Pipeline manifest write failed.');
+    }
+    const persistedManifest = normalizePipelineRun((await storage.readJson(key))?.manifest);
+    if (!persistedManifest || await stableHash(persistedManifest) !== await stableHash(normalized)) {
+      throw new Error('Pipeline manifest write verification failed.');
+    }
+    await writeAuxiliaryIndexEntry(key, 'pipelineRun', safeId(chatKey, 'chat'), {
+      operationId: safeId(normalized.operationId, 'operation')
+    });
+    return normalized;
+  }
+
+  async function loadQueuedReprocess(chatKey) {
+    const key = queuedReprocessKey(chatKey);
+    const record = await storage.readJson(key);
+    if (
+      !isStorageObject(record)
+      || record.recordType !== 'recursion.queuedReprocess'
+      || record.schemaVersion !== 1
+      || record.chatKey !== safeId(chatKey, 'chat')
+    ) {
+      return null;
+    }
+    return normalizeQueuedReprocessIntent(record.intent);
+  }
+
+  async function saveQueuedReprocess(chatKey, intent) {
+    const normalized = normalizeQueuedReprocessIntent(intent);
+    if (!normalized) throw new TypeError('Queued reprocess intent is invalid.');
+    const key = queuedReprocessKey(chatKey);
+    const record = baseRecord('recursion.queuedReprocess', {
+      chatKey: safeId(chatKey, 'chat'),
+      intent: normalized
+    });
+    const writeResult = await storage.writeJson(key, record);
+    if (storageWriteStatus(writeResult).persisted === false) {
+      throw new Error('Queued reprocess write failed.');
+    }
+    const persistedIntent = normalizeQueuedReprocessIntent((await storage.readJson(key))?.intent);
+    if (!persistedIntent || await stableHash(persistedIntent) !== await stableHash(normalized)) {
+      throw new Error('Queued reprocess write verification failed.');
+    }
+    await writeAuxiliaryIndexEntry(key, 'queuedReprocess', safeId(chatKey, 'chat'));
+    return normalized;
+  }
+
+  async function clearPipelineRun(chatKey) {
+    const key = pipelineRunKey(chatKey);
+    const deleted = await storage.deleteJson(key);
+    await removeIndexEntry(key);
+    return { ok: deleted?.ok !== false, key };
+  }
+
+  async function clearQueuedReprocess(chatKey) {
+    const key = queuedReprocessKey(chatKey);
+    const deleted = await storage.deleteJson(key);
+    await removeIndexEntry(key);
+    return { ok: deleted?.ok !== false, key };
+  }
+
+  async function clearPipelineArtifacts(chatKey, operationId = null) {
+    await repairIndex();
+    const index = normalizeIndex(await storage.readJson(SYSTEM_INDEX_KEY));
+    const safeChatKey = safeId(chatKey, 'chat');
+    const safeOperationId = operationId === null ? null : safeId(operationId, 'operation');
+    const keys = Object.values(index.records)
+      .filter((record) => (
+        record.kind === 'pipelineArtifact'
+        && record.chatKey === safeChatKey
+        && (safeOperationId === null || record.operationId === safeOperationId)
+      ))
+      .map((record) => record.key);
+    for (const key of keys) {
+      await storage.deleteJson(key);
+      delete index.records[key];
+    }
+    if (keys.length > 0) {
+      index.updatedAt = nowIso();
+      await storage.writeJson(SYSTEM_INDEX_KEY, index);
+    }
+    return { ok: true, deletedKeys: keys };
+  }
+
+  async function clearPipelineExecution(chatKey) {
+    const artifacts = await clearPipelineArtifacts(chatKey);
+    const manifest = await clearPipelineRun(chatKey);
+    const queued = await clearQueuedReprocess(chatKey);
+    return {
+      ok: artifacts.ok && manifest.ok && queued.ok,
+      artifacts,
+      manifest,
+      queued
+    };
+  }
+
+  async function prunePipelineExecution() {
+    const repair = await repairIndex();
+    const index = normalizeIndex(await storage.readJson(SYSTEM_INDEX_KEY));
+    const pruned = [];
+    for (const runRecord of Object.values(index.records)) {
+      if (runRecord.kind !== 'pipelineRun') continue;
+      const stored = await storage.readJson(runRecord.key);
+      const manifest = normalizePipelineRun(stored?.manifest);
+      if (!manifest || manifest.state !== 'abandoned') continue;
+      const artifactRecords = Object.values(index.records).filter((record) => (
+        record.kind === 'pipelineArtifact'
+        && record.chatKey === runRecord.chatKey
+        && record.operationId === runRecord.operationId
+      ));
+      for (const artifactRecord of artifactRecords) {
+        await storage.deleteJson(artifactRecord.key);
+        delete index.records[artifactRecord.key];
+        pruned.push(repairDiagnostic('pipeline-artifact-deleted', {
+          kind: 'pipelineArtifact',
+          chatKey: artifactRecord.chatKey,
+          reason: 'operation-abandoned'
+        }));
+      }
+      await storage.deleteJson(runRecord.key);
+      delete index.records[runRecord.key];
+      pruned.push(repairDiagnostic('pipeline-run-deleted', {
+        kind: 'pipelineRun',
+        chatKey: runRecord.chatKey,
+        reason: 'operation-abandoned'
+      }));
+    }
+    if (pruned.length > 0) {
+      index.updatedAt = nowIso();
+      await storage.writeJson(SYSTEM_INDEX_KEY, index);
+    }
+    return {
+      ok: true,
+      repaired: repair.repaired,
+      pruned,
+      skipped: repair.skipped,
+      journalEvents: [...repair.journalEvents, ...cleanupJournalEvents([], pruned)]
+    };
+  }
+
   return {
     loadSceneCache,
     async saveSceneCache(chatKey, sceneKey, value) {
@@ -1273,15 +1636,35 @@ export function createStorageRepository({
       return { ok: deleted?.ok !== false, key, deleted: deleted?.ok !== false };
     },
     appendJournal,
+    loadPipelineArtifact,
+    savePipelineArtifact,
+    loadPipelineRun,
+    savePipelineRun,
+    loadQueuedReprocess,
+    saveQueuedReprocess,
+    clearPipelineRun,
+    clearPipelineArtifacts,
+    clearQueuedReprocess,
+    clearPipelineExecution,
+    prunePipelineExecution,
     repairIndex,
     pruneSceneCaches,
     async maintainRetention(options = {}) {
       const retention = currentRetention();
-      return pruneSceneCaches({
+      const scenes = await pruneSceneCaches({
         ...options,
         maxPerChat: retention.sceneCachesPerChat,
         maxTotal: retention.sceneCachesTotal
       });
+      const pipeline = await prunePipelineExecution();
+      return {
+        ...scenes,
+        repaired: [...scenes.repaired, ...pipeline.repaired],
+        pruned: [...scenes.pruned, ...pipeline.pruned],
+        skipped: [...scenes.skipped, ...pipeline.skipped],
+        journalEvents: [...scenes.journalEvents, ...pipeline.journalEvents],
+        pipeline
+      };
     },
     async clearSceneCache(chatKey, sceneKey) {
       const key = sceneCacheKey(chatKey, sceneKey);

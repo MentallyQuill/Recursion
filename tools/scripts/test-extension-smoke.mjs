@@ -110,10 +110,12 @@ function createFakeSillyTavernContext(label) {
   const promptWrites = [];
   const promptState = new Map();
   const controlEvents = [];
+  const userFiles = new Map();
   const fake = {
     promptWrites,
     promptState,
     controlEvents,
+    userFiles,
     context: {
       chatId: `${label}-chat`,
       chat: [{ mesid: 0, is_user: true, mes: `${label} user message.` }],
@@ -137,10 +139,26 @@ function createFakeSillyTavernContext(label) {
           controlEvents.push('hide-swipes');
         }
       },
-      async generateRaw() {
+      async generateRaw(request = {}) {
+        const prompt = String(request.prompt || '');
+        const snapshotHash = prompt.match(/Snapshot hash:\s*([^\s]+)/)?.[1] || '';
+        if (prompt.includes('recursion.guidanceComposer.v1')) {
+          return {
+            text: JSON.stringify({
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash,
+              guidanceText: 'Preserve the current visible scene and answer the immediate user message.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: [`${label}-guidance-smoke`]
+            })
+          };
+        }
         return {
           text: JSON.stringify({
             schema: 'recursion.utilityArbiter.v1',
+            snapshotHash,
             action: 'compose-brief',
             cardJobs: [],
             reasonerDecision: { mode: 'skip', reason: 'smoke test', signals: [] },
@@ -150,6 +168,29 @@ function createFakeSillyTavernContext(label) {
         };
       }
     }
+  };
+  globalThis.fetch = async (url, options = {}) => {
+    const target = String(url);
+    if (target.startsWith('/user/files/')) {
+      const fileName = decodeURIComponent(target.slice('/user/files/'.length));
+      if (!userFiles.has(fileName)) {
+        return { ok: false, status: 404, json: async () => null };
+      }
+      return { ok: true, status: 200, json: async () => structuredClone(userFiles.get(fileName)) };
+    }
+    if (target === '/api/files/upload') {
+      const body = JSON.parse(String(options.body || '{}'));
+      const text = Buffer.from(String(body.data || ''), 'base64').toString('utf8');
+      userFiles.set(String(body.name), JSON.parse(text));
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+    if (target === '/api/files/delete') {
+      const body = JSON.parse(String(options.body || '{}'));
+      const fileName = String(body.path || '').split('/').pop();
+      userFiles.delete(fileName);
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+    return { ok: false, status: 404, json: async () => null };
   };
   fake.throwOnClear = false;
   return fake;
@@ -408,11 +449,26 @@ if (lifecycleFailures.length) {
     GENERATION_ENDED: 'generation_ended'
   };
   fake.context.generateRaw = async (request = {}) => {
-    prompts.push(String(request.prompt || ''));
+    const prompt = String(request.prompt || '');
+    prompts.push(prompt);
+    const snapshotHash = prompt.match(/Snapshot hash:\s*([^\s]+)/)?.[1] || '';
+    if (prompt.includes('recursion.guidanceComposer.v1')) {
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.guidanceComposer.v1',
+          snapshotHash,
+          guidanceText: 'Preserve the current visible scene and answer the immediate user message.',
+          sourceCardIds: [],
+          guardrailCardIds: [],
+          omittedCardIds: [],
+          diagnostics: ['latest-assistant-swipe-retry-guidance-smoke']
+        })
+      };
+    }
     return {
       text: JSON.stringify({
         schema: 'recursion.utilityArbiter.v1',
-        snapshotHash: request.snapshotHash,
+        snapshotHash,
         action: 'skip',
         reasonerDecision: { mode: 'skip', reason: 'latest assistant swipe smoke', signals: [] },
         budgets: { targetBriefTokens: 500, maxCards: 6 },
@@ -453,11 +509,26 @@ if (lifecycleFailures.length) {
   fake.context.chat = [{ mesid: 1, is_user: true, mes: userText }];
   fake.context.event_types = { MESSAGE_SWIPED: 'message_swiped' };
   fake.context.generateRaw = async (request = {}) => {
-    prompts.push(String(request.prompt || ''));
+    const prompt = String(request.prompt || '');
+    prompts.push(prompt);
+    const snapshotHash = prompt.match(/Snapshot hash:\s*([^\s]+)/)?.[1] || '';
+    if (prompt.includes('recursion.guidanceComposer.v1')) {
+      return {
+        text: JSON.stringify({
+          schema: 'recursion.guidanceComposer.v1',
+          snapshotHash,
+          guidanceText: 'Preserve the current visible scene and answer the immediate user message.',
+          sourceCardIds: [],
+          guardrailCardIds: [],
+          omittedCardIds: [],
+          diagnostics: ['latest-assistant-swipe-retry-guidance-smoke']
+        })
+      };
+    }
     return {
       text: JSON.stringify({
         schema: 'recursion.utilityArbiter.v1',
-        snapshotHash: request.snapshotHash,
+        snapshotHash,
         action: 'compose-brief',
         cardJobs: [],
         reasonerDecision: { mode: 'skip', reason: 'latest assistant swipe retry smoke', signals: [] },

@@ -122,12 +122,13 @@ function manifest({
 
 function stage(id, dependencies, run, {
   failurePolicy = 'blocking',
-  input = id
+  input = id,
+  kind = 'model'
 } = {}) {
   return {
     id,
     version: 1,
-    kind: 'model',
+    kind,
     executable: true,
     dependencies,
     checkpoint: 'durable',
@@ -138,7 +139,7 @@ function stage(id, dependencies, run, {
         dependencyHashes: Object.fromEntries(
           Object.entries(dependencyArtifacts).map(([stageId, value]) => [
             stageId,
-            value.checkpoint.outputHash
+            value.checkpoint?.outputHash || value.stateHash
           ])
         )
       };
@@ -758,6 +759,44 @@ function createIds() {
   assertEqual(saved.stageRecords.root.attempts.window, 2, 'manual Retry increments attempt window');
   assertEqual(saved.stageRecords.root.attempts.used, 1, 'manual Retry resets used attempts for the new window');
   assertEqual(saved.stageRecords.root.attempts.total, 3, 'manual Retry preserves monotonic total');
+}
+
+{
+  const repository = createRepository();
+  let deckDependencies = null;
+  const graph = createExecutionGraph({
+    stages: [
+      stage('arbiter', [], async () => ({ selected: ['character'] })),
+      stage('card.character', ['arbiter'], async () => {
+        throw Object.assign(new Error('optional card failed'), {
+          code: 'RECURSION_TEST_OPTIONAL_CARD_FAILED',
+          retryable: false
+        });
+      }, { failurePolicy: 'continue' }),
+      stage('deck', ['arbiter', 'card.character'], async ({ dependencies }) => {
+        deckDependencies = dependencies;
+        return { cardCount: 0 };
+      }, { kind: 'local' })
+    ]
+  });
+  const scheduler = createExecutionScheduler({
+    repository,
+    now: createClock(),
+    createId: createIds(),
+    attemptsPerStep: 2
+  });
+  await scheduler.start({
+    manifest: manifest({ operationId: 'continue-dependency-run' }),
+    graph,
+    context: {}
+  });
+  const saved = await repository.loadPipelineRun('chat-a');
+  assertEqual(saved.state, 'completed', 'failed optional dependency does not block local descendant');
+  assertEqual(saved.stageRecords['card.character'].state, 'failed', 'optional failed stage remains visible');
+  assertEqual(saved.stageRecords.deck.state, 'completed', 'local descendant runs after optional dependency settles');
+  assertEqual(saved.stageRecords.deck.attempts.total, 0, 'local bookkeeping does not consume model attempts');
+  assertEqual(deckDependencies['card.character'].state, 'failed', 'local descendant receives failed optional dependency state');
+  assertEqual(deckDependencies['card.character'].artifact, null, 'failed optional dependency has no fabricated artifact');
 }
 
 await assertRejects(

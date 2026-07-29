@@ -11,6 +11,7 @@ let host = null;
 let hostEventUnsubscribers = [];
 let settingsBootstrapUnsubscribers = [];
 let settingsLoadEventObserved = false;
+let runtimeRestorePromise = null;
 
 let postProcessControlsLocked = false;
 let postProcessControlLockPromise = null;
@@ -289,7 +290,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
     lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
   };
   const chatChangedEvent = resolveChatChangedEvent(context);
-  registerRuntimeHostEvent(eventSource, chatChangedEvent, () => {
+  registerRuntimeHostEvent(eventSource, chatChangedEvent, async () => {
     const nextAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
     const postProcessOwnedChatMutation = activeAssistantIdentityFromHost(currentHost)?.postProcessOwned === true
       && Boolean(nextAssistantIdentity)
@@ -300,10 +301,19 @@ function registerHostEvents(nextRuntime, currentHost = host) {
       return { ok: true, skipped: true, reason: 'post-process-owned-chat-mutation' };
     }
     nextRuntime.cancelPostProcess?.('chat-changed');
-    return invokeRuntimeCleanup('handleChatChanged', 'Chat change cleanup failed.');
+    await invokeRuntimeCleanup(
+      'pauseOperation',
+      'Chat change pause failed.',
+      { reason: 'chat-changed' }
+    );
+    await invokeRuntimeCleanup('handleChatChanged', 'Chat change cleanup failed.');
+    return invokeRuntimeCleanup(
+      'restoreExecutionState',
+      'Chat execution restore failed.'
+    );
   });
   for (const eventName of resolveSourceChangedEvents(context)) {
-    registerRuntimeHostEvent(eventSource, eventName, (payload) => {
+    registerRuntimeHostEvent(eventSource, eventName, async (payload) => {
       const details = normalizeHostMessageEvent(currentHost, eventName, payload);
       runtime ||= nextRuntime;
       if (postProcessOwnedSourceMutation(details, currentHost)) {
@@ -319,7 +329,16 @@ function registerHostEvents(nextRuntime, currentHost = host) {
         return invokeRuntimeCleanup('handleLatestAssistantSwipeRetry', 'Latest assistant swipe retry marker failed.', details);
       }
       refreshAssistantSignature();
-      return invokeRuntimeCleanup('handleSourceChanged', 'Source change cleanup failed.', details);
+      await invokeRuntimeCleanup(
+        'pauseOperation',
+        'Source change pause failed.',
+        { reason: details.deleted ? 'source-deleted' : (details.swiped ? 'source-swiped' : 'source-edited') }
+      );
+      await invokeRuntimeCleanup('handleSourceChanged', 'Source change cleanup failed.', details);
+      return invokeRuntimeCleanup(
+        'restoreExecutionState',
+        'Source execution restore failed.'
+      );
     });
   }
   for (const eventName of resolveAssistantStreamingEvents(context)) {
@@ -329,12 +348,17 @@ function registerHostEvents(nextRuntime, currentHost = host) {
     });
   }
   for (const eventName of resolveGenerationStoppedEvents(context)) {
-    registerRuntimeHostEvent(eventSource, eventName, (payload) => {
+    registerRuntimeHostEvent(eventSource, eventName, async (payload) => {
       refreshAssistantSignature();
       runtime ||= nextRuntime;
       const details = normalizeHostMessageEvent(currentHost, eventName, payload);
       details.postProcessControlsLocked = postProcessControlsLocked;
       nextRuntime.cancelPostProcess?.('host-generation-stopped');
+      await invokeRuntimeCleanup(
+        'pauseOperation',
+        'Generation stop pause failed.',
+        { reason: 'host-generation-stopped' }
+      );
       return invokeRuntimeCleanup('handleHostGenerationStopped', 'Generation stop cleanup failed.', details)
         .finally(() => unlockPostProcessControls(currentHost));
     });
@@ -562,7 +586,8 @@ export function bootstrapRecursion() {
       settingsStore: nextHost.settingsStore,
       storage,
       activity,
-      generationRouter
+      generationRouter,
+      durablePreprocess: true
     });
     const nextUi = mountRecursionUi({ runtime: nextRuntime });
     host = nextHost;
@@ -570,6 +595,11 @@ export function bootstrapRecursion() {
     ui = nextUi;
     publishLiveHarnessRuntime(nextRuntime);
     registerHostEvents(nextRuntime, nextHost);
+    runtimeRestorePromise = Promise.resolve(nextRuntime.restoreExecutionState?.())
+      .catch((error) => {
+        warn('Initial execution restore failed.', error);
+        return null;
+      });
     return runtime;
   } catch (error) {
     warn('Bootstrap failed.', error);
@@ -597,6 +627,7 @@ async function teardownRecursion(label) {
   settingsLoadEventObserved = false;
   await unlockPostProcessControls(host);
   try {
+    await runtimeRestorePromise;
     await runtime?.dispose?.();
   } catch (error) {
     warn(`${label} runtime dispose failed.`, error);
@@ -605,6 +636,7 @@ async function teardownRecursion(label) {
   destroyUi();
   host = null;
   runtime = null;
+  runtimeRestorePromise = null;
   publishLiveHarnessRuntime(null);
 }
 
@@ -614,6 +646,7 @@ export async function recursionGenerationInterceptor(chat, _contextSize, _abort,
   if (!activeRuntime) return chat;
 
   try {
+    await runtimeRestorePromise;
     await activeRuntime.prepareForGeneration({
       userMessage: latestPendingUserMessageFromPayload(chat),
       hostGeneration: true,

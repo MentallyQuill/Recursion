@@ -1,5 +1,12 @@
 import { hashJson } from '../../src/core.mjs';
-import { composePromptPacket, packetToPromptBlocks, validatePromptPacket } from '../../src/prompt.mjs';
+import {
+  buildGuidanceCorrectionRequest,
+  buildGuidanceStageRequest,
+  composePromptPacket,
+  packetToPromptBlocks,
+  validateGuidanceStageResult,
+  validatePromptPacket
+} from '../../src/prompt.mjs';
 import { influencePolicyForSettings } from '../../src/settings-policy.mjs';
 import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
 
@@ -88,6 +95,48 @@ function markerHand(overrides = {}) {
     privateSecret: 'private-secret',
     ...overrides
   };
+}
+
+{
+  const hand = markerHand();
+  const snapshot = baseSnapshot();
+  const request = buildGuidanceStageRequest({
+    hand,
+    snapshot,
+    settings: {},
+    runId: 'durable-guidance'
+  });
+  assertEqual(request.roleId, 'guidanceComposer', 'durable guidance stage exposes its provider role');
+  assert(request.request.prompt.includes('recursion.guidanceComposer.v1'), 'durable guidance request names its schema');
+  const valid = validateGuidanceStageResult({
+    ok: true,
+    data: {
+      schema: 'recursion.guidanceComposer.v1',
+      snapshotHash: hashJson(snapshot),
+      guidanceText: 'Keep the escort boundary visible and answer only with the next scene beat.',
+      sourceCardIds: ['scene-card'],
+      guardrailCardIds: ['constraint-card'],
+      omittedCardIds: [],
+      diagnostics: []
+    }
+  }, { hand, snapshot });
+  assertEqual(valid.ok, true, 'durable guidance stage accepts valid structured guidance');
+  assertEqual(valid.value.status, 'used', 'durable guidance stage returns canonical guidance');
+
+  const invalid = validateGuidanceStageResult({
+    ok: true,
+    data: { schema: 'wrong.schema', guidanceText: 'raw fallback must not become success' }
+  }, { hand, snapshot });
+  assertEqual(invalid.ok, false, 'durable guidance stage rejects invalid structured guidance');
+  assertEqual(invalid.error.retryable, true, 'invalid guidance consumes another model attempt');
+
+  const corrected = buildGuidanceCorrectionRequest({
+    request: request.request,
+    failure: invalid.error,
+    attempt: 1
+  });
+  assert(corrected.prompt.includes('Correction required'), 'guidance retry explicitly corrects the invalid response');
+  assert(corrected.prompt.includes('wrong schema'), 'guidance retry carries a bounded failure reason');
 }
 
 const guidanceCalls = [];

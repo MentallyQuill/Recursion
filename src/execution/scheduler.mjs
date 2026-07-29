@@ -106,6 +106,10 @@ function removeValue(values, target) {
   return (Array.isArray(values) ? values : []).filter((value) => value !== target);
 }
 
+function dependencyHash(value) {
+  return String(value?.checkpoint?.outputHash || value?.stateHash || '');
+}
+
 export function createExecutionScheduler({
   repository,
   now = () => new Date().toISOString(),
@@ -194,6 +198,26 @@ export function createExecutionScheduler({
     for (const dependencyId of stage.dependencies) {
       const record = runtime.manifest.stageRecords[dependencyId];
       const checkpoint = record?.checkpoint;
+      const dependencyStage = runtime.graph.getStage(dependencyId);
+      if (
+        !checkpoint
+        && record?.state === 'failed'
+        && dependencyStage?.failurePolicy === 'continue'
+      ) {
+        const failure = clone(record.failure);
+        dependencies[dependencyId] = {
+          artifact: null,
+          checkpoint: null,
+          state: 'failed',
+          failure,
+          stateHash: await stableHash({
+            stageId: dependencyId,
+            state: 'failed',
+            failure
+          })
+        };
+        continue;
+      }
       if (!checkpoint) throw new Error(`Dependency checkpoint missing for ${dependencyId}.`);
       const artifactId = checkpoint.artifactRef?.artifactId || dependencyId;
       const artifact = await repository.loadPipelineArtifact(
@@ -204,7 +228,13 @@ export function createExecutionScheduler({
       if (!artifact || await stableHash(artifact) !== checkpoint.outputHash) {
         throw new Error(`Dependency artifact invalid for ${dependencyId}.`);
       }
-      dependencies[dependencyId] = { artifact, checkpoint };
+      dependencies[dependencyId] = {
+        artifact,
+        checkpoint,
+        state: 'completed',
+        failure: null,
+        stateHash: checkpoint.outputHash
+      };
     }
     return dependencies;
   }
@@ -237,7 +267,7 @@ export function createExecutionScheduler({
             dependencyHashes: Object.fromEntries(
               Object.entries(dependencyArtifacts).map(([stageId, value]) => [
                 stageId,
-                value.checkpoint.outputHash
+                dependencyHash(value)
               ])
             )
           };
@@ -264,7 +294,7 @@ export function createExecutionScheduler({
         dependencyCheckpoints: Object.fromEntries(
           Object.entries(dependencyArtifacts).map(([stageId, value]) => [
             stageId,
-            value.checkpoint
+            value.checkpoint || { outputHash: dependencyHash(value) }
           ])
         ),
         artifactHash: checkpoint.outputHash,
@@ -332,6 +362,27 @@ export function createExecutionScheduler({
     }
   }
 
+  async function failPendingStage(runtime, stage, failure) {
+    try {
+      await queueMutation(runtime, (draft) => {
+        const record = draft.stageRecords[stage.id];
+        if (!record || record.state !== 'pending') return null;
+        draft.stageRecords[stage.id] = {
+          ...record,
+          state: 'failed',
+          checkpoint: null,
+          failure: failureRecord(failure),
+          executionToken: null,
+          updatedAt: now()
+        };
+        draft.frontierStageIds = removeValue(draft.frontierStageIds, stage.id);
+        return draft;
+      });
+    } catch {
+      // The last durably written manifest remains authoritative.
+    }
+  }
+
   async function executeStage(runtime, stage) {
     const executionToken = createId('stage');
     const controller = new AbortController();
@@ -349,21 +400,24 @@ export function createExecutionScheduler({
             dependencyHashes: Object.fromEntries(
               Object.entries(dependencyArtifacts).map(([stageId, value]) => [
                 stageId,
-                value.checkpoint.outputHash
+                dependencyHash(value)
               ])
             )
           };
       inputHash = await stableHash(fingerprint);
-      const limit = attemptLimit();
+      const modelStage = stage.kind === 'model';
+      const limit = modelStage ? attemptLimit() : 0;
       await queueMutation(runtime, (draft) => {
         if (draft.state !== 'running') return null;
         const record = draft.stageRecords[stage.id];
-        openedAttempts = {
-          window: Number(record.attempts?.window || 0) + 1,
-          limit,
-          used: 0,
-          total: Number(record.attempts?.total || 0)
-        };
+        openedAttempts = modelStage
+          ? {
+              window: Number(record.attempts?.window || 0) + 1,
+              limit,
+              used: 0,
+              total: Number(record.attempts?.total || 0)
+            }
+          : record.attempts;
         draft.stageRecords[stage.id] = {
           ...record,
           state: 'running',
@@ -393,56 +447,79 @@ export function createExecutionScheduler({
       const request = typeof stage.buildRequest === 'function'
         ? await stage.buildRequest(runtime.context, dependencyArtifacts)
         : { context: runtime.context, dependencies: dependencyArtifacts };
-      const attemptResult = await runModelStageAttempts({
-        attemptsPerStep: openedAttempts.limit,
-        request,
-        signal: controller.signal,
-        invoke: (attemptRequest, attemptContext) => raceAbort(
-          () => stage.run({
-            request: attemptRequest,
-            signal: controller.signal,
-            context: runtime.context,
-            dependencies: dependencyArtifacts,
-            attempt: attemptContext.attempt,
-            operationId: runtime.manifest.operationId,
-            stageId: stage.id
-          }),
-          controller.signal
-        ),
-        validate: (artifact) => validateArtifact(stage, artifact, {
+      const invokeStage = (attemptRequest, attempt = 0) => raceAbort(
+        () => stage.run({
+          request: attemptRequest,
+          signal: controller.signal,
           context: runtime.context,
           dependencies: dependencyArtifacts,
-          reuse: false
+          attempt,
+          operationId: runtime.manifest.operationId,
+          stageId: stage.id
         }),
-        buildCorrectionRequest: typeof stage.buildCorrectionRequest === 'function'
-          ? (details) => stage.buildCorrectionRequest({
-              ...details,
-              context: runtime.context,
-              dependencies: dependencyArtifacts
-            })
-          : ({ request: currentRequest }) => currentRequest,
-        onAttemptSettled: (summary) => queueMutation(runtime, (draft) => {
-          const record = draft.stageRecords[stage.id];
-          if (
-            !record
-            || record.executionToken !== executionToken
-            || record.state !== 'running'
-          ) {
-            return null;
-          }
-          draft.stageRecords[stage.id] = {
-            ...record,
-            attempts: {
-              ...record.attempts,
-              used: Number(record.attempts.used || 0) + 1,
-              total: Number(record.attempts.total || 0) + 1
-            },
-            failure: summary.failure ? failureRecord(summary.failure) : null,
-            updatedAt: now()
-          };
-          return draft;
-        })
-      });
+        controller.signal
+      );
+      let attemptResult;
+      if (modelStage) {
+        attemptResult = await runModelStageAttempts({
+          attemptsPerStep: openedAttempts.limit,
+          request,
+          signal: controller.signal,
+          invoke: (attemptRequest, attemptContext) => invokeStage(
+            attemptRequest,
+            attemptContext.attempt
+          ),
+          validate: (artifact) => validateArtifact(stage, artifact, {
+            context: runtime.context,
+            dependencies: dependencyArtifacts,
+            reuse: false
+          }),
+          buildCorrectionRequest: typeof stage.buildCorrectionRequest === 'function'
+            ? (details) => stage.buildCorrectionRequest({
+                ...details,
+                context: runtime.context,
+                dependencies: dependencyArtifacts
+              })
+            : ({ request: currentRequest }) => currentRequest,
+          onAttemptSettled: (summary) => queueMutation(runtime, (draft) => {
+            const record = draft.stageRecords[stage.id];
+            if (
+              !record
+              || record.executionToken !== executionToken
+              || record.state !== 'running'
+            ) {
+              return null;
+            }
+            draft.stageRecords[stage.id] = {
+              ...record,
+              attempts: {
+                ...record.attempts,
+                used: Number(record.attempts.used || 0) + 1,
+                total: Number(record.attempts.total || 0) + 1
+              },
+              failure: summary.failure ? failureRecord(summary.failure) : null,
+              updatedAt: now()
+            };
+            return draft;
+          })
+        });
+      } else {
+        try {
+          const artifact = await invokeStage(request);
+          const validation = await validateArtifact(stage, artifact, {
+            context: runtime.context,
+            dependencies: dependencyArtifacts,
+            reuse: false
+          });
+          attemptResult = validation.ok
+            ? { ok: true, value: validation.value }
+            : { ok: false, failure: validation.error };
+        } catch (error) {
+          attemptResult = error?.name === 'AbortError'
+            ? { ok: false, aborted: true, failure: error }
+            : { ok: false, failure: error };
+        }
+      }
 
       if (attemptResult.aborted || controller.signal.aborted) return;
       if (!attemptResult.ok) {
@@ -474,6 +551,12 @@ export function createExecutionScheduler({
             dependencies: dependencyArtifacts
           })
         : null;
+      const settledFailure = typeof stage.settledFailure === 'function'
+        ? stage.settledFailure(artifact, {
+            context: runtime.context,
+            dependencies: dependencyArtifacts
+          })
+        : null;
       const checkpoint = createCheckpoint({
         operationId: runtime.manifest.operationId,
         stageId: stage.id,
@@ -483,7 +566,7 @@ export function createExecutionScheduler({
         dependencyHashes: Object.fromEntries(
           Object.entries(dependencyArtifacts).map(([stageId, value]) => [
             stageId,
-            value.checkpoint.outputHash
+            dependencyHash(value)
           ])
         ),
         provenance: runtime.provenance,
@@ -506,10 +589,10 @@ export function createExecutionScheduler({
         }
         draft.stageRecords[stage.id] = {
           ...record,
-          state: 'completed',
+          state: settledFailure ? 'failed' : 'completed',
           checkpoint,
           summary,
-          failure: null,
+          failure: settledFailure ? failureRecord(settledFailure) : null,
           executionToken: null,
           updatedAt: now()
         };
@@ -518,13 +601,18 @@ export function createExecutionScheduler({
       });
     } catch (error) {
       if (!controller.signal.aborted) {
-        await failStage(runtime, stage, executionToken, {
+        const failure = {
           code: error?.code || 'RECURSION_STAGE_FAILED',
           category: /artifact|manifest|storage/i.test(String(error?.message || ''))
             ? 'storage'
             : 'internal',
           retryable: error?.retryable === true
-        });
+        };
+        if (runtime.manifest.stageRecords[stage.id]?.state === 'pending') {
+          await failPendingStage(runtime, stage, failure);
+        } else {
+          await failStage(runtime, stage, executionToken, failure);
+        }
       }
     } finally {
       runtime.controllers.delete(stage.id);
@@ -554,11 +642,13 @@ export function createExecutionScheduler({
       const stage = runtime.graph.getStage(stageId);
       const record = runtime.manifest.stageRecords[stageId];
       if (record.state !== 'pending') continue;
-      if (stage.dependencies.some((dependencyId) => (
-        ['failed', 'skipped', 'stale'].includes(
-          runtime.manifest.stageRecords[dependencyId]?.state
-        )
-      ))) {
+      if (stage.dependencies.some((dependencyId) => {
+        const dependencyState = runtime.manifest.stageRecords[dependencyId]?.state;
+        if (dependencyState === 'failed') {
+          return runtime.graph.getStage(dependencyId)?.failurePolicy !== 'continue';
+        }
+        return ['skipped', 'stale'].includes(dependencyState);
+      })) {
         skipped.push(stageId);
       }
     }
@@ -580,6 +670,14 @@ export function createExecutionScheduler({
   }
 
   async function runOperation(runtime, epoch) {
+    const dependencySettled = (dependencyId) => {
+      const dependencyState = runtime.manifest.stageRecords[dependencyId]?.state;
+      return dependencyState === 'completed'
+        || (
+          dependencyState === 'failed'
+          && runtime.graph.getStage(dependencyId)?.failurePolicy === 'continue'
+        );
+    };
     while (runtime.epoch === epoch && runtime.manifest.state === 'running') {
       await markBlockedDescendants(runtime);
       if (runtime.epoch !== epoch || runtime.manifest.state !== 'running') break;
@@ -593,9 +691,7 @@ export function createExecutionScheduler({
         }
         let record = runtime.manifest.stageRecords[stageId];
         if (record.state === 'completed') {
-          if (!stage.dependencies.every((dependencyId) => (
-            runtime.manifest.stageRecords[dependencyId]?.state === 'completed'
-          ))) {
+          if (!stage.dependencies.every(dependencySettled)) {
             continue;
           }
           if (runtime.forcedStageIds.has(stageId)) {
@@ -621,9 +717,7 @@ export function createExecutionScheduler({
           });
           continue;
         }
-        if (stage.dependencies.every((dependencyId) => (
-          runtime.manifest.stageRecords[dependencyId]?.state === 'completed'
-        ))) {
+        if (stage.dependencies.every(dependencySettled)) {
           ready.push(stage);
           scheduledThisWave.add(stageId);
         }
@@ -915,6 +1009,19 @@ export function createExecutionScheduler({
           executionToken: null,
           updatedAt: now()
         };
+        for (const descendantId of runtime.graph.descendantIds(stageId)) {
+          const descendant = draft.stageRecords[descendantId];
+          if (!descendant) continue;
+          draft.stageRecords[descendantId] = {
+            ...descendant,
+            state: 'pending',
+            checkpoint: null,
+            summary: null,
+            failure: null,
+            executionToken: null,
+            updatedAt: now()
+          };
+        }
         return draft;
       });
       return activate(runtime);

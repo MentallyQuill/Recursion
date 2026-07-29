@@ -460,6 +460,89 @@ function buildGuidancePrompt({ runId, snapshotHash: sourceSnapshotHash, cards, b
   ].join('\n\n');
 }
 
+export function buildGuidanceStageRequest({
+  hand = {},
+  cards: inputCards = null,
+  snapshot = {},
+  settings = {},
+  behaviorPolicy = null,
+  runId = makeId('prompt-run'),
+  storyForm = UNKNOWN_STORY_FORM
+} = {}) {
+  const cards = Array.isArray(inputCards)
+    ? inputCards.map((card, index) => normalizeCard(card, index)).filter((card) => card.promptText)
+    : normalizeCards(hand);
+  const promptRunId = safePromptId(runId, 'prompt-run') || makeId('prompt-run');
+  const sourceSnapshotHash = snapshotHash(snapshot);
+  const policy = behaviorPolicyFrom(settings, behaviorPolicy);
+  return {
+    roleId: 'guidanceComposer',
+    request: {
+      lane: 'utility',
+      runId: promptRunId,
+      snapshotHash: sourceSnapshotHash,
+      prompt: buildGuidancePrompt({
+        runId: promptRunId,
+        snapshotHash: sourceSnapshotHash,
+        cards,
+        behaviorPolicy: policy,
+        storyForm
+      })
+    }
+  };
+}
+
+export function validateGuidanceStageResult(result, {
+  hand = {},
+  cards: inputCards = null,
+  snapshot = {}
+} = {}) {
+  const cards = Array.isArray(inputCards)
+    ? inputCards.map((card, index) => normalizeCard(card, index)).filter((card) => card.promptText)
+    : normalizeCards(hand);
+  const validated = validateGuidanceResult(
+    result,
+    new Set(cards.map((card) => card.id)),
+    snapshotHash(snapshot)
+  );
+  if (validated.ok) return { ok: true, value: validated };
+  const reason = safeText(validated.reason || 'invalid', MAX_DIAGNOSTIC_TEXT);
+  const readableReason = reason === 'schema-mismatch'
+    ? 'wrong schema'
+    : reason.replace(/[-_]+/g, ' ');
+  return {
+    ok: false,
+    error: {
+      code: 'RECURSION_GUIDANCE_INVALID',
+      category: 'validation',
+      retryable: true,
+      reason,
+      message: `Guidance response is invalid: ${readableReason}.`
+    }
+  };
+}
+
+export function buildGuidanceCorrectionRequest({
+  request = {},
+  failure = {},
+  attempt = 1
+} = {}) {
+  const source = asObject(request);
+  const reason = safeText(
+    failure?.message || failure?.reason || failure?.code || 'invalid structured guidance',
+    MAX_DIAGNOSTIC_TEXT
+  );
+  return {
+    ...source,
+    prompt: [
+      safeTextSource(source.prompt, MAX_PACKET_SECTION),
+      'Correction required.',
+      `The previous response was rejected after attempt ${Math.max(1, Number(attempt) || 1)}: ${reason}`,
+      `Return one corrected JSON object only using schema "${GUIDANCE_SCHEMA}".`
+    ].filter(Boolean).join('\n\n')
+  };
+}
+
 function buildReasonerPrompt({ runId, snapshotHash: sourceSnapshotHash, footprint, cards, guidance, behaviorPolicy = null, storyForm = UNKNOWN_STORY_FORM }) {
   const normalizedStoryForm = normalizeStoryForm(storyForm);
   return [

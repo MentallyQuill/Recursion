@@ -4,6 +4,9 @@ import {
   CARD_CATALOG,
   applyCardPlan,
   buildCardRequests,
+  buildFusedCardBundleRequest,
+  cardsFromFusedProviderResult,
+  cardsFromProviderResult,
   limitCardJobsForHandBudget,
   normalizeCard,
   selectHand
@@ -30,7 +33,16 @@ import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs'
 import { boundEnhancementMessages, buildContextContract, contextMessageIdentity } from './context-contract.mjs';
 import { enhancementContextFromSnapshot } from './enhancement-context.mjs';
 import { ENHANCEMENT_EDIT_RATIO_MINIMUM, roundedEnhancementEditRatio } from './enhancement-metrics.mjs';
-import { composeGuidanceForCards, composePromptPacket, GUIDANCE_SCHEMA as PROMPT_GUIDANCE_SCHEMA, PROMPT_PACKET_VERSION } from './prompt.mjs';
+import {
+  buildGuidanceCorrectionRequest,
+  buildGuidanceStageRequest,
+  composeGuidanceForCards,
+  composePromptPacket,
+  GUIDANCE_SCHEMA as PROMPT_GUIDANCE_SCHEMA,
+  PROMPT_PACKET_VERSION,
+  validateGuidanceStageResult,
+  validatePromptPacket
+} from './prompt.mjs';
 import { PROVIDER_CONTRACT_HASH, fetchOpenAICompatibleModels } from './providers.mjs';
 import {
   providerConfigHash,
@@ -45,6 +57,16 @@ import { createMemoryStorageAdapter, createStorageRepository } from './storage.m
 import { normalizeRetentionSettings } from './retention-policy.mjs';
 import { asObject } from './safe-values.mjs';
 import { createPostProcessRuntime } from './post-process-runtime.mjs';
+import { createPipelineRun } from './execution/checkpoints.mjs';
+import { createExecutionScheduler } from './execution/scheduler.mjs';
+import { createExecutionGraph } from './execution/stage-registry.mjs';
+import {
+  QUEUED_REPROCESS_SCHEMA,
+  bindQueuedReprocess,
+  mergeQueuedReprocess,
+  normalizeQueuedReprocess
+} from './execution/queued-reprocess.mjs';
+import { buildRunProvenance, compareRunProvenance } from './execution/provenance.mjs';
 import {
   applyGenerationReviewPatches,
   buildGenerationReviewRequest,
@@ -85,6 +107,10 @@ import {
 } from './runtime/prompt-install.mjs';
 import { runFusedCardPipeline } from './runtime/pipelines/fused.mjs';
 import { runSegmentedCardPipeline } from './runtime/pipelines/segmented.mjs';
+import {
+  createFusedCardStages,
+  createSegmentedCardStages
+} from './runtime/preprocess-graph.mjs';
 import {
   PREPARED_GENERATION_VERSION,
   compareGenerationBasis,
@@ -2193,7 +2219,8 @@ export function createRecursionRuntime({
   storage = createStorageRepository({ storage: createMemoryStorageAdapter() }),
   activity = createActivityReporter(),
   generationRouter = null,
-  fetchImpl = globalThis.fetch
+  fetchImpl = globalThis.fetch,
+  durablePreprocess = false
 } = {}) {
   const runState = createRuntimeRunState();
   const activeProviderOperations = new Map();
@@ -2309,6 +2336,23 @@ export function createRecursionRuntime({
   let activeProseEnhancementLifecycle = null;
   let canceledProseEnhancement = null;
   let lastEditorialResult = null;
+  let executionView = null;
+  let queuedReprocessView = null;
+  let activeExecutionChatKey = '';
+  const preprocessGraphs = new Map();
+  const preprocessContexts = new Map();
+  const durablePreparePromises = new Map();
+  const executionScheduler = durablePreprocess
+    ? createExecutionScheduler({
+        repository: storage,
+        attemptsPerStep: () => settingsStore.get().modelAttemptsPerStep,
+        onViewChanged(manifest) {
+          if (!activeExecutionChatKey || manifest?.chatKey === activeExecutionChatKey) {
+            executionView = manifest || null;
+          }
+        }
+      })
+    : null;
 
   async function postProcessSourceStillCurrent(source = {}) {
     if (typeof host?.messages?.postProcessSourceIdentity !== 'function') return false;
@@ -2649,6 +2693,30 @@ export function createRecursionRuntime({
       clearLastBrief({ status: 'empty', reason: 'disabled' });
       return { ok: true, skipped: true, reason: 'disabled' };
     }
+    if (durablePreprocess) {
+      const snapshot = await readSnapshot();
+      const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;
+      const intent = {
+        schema: QUEUED_REPROCESS_SCHEMA,
+        mode: 'full-fresh',
+        stageIds: []
+      };
+      await storage.saveQueuedReprocess(chatKey, intent);
+      activeExecutionChatKey = chatKey;
+      queuedReprocessView = intent;
+      clearPendingLatestAssistantSwipeRetry();
+      return {
+        ok: true,
+        queuedReprocess: redact(intent),
+        freshNextGeneration: {
+          pending: true,
+          id: '',
+          reason: 'full-fresh',
+          requestedAt: nowIso(),
+          source: safeText(asObject(details).source || 'bar', 80) || 'bar'
+        }
+      };
+    }
     const source = asObject(details);
     runState.setFreshNextGeneration({
       id: makeId('fresh-next-generation'),
@@ -2665,6 +2733,18 @@ export function createRecursionRuntime({
   }
 
   async function clearFreshNextGeneration() {
+    if (durablePreprocess) {
+      const snapshot = await readSnapshot();
+      const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;
+      const intent = await storage.loadQueuedReprocess(chatKey);
+      if (intent?.mode === 'full-fresh') await storage.clearQueuedReprocess(chatKey);
+      queuedReprocessView = intent?.mode === 'full-fresh' ? null : intent;
+      return {
+        ok: true,
+        queuedReprocess: queuedReprocessView ? redact(queuedReprocessView) : null,
+        freshNextGeneration: freshNextGenerationView()
+      };
+    }
     clearPendingFreshNextGeneration();
     return {
       ok: true,
@@ -3154,6 +3234,23 @@ export function createRecursionRuntime({
       lastSnapshot: viewSnapshot(lastSnapshot),
       lastBrief: { ...lastBrief },
       freshNextGeneration: freshNextGenerationView(),
+      execution: executionView
+        ? {
+            operationId: safeIdentifier(executionView.operationId || '', 'operation', 180),
+            chatKey: safeText(executionView.chatKey || '', 180),
+            phase: safeText(executionView.phase || '', 80),
+            state: safeText(executionView.state || '', 40),
+            frontierStageIds: safeStringList(executionView.frontierStageIds, 180),
+            resumable: executionView.state === 'paused'
+              && !String(executionView.pauseReason || '').startsWith('stage-failed:')
+              && !(executionView.staleChangedFields || []).length,
+            staleFields: safeStringList(executionView.staleChangedFields, 120),
+            pauseReason: safeText(executionView.pauseReason || '', 160),
+            stages: Object.values(asObject(executionView.stageRecords)).map((record) => redact(record)),
+            stageRecords: redact(executionView.stageRecords || {})
+          }
+        : null,
+      queuedReprocess: queuedReprocessView ? redact(queuedReprocessView) : null,
       activity: safeCurrentActivity(activity),
       activityHistory: safeActivityHistory(activity),
       editorialResult: lastEditorialResult ? { ...lastEditorialResult } : null,
@@ -3239,6 +3336,15 @@ export function createRecursionRuntime({
   async function resetSceneCache() {
     const runId = makeId('scene-reset');
     supersedeActiveRun();
+    const durableOperationId = durablePreprocess
+      ? safeText(executionView?.operationId || '', 180)
+      : '';
+    if (durableOperationId) {
+      await executionScheduler.abandon({
+        operationId: durableOperationId,
+        reason: 'scene-cache-reset'
+      });
+    }
     return trackRuntimeMutation(async () => {
       startRuntimeActivity({
         runId,
@@ -3262,10 +3368,21 @@ export function createRecursionRuntime({
       lastSnapshot = snapshot;
       const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 160) || DEFAULT_CHAT_ID;
       const sceneKey = safeText(snapshot.sceneKey || DEFAULT_SCENE_KEY, 160) || DEFAULT_SCENE_KEY;
+      const executionClear = durablePreprocess
+        ? await storage.clearPipelineExecution(chatKey)
+        : { ok: true };
+      if (durablePreprocess) {
+        if (durableOperationId) {
+          preprocessContexts.delete(durableOperationId);
+          preprocessGraphs.delete(durableOperationId);
+        }
+        executionView = null;
+        queuedReprocessView = null;
+      }
       const result = typeof storage.clearSceneCache === 'function'
         ? await storage.clearSceneCache(chatKey, sceneKey)
         : { ok: false, reason: 'unsupported' };
-      if (result?.ok === false) {
+      if (result?.ok === false || executionClear?.ok === false) {
         settleRuntimeActivity({
           runId,
           outcome: 'warning',
@@ -3275,7 +3392,14 @@ export function createRecursionRuntime({
           chips: ['Cache'],
           detail: redact(result)
         });
-        return { ok: false, chatKey, sceneKey, result: redact(result), clear: null };
+        return {
+          ok: false,
+          chatKey,
+          sceneKey,
+          result: redact(result),
+          executionClear: redact(executionClear),
+          clear: null
+        };
       }
       clearPreparedGeneration();
       lastPlan = null;
@@ -3298,7 +3422,14 @@ export function createRecursionRuntime({
       });
       if (clear?.ok === false) {
         reportClearWarning(runId, clear);
-        return { ok: false, chatKey, sceneKey, result: redact(result), clear };
+        return {
+          ok: false,
+          chatKey,
+          sceneKey,
+          result: redact(result),
+          executionClear: redact(executionClear),
+          clear
+        };
       }
       settleRuntimeActivity({
         runId,
@@ -3308,7 +3439,14 @@ export function createRecursionRuntime({
         label: 'Scene cache reset. Prompt cleared.',
         chips: ['Cache', 'Prompt']
       });
-      return { ok: true, chatKey, sceneKey, result: redact(result), clear };
+      return {
+        ok: true,
+        chatKey,
+        sceneKey,
+        result: redact(result),
+        executionClear: redact(executionClear),
+        clear
+      };
     });
   }
 
@@ -5163,6 +5301,9 @@ export function createRecursionRuntime({
   async function stopGeneration(details = {}) {
     postProcessRuntime.cancelPostProcess('stop-generation');
     cancelPendingProseEnhancement('prose-enhancement-canceled');
+    if (durablePreprocess) {
+      await pauseOperation({ reason: 'user-stop' });
+    }
     supersedeActiveRun();
     recursionStopRequest = {
       source: safeText(details.source || 'recursion-ui', 80),
@@ -6264,6 +6405,1336 @@ export function createRecursionRuntime({
     });
   }
 
+  function executionSourceIdentity(snapshot = {}) {
+    const latest = latestVisibleMessage(snapshot) || {};
+    return {
+      sourceRevisionHash: activeSourceRevisionHash(snapshot),
+      latestMessageId: String(snapshot.latestMesId ?? latest.mesid ?? ''),
+      selectedSwipeId: String(latest.swipeId ?? ''),
+      characterHash: safeText(snapshot.activeCharacterHash || snapshot.characterHash || '', 180),
+      groupHash: safeText(snapshot.activeGroupHash || snapshot.groupHash || '', 180)
+    };
+  }
+
+  function executionProvenance(snapshot, settings) {
+    const utility = settings?.providers?.utility || {};
+    return buildRunProvenance({
+      chatKey: safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID,
+      sourceIdentity: executionSourceIdentity(snapshot),
+      settingsHash: hashJson(preparedGenerationSettingsSignature(settings)),
+      provider: {
+        id: safeText(utility.source || utility.hostConnectionProfileId || 'utility', 180),
+        model: safeText(utility.openAICompatible?.model || utility.model || '', 180)
+      },
+      pipelineMode: settings.pipelineMode === 'fused' ? 'fused' : 'segmented',
+      promptVersions: {
+        promptPacket: PROMPT_PACKET_VERSION,
+        preprocessGraph: 1
+      },
+      providerContractHash: PROVIDER_CONTRACT_HASH,
+      deckRevisionHash: activeDeckRevisionHash(settings),
+      cardConfigurationHash: hashJson(settingsWithRuntimeCardScope(settings).cardEligibility),
+      promptContractHash: preparedGenerationContract(settings).promptContractHash
+    });
+  }
+
+  async function loadExecutionArtifact(manifest, stageId) {
+    const checkpoint = manifest?.stageRecords?.[stageId]?.checkpoint;
+    if (!checkpoint) return null;
+    return storage.loadPipelineArtifact(
+      manifest.chatKey,
+      manifest.operationId,
+      checkpoint.artifactRef?.artifactId || stageId
+    );
+  }
+
+  function summarizeExecutionArtifact(artifact) {
+    const source = asObject(artifact);
+    return {
+      keys: Object.keys(source).sort().slice(0, 30),
+      ...(Array.isArray(source.cards) ? { cardCount: source.cards.length } : {}),
+      ...(source.family ? { family: safeText(source.family, 120) } : {}),
+      ...(source.action ? { action: safeText(source.action, 80) } : {})
+    };
+  }
+
+  function durableSnapshotStage(context) {
+    return {
+      id: 'preprocess.snapshot',
+      version: 1,
+      kind: 'local',
+      executable: true,
+      dependencies: [],
+      checkpoint: 'durable',
+      failurePolicy: 'blocking',
+      buildInputFingerprint() {
+        return {
+          sourceIdentity: context.provenance.sourceIdentity,
+          pendingUserMessageHash: context.pendingUserMessage.textHash
+        };
+      },
+      run() {
+        return {
+          snapshot: context.snapshot,
+          pendingUserMessage: context.pendingUserMessage,
+          initialCache: context.initialCache
+        };
+      },
+      validate(artifact) {
+        return artifact?.snapshot?.chatKey === context.snapshot.chatKey
+          ? { ok: true, value: artifact }
+          : { ok: false, error: { code: 'RECURSION_SNAPSHOT_INVALID' } };
+      },
+      summarizeArtifact(artifact) {
+        return {
+          chatKey: safeText(artifact?.snapshot?.chatKey || '', 180),
+          latestMesId: numberOr(artifact?.snapshot?.latestMesId, 0),
+          sourceRevisionHash: activeSourceRevisionHash(artifact?.snapshot)
+        };
+      }
+    };
+  }
+
+  function buildDurableArbiterRequest(context) {
+    const {
+      runId,
+      settings,
+      arbiterSnapshot,
+      fallbackPlan,
+      initialCache,
+      pendingUserMessage
+    } = context;
+    const arbiterLane = arbiterLaneForSettings(settings, runtimeProviderCapability);
+    const cacheView = compactSceneCacheForArbiter(initialCache, arbiterSnapshot, settings);
+    const cardScope = runtimeScopePayload(settings);
+    const eligibility = settingsWithRuntimeCardScope(settings).cardEligibility;
+    const catalog = usesCardDeckEligibility(settings)
+      ? cardScope.availableCatalog.filter((entry) => eligibility.allowedFamilies.includes(entry.family))
+      : (cardScope.strictWhitelist ? cardScope.allowedCatalog : cardScope.availableCatalog);
+    return {
+      roleId: 'utilityArbiter',
+      request: {
+        lane: arbiterLane,
+        runId,
+        snapshotHash: fallbackPlan.snapshotHash,
+        ...reasonerRequestMetadata(settings, 'arbiter', arbiterLane),
+        prompt: [
+          'Return a Recursion Utility Arbiter plan as strict JSON.',
+          `Schema: ${UTILITY_ARBITER_SCHEMA}`,
+          arbiterOutputContractLine(fallbackPlan.snapshotHash),
+          `Settings: ${JSON.stringify(arbiterSafeSettings(settings, runtimeProviderCapability))}`,
+          behaviorPolicyPromptLines(influencePolicyForSettings(settings)),
+          `Provider health: ${JSON.stringify(providerHealthForArbiter(settings, runtimeProviderCapability))}`,
+          `Card scope: ${JSON.stringify(cardScope)}`,
+          cardScopePolicyLine(cardScope),
+          ...(usesCardDeckEligibility(settings)
+            ? [`Card Deck eligibility is a hard whitelist. Allowed families: ${JSON.stringify(eligibility.allowedFamilies)}. Inactive families are unavailable.`]
+            : []),
+          arbiterCardJobContractLine(),
+          arbiterStoryFormContractLine(),
+          reasoningPolicyPromptLine(settings),
+          `Catalog: ${JSON.stringify(catalog)}`,
+          `Catalog hash: ${hashJson(catalog)}`,
+          `Snapshot hash: ${fallbackPlan.snapshotHash}`,
+          `User message hash: ${hashJson(pendingUserMessage.text)}`,
+          `Pending user message: ${JSON.stringify(pendingUserMessage.text)}`,
+          `Scene cache: ${JSON.stringify(cacheView)}`,
+          `Snapshot: ${JSON.stringify(providerSafeSnapshot(arbiterSnapshot, settings.retention))}`
+        ].join('\n\n')
+      }
+    };
+  }
+
+  function normalizeDurableArbiterPlan(context, result) {
+    if (result?.ok !== true) {
+      return {
+        ok: false,
+        error: {
+          code: safeText(result?.error?.code || 'RECURSION_ARBITER_FAILED', 120),
+          category: safeText(result?.error?.category || 'provider', 80),
+          retryable: result?.error?.retryable !== false,
+          message: safeText(result?.error?.message || 'Utility Arbiter call failed.', 240)
+        }
+      };
+    }
+    let plan;
+    try {
+      plan = mergePlan(context.fallbackPlan, result.data);
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: 'RECURSION_ARBITER_INVALID',
+          category: 'validation',
+          retryable: true,
+          message: safeText(error?.message || 'Utility Arbiter output was invalid.', 240)
+        }
+      };
+    }
+    const latestAssistant = latestVisibleAssistantEntry(context.arbiterSnapshot);
+    if (context.settings.storyFormOverride && context.settings.storyFormOverride !== 'auto') {
+      const forced = forcedStoryForm(context.settings.storyFormOverride);
+      if (forced) plan = { ...plan, storyForm: normalizeStoryForm(forced) };
+    } else {
+      plan = {
+        ...plan,
+        storyForm: normalizeStoryFormWithHeuristic(
+          plan.storyForm,
+          UNKNOWN_STORY_FORM,
+          latestAssistant?.message?.text || ''
+        )
+      };
+    }
+    plan = enforceReasonerAvailability(plan, context.settings, runtimeProviderCapability);
+    plan = applyReasoningPolicyToPlan(plan, context.settings);
+    plan = applyBehaviorPolicyToPlan(plan, context.settings);
+    const scoped = filterCardJobsForRuntimeScope(plan.cardJobs, context.settings);
+    plan = {
+      ...plan,
+      cardJobs: scoped.cardJobs,
+      diagnostics: mergeDiagnostics(
+        plan.diagnostics,
+        scopeOmissionReasons(scoped.omitted),
+        ...(scoped.diagnostics || [])
+      )
+    };
+    plan = budgetCardJobsForGeneration(
+      plan,
+      runPolicyForEffectivePlan(context.settings, plan),
+      prioritySelectionForSettings(context.settings).forcedFamilies
+    ).plan;
+    return { ok: true, value: plan };
+  }
+
+  function durableArbiterStage(context) {
+    return {
+      id: 'preprocess.arbiter',
+      version: 1,
+      kind: 'model',
+      executable: true,
+      dependencies: ['preprocess.snapshot'],
+      checkpoint: 'durable',
+      failurePolicy: 'blocking',
+      buildInputFingerprint(_runtimeContext, dependencies) {
+        return {
+          snapshotHash: dependencies['preprocess.snapshot'].checkpoint.outputHash,
+          settingsHash: context.provenance.settingsHash,
+          providerContractHash: context.provenance.providerContractHash
+        };
+      },
+      buildRequest() {
+        return buildDurableArbiterRequest(context);
+      },
+      run({ request, signal }) {
+        if (!generationRouter || typeof generationRouter.generate !== 'function') {
+          throw Object.assign(new Error('Utility provider is unavailable.'), {
+            code: 'RECURSION_UTILITY_UNAVAILABLE',
+            retryable: false
+          });
+        }
+        return generationRouter.generate(
+          request.roleId,
+          { ...request.request, signal },
+          { runId: context.runId, signal }
+        );
+      },
+      validate(result, validationContext = {}) {
+        if (
+          validationContext.reuse === true
+          && result?.schema === UTILITY_ARBITER_SCHEMA
+          && result?.snapshotHash === context.fallbackPlan.snapshotHash
+        ) {
+          return { ok: true, value: result };
+        }
+        return normalizeDurableArbiterPlan(context, result);
+      },
+      buildCorrectionRequest({ request, error, attempt }) {
+        return {
+          ...request,
+          request: {
+            ...request.request,
+            prompt: [
+              request.request.prompt,
+              'Correction required.',
+              `Attempt ${attempt} was rejected: ${safeText(error?.message || error?.code || 'invalid Arbiter plan', 180)}`,
+              `Return one corrected JSON object only using schema "${UTILITY_ARBITER_SCHEMA}".`
+            ].join('\n\n')
+          }
+        };
+      },
+      summarizeArtifact: summarizeExecutionArtifact
+    };
+  }
+
+  function durableSegmentedStages(context, plan) {
+    const requestContext = {
+      runId: context.runId,
+      snapshotHash: plan.snapshotHash || hashJson(context.snapshot),
+      snapshot: providerSafeSnapshot(context.snapshot, context.settings.retention),
+      cardScope: runtimeScopePayload(context.settings),
+      sourceCardsByFamily: activeCardDeckSourceCards(context.settings),
+      storyForm: plan.storyForm || UNKNOWN_STORY_FORM
+    };
+    const requests = buildCardRequests(plan, requestContext)
+      .map((request) => applyReasoningLaneToCardRequest(
+        request,
+        context.settings,
+        runtimeProviderCapability
+      ));
+    const requestByFamily = new Map(
+      requests.map((request) => [safeText(request.metadata?.family || '', 120), request])
+    );
+    return createSegmentedCardStages({
+      selectedCards: plan.cardJobs,
+      createCardRequest(selectedCard) {
+        return requestByFamily.get(safeText(selectedCard?.family || '', 120)) || null;
+      },
+      async generateCard(request, { signal }) {
+        if (!request || !generationRouter || typeof generationRouter.generate !== 'function') {
+          throw Object.assign(new Error('Card provider request is unavailable.'), {
+            code: 'RECURSION_CARD_PROVIDER_UNAVAILABLE',
+            retryable: false
+          });
+        }
+        return generationRouter.generate(
+          request.roleId,
+          { ...request, signal },
+          { runId: context.runId, signal }
+        );
+      },
+      validateCard(result, { selectedCard, reuse = false }) {
+        const request = requestByFamily.get(safeText(selectedCard?.family || '', 120));
+        if (
+          reuse
+          && safeText(result?.family || '', 120) === safeText(selectedCard?.family || '', 120)
+          && safeText(result?.promptText || '', 1200)
+        ) {
+          return { ok: true, value: result };
+        }
+        const cards = cardsFromProviderResult(result, {
+          ...cardSourceContext(context.snapshot),
+          expectedSnapshotHash: request?.snapshotHash,
+          expectedRole: request?.metadata?.role,
+          expectedFamily: request?.metadata?.family,
+          sourceCardIds: request?.metadata?.sourceCardIds || [],
+          sourceCards: request?.metadata?.sourceCards || []
+        });
+        const card = cards[0];
+        return card
+          ? { ok: true, value: sanitizeGeneratedCard(card) }
+          : {
+              ok: false,
+              error: {
+                code: 'RECURSION_CARD_INVALID',
+                category: 'validation',
+                retryable: true,
+                message: `${safeText(selectedCard?.family || 'Card', 120)} response was invalid.`
+              }
+            };
+      }
+    }).map((stage) => ({
+      ...stage,
+      summarizeArtifact: stage.summarize
+    }));
+  }
+
+  function durableFusedStages(context, plan) {
+    const requestContext = {
+      runId: context.runId,
+      snapshotHash: plan.snapshotHash || hashJson(context.snapshot),
+      snapshot: providerSafeSnapshot(context.snapshot, context.settings.retention),
+      cardScope: runtimeScopePayload(context.settings),
+      sourceCardsByFamily: activeCardDeckSourceCards(context.settings),
+      storyForm: plan.storyForm || UNKNOWN_STORY_FORM
+    };
+    const selectedCards = Array.isArray(plan.cardJobs) ? plan.cardJobs : [];
+    return createFusedCardStages({
+      selectedCards,
+      createBundleRequest() {
+        const request = buildFusedCardBundleRequest(plan, requestContext);
+        return request
+          ? applyReasoningLaneToFusedCardBundleRequest(
+              request,
+              context.settings,
+              runtimeProviderCapability
+            )
+          : null;
+      },
+      async generateBundle(request, { attempt, signal }) {
+        if (!request || !generationRouter || typeof generationRouter.generate !== 'function') {
+          throw Object.assign(new Error('Fused provider request is unavailable.'), {
+            code: 'RECURSION_FUSED_PROVIDER_UNAVAILABLE',
+            retryable: false
+          });
+        }
+        const providerResult = await generationRouter.generate(
+          'fusedCardBundle',
+          { ...request, signal },
+          { runId: context.runId, signal }
+        );
+        return { providerResult, attempt };
+      },
+      validateBundle(artifact, validationContext = {}) {
+        if (
+          validationContext.reuse === true
+          && artifact?.cards
+          && artifact?.outcomes
+        ) {
+          return { ok: true, value: artifact };
+        }
+        const request = buildFusedCardBundleRequest(plan, requestContext);
+        const parsed = cardsFromFusedProviderResult(artifact?.providerResult, {
+          ...cardSourceContext(context.snapshot),
+          expectedSnapshotHash: request?.snapshotHash,
+          requestedCards: request?.requestedCards || [],
+          providerLane: request?.lane
+        });
+        const cards = Object.fromEntries(
+          parsed.cards.map((card) => [
+            safeText(card.family || card.role || card.id, 120),
+            sanitizeGeneratedCard(card)
+          ])
+        );
+        const outcomes = Object.fromEntries(selectedCards.map((selectedCard) => {
+          const family = safeText(selectedCard?.family || selectedCard?.role || '', 120);
+          return [
+            family,
+            cards[family]
+              ? { state: 'completed', reason: null }
+              : { state: 'failed', reason: 'invalid-card' }
+          ];
+        }));
+        if (Object.keys(cards).length > 0) {
+          return {
+            ok: true,
+            value: { cards, outcomes, fallback: null }
+          };
+        }
+        if (Number(artifact?.attempt || 0) >= context.settings.modelAttemptsPerStep) {
+          return {
+            ok: true,
+            value: {
+              cards: {},
+              outcomes,
+              fallback: {
+                mode: 'segmented',
+                reason: 'zero-useful-fused-cards'
+              }
+            }
+          };
+        }
+        return {
+          ok: false,
+          error: {
+            code: 'RECURSION_FUSED_ZERO_USEFUL_CARDS',
+            category: 'validation',
+            retryable: true,
+            message: 'Fused bundle produced no useful cards.'
+          }
+        };
+      },
+      createSegmentedFallbackStages() {
+        return durableSegmentedStages(context, plan);
+      }
+    }).map((stage) => ({
+      ...stage,
+      summarizeArtifact: stage.summarize
+    }));
+  }
+
+  function durableDeckStage(context, plan, cardStageIds) {
+    return {
+      id: 'preprocess.deck',
+      version: 1,
+      kind: 'local',
+      executable: true,
+      dependencies: ['preprocess.arbiter', ...cardStageIds],
+      checkpoint: 'durable',
+      failurePolicy: 'blocking',
+      buildInputFingerprint(_runtimeContext, dependencies) {
+        return {
+          planHash: dependencies['preprocess.arbiter'].checkpoint.outputHash,
+          cardHashes: Object.fromEntries(cardStageIds.map((stageId) => [
+            stageId,
+            dependencies[stageId].checkpoint?.outputHash || dependencies[stageId].stateHash
+          ])),
+          cacheHash: hashJson(context.initialCache || {}),
+          fullFresh: Boolean(context.fullFresh)
+        };
+      },
+      run({ dependencies }) {
+        const settings = context.settings;
+        const snapshot = context.snapshot;
+        const action = planAction(plan);
+        const scopedDiagnostics = [];
+        const filterScopedCards = (cards) => {
+          const scoped = filterCardsForRuntimeScope(cards, settings);
+          scopedDiagnostics.push(
+            ...scopeOmissionReasons(scoped.omitted),
+            ...autoScopeExceptionReasons(scoped.cards, settings)
+          );
+          return scoped.cards;
+        };
+        const activeCache = activeSceneCacheVariant(context.initialCache, snapshot);
+        const cacheCards = context.fullFresh
+          ? []
+          : filterScopedCards(cardsWithOrigin(
+              sanitizedCacheCards(context.runId, snapshot, activeCache.cards),
+              'cache'
+            ));
+        const reuseCacheOnly = !context.fullFresh
+          && action === 'reuse-cache'
+          && cacheCards.length > 0;
+        const providerCards = reuseCacheOnly
+          ? []
+          : filterScopedCards(cardsWithOrigin(
+              cardStageIds
+                .flatMap((stageId) => {
+                  const artifact = dependencies[stageId]?.artifact;
+                  if (artifact?.cards && typeof artifact.cards === 'object') {
+                    return Object.values(artifact.cards);
+                  }
+                  return artifact ? [artifact] : [];
+                })
+                .filter((card) => card && card.promptText)
+                .map(sanitizeGeneratedCard),
+              'generated'
+            ));
+        const generatedCards = !reuseCacheOnly && !cacheCards.length && !providerCards.length
+          ? filterScopedCards(cardsWithOrigin(
+              localCards(snapshot).map(sanitizeGeneratedCard),
+              'fallback'
+            ))
+          : [];
+        const candidateCards = reuseCacheOnly
+          ? cacheCards
+          : [...cacheCards, ...providerCards, ...generatedCards];
+        const deck = applyCardPlan(cacheCards, {
+          acceptedCards: [...generatedCards, ...providerCards],
+          lifecycle: lifecycleForDeck(
+            candidateCards,
+            plan,
+            (card) => (
+              reuseCacheOnly
+                ? 'reused scene cache'
+                : (providerCards.some((entry) => entry.id === card.id)
+                    ? 'utility generated card'
+                    : (generatedCards.some((entry) => entry.id === card.id)
+                        ? 'current fallback hand'
+                        : 'scene cache'))
+            )
+          )
+        });
+        return {
+          deck,
+          cacheCards,
+          providerCards,
+          generatedCards,
+          reuseCacheOnly,
+          diagnostics: mergeDiagnostics(plan.diagnostics, scopedDiagnostics)
+        };
+      },
+      validate(artifact) {
+        return Array.isArray(artifact?.deck?.cards)
+          ? { ok: true, value: artifact }
+          : { ok: false, error: { code: 'RECURSION_DECK_INVALID' } };
+      },
+      summarizeArtifact(artifact) {
+        return {
+          cardCount: artifact?.deck?.cards?.length || 0,
+          cacheCardCount: artifact?.cacheCards?.length || 0,
+          providerCardCount: artifact?.providerCards?.length || 0,
+          fallbackCardCount: artifact?.generatedCards?.length || 0
+        };
+      }
+    };
+  }
+
+  function durableHandStage(context, plan) {
+    return {
+      id: 'preprocess.hand',
+      version: 1,
+      kind: 'local',
+      executable: true,
+      dependencies: ['preprocess.deck'],
+      checkpoint: 'durable',
+      failurePolicy: 'blocking',
+      buildInputFingerprint(_runtimeContext, dependencies) {
+        return {
+          deckHash: dependencies['preprocess.deck'].checkpoint.outputHash,
+          budgetHash: hashJson(plan.budgets || {}),
+          policyHash: hashJson(runPolicyForEffectivePlan(context.settings, plan))
+        };
+      },
+      run({ dependencies }) {
+        const deckArtifact = dependencies['preprocess.deck'].artifact;
+        const behaviorPolicy = runPolicyForEffectivePlan(context.settings, plan);
+        const prioritySelection = prioritySelectionForSettings(context.settings);
+        return selectHand(
+          filterCardsForRuntimeScope(deckArtifact.deck.cards, context.settings).cards,
+          {
+            maxCards: budgetOr(plan.budgets?.maxCards, 6),
+            maxTokens: cardEvidenceTokenBudget(context.settings, plan, behaviorPolicy),
+            behaviorPolicy,
+            forcedFamilies: prioritySelection.forcedFamilies,
+            forcedCardIds: prioritySelection.forcedCardIds
+          }
+        );
+      },
+      validate(artifact) {
+        return Array.isArray(artifact?.cards) && Array.isArray(artifact?.omitted)
+          ? { ok: true, value: artifact }
+          : { ok: false, error: { code: 'RECURSION_HAND_INVALID' } };
+      },
+      summarizeArtifact(artifact) {
+        return {
+          handId: safeIdentifier(artifact?.handId || '', 'hand', 160),
+          cardCount: artifact?.cards?.length || 0,
+          omittedCount: artifact?.omitted?.length || 0
+        };
+      }
+    };
+  }
+
+  function durableGuidanceStage(context, plan) {
+    return {
+      id: 'preprocess.guidance',
+      version: 1,
+      kind: 'model',
+      executable: true,
+      dependencies: ['preprocess.snapshot', 'preprocess.arbiter', 'preprocess.hand'],
+      checkpoint: 'durable',
+      failurePolicy: 'blocking',
+      buildInputFingerprint(_runtimeContext, dependencies) {
+        return {
+          snapshotHash: dependencies['preprocess.snapshot'].checkpoint.outputHash,
+          planHash: dependencies['preprocess.arbiter'].checkpoint.outputHash,
+          handHash: dependencies['preprocess.hand'].checkpoint.outputHash,
+          promptContractHash: context.provenance.promptContractHash
+        };
+      },
+      buildRequest(_runtimeContext, dependencies) {
+        return buildGuidanceStageRequest({
+          hand: dependencies['preprocess.hand'].artifact,
+          snapshot: context.snapshot,
+          settings: settingsForPlan(
+            context.settings,
+            plan,
+            runtimeProviderCapability
+          ),
+          behaviorPolicy: runPolicyForEffectivePlan(context.settings, plan),
+          runId: context.runId,
+          storyForm: plan.storyForm || UNKNOWN_STORY_FORM
+        });
+      },
+      run({ request, signal }) {
+        if (!generationRouter || typeof generationRouter.generate !== 'function') {
+          throw Object.assign(new Error('Guidance provider is unavailable.'), {
+            code: 'RECURSION_GUIDANCE_PROVIDER_UNAVAILABLE',
+            retryable: false
+          });
+        }
+        return generationRouter.generate(
+          request.roleId,
+          { ...request.request, signal },
+          { runId: context.runId, signal }
+        );
+      },
+      validate(result, validationContext = {}) {
+        if (
+          validationContext.reuse === true
+          && result?.schema === PROMPT_GUIDANCE_SCHEMA
+          && result?.status === 'used'
+          && safeText(result?.text || '', 6000)
+        ) {
+          return { ok: true, value: result };
+        }
+        return validateGuidanceStageResult(result, {
+          hand: validationContext.dependencies?.['preprocess.hand']?.artifact,
+          snapshot: context.snapshot
+        });
+      },
+      buildCorrectionRequest({ request, error, attempt }) {
+        return {
+          ...request,
+          request: buildGuidanceCorrectionRequest({
+            request: request.request,
+            failure: error,
+            attempt
+          })
+        };
+      },
+      summarizeArtifact(artifact) {
+        return {
+          status: safeText(artifact?.status || '', 40),
+          sourceCardCount: artifact?.sourceCardIds?.length || 0,
+          guardrailCardCount: artifact?.guardrailCardIds?.length || 0
+        };
+      }
+    };
+  }
+
+  function durablePacketStage(context, plan) {
+    return {
+      id: 'preprocess.packet',
+      version: 1,
+      kind: 'local',
+      executable: true,
+      dependencies: [
+        'preprocess.snapshot',
+        'preprocess.arbiter',
+        'preprocess.hand',
+        'preprocess.guidance'
+      ],
+      checkpoint: 'durable',
+      failurePolicy: 'blocking',
+      buildInputFingerprint(_runtimeContext, dependencies) {
+        return {
+          handHash: dependencies['preprocess.hand'].checkpoint.outputHash,
+          guidanceHash: dependencies['preprocess.guidance'].checkpoint.outputHash,
+          promptContractHash: context.provenance.promptContractHash
+        };
+      },
+      async run({ dependencies }) {
+        const effectiveSettings = {
+          ...settingsForPlan(context.settings, plan, runtimeProviderCapability),
+          reasonerUse: 'off'
+        };
+        return composePromptPacket({
+          hand: dependencies['preprocess.hand'].artifact,
+          snapshot: context.snapshot,
+          settings: effectiveSettings,
+          behaviorPolicy: runPolicyForEffectivePlan(context.settings, plan),
+          generationRouter: null,
+          runId: context.runId,
+          precomposedGuidance: dependencies['preprocess.guidance'].artifact,
+          storyForm: plan.storyForm || UNKNOWN_STORY_FORM,
+          pipelineMode: context.settings.pipelineMode === 'fused' ? 'fused' : 'segmented',
+          planDiagnostics: plan.diagnostics
+        });
+      },
+      validate(artifact) {
+        try {
+          validatePromptPacket(artifact);
+          return { ok: true, value: artifact };
+        } catch (error) {
+          return { ok: false, error };
+        }
+      },
+      summarizeArtifact(artifact) {
+        return {
+          packetId: safeIdentifier(artifact?.packetId || '', 'packet', 180),
+          handId: safeIdentifier(artifact?.handId || '', 'hand', 180),
+          cardCount: artifact?.selectedCardRefs?.length || 0
+        };
+      }
+    };
+  }
+
+  function durableInstallStage(context, plan) {
+    return {
+      id: 'preprocess.install',
+      version: 1,
+      kind: 'host',
+      executable: true,
+      dependencies: ['preprocess.snapshot', 'preprocess.packet'],
+      checkpoint: 'durable',
+      failurePolicy: 'continue',
+      buildInputFingerprint(_runtimeContext, dependencies) {
+        return {
+          snapshotHash: dependencies['preprocess.snapshot'].checkpoint.outputHash,
+          packetHash: dependencies['preprocess.packet'].checkpoint.outputHash
+        };
+      },
+      async run({ dependencies }) {
+        const packet = dependencies['preprocess.packet'].artifact;
+        const freshness = await recheckPromptInstallSnapshot(
+          context.runId,
+          context.snapshot,
+          plan,
+          context.pendingUserMessage
+        );
+        if (freshness.ok === false) {
+          return {
+            installed: false,
+            settled: true,
+            failureClass: 'host-source-stale',
+            continuePrimaryGeneration: true
+          };
+        }
+        const install = await installPrompt(host, packet);
+        if (install?.ok === false) {
+          await clearPromptBestEffort(host);
+          return {
+            installed: false,
+            settled: true,
+            failureClass: 'host-install-rejected',
+            continuePrimaryGeneration: true,
+            error: sanitizePromptError(
+              install.error,
+              'RECURSION_PROMPT_INSTALL_FAILED',
+              'Prompt install failed.'
+            )
+          };
+        }
+        return {
+          installed: true,
+          settled: true,
+          failureClass: '',
+          continuePrimaryGeneration: true
+        };
+      },
+      validate(artifact) {
+        return artifact?.settled === true
+          ? { ok: true, value: artifact }
+          : { ok: false, error: { code: 'RECURSION_PROMPT_INSTALL_UNSETTLED' } };
+      },
+      settledFailure(artifact) {
+        return artifact?.installed === false
+          ? {
+              code: safeText(
+                artifact?.error?.code || 'RECURSION_PROMPT_INSTALL_FAILED',
+                120
+              ),
+              category: 'host',
+              retryable: false
+            }
+          : null;
+      },
+      summarizeArtifact(artifact) {
+        return {
+          installed: artifact?.installed === true,
+          settled: artifact?.settled === true,
+          failureClass: safeText(artifact?.failureClass || '', 120),
+          continuePrimaryGeneration: artifact?.continuePrimaryGeneration === true
+        };
+      }
+    };
+  }
+
+  function durableBaseGraph(context) {
+    return createExecutionGraph({
+      stages: [
+        durableSnapshotStage(context),
+        durableArbiterStage(context)
+      ]
+    });
+  }
+
+  function durableCardStageSet(context, plan, {
+    segmentedFallback = false
+  } = {}) {
+    if (context.settings.pipelineMode !== 'fused') {
+      const stages = durableSegmentedStages(context, plan);
+      return {
+        stages,
+        resultStageIds: stages.map((stage) => stage.id),
+        segmentedFallback: false
+      };
+    }
+    const fusedStages = durableFusedStages(context, plan);
+    if (!segmentedFallback) {
+      return {
+        stages: fusedStages,
+        resultStageIds: fusedStages.map((stage) => stage.id),
+        segmentedFallback: false
+      };
+    }
+    const segmentedStages = durableSegmentedStages(context, plan);
+    return {
+      stages: [...fusedStages, ...segmentedStages],
+      resultStageIds: segmentedStages.map((stage) => stage.id),
+      segmentedFallback: true
+    };
+  }
+
+  function durableCardWaveGraph(context, plan, options = {}) {
+    const cardSet = durableCardStageSet(context, plan, options);
+    return createExecutionGraph({
+      stages: [
+        durableSnapshotStage(context),
+        durableArbiterStage(context),
+        ...cardSet.stages
+      ]
+    });
+  }
+
+  function durableFullGraph(context, plan, options = {}) {
+    const cardSet = durableCardStageSet(context, plan, options);
+    return createExecutionGraph({
+      stages: [
+        durableSnapshotStage(context),
+        durableArbiterStage(context),
+        ...cardSet.stages,
+        durableDeckStage(context, plan, cardSet.resultStageIds),
+        durableHandStage(context, plan),
+        durableGuidanceStage(context, plan),
+        durablePacketStage(context, plan),
+        durableInstallStage(context, plan)
+      ]
+    });
+  }
+
+  function durableOperationResult(manifest, plan = null) {
+    return {
+      ok: false,
+      paused: manifest?.state === 'paused',
+      execution: manifest,
+      ...(plan ? { plan } : {})
+    };
+  }
+
+  async function startDurableGraph(context, manifest, graph) {
+    preprocessGraphs.set(manifest.operationId, graph);
+    const next = await executionScheduler.start({
+      manifest,
+      graph,
+      context
+    });
+    executionView = next;
+    queuedReprocessView = await storage.loadQueuedReprocess(manifest.chatKey);
+    return next;
+  }
+
+  async function bindDurableQueuedIntent(context, manifest, graph, intentValue = undefined) {
+    const intent = intentValue === undefined
+      ? await storage.loadQueuedReprocess(manifest.chatKey)
+      : intentValue;
+    const binding = bindQueuedReprocess({
+      intent,
+      graph,
+      manifest,
+      provenance: context.provenance
+    });
+    context.fullFresh = normalizeQueuedReprocess(intent)?.mode === 'full-fresh';
+    if (binding.intent) {
+      await storage.saveQueuedReprocess(manifest.chatKey, binding.intent);
+    } else if (intent) {
+      await storage.clearQueuedReprocess(manifest.chatKey);
+    }
+    queuedReprocessView = binding.intent;
+    if (binding.notices.length > 0) {
+      settleRuntimeActivity({
+        runId: context.runId,
+        outcome: 'warning',
+        phase: 'storageWarning',
+        severity: 'warning',
+        label: 'Queued stage is unavailable for this operation.',
+        chips: ['Pre-process'],
+        detail: redact(binding.notices[0])
+      });
+    }
+    const next = await storage.savePipelineRun(manifest.chatKey, {
+      ...binding.manifest,
+      revision: Number(manifest.revision || 0) + 1,
+      updatedAt: nowIso()
+    });
+    executionView = next;
+    return {
+      manifest: next,
+      intent: binding.intent,
+      notices: binding.notices
+    };
+  }
+
+  async function advanceDurablePreprocess(context, manifest, planValue = null) {
+    if (!manifest || manifest.state !== 'completed') {
+      return durableOperationResult(manifest, planValue);
+    }
+    const plan = planValue
+      || await loadExecutionArtifact(manifest, 'preprocess.arbiter');
+    if (!plan) throw new Error('Durable Arbiter checkpoint artifact is unavailable.');
+    lastPlan = plan;
+
+    let segmentedFallback = false;
+    if (context.settings.pipelineMode === 'fused') {
+      const fusedRecord = manifest.stageRecords?.['preprocess.cards.fused'];
+      if (!fusedRecord) {
+        manifest = await startDurableGraph(
+          context,
+          manifest,
+          durableCardWaveGraph(context, plan)
+        );
+        if (manifest.state !== 'completed') {
+          return durableOperationResult(manifest, plan);
+        }
+      }
+      const fusedArtifact = await loadExecutionArtifact(
+        manifest,
+        'preprocess.cards.fused'
+      );
+      segmentedFallback = fusedArtifact?.fallback?.mode === 'segmented';
+      if (
+        segmentedFallback
+        && !durableSegmentedStages(context, plan).every(
+          (stage) => manifest.stageRecords?.[stage.id]?.state === 'completed'
+        )
+      ) {
+        manifest = await startDurableGraph(
+          context,
+          manifest,
+          durableCardWaveGraph(context, plan, { segmentedFallback: true })
+        );
+        if (manifest.state !== 'completed') {
+          return durableOperationResult(manifest, plan);
+        }
+      }
+    } else if (
+      !durableSegmentedStages(context, plan).every(
+        (stage) => manifest.stageRecords?.[stage.id]?.state === 'completed'
+      )
+    ) {
+      manifest = await startDurableGraph(
+        context,
+        manifest,
+        durableCardWaveGraph(context, plan)
+      );
+      if (manifest.state !== 'completed') {
+        return durableOperationResult(manifest, plan);
+      }
+    }
+
+    if (!manifest.stageRecords?.['preprocess.install']) {
+      manifest = await startDurableGraph(
+        context,
+        manifest,
+        durableFullGraph(context, plan, { segmentedFallback })
+      );
+      if (manifest.state !== 'completed') {
+        return durableOperationResult(manifest, plan);
+      }
+    }
+    preprocessGraphs.set(
+      manifest.operationId,
+      durableFullGraph(context, plan, { segmentedFallback })
+    );
+    return finalizeDurablePreprocess(context, manifest, plan);
+  }
+
+  async function finalizeDurablePreprocess(context, manifest, plan) {
+    const [
+      packet,
+      hand,
+      deckArtifact,
+      installSettlement
+    ] = await Promise.all([
+      loadExecutionArtifact(manifest, 'preprocess.packet'),
+      loadExecutionArtifact(manifest, 'preprocess.hand'),
+      loadExecutionArtifact(manifest, 'preprocess.deck'),
+      loadExecutionArtifact(manifest, 'preprocess.install')
+    ]);
+    if (!packet || !hand) {
+      return {
+        ok: false,
+        paused: manifest.state === 'paused',
+        execution: manifest,
+        plan
+      };
+    }
+    const candidate = createPreparedGenerationCandidate(
+      packet,
+      hand,
+      context.snapshot,
+      context.settings
+    );
+    if (candidate) commitPreparedGeneration(candidate);
+    lastPlan = plan;
+    lastSnapshot = context.snapshot;
+    const installed = installSettlement?.installed === true;
+    if (installed) {
+      readyLastBrief({ runId: context.runId, reason: 'packet-installed' });
+    } else {
+      clearLastBrief({
+        status: 'empty',
+        reason: installSettlement?.failureClass || 'prompt-install-failed',
+        runId: context.runId
+      });
+    }
+    if (deckArtifact?.deck) {
+      await runStorageSaveSection(context.runId, () => saveSceneCacheSafe(
+        context.runId,
+        context.snapshot,
+        sceneCachePayload(
+          context.snapshot,
+          deckArtifact.deck,
+          hand,
+          plan,
+          packet,
+          context.settings,
+          context.initialCache
+        )
+      ));
+    }
+    settleRuntimeActivity({
+      runId: context.runId,
+      outcome: installed ? 'success' : 'warning',
+      phase: 'settled',
+      severity: installed ? 'success' : 'warning',
+      label: installed ? 'Recursion prompt ready.' : INSTALL_FAILURE_LABEL
+    });
+    return {
+      ok: true,
+      packet,
+      hand,
+      plan,
+      install: {
+        ok: installed,
+        ...(installSettlement || {})
+      },
+      continuePrimaryGeneration: installSettlement?.continuePrimaryGeneration !== false,
+      recursionPromptInstalled: installed,
+      execution: manifest
+    };
+  }
+
+  async function createDurablePreprocessContext({
+    snapshot,
+    settings,
+    pendingUserMessage = normalizePendingUserMessage(''),
+    initialCache: initialCacheValue = undefined,
+    runId = makeId('preprocess'),
+    hostGeneration = false,
+    generationType = ''
+  } = {}) {
+    const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180)
+      || DEFAULT_CHAT_ID;
+    const initialCache = initialCacheValue === undefined
+      ? await loadSceneCacheSafe(runId, snapshot, settings)
+      : initialCacheValue;
+    const fallbackPlan = localFallbackPlan(snapshot, settings);
+    fallbackPlan.source = {
+      ...fallbackPlan.source,
+      userMessageHash: hashJson(pendingUserMessage.text),
+      catalogHash: hashJson(CARD_CATALOG)
+    };
+    return {
+      runId,
+      chatKey,
+      snapshot,
+      arbiterSnapshot: snapshotWithoutVisiblePendingUserMessage(
+        snapshot,
+        pendingUserMessage
+      ),
+      pendingUserMessage,
+      settings,
+      initialCache,
+      fallbackPlan,
+      provenance: executionProvenance(snapshot, settings),
+      hostGeneration,
+      generationType: safeText(generationType, 40)
+    };
+  }
+
+  async function restoreDurablePreprocessContext(manifest, currentSnapshot) {
+    const snapshotArtifact = await loadExecutionArtifact(
+      manifest,
+      'preprocess.snapshot'
+    );
+    const restoredSnapshot = snapshotArtifact?.snapshot || currentSnapshot;
+    const pendingUserMessage = normalizePendingUserMessage(
+      snapshotArtifact?.pendingUserMessage || ''
+    );
+    return createDurablePreprocessContext({
+      snapshot: restoredSnapshot,
+      settings: settingsStore.get(),
+      pendingUserMessage,
+      initialCache: snapshotArtifact
+        ? (snapshotArtifact.initialCache ?? null)
+        : undefined,
+      runId: safeIdentifier(manifest.operationId, 'preprocess', 180)
+    });
+  }
+
+  async function restoreDurablePreprocessGraph(manifest, context) {
+    const plan = await loadExecutionArtifact(manifest, 'preprocess.arbiter');
+    if (!plan) return durableBaseGraph(context);
+    let segmentedFallback = false;
+    if (context.settings.pipelineMode === 'fused') {
+      const fusedArtifact = await loadExecutionArtifact(
+        manifest,
+        'preprocess.cards.fused'
+      );
+      segmentedFallback = fusedArtifact?.fallback?.mode === 'segmented';
+    }
+    return durableFullGraph(context, plan, { segmentedFallback });
+  }
+
+  async function prepareForGenerationDurable({
+    userMessage = '',
+    hostGeneration = false,
+    generationType = ''
+  } = {}) {
+    const settings = settingsStore.get();
+    const hostSnapshot = await readSnapshot();
+    let pendingUserMessage = normalizePendingUserMessage(userMessage);
+    if (!pendingUserMessage.text && hostGeneration === true) {
+      const latest = latestVisibleMessage(hostSnapshot);
+      if (latest?.role === 'user') {
+        pendingUserMessage = normalizePendingUserMessage({
+          text: latest.text,
+          mesid: latest.mesid
+        });
+      }
+    }
+    const snapshot = snapshotWithPendingUserMessage(hostSnapshot, pendingUserMessage);
+    lastSnapshot = snapshot;
+    const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;
+    activeExecutionChatKey = chatKey;
+    const existingPromise = durablePreparePromises.get(chatKey);
+    if (existingPromise) return existingPromise;
+    const run = (async () => {
+      const context = await createDurablePreprocessContext({
+        snapshot,
+        pendingUserMessage,
+        settings,
+        hostGeneration,
+        generationType
+      });
+      let activeContext = context;
+      let { runId, provenance } = activeContext;
+      const queuedIntent = normalizeQueuedReprocess(
+        await storage.loadQueuedReprocess(chatKey)
+      );
+      queuedReprocessView = queuedIntent;
+      const storedManifest = await storage.loadPipelineRun(chatKey);
+      const storedStatus = storedManifest
+        ? compareRunProvenance(provenance, storedManifest.provenance)
+        : { reusable: false };
+      if (
+        storedManifest
+        && storedStatus.reusable
+        && !['stale', 'abandoned'].includes(storedManifest.state)
+      ) {
+        activeContext = await restoreDurablePreprocessContext(
+          storedManifest,
+          snapshot
+        );
+        activeContext.hostGeneration = hostGeneration;
+        activeContext.generationType = safeText(generationType, 40);
+        ({ runId, provenance } = activeContext);
+        const plan = await loadExecutionArtifact(
+          storedManifest,
+          'preprocess.arbiter'
+        );
+        const graph = await restoreDurablePreprocessGraph(
+          storedManifest,
+          activeContext
+        );
+        preprocessContexts.set(storedManifest.operationId, activeContext);
+        preprocessGraphs.set(storedManifest.operationId, graph);
+        executionView = storedManifest;
+        if (!queuedIntent) {
+          if (
+            storedManifest.state === 'completed'
+            && plan
+            && storedManifest.stageRecords?.['preprocess.install']
+          ) {
+            return finalizeDurablePreprocess(
+              activeContext,
+              storedManifest,
+              plan
+            );
+          }
+          return durableOperationResult(storedManifest, plan);
+        }
+
+        let bound = await bindDurableQueuedIntent(
+          activeContext,
+          storedManifest,
+          graph,
+          queuedIntent
+        );
+        if (bound.manifest.state === 'stale') {
+          return durableOperationResult(bound.manifest, plan);
+        }
+        if (bound.manifest.queuedStageIds.length === 0) {
+          if (
+            bound.manifest.state === 'completed'
+            && plan
+            && bound.manifest.stageRecords?.['preprocess.install']
+          ) {
+            return finalizeDurablePreprocess(activeContext, bound.manifest, plan);
+          }
+          return durableOperationResult(bound.manifest, plan);
+        }
+        const rerunsBase = queuedIntent.mode === 'full-fresh'
+          || bound.manifest.queuedStageIds.some((stageId) => (
+            stageId === 'preprocess.snapshot'
+            || stageId === 'preprocess.arbiter'
+          ));
+        const rerunGraph = rerunsBase
+          ? durableBaseGraph(activeContext)
+          : graph;
+        let manifest = await startDurableGraph(
+          activeContext,
+          bound.manifest,
+          rerunGraph
+        );
+        if (manifest.state !== 'completed') {
+          return durableOperationResult(manifest, plan);
+        }
+        return advanceDurablePreprocess(
+          activeContext,
+          manifest,
+          rerunsBase ? null : plan
+        );
+      }
+
+      const operationId = makeId('operation');
+      let manifest = createPipelineRun({
+        operationId,
+        chatKey,
+        phase: 'preprocess',
+        pipelineMode: settings.pipelineMode === 'fused' ? 'fused' : 'segmented',
+        createdAt: nowIso(),
+        sourceIdentity: provenance.sourceIdentity,
+        provenance
+      });
+      preprocessContexts.set(operationId, activeContext);
+      let graph = durableBaseGraph(activeContext);
+      preprocessGraphs.set(operationId, graph);
+      startRuntimeActivity({ runId, label: 'Reading current turn...', chips: ['Pre-process'] });
+      if (
+        queuedIntent?.mode === 'full-fresh'
+        || queuedIntent?.stageIds?.some((stageId) => (
+          stageId === 'preprocess.snapshot'
+          || stageId === 'preprocess.arbiter'
+        ))
+      ) {
+        const bound = await bindDurableQueuedIntent(
+          activeContext,
+          manifest,
+          graph,
+          queuedIntent
+        );
+        manifest = bound.manifest;
+      }
+      manifest = await startDurableGraph(activeContext, manifest, graph);
+      if (manifest.state !== 'completed') {
+        return { ok: false, paused: manifest.state === 'paused', execution: manifest };
+      }
+      const remainingIntent = normalizeQueuedReprocess(
+        await storage.loadQueuedReprocess(chatKey)
+      );
+      if (remainingIntent) {
+        const plan = await loadExecutionArtifact(manifest, 'preprocess.arbiter');
+        if (!plan) throw new Error('Durable Arbiter checkpoint artifact is unavailable.');
+        const bound = await bindDurableQueuedIntent(
+          activeContext,
+          manifest,
+          durableFullGraph(activeContext, plan),
+          remainingIntent
+        );
+        manifest = bound.manifest;
+      }
+      return advanceDurablePreprocess(activeContext, manifest);
+    })().finally(() => {
+      durablePreparePromises.delete(chatKey);
+    });
+    durablePreparePromises.set(chatKey, run);
+    return run;
+  }
+
   async function prepareForGeneration({ userMessage = '', refreshReason = '', hostGeneration = false, generationType = '' } = {}) {
     const settings = settingsStore.get();
     const hostGenerationType = safeText(generationType, 40).toLowerCase();
@@ -6277,6 +7748,65 @@ export function createRecursionRuntime({
       await postProcessRuntime.waitForPostProcessSettlement();
     }
     setHostGenerationActive(hostGeneration);
+    if (durablePreprocess && settings.enabled !== false) {
+      await waitForExternalMutations();
+      const runId = makeId('run');
+      if (hostGeneration === true) {
+        let preGenerationSourceIdentity = null;
+        try {
+          preGenerationSourceIdentity = await host?.messages?.postProcessSourceIdentity?.() || null;
+        } catch {
+          preGenerationSourceIdentity = null;
+        }
+        postProcessRuntime.armPostProcess({
+          preGenerationSourceIdentity,
+          generationType: hostGenerationType || 'normal'
+        });
+        armProseEnhancementForHostGeneration(settings, runId);
+      } else {
+        postProcessRuntime.cancelPostProcess('not-host-generation');
+        clearPendingProseEnhancement();
+      }
+      if (explicitSwipe && lastPreparedGeneration) {
+        if (!runState.current().pendingLatestAssistantSwipeRetry) {
+          markLatestAssistantSwipeRetry({ eventName: 'host-generation-swipe' });
+        }
+        const swipeRetry = runState.takeLatestAssistantSwipeRetry();
+        const hostSnapshot = await readSnapshot();
+        const swipeMessageId = finiteNumberOrNull(swipeRetry?.messageId);
+        const swipeBasis = generationBasisForLatestAssistantSwipe(
+          hostSnapshot,
+          swipeMessageId,
+          settings
+        );
+        if (swipeBasis) {
+          startRun(runId);
+          runState.beginAttempt?.({
+            runId,
+            kind: 'swipe',
+            sourceRevisionHash: activeSourceRevisionHash(hostSnapshot),
+            packetId: preparedPacket()?.packetId
+          });
+          startRuntimeActivity({
+            runId,
+            label: 'Reusing Recursion prompt for swipe...',
+            chips: ['Prompt', 'Swipe']
+          });
+          const reuse = await tryPreparedGenerationReuse(runId, {
+            basis: swipeBasis,
+            settings,
+            swipe: true,
+            swipeMessageId
+          });
+          if (reuse.reused || reuse.preparedMatch) return reuse;
+        }
+      }
+      return prepareForGenerationDurable({
+        userMessage: explicitSwipe ? '' : userMessage,
+        hostGeneration,
+        generationType
+      });
+    }
     if (settings.enabled === false) {
       postProcessRuntime.cancelPostProcess('recursion-disabled');
       clearPendingProseEnhancement();
@@ -7031,12 +8561,175 @@ export function createRecursionRuntime({
     ));
   }
 
+  async function restoreExecutionState() {
+    const snapshot = await readSnapshot();
+    lastSnapshot = snapshot;
+    const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;
+    activeExecutionChatKey = chatKey;
+    let manifest = await storage.loadPipelineRun(chatKey);
+    queuedReprocessView = await storage.loadQueuedReprocess(chatKey);
+    if (!manifest) {
+      executionView = null;
+      return null;
+    }
+    if (manifest.state === 'running') {
+      const stageRecords = Object.fromEntries(
+        Object.entries(manifest.stageRecords || {}).map(([stageId, record]) => [
+          stageId,
+          record?.state === 'running'
+            ? {
+                ...record,
+                state: 'pending',
+                checkpoint: null,
+                summary: null,
+                failure: null,
+                executionToken: null,
+                updatedAt: nowIso()
+              }
+            : record
+        ])
+      );
+      manifest = await storage.savePipelineRun(chatKey, {
+        ...manifest,
+        revision: Number(manifest.revision || 0) + 1,
+        state: 'paused',
+        pauseReason: 'restored-after-reload',
+        frontierStageIds: [],
+        stageRecords,
+        updatedAt: nowIso()
+      });
+    }
+    const provenance = executionProvenance(snapshot, settingsStore.get());
+    const status = compareRunProvenance(provenance, manifest.provenance);
+    if (!status.reusable && manifest.state !== 'stale' && manifest.state !== 'abandoned') {
+      manifest = await storage.savePipelineRun(chatKey, {
+        ...manifest,
+        revision: Number(manifest.revision || 0) + 1,
+        state: 'stale',
+        pauseReason: 'provenance-changed',
+        staleChangedFields: status.changedFields,
+        frontierStageIds: [],
+        updatedAt: nowIso()
+      });
+    }
+    executionView = manifest;
+    if (status.reusable && manifest.state !== 'stale' && manifest.state !== 'abandoned') {
+      const context = await restoreDurablePreprocessContext(manifest, snapshot);
+      const graph = await restoreDurablePreprocessGraph(manifest, context);
+      preprocessContexts.set(manifest.operationId, context);
+      preprocessGraphs.set(manifest.operationId, graph);
+    } else {
+      preprocessContexts.delete(manifest.operationId);
+      preprocessGraphs.delete(manifest.operationId);
+    }
+    return redact(manifest);
+  }
+
+  async function pauseOperation({ reason = 'user' } = {}) {
+    const operationId = safeText(executionView?.operationId || '', 180);
+    if (!operationId) return null;
+    if (executionView?.state !== 'running') return redact(executionView);
+    const paused = await executionScheduler.pause({ operationId, reason });
+    if (paused) executionView = paused;
+    return paused ? redact(paused) : null;
+  }
+
+  async function resumeOperation({ operationId = executionView?.operationId } = {}) {
+    const id = safeText(operationId || '', 180);
+    const graph = preprocessGraphs.get(id);
+    const context = preprocessContexts.get(id);
+    if (!id || !graph || !context) {
+      throw new Error('Pre-process operation context is unavailable for Resume.');
+    }
+    const result = await executionScheduler.resume({
+      operationId: id,
+      graph,
+      context,
+      provenance: context.provenance
+    });
+    if (result?.state) executionView = result;
+    if (result?.state !== 'completed') return result;
+    return advanceDurablePreprocess(context, result);
+  }
+
+  async function retryStage({
+    operationId = executionView?.operationId,
+    stageId
+  } = {}) {
+    const id = safeText(operationId || '', 180);
+    const graph = preprocessGraphs.get(id);
+    const context = preprocessContexts.get(id);
+    if (!id || !graph || !context) {
+      throw new Error('Pre-process operation context is unavailable for Retry.');
+    }
+    const result = await executionScheduler.retry({
+      operationId: id,
+      stageId,
+      graph,
+      context,
+      provenance: context.provenance
+    });
+    if (result?.state) executionView = result;
+    if (result?.state !== 'completed') return result;
+    return advanceDurablePreprocess(context, result);
+  }
+
+  async function queueStageReprocess({ stageId } = {}) {
+    const id = safeText(stageId || '', 180);
+    const operationId = safeText(executionView?.operationId || '', 180);
+    const graph = preprocessGraphs.get(operationId);
+    if (!id || !graph || !graph.hasStage(id) || !graph.getStage(id).executable) {
+      return {
+        ok: false,
+        notice: {
+          code: 'stage-reprocess-inapplicable',
+          stageIds: id ? [id] : []
+        }
+      };
+    }
+    const current = await storage.loadQueuedReprocess(activeExecutionChatKey);
+    const intent = mergeQueuedReprocess(current, {
+      schema: QUEUED_REPROCESS_SCHEMA,
+      mode: 'stage',
+      stageIds: [id]
+    }, graph);
+    if (intent) await storage.saveQueuedReprocess(activeExecutionChatKey, intent);
+    queuedReprocessView = intent;
+    return { ok: true, queuedReprocess: redact(intent) };
+  }
+
+  async function cancelQueuedStageReprocess({ stageId } = {}) {
+    const id = safeText(stageId || '', 180);
+    const current = normalizeQueuedReprocess(
+      await storage.loadQueuedReprocess(activeExecutionChatKey)
+    );
+    if (!current || current.mode !== 'stage') {
+      queuedReprocessView = current;
+      return { ok: true, queuedReprocess: current };
+    }
+    const stageIds = current.stageIds.filter((stageIdValue) => stageIdValue !== id);
+    const next = stageIds.length ? { ...current, stageIds } : null;
+    if (next) await storage.saveQueuedReprocess(activeExecutionChatKey, next);
+    else await storage.clearQueuedReprocess(activeExecutionChatKey);
+    queuedReprocessView = next;
+    return { ok: true, queuedReprocess: next };
+  }
+
   return {
     storage,
     prepareForGeneration,
+    restoreExecutionState,
+    pauseOperation,
+    resumeOperation,
+    retryStage,
+    queueStageReprocess,
+    cancelQueuedStageReprocess,
     requestFreshNextGeneration,
     clearFreshNextGeneration,
     async dispose() {
+      if (durablePreprocess) {
+        await pauseOperation({ reason: 'runtime-disposed' });
+      }
       supersedeActiveRun();
       postProcessRuntime.cancelPostProcess('runtime-disposed');
       clearPendingFreshNextGeneration();
@@ -7086,6 +8779,7 @@ export function createRecursionRuntime({
     exportDiagnostics,
     view() {
       return safeRuntimeView();
-    }
+    },
+    getView: safeRuntimeView
   };
 }

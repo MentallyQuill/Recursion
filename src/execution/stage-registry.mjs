@@ -24,7 +24,9 @@ function normalizeStage(stage) {
     executable: stage.executable !== false,
     dependencies: Object.freeze(dependencies),
     checkpoint: stage.checkpoint === 'none' ? 'none' : 'durable',
-    failurePolicy: stage.failurePolicy === 'continue' ? 'continue' : 'blocking'
+    failurePolicy: ['continue', 'fallback'].includes(stage.failurePolicy)
+      ? stage.failurePolicy
+      : 'blocking'
   });
 }
 

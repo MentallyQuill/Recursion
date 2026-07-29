@@ -351,6 +351,7 @@ function cacheSettingsSignature(settings = {}) {
     strength: normalized.strength,
     minCards: normalized.minCards,
     maxCards: normalized.maxCards,
+    modelAttemptsPerStep: normalized.modelAttemptsPerStep,
     reasoningLevel: normalized.reasoningLevel,
     promptFootprint: normalized.promptFootprint,
     focus: normalized.focus,
@@ -1405,6 +1406,7 @@ export function preparedGenerationSettingsSignature(settings = {}) {
     strength: normalized.strength,
     minCards: normalized.minCards,
     maxCards: normalized.maxCards,
+    modelAttemptsPerStep: normalized.modelAttemptsPerStep,
     reasoningLevel: normalized.reasoningLevel,
     promptFootprint: normalized.promptFootprint,
     focus: normalized.focus,
@@ -2395,7 +2397,10 @@ export function createRecursionRuntime({
     durableExecution: durablePreprocess
       ? {
           scheduler: executionScheduler,
-          repository: storage
+          repository: storage,
+          onQueuedReprocessChanged(intent) {
+            queuedReprocessView = intent || null;
+          }
         }
       : null
   });
@@ -2635,8 +2640,8 @@ export function createRecursionRuntime({
   }
 
   function freshNextGenerationView() {
-    const pendingFreshNextGeneration = runState.current().pendingFreshNextGeneration;
-    if (!pendingFreshNextGeneration) {
+    const queuedFullFresh = runState.current().queuedFullFresh;
+    if (!queuedFullFresh) {
       return {
         pending: false,
         id: '',
@@ -2647,15 +2652,15 @@ export function createRecursionRuntime({
     }
     return {
       pending: true,
-      id: safeText(pendingFreshNextGeneration.id || '', 180),
-      reason: safeText(pendingFreshNextGeneration.reason || 'user-fresh-next-generation', 120),
-      requestedAt: safeText(pendingFreshNextGeneration.requestedAt || '', 80),
-      source: safeText(pendingFreshNextGeneration.source || 'bar', 80)
+      id: safeText(queuedFullFresh.id || '', 180),
+      reason: safeText(queuedFullFresh.reason || 'user-fresh-next-generation', 120),
+      requestedAt: safeText(queuedFullFresh.requestedAt || '', 80),
+      source: safeText(queuedFullFresh.source || 'bar', 80)
     };
   }
 
   function clearPendingFreshNextGeneration() {
-    runState.clearFreshNextGeneration();
+    runState.clearQueuedFullFresh();
   }
 
   function freshNextGenerationDetails(freshContext, snapshot = null) {
@@ -2681,13 +2686,13 @@ export function createRecursionRuntime({
   }
 
   function consumePendingFreshNextGeneration(runId) {
-    const pendingFreshNextGeneration = runState.current().pendingFreshNextGeneration;
-    if (!pendingFreshNextGeneration) return null;
+    const queuedFullFresh = runState.current().queuedFullFresh;
+    if (!queuedFullFresh) return null;
     const token = {
-      ...pendingFreshNextGeneration,
+      ...queuedFullFresh,
       consumeByRunId: safeText(runId || '', 160)
     };
-    runState.clearFreshNextGeneration();
+    runState.clearQueuedFullFresh();
     return token;
   }
 
@@ -2711,6 +2716,14 @@ export function createRecursionRuntime({
       activeExecutionChatKey = chatKey;
       queuedReprocessView = intent;
       clearPendingLatestAssistantSwipeRetry();
+      settleRuntimeActivity({
+        runId: safeText(executionView?.operationId || makeId('queued-full-fresh'), 180),
+        outcome: 'success',
+        phase: 'settled',
+        severity: 'success',
+        label: 'Full fresh generation queued.',
+        chips: ['Queued']
+      });
       return {
         ok: true,
         queuedReprocess: redact(intent),
@@ -2724,7 +2737,7 @@ export function createRecursionRuntime({
       };
     }
     const source = asObject(details);
-    runState.setFreshNextGeneration({
+    runState.setQueuedFullFresh({
       id: makeId('fresh-next-generation'),
       reason: 'user-fresh-next-generation',
       requestedAt: nowIso(),
@@ -2732,6 +2745,14 @@ export function createRecursionRuntime({
       source: safeText(source.source || 'bar', 80) || 'bar'
     });
     clearPendingLatestAssistantSwipeRetry();
+    settleRuntimeActivity({
+      runId: makeId('queued-full-fresh'),
+      outcome: 'success',
+      phase: 'settled',
+      severity: 'success',
+      label: 'Full fresh generation queued.',
+      chips: ['Queued']
+    });
     return {
       ok: true,
       freshNextGeneration: freshNextGenerationView()
@@ -2745,6 +2766,14 @@ export function createRecursionRuntime({
       const intent = await storage.loadQueuedReprocess(chatKey);
       if (intent?.mode === 'full-fresh') await storage.clearQueuedReprocess(chatKey);
       queuedReprocessView = intent?.mode === 'full-fresh' ? null : intent;
+      settleRuntimeActivity({
+        runId: safeText(executionView?.operationId || makeId('queued-reprocess-canceled'), 180),
+        outcome: 'success',
+        phase: 'settled',
+        severity: 'success',
+        label: 'Queued reprocessing canceled.',
+        chips: ['Queued']
+      });
       return {
         ok: true,
         queuedReprocess: queuedReprocessView ? redact(queuedReprocessView) : null,
@@ -2752,6 +2781,14 @@ export function createRecursionRuntime({
       };
     }
     clearPendingFreshNextGeneration();
+    settleRuntimeActivity({
+      runId: makeId('queued-reprocess-canceled'),
+      outcome: 'success',
+      phase: 'settled',
+      severity: 'success',
+      label: 'Queued reprocessing canceled.',
+      chips: ['Queued']
+    });
     return {
       ok: true,
       freshNextGeneration: freshNextGenerationView()
@@ -2835,7 +2872,7 @@ export function createRecursionRuntime({
     lastSavedSceneCacheRef = null;
     runState.clearLatestAssistantSwipeRetry();
     runState.clearAttempt?.();
-    runState.clearFreshNextGeneration();
+    runState.clearQueuedFullFresh();
     if (!preserveLastBrief) clearLastBrief({ status: 'empty', reason: 'source-cleared' });
   }
 
@@ -2965,6 +3002,14 @@ export function createRecursionRuntime({
     return keys.length === 1 && keys[0] === 'pipelineMode';
   }
 
+  async function reconcileDurableExecutionAfterSettingsChange() {
+    if (!durablePreprocess || !executionView?.operationId) return null;
+    if (executionView.state === 'running') {
+      await pauseOperation({ reason: 'settings-changed' });
+    }
+    return restoreExecutionState();
+  }
+
   async function updateSettings(patch = {}) {
     const cleanPatch = asObject(patch);
     const currentSettings = settingsStore.get();
@@ -2989,6 +3034,7 @@ export function createRecursionRuntime({
     if (isPipelineOnlySettingsChange(changedKeys)) {
       supersedeActiveRun();
       return trackRuntimeMutation(async () => {
+        await reconcileDurableExecutionAfterSettingsChange();
         const clear = await clearPromptAfterSupersede({
           successLabel: 'Recursion prompt cleared after pipeline change.',
           journalReason: 'pipeline-mode-changed'
@@ -3009,6 +3055,7 @@ export function createRecursionRuntime({
       supersedeActiveRun();
       if (next.enabled === false) clearPreparedGeneration();
       const result = await trackRuntimeMutation(async () => {
+        await reconcileDurableExecutionAfterSettingsChange();
         await invalidateActiveSceneCacheBestEffort('settings-changed', {
           changedKeys
         });
@@ -3054,6 +3101,7 @@ export function createRecursionRuntime({
       'maxCards',
       'focus',
       'promptFootprint',
+      'modelAttemptsPerStep',
       'injection',
       'ui',
       'postProcess',
@@ -3444,7 +3492,7 @@ export function createRecursionRuntime({
       lastPlan = null;
       lastSavedSceneCacheRef = null;
       runState.clearLatestAssistantSwipeRetry();
-      runState.clearFreshNextGeneration();
+      runState.clearQueuedFullFresh();
       clearLastBrief({ status: 'empty', reason: 'scene-cache-reset' });
       stageRuntimeActivity({
         runId,
@@ -7339,19 +7387,54 @@ export function createRecursionRuntime({
     const intent = intentValue === undefined
       ? await storage.loadQueuedReprocess(manifest.chatKey)
       : intentValue;
+    const normalizedIntent = normalizeQueuedReprocess(intent);
+    const graphPhase = graph.topologicalStageIds.some((stageId) => stageId.startsWith('postprocess.'))
+      ? 'postprocess'
+      : 'preprocess';
+    const deferredStageIds = normalizedIntent?.mode === 'stage'
+      ? normalizedIntent.stageIds.filter((stageId) => {
+          const phase = stageId.split('.')[0];
+          return ['preprocess', 'postprocess'].includes(phase) && phase !== graphPhase;
+        })
+      : [];
+    const currentStageIds = normalizedIntent?.mode === 'stage'
+      ? normalizedIntent.stageIds.filter((stageId) => !deferredStageIds.includes(stageId))
+      : [];
+    const currentIntent = normalizedIntent?.mode === 'stage'
+      ? (
+          currentStageIds.length
+            ? { ...normalizedIntent, stageIds: currentStageIds }
+            : null
+        )
+      : normalizedIntent;
     const binding = bindQueuedReprocess({
-      intent,
+      intent: currentIntent,
       graph,
       manifest,
       provenance: context.provenance
     });
-    context.fullFresh = normalizeQueuedReprocess(intent)?.mode === 'full-fresh';
-    if (binding.intent) {
-      await storage.saveQueuedReprocess(manifest.chatKey, binding.intent);
+    const boundStageIds = binding.intent?.mode === 'stage'
+      ? binding.intent.stageIds
+      : [];
+    const retainedStageIds = [...new Set([...boundStageIds, ...deferredStageIds])];
+    const retainedIntent = normalizedIntent?.mode === 'stage'
+      ? (
+          retainedStageIds.length
+            ? {
+                schema: QUEUED_REPROCESS_SCHEMA,
+                mode: 'stage',
+                stageIds: retainedStageIds
+              }
+            : null
+        )
+      : binding.intent;
+    context.fullFresh = normalizedIntent?.mode === 'full-fresh';
+    if (retainedIntent) {
+      await storage.saveQueuedReprocess(manifest.chatKey, retainedIntent);
     } else if (intent) {
       await storage.clearQueuedReprocess(manifest.chatKey);
     }
-    queuedReprocessView = binding.intent;
+    queuedReprocessView = retainedIntent;
     if (binding.notices.length > 0) {
       settleRuntimeActivity({
         runId: context.runId,
@@ -7371,7 +7454,7 @@ export function createRecursionRuntime({
     executionView = next;
     return {
       manifest: next,
-      intent: binding.intent,
+      intent: retainedIntent,
       notices: binding.notices
     };
   }
@@ -8700,17 +8783,70 @@ export function createRecursionRuntime({
     return redact(manifest);
   }
 
+  function executionStageDisplayName(stageId) {
+    const id = safeText(stageId || '', 180);
+    const canonical = {
+      'preprocess.snapshot': 'Reading current turn',
+      'preprocess.arbiter': 'Planning card pass',
+      'preprocess.cards.fused': 'Fused card bundle',
+      'preprocess.deck': 'Updating scene deck',
+      'preprocess.hand': 'Selecting turn hand',
+      'preprocess.guidance': 'Reasoner guidance',
+      'preprocess.packet': 'Composing prompt packet',
+      'preprocess.install': 'Installing Recursion prompt',
+      'postprocess.source-snapshot': 'Reading generated response',
+      'postprocess.host-commit': 'Adding Post-process result'
+    }[id];
+    if (canonical) return canonical;
+    const suffix = id.split('.').at(-1) || 'step';
+    return suffix
+      .split(/[-_]+/)
+      .filter(Boolean)
+      .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+      .join(' ') || 'Step';
+  }
+
+  function resumeStageIdForExecution(manifest) {
+    const frontier = safeStringList(manifest?.frontierStageIds, 180);
+    if (frontier.length) return frontier[0];
+    const failedId = safeText(manifest?.pauseReason || '', 180).replace(/^stage-failed:/, '');
+    if (failedId && failedId !== manifest?.pauseReason) return failedId;
+    return Object.values(asObject(manifest?.stageRecords))
+      .find((record) => record?.state === 'pending')
+      ?.stageId || '';
+  }
+
   async function pauseOperation({ reason = 'user' } = {}) {
     const operationId = safeText(executionView?.operationId || '', 180);
     if (!operationId) return null;
     if (executionView?.state !== 'running') return redact(executionView);
     const paused = await executionScheduler.pause({ operationId, reason });
     if (paused) executionView = paused;
+    if (paused) {
+      settleRuntimeActivity({
+        runId: operationId,
+        outcome: 'warning',
+        phase: 'settled',
+        severity: 'warning',
+        label: 'Operation paused. Completed work was saved.',
+        chips: ['Paused']
+      });
+    }
     return paused ? redact(paused) : null;
   }
 
   async function resumeOperation({ operationId = executionView?.operationId } = {}) {
     const id = safeText(operationId || '', 180);
+    const resumeStageId = resumeStageIdForExecution(executionView);
+    if (resumeStageId) {
+      startRuntimeActivity({
+        runId: id,
+        phase: 'activity',
+        severity: 'info',
+        label: `Resuming from ${executionStageDisplayName(resumeStageId)}.`,
+        chips: ['Resume']
+      });
+    }
     if (executionView?.phase === 'postprocess') {
       const result = await postProcessRuntime.resumeOperation({
         operationId: id
@@ -8767,7 +8903,9 @@ export function createRecursionRuntime({
   async function queueStageReprocess({ stageId } = {}) {
     const id = safeText(stageId || '', 180);
     const operationId = safeText(executionView?.operationId || '', 180);
-    const graph = preprocessGraphs.get(operationId);
+    const graph = preprocessGraphs.get(operationId)
+      || postProcessRuntime.executionGraph?.(operationId)
+      || null;
     if (!id || !graph || !graph.hasStage(id) || !graph.getStage(id).executable) {
       return {
         ok: false,
@@ -8777,14 +8915,44 @@ export function createRecursionRuntime({
         }
       };
     }
-    const current = await storage.loadQueuedReprocess(activeExecutionChatKey);
-    const intent = mergeQueuedReprocess(current, {
+    const current = normalizeQueuedReprocess(
+      await storage.loadQueuedReprocess(activeExecutionChatKey)
+    );
+    const graphPhase = id.startsWith('postprocess.') ? 'postprocess' : 'preprocess';
+    const deferredStageIds = current?.mode === 'stage'
+      ? current.stageIds.filter((currentStageId) => (
+          currentStageId.split('.')[0] !== graphPhase
+        ))
+      : [];
+    const currentForGraph = current?.mode === 'stage'
+      ? {
+          ...current,
+          stageIds: current.stageIds.filter((currentStageId) => (
+            currentStageId.split('.')[0] === graphPhase
+          ))
+        }
+      : current;
+    const merged = mergeQueuedReprocess(currentForGraph, {
       schema: QUEUED_REPROCESS_SCHEMA,
       mode: 'stage',
       stageIds: [id]
     }, graph);
+    const intent = merged?.mode === 'stage'
+      ? {
+          ...merged,
+          stageIds: [...new Set([...merged.stageIds, ...deferredStageIds])]
+        }
+      : merged;
     if (intent) await storage.saveQueuedReprocess(activeExecutionChatKey, intent);
     queuedReprocessView = intent;
+    settleRuntimeActivity({
+      runId: operationId || makeId('stage-reprocess-queued'),
+      outcome: 'success',
+      phase: 'settled',
+      severity: 'success',
+      label: `${executionStageDisplayName(id)} queued for reprocessing.`,
+      chips: ['Queued']
+    });
     return { ok: true, queuedReprocess: redact(intent) };
   }
 
@@ -8802,6 +8970,14 @@ export function createRecursionRuntime({
     if (next) await storage.saveQueuedReprocess(activeExecutionChatKey, next);
     else await storage.clearQueuedReprocess(activeExecutionChatKey);
     queuedReprocessView = next;
+    settleRuntimeActivity({
+      runId: safeText(executionView?.operationId || makeId('queued-reprocess-canceled'), 180),
+      outcome: 'success',
+      phase: 'settled',
+      severity: 'success',
+      label: 'Queued reprocessing canceled.',
+      chips: ['Queued']
+    });
     return { ok: true, queuedReprocess: next };
   }
 

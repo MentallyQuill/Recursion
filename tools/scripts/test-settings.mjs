@@ -3,7 +3,8 @@ import {
   createSessionSecretStore,
   createSettingsStore,
   normalizeProviderSettings,
-  normalizeSettings
+  normalizeSettings,
+  resetSettingsMenuValue
 } from '../../src/settings.mjs';
 import { providerConfigHash } from '../../src/provider-capability.mjs';
 import {
@@ -66,6 +67,11 @@ assertEqual(normalizeSettings({ modelAttemptsPerStep: 4 }).modelAttemptsPerStep,
 assertEqual(normalizeSettings({ modelAttemptsPerStep: 6 }).modelAttemptsPerStep, 5, 'model attempts clamp high');
 assertEqual(normalizeSettings({ modelAttemptsPerStep: '3' }).modelAttemptsPerStep, 3, 'numeric model attempt strings normalize');
 assertEqual(normalizeSettings({ modelAttemptsPerStep: 'many' }).modelAttemptsPerStep, 2, 'invalid model attempts use the default');
+assertEqual(
+  resetSettingsMenuValue({ modelAttemptsPerStep: 5 }).modelAttemptsPerStep,
+  2,
+  'Reset Defaults restores Attempts per step'
+);
 assertDeepEqual(DEFAULT_RECURSION_SETTINGS.postProcess, {
   enabled: false,
   applyMode: 'as-swipe',

@@ -252,6 +252,11 @@ function immediateProvider(calls = []) {
   await runtime.pauseOperation({ reason: 'user' });
   const pausedView = runtime.getView();
   assertEqual(pausedView.execution.state, 'paused', 'Stop pauses the durable operation');
+  assertEqual(
+    pausedView.activity.label,
+    'Operation paused. Completed work was saved.',
+    'Stop confirms that completed work was saved'
+  );
   const manifest = await storage.loadPipelineRun('chat-preprocess');
   assertEqual(manifest.stageRecords['preprocess.arbiter'].state, 'completed', 'Arbiter checkpoint survives Stop');
   assertEqual(
@@ -476,6 +481,42 @@ function immediateProvider(calls = []) {
   );
   activeCastGate.resolve(cardResponse('activeCastCard', {
     snapshotHash: runtime.getView().lastPlan.snapshotHash
+  }));
+  await preparing;
+}
+
+{
+  const cardGate = deferred();
+  let inFlightSignal = null;
+  const provider = {
+    async generate(roleId, request = {}) {
+      if (roleId === 'utilityArbiter') return arbiterResponse(request);
+      if (roleId === 'sceneFrameCard') {
+        inFlightSignal = request.signal;
+        return cardGate.promise;
+      }
+      if (roleId === 'guidanceComposer') return guidanceResponse(request);
+      throw new Error(`unexpected provider role ${roleId}`);
+    }
+  };
+  const { runtime, storage, calls } = createHarness({ provider });
+  const preparing = runtime.prepareForGeneration({
+    userMessage: 'I ask what she remembers.',
+    hostGeneration: true
+  });
+  await waitUntil(() => Boolean(inFlightSignal), 'attempt-setting test did not start a card call');
+  const update = await runtime.updateSettings({ modelAttemptsPerStep: 5 });
+  assertEqual(update.settings.modelAttemptsPerStep, 5, 'Attempts per step update stores the new limit');
+  assertEqual(inFlightSignal.aborted, true, 'Attempts per step update aborts incompatible in-flight work');
+  const stale = await storage.loadPipelineRun('chat-preprocess');
+  assertEqual(stale.state, 'stale', 'Attempts per step update marks the durable operation stale');
+  assert(
+    stale.staleChangedFields.includes('settingsHash'),
+    'Attempts per step update records settings provenance drift'
+  );
+  assert(calls.clear > 0, 'Attempts per step update clears transient prompt state');
+  cardGate.resolve(cardResponse('sceneFrameCard', {
+    snapshotHash: runtime.getView().lastPlan?.snapshotHash || 'late'
   }));
   await preparing;
 }
@@ -727,6 +768,11 @@ function immediateProvider(calls = []) {
   assertEqual(queued.ok, true, 'a completed card can be queued for the next preparation');
   assertEqual(providerCalls.length, callsBeforeQueue, 'queueing a card performs no model work');
   assertEqual(
+    runtime.getView().activity.label,
+    'Scene Frame queued for reprocessing.',
+    'queueing a card emits the compact Queued confirmation'
+  );
+  assertEqual(
     (await storage.loadQueuedReprocess('chat-preprocess')).stageIds.join(','),
     'preprocess.cards.segmented.scene-frame',
     'queued card intent is durable'
@@ -738,6 +784,11 @@ function immediateProvider(calls = []) {
     await storage.loadQueuedReprocess('chat-preprocess'),
     null,
     'cancel removes the durable queued intent'
+  );
+  assertEqual(
+    runtime.getView().activity.label,
+    'Queued reprocessing canceled.',
+    'cancel emits the compact Queued confirmation'
   );
 
   await runtime.queueStageReprocess({
@@ -770,12 +821,33 @@ function immediateProvider(calls = []) {
   );
   await runtime.cancelQueuedStageReprocess({ stageId: 'preprocess.arbiter' });
 
+  await storage.saveQueuedReprocess('chat-preprocess', {
+    schema: 'recursion.queued-reprocess.v1',
+    mode: 'stage',
+    stageIds: ['postprocess.unified.guidance']
+  });
+  await runtime.prepareForGeneration({
+    userMessage: 'I ask what she remembers.',
+    hostGeneration: true
+  });
+  assertEqual(
+    (await storage.loadQueuedReprocess('chat-preprocess')).stageIds.join(','),
+    'postprocess.unified.guidance',
+    'Pre-process defers a queued Post-process stage for the eligible phase'
+  );
+  await storage.clearQueuedReprocess('chat-preprocess');
+
   const callsBeforeFresh = {
     arbiter: providerCalls.filter((entry) => entry.roleId === 'utilityArbiter').length,
     card: providerCalls.filter((entry) => entry.roleId === 'sceneFrameCard').length,
     guidance: providerCalls.filter((entry) => entry.roleId === 'guidanceComposer').length
   };
   await runtime.requestFreshNextGeneration({ source: 'test' });
+  assertEqual(
+    runtime.getView().activity.label,
+    'Full fresh generation queued.',
+    'full fresh uses Queued terminology'
+  );
   await runtime.prepareForGeneration({
     userMessage: 'I ask what she remembers.',
     hostGeneration: true

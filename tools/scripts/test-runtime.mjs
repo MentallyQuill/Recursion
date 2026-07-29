@@ -362,8 +362,8 @@ const preparedGenerationSnapshot = {
   runState.setLatestAssistantSwipeRetry({ reason: 'latest-assistant-swipe' });
   assertEqual(runState.takeLatestAssistantSwipeRetry().reason, 'latest-assistant-swipe', 'run state takes swipe retry once');
   assertEqual(runState.takeLatestAssistantSwipeRetry(), null, 'swipe retry is cleared after take');
-  runState.setFreshNextGeneration({ id: 'fresh-1' });
-  assertEqual(runState.takeFreshNextGeneration().id, 'fresh-1', 'fresh next generation token is taken once');
+  runState.setQueuedFullFresh({ id: 'fresh-1' });
+  assertEqual(runState.takeQueuedFullFresh().id, 'fresh-1', 'queued full-fresh token is taken once');
   runState.clearActiveRun('run-state-1');
   assertEqual(runState.current().activeRunId, null, 'run state clears active run');
 }
@@ -2277,6 +2277,23 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
 {
   const roleCalls = [];
   const harness = createRuntimeHarness({
+    settings: { modelAttemptsPerStep: 2 },
+    generationRouter: {
+      async generate(roleId) {
+        roleCalls.push(roleId);
+        throw new Error(`attempt setting should not call provider role ${roleId}`);
+      }
+    }
+  });
+  const update = await harness.runtime.updateSettings({ modelAttemptsPerStep: 4 });
+  assertEqual(update.ok, true, 'updating Attempts per step succeeds');
+  assertEqual(update.settings.modelAttemptsPerStep, 4, 'runtime stores the normalized attempt limit');
+  assertDeepEqual(roleCalls, [], 'updating Attempts per step does not start a provider call');
+}
+
+{
+  const roleCalls = [];
+  const harness = createRuntimeHarness({
     settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request = {}) {
@@ -3406,8 +3423,8 @@ function createTrackedStorageRepository() {
   assertEqual(queued.ok, true, 'fresh next generation queues successfully');
   assertEqual(runtime.view().freshNextGeneration?.pending, true, 'fresh next generation is visible as pending');
   assertEqual(runtime.view().lastBrief?.status, 'ready', 'fresh next generation keeps Last Brief ready until send or swipe');
-  assertEqual(runtime.view().lastBrief?.packetId, firstPacketId, 'fresh next generation keeps the previous packet visible while armed');
-  assertEqual(runtime.view().lastBrief?.handId, firstHandId, 'fresh next generation keeps the previous hand visible while armed');
+  assertEqual(runtime.view().lastBrief?.packetId, firstPacketId, 'queued fresh next generation keeps the previous packet visible');
+  assertEqual(runtime.view().lastBrief?.handId, firstHandId, 'queued fresh next generation keeps the previous hand visible');
   const second = await runtime.prepareForGeneration({ userMessage, hostGeneration: true });
   assertEqual(second.ok, true, 'fresh next same-turn run succeeds');
   assertEqual(second.reused, undefined, 'fresh next same-turn run does not report packet reuse');

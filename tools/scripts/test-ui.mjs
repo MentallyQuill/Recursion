@@ -308,7 +308,7 @@ assertEqual(
     activity: { phase: 'idle' },
     lastHand: { cards: [{ id: 'manual-card' }] }
   }).standbyStatusText,
-  'Manual scope armed.',
+  'Manual scope ready.',
   'manual idle view exposes scoped standby text with punctuation'
 );
 assertEqual(
@@ -3747,6 +3747,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-settings-panel]').hidden, false, 'settings tab click keeps settings panel open even when document outside-click also receives the rerendered event');
   assertEqual(root.querySelector('[data-recursion-settings-advanced]').hidden, false, 'clicking Advanced shows advanced controls');
   assert(root.querySelector('[data-recursion-settings-section-injection]'), 'Advanced settings groups injection controls');
+  assert(root.querySelector('[data-recursion-settings-section-execution]'), 'Advanced settings groups execution controls');
   assert(root.querySelector('[data-recursion-settings-section-ui]'), 'Advanced settings groups UI controls');
   assert(root.querySelector('[data-recursion-settings-section-context-windows]'), 'Advanced settings groups context-window controls');
   assert(root.querySelector('[data-recursion-settings-section-storage-retention]'), 'Advanced settings groups storage-retention controls');
@@ -3767,6 +3768,16 @@ try {
   assert(root.querySelector('[data-recursion-setting-injection-placement]'), 'Advanced settings render injection placement control');
   assert(root.querySelector('[data-recursion-setting-injection-role]'), 'Advanced settings render injection role control');
   assert(root.querySelector('[data-recursion-setting-injection-depth]'), 'Advanced settings render injection depth control');
+  const attemptsPerStepControl = root.querySelector('[data-recursion-setting-model-attempts-per-step]');
+  assert(attemptsPerStepControl, 'Advanced settings render Attempts per step');
+  assertEqual(attemptsPerStepControl.value, '2', 'Attempts per step defaults to two');
+  assertEqual(attemptsPerStepControl.getAttribute('min'), '1', 'Attempts per step has a minimum of one');
+  assertEqual(attemptsPerStepControl.getAttribute('max'), '5', 'Attempts per step has a maximum of five');
+  assert(
+    fakeDocument.textTree(root.querySelector('[data-recursion-settings-section-execution]'))
+      .includes('Total automatic model attempts for each Recursion step. Slow calls are not retried unless they fail.'),
+    'Attempts per step renders the approved helper'
+  );
   assert(root.querySelector('[data-recursion-setting-post-process-context-messages]'), 'Context Windows renders Post-process evidence cap');
   assert(root.querySelector('[data-recursion-setting-source-window-messages]'), 'Context Windows renders source freshness message cap');
   assert(root.querySelector('[data-recursion-setting-source-window-characters]'), 'Context Windows renders source freshness character budget');
@@ -3778,6 +3789,7 @@ try {
   const typedIntegerSettingSelectors = [
     '[data-recursion-setting-min-cards]',
     '[data-recursion-setting-max-cards]',
+    '[data-recursion-setting-model-attempts-per-step]',
     '[data-recursion-setting-progress-child-limit]',
     '[data-recursion-setting-progress-list-limit]',
     '[data-recursion-setting-source-window-messages]',
@@ -3977,6 +3989,7 @@ try {
   root.querySelector('[data-recursion-setting-max-cards]').value = '12';
   root.querySelector('[data-recursion-setting-footprint]').value = 'rich';
   root.querySelector('[data-recursion-setting-focus]').value = 'character';
+  root.querySelector('[data-recursion-setting-model-attempts-per-step]').value = '4';
   root.querySelector('[data-recursion-setting-progress-child-limit]').value = '7';
   root.querySelector('[data-recursion-setting-progress-list-limit]').value = '22';
   root.querySelector('[data-recursion-setting-post-process-context-messages]').value = '21';
@@ -4002,6 +4015,7 @@ try {
     maxCards: 12,
     promptFootprint: 'rich',
     focus: 'character',
+    modelAttemptsPerStep: 4,
     ui: {
       progressChildVisibleLimit: 7,
       progressListVisibleLimit: 22,
@@ -4276,8 +4290,8 @@ try {
   }
   assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, true, 'idle view hides stop generation button');
   assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').hidden, false, 'idle view shows fresh-next generation button in command slot');
-  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-label'), 'Force next generation fresh', 'fresh-next button exposes accessible copy');
-  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('title'), 'Force the next send or swipe to rebuild fresh cards and prompt guidance without using cached cards or same-turn packet reuse.', 'fresh-next button exposes hover tip copy');
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-label'), 'Queue a full fresh generation', 'fresh-next button exposes accessible copy');
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('title'), 'Queue the next send or swipe to rebuild fresh cards and prompt guidance without using cached cards or same-turn packet reuse.', 'fresh-next button exposes hover tip copy');
   assert(root.querySelector('[data-recursion-fresh-next-generation-icon]'), 'fresh-next button renders the Regenerate icon');
   assertEqual(root.querySelector('[data-recursion-fresh-next-generation-icon]').children.length, 0, 'fresh-next icon uses the regenerate.svg asset mask instead of inline SVG');
   assertEqual(fakeDocument.textTree(root.querySelector('[data-recursion-fresh-next-generation]')).includes('Regenerate'), false, 'fresh-next button is icon-only when idle');
@@ -4286,14 +4300,14 @@ try {
   assertDeepEqual(freshNextGenerationDetails.at(-1), { source: 'bar' }, 'fresh-next button identifies bar as source');
   ui.update();
   assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, true, 'queued fresh-next state does not show Stop while idle');
-  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-pressed'), 'true', 'queued fresh-next state renders armed button state');
-  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-label'), 'Fresh next generation armed', 'armed fresh-next button exposes armed copy');
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-pressed'), 'true', 'queued fresh-next state renders selected button state');
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-label'), 'Full fresh generation: Queued', 'queued fresh-next button exposes Queued copy');
   root.querySelector('[data-recursion-hand-toggle]').click();
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-hand-dropdown]')).includes('Door stays blocked and the brass lock remains warped.'), 'fresh-next armed state keeps previous Last Brief cards visible until send or swipe');
-  assert(!fakeDocument.textTree(root.querySelector('[data-recursion-hand-dropdown]')).includes('Next generation will be fresh.'), 'fresh-next armed state does not spend the Last Brief clearing copy before generation');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-hand-dropdown]')).includes('Door stays blocked and the brass lock remains warped.'), 'queued fresh-next state keeps previous Last Brief cards visible until send or swipe');
+  assert(!fakeDocument.textTree(root.querySelector('[data-recursion-hand-dropdown]')).includes('Next generation will be fresh.'), 'queued fresh-next state does not spend the Last Brief clearing copy before generation');
   root.querySelector('[data-recursion-hand-toggle]').click();
   root.querySelector('[data-recursion-fresh-next-generation]').click();
-  assertEqual(clearFreshNextGenerationCalls, 1, 'clicking armed fresh-next button clears the override');
+  assertEqual(clearFreshNextGenerationCalls, 1, 'clicking queued fresh-next button clears the override');
   assertDeepEqual(clearFreshNextGenerationDetails.at(-1), { source: 'bar' }, 'fresh-next clear identifies bar as source');
   view = { settings: { mode: 'auto' }, activeRunId: 'run-active-force-slot', activity: { phase: 'cardBatchRunning' }, lastHand: { cards: [] }, freshNextGeneration: { pending: false } };
   ui.update();
@@ -4310,7 +4324,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-current-step]').textContent, '', 'same fresh idle standby text does not reappear after expiry');
   view = { settings: { mode: 'manual' }, activity: { phase: 'idle' }, lastHand: { cards: [] } };
   ui.update();
-  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Manual scope armed.', 'new standby text appears when standby key changes');
+  assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'Manual scope ready.', 'new standby text appears when standby key changes');
   const idleViewerText = fakeDocument.textTree(viewer);
   assert(!idleViewerText.includes('Recursion is working...'), 'idle viewer does not report active work');
 

@@ -257,6 +257,7 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   injectionRole: 'Role SillyTavern assigns to Recursion prompt blocks. System is safest for instruction-like scene guidance; User or Assistant exist for preset compatibility.',
   injectionDepth: 'Insertion depth for the composed packet. Lower values sit closer to generation; higher values sit farther back and usually feel less forceful.',
   ui: 'Display preferences for Recursion chrome. These affect local visibility and hover help only, not prompts or provider calls.',
+  modelAttemptsPerStep: 'Total automatic model attempts for each Recursion step. Slow calls are not retried unless they fail.',
   tooltips: 'Show hover help across Recursion. Turn off once the controls are familiar; hidden text never affects model calls.',
   progressChildLimit: 'Maximum visible sub-rows under one progress step before that child list scrolls. Useful when many card calls run in one turn.',
   progressListLimit: 'Maximum combined progress rows before the whole progress menu scrolls. Keeps long model-call runs readable without growing over the chat.',
@@ -283,7 +284,7 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   providerTest: 'Send a small structured test call through this lane to verify routing, credentials, and JSON output before using it in chat.',
   providerClearKey: 'Remove the in-memory session key for this lane. Saved endpoint, model, and profile settings stay unchanged.'
 });
-const FRESH_NEXT_GENERATION_TOOLTIP = 'Force the next send or swipe to rebuild fresh cards and prompt guidance without using cached cards or same-turn packet reuse.';
+const FRESH_NEXT_GENERATION_TOOLTIP = 'Queue the next send or swipe to rebuild fresh cards and prompt guidance without using cached cards or same-turn packet reuse.';
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -2937,6 +2938,31 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
   const defaultRetention = DEFAULT_RETENTION_SETTINGS;
   const tooltipsEnabled = ui.tooltipsEnabled !== false;
   group.appendChild(el('h3', { text: 'Advanced' }));
+  const modelAttemptsPerStepControl = integerInputControl({
+    value: integerInRange(
+      settings.modelAttemptsPerStep,
+      DEFAULT_RECURSION_SETTINGS.modelAttemptsPerStep,
+      1,
+      5
+    ),
+    dataset: { recursionSettingModelAttemptsPerStep: '' },
+    ariaLabel: 'Attempts per step',
+    min: 1,
+    max: 5,
+    step: 1
+  });
+  setTooltip(
+    modelAttemptsPerStepControl,
+    tooltipsEnabled,
+    SETTINGS_TOOLTIPS.modelAttemptsPerStep
+  );
+  group.appendChild(settingsDisclosureSection('execution', 'Execution', [
+    controlRow(
+      'Attempts per step',
+      modelAttemptsPerStepControl,
+      SETTINGS_TOOLTIPS.modelAttemptsPerStep
+    )
+  ], { tooltip: SETTINGS_TOOLTIPS.modelAttemptsPerStep, tooltipsEnabled }));
   const resetSceneCache = button('Reset Scene Cache', 'recursionResetSceneCache', 'Reset Recursion scene cache');
   if (asObject(capabilities).resetSceneCache !== true) {
     resetSceneCache.disabled = true;
@@ -7321,6 +7347,16 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       ),
       promptFootprint: controlValue(sourceRoot, '[data-recursion-setting-footprint]'),
       focus: controlValue(sourceRoot, '[data-recursion-setting-focus]'),
+      modelAttemptsPerStep: integerInRange(
+        controlNumber(
+          sourceRoot,
+          '[data-recursion-setting-model-attempts-per-step]',
+          DEFAULT_RECURSION_SETTINGS.modelAttemptsPerStep
+        ),
+        DEFAULT_RECURSION_SETTINGS.modelAttemptsPerStep,
+        1,
+        5
+      ),
       ui: {
         tooltipsEnabled: controlChecked(sourceRoot, '[data-recursion-setting-tooltips-enabled]'),
         progressChildVisibleLimit: integerInRange(
@@ -7523,7 +7559,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       freshNextGenerationButton.setAttribute('aria-hidden', visible ? 'false' : 'true');
       freshNextGenerationButton.setAttribute('tabindex', visible ? '0' : '-1');
       freshNextGenerationButton.setAttribute('aria-pressed', pending ? 'true' : 'false');
-      freshNextGenerationButton.setAttribute('aria-label', pending ? 'Fresh next generation armed' : 'Force next generation fresh');
+      freshNextGenerationButton.setAttribute('aria-label', pending ? 'Full fresh generation: Queued' : 'Queue a full fresh generation');
       setTooltip(freshNextGenerationButton, model.tooltipsEnabled, FRESH_NEXT_GENERATION_TOOLTIP);
     }
     renderPipelineMenuSelection(model.pipelineMode);

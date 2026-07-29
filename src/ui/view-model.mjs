@@ -238,7 +238,7 @@ function standbyStatusText(activity, progressRun, enabled, mode, cards) {
     return terminalStatusText(label || 'Ready for next turn');
   }
   if (!READY_PHASES.has(activity.phase)) return '';
-  if (mode === 'manual') return terminalStatusText('Manual scope armed');
+  if (mode === 'manual') return terminalStatusText('Manual scope ready');
   if (Array.isArray(cards) && cards.length > 0) return terminalStatusText('Scene deck standing by');
   return terminalStatusText('Ready for Recursion');
 }

@@ -11,6 +11,10 @@ import { runModelStageAttempts } from './execution/attempt-policy.mjs';
 import { createExecutionGraph } from './execution/stage-registry.mjs';
 import { createPipelineRun } from './execution/checkpoints.mjs';
 import { buildRunProvenance } from './execution/provenance.mjs';
+import {
+  bindQueuedReprocess,
+  normalizeQueuedReprocess
+} from './execution/queued-reprocess.mjs';
 
 const POST_PROCESS_WRITER_PACKET_SCHEMA = 'recursion.postProcessWriterPacket.v1';
 const POST_PROCESS_WRITER_BOUNDARIES = Object.freeze([
@@ -1470,7 +1474,7 @@ export function createPostProcessRuntime({
   async function startDurableOperation(record, operation, currentSettings) {
     const provenance = durableProvenance(operation, currentSettings);
     const graph = durableGraph(operation);
-    const manifest = createPipelineRun({
+    let manifest = createPipelineRun({
       operationId: operation.operationId,
       chatKey: operation.snapshot.chatKey,
       phase: 'postprocess',
@@ -1478,6 +1482,40 @@ export function createPostProcessRuntime({
       sourceIdentity: provenance.sourceIdentity,
       provenance
     });
+    const queuedIntent = normalizeQueuedReprocess(
+      await durableRepository.loadQueuedReprocess?.(manifest.chatKey)
+    );
+    if (queuedIntent) {
+      const deferredStageIds = queuedIntent.mode === 'stage'
+        ? queuedIntent.stageIds.filter((stageId) => stageId.startsWith('preprocess.'))
+        : [];
+      const currentIntent = queuedIntent.mode === 'stage'
+        ? {
+            ...queuedIntent,
+            stageIds: queuedIntent.stageIds.filter((stageId) => !deferredStageIds.includes(stageId))
+          }
+        : queuedIntent;
+      const binding = bindQueuedReprocess({
+        intent: currentIntent.stageIds?.length === 0 ? null : currentIntent,
+        graph,
+        manifest,
+        provenance
+      });
+      manifest = binding.manifest;
+      const retainedStageIds = [
+        ...(binding.intent?.mode === 'stage' ? binding.intent.stageIds : []),
+        ...deferredStageIds
+      ];
+      const retainedIntent = queuedIntent.mode === 'stage' && retainedStageIds.length
+        ? { ...queuedIntent, stageIds: [...new Set(retainedStageIds)] }
+        : binding.intent;
+      if (retainedIntent) {
+        await durableRepository.saveQueuedReprocess?.(manifest.chatKey, retainedIntent);
+      } else {
+        await durableRepository.clearQueuedReprocess?.(manifest.chatKey);
+      }
+      durableExecution?.onQueuedReprocessChanged?.(retainedIntent || null);
+    }
     record.operationId = operation.operationId;
     durableOperations.set(operation.operationId, {
       operation,
@@ -1496,6 +1534,9 @@ export function createPostProcessRuntime({
       graph,
       context: {}
     });
+    durableExecution?.onQueuedReprocessChanged?.(
+      await durableRepository.loadQueuedReprocess?.(manifest.chatKey) || null
+    );
     return finalizeDurableOperation(record, operation, settled);
   }
 

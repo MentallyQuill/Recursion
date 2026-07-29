@@ -441,17 +441,17 @@ async function main() {
         && Array.isArray(probe?.generateCalls)
         && probe.generateCalls.length === 0;
     }, null, { timeout: timeoutMs });
-    const armed = await page.evaluate(readDomStateScript());
-    if (armed.runtimeLastBrief?.status !== 'ready' || armed.freshNextGeneration?.pending !== true || armed.cardRows <= 0) {
-      fail('fresh-not-armed', 'Regenerate click did not arm a fresh-next token.', { armed });
+    const queued = await page.evaluate(readDomStateScript());
+    if (queued.runtimeLastBrief?.status !== 'ready' || queued.freshNextGeneration?.pending !== true || queued.cardRows <= 0) {
+      fail('fresh-not-queued', 'Regenerate click did not queue a fresh-next token.', { queued });
     }
-    if (armed.stopButtonHidden !== true || armed.freshButtonHidden || armed.freshButtonPressed !== 'true') {
-      fail('fresh-command-slot-mismatch', 'Armed fresh-next state did not keep Regenerate visible and Stop hidden.', { armed });
+    if (queued.stopButtonHidden !== true || queued.freshButtonHidden || queued.freshButtonPressed !== 'true') {
+      fail('fresh-command-slot-mismatch', 'Queued fresh-next state did not keep Regenerate visible and Stop hidden.', { queued });
     }
-    if (armed.probe?.prepareCalls?.length || armed.probe?.generateCalls?.length) {
-      fail('fresh-click-started-generation', 'Regenerate click started generation instead of arming the next run.', { armed });
+    if (queued.probe?.prepareCalls?.length || queued.probe?.generateCalls?.length) {
+      fail('fresh-click-started-generation', 'Regenerate click started generation instead of queuing the next run.', { queued });
     }
-    const armedScreenshot = await screenshotPanel(page, artifactDir, '02-armed-fresh-next', timeoutMs);
+    const queuedScreenshot = await screenshotPanel(page, artifactDir, '02-queued-fresh-next', timeoutMs);
 
     const second = await page.evaluate(() => globalThis.__recursionLiveHarnessRuntime.prepareForGeneration({
       userMessage: null,
@@ -507,12 +507,12 @@ async function main() {
         hostGenerationPrepareCalls: hostPrepareCalls.length,
         nativeGenerateCalls: readyAfter.probe?.generateCalls?.length || 0
       },
-      armed: {
-        state: armed.panelState,
-        reason: armed.runtimeLastBrief?.reason || '',
-        buttonPressed: armed.freshButtonPressed,
-        stopVisible: armed.stopButtonHidden === false,
-        prepareCalls: armed.probe?.prepareCalls?.length || 0
+      queued: {
+        state: queued.panelState,
+        reason: queued.runtimeLastBrief?.reason || '',
+        buttonPressed: queued.freshButtonPressed,
+        stopVisible: queued.stopButtonHidden === false,
+        prepareCalls: queued.probe?.prepareCalls?.length || 0
       },
       readyAfter: {
         state: readyAfter.panelState,
@@ -524,7 +524,7 @@ async function main() {
       },
       screenshots: {
         readyBefore: readyScreenshot,
-        armed: armedScreenshot,
+        queued: queuedScreenshot,
         readyAfter: readyAfterScreenshot
       }
     }, null, 2));

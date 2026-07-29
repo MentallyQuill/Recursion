@@ -3023,6 +3023,10 @@
   opacity: 0.74;
 }
 
+[data-recursion-setting-model-attempts-per-step] {
+  max-width: 72px;
+}
+
 .recursion-input {
   background: var(--recursion-panel);
   border: 1px solid var(--recursion-border);

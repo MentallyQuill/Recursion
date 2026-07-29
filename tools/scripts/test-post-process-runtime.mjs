@@ -1154,6 +1154,78 @@ test('26. Progressive Resume reuses prior drafts and current category guidance',
   assertEqual(commits[0].text, 'Final progressive draft.', 'Progressive commit uses the latest valid draft');
 });
 
+test('27. Queued Post-process stage binds to and is consumed by the eligible operation', async () => {
+  const storage = createStorageRepository({
+    storage: createMemoryStorageAdapter()
+  });
+  await storage.saveQueuedReprocess('post-process-queued-chat', {
+    schema: 'recursion.queued-reprocess.v1',
+    mode: 'stage',
+    stageIds: ['postprocess.unified.guidance']
+  });
+  const queuedViews = [];
+  const scheduler = createExecutionScheduler({
+    repository: storage,
+    attemptsPerStep: 2
+  });
+  const runtime = createPostProcessRuntime({
+    host: {
+      generation: {
+        async rewriteWithPostProcess() {
+          return { ok: true, text: 'Queued Post-process rewrite.' };
+        }
+      }
+    },
+    generationRouter: {
+      async generate(_roleId, request) {
+        return {
+          ok: true,
+          data: {
+            schema: GUIDANCE_SCHEMA,
+            snapshotHash: request.snapshotHash,
+            sourceHash: request.sourceHash,
+            guidanceText: 'Apply the queued guidance stage.'
+          }
+        };
+      }
+    },
+    settingsStore: {
+      get: () => settings({
+        postProcess: {
+          enabled: true,
+          rewriteFlow: 'unified',
+          applyMode: 'as-swipe'
+        }
+      })
+    },
+    snapshotProvider: async () => snapshot({
+      chatKey: 'post-process-queued-chat'
+    }),
+    deckProvider: async () => deckFrom(['natural-prose']),
+    sourceGuard: async () => true,
+    commitResult: async ({ commitId, finalArtifactHash }) => ({
+      ok: true,
+      applied: true,
+      receipt: { commitId, finalArtifactHash }
+    }),
+    durableExecution: {
+      scheduler,
+      repository: storage,
+      onQueuedReprocessChanged(intent) {
+        queuedViews.push(intent);
+      }
+    }
+  });
+  const result = await runtime.runPostProcessForLatestAssistant();
+  assertEqual(result.committed, true, 'queued Post-process operation commits');
+  assertEqual(
+    await storage.loadQueuedReprocess('post-process-queued-chat'),
+    null,
+    'queued Post-process stage is consumed when it begins'
+  );
+  assertEqual(queuedViews.at(-1), null, 'runtime view callback clears the consumed Post-process intent');
+});
+
 let passed = 0;
 for (const entry of cases) {
   try {
@@ -1165,5 +1237,5 @@ for (const entry of cases) {
   }
 }
 
-assertEqual(passed, 27, 'the complete 27-case state-machine matrix ran');
-console.log('[pass] post-process runtime (27 cases)');
+assertEqual(passed, 28, 'the complete 28-case state-machine matrix ran');
+console.log('[pass] post-process runtime (28 cases)');

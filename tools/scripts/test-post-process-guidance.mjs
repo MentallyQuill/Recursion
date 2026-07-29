@@ -5,6 +5,7 @@ import {
   postProcessGuidanceRoute
 } from '../../src/post-process-guidance.mjs';
 import { createGenerationRouter } from '../../src/providers.mjs';
+import { runModelStageAttempts } from '../../src/execution/attempt-policy.mjs';
 import {
   reasoningIntentForLevel,
   reasoningRequestMetadata
@@ -100,8 +101,7 @@ async function routeResult(rawText, overrides = {}) {
   });
   return router.generate(
     'postProcessGuidanceUtility',
-    buildPostProcessGuidanceRequest({ ...baseInput, ...overrides }),
-    { maxAttempts: 1, allowStructuredRecovery: false }
+    buildPostProcessGuidanceRequest({ ...baseInput, ...overrides })
   );
 }
 
@@ -162,20 +162,28 @@ const retryRouter = createGenerationRouter({
   }
 });
 const highRoute = postProcessGuidanceRoute('high');
-const retried = await retryRouter.generate(
-  highRoute.roleId,
-  { ...buildPostProcessGuidanceRequest({ ...baseInput, reasoningLevel: 'high' }), lane: highRoute.lane },
-  { maxAttempts: 2, allowStructuredRecovery: true }
-);
-assertEqual(retried.ok, true, 'one structured recovery succeeds on the second attempt');
-assertEqual(retryCalls.length, 2, 'guidance uses at most the router two-attempt budget');
+const highRequest = {
+  ...buildPostProcessGuidanceRequest({ ...baseInput, reasoningLevel: 'high' }),
+  lane: highRoute.lane
+};
+const retried = await runModelStageAttempts({
+  attemptsPerStep: 2,
+  request: highRequest,
+  invoke: (attemptRequest) => retryRouter.generate(highRoute.roleId, attemptRequest),
+  validate: (result) => result.ok
+    ? { ok: true, value: result }
+    : { ok: false, error: result.error },
+  buildCorrectionRequest: ({ request: attemptRequest }) => ({ ...attemptRequest })
+});
+assertEqual(retried.ok, true, 'attempt policy can recover guidance on the second request');
+assertEqual(retryCalls.length, 2, 'guidance uses at most the configured two-attempt window');
 assertDeepEqual(
   retryCalls.map(({ roleId, requestLane }) => [roleId, requestLane]),
   [
     ['postProcessGuidanceReasoner', 'reasoner'],
     ['postProcessGuidanceReasoner', 'reasoner']
   ],
-  'guidance retry never changes role or lane'
+  'guidance attempt policy never changes role or lane'
 );
 
 console.log('[pass] post-process guidance');

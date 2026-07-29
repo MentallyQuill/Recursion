@@ -64,6 +64,7 @@ function deckFrom(categoryIds = ['natural-prose']) {
 function settings(overrides = {}) {
   return {
     reasoningLevel: 'medium',
+    modelAttemptsPerStep: 2,
     postProcess: {
       enabled: true,
       applyMode: 'as-swipe',
@@ -304,15 +305,14 @@ test('3. Unified makes one guidance call, one host call, and one final candidate
   assertEqual(result.candidate, 'unified rewrite', 'Unified returns its one final candidate');
 });
 
-test('4. Unified guidance recovery stays in one router call with two same-role attempts', async () => {
+test('4. Unified guidance recovery uses two scheduler-policy calls with the same frozen role', async () => {
   const harness = createHarness({
-    guidancePlan: [[false, 'recovered guidance']],
+    guidancePlan: [false, 'recovered guidance'],
     hostPlan: ['recovered rewrite']
   });
   const result = await harness.runtime.runPostProcessForLatestAssistant();
   assertEqual(result.committed, true, 'recovered Unified guidance commits');
-  assertEqual(harness.generationRouterCalls.length, 1, 'orchestrator delegates the guidance retry budget once');
-  assertEqual(harness.generationRouterCalls[0].options.maxAttempts, 2, 'guidance router gets exactly two attempts');
+  assertEqual(harness.generationRouterCalls.length, 2, 'attempt policy invokes the single-attempt router twice');
   assertDeepEqual(
     harness.guidanceAttempts.map(({ roleId, lane }) => [roleId, lane]),
     [
@@ -325,7 +325,7 @@ test('4. Unified guidance recovery stays in one router call with two same-role a
 });
 
 test('5. Unified total guidance failure makes no host call and no commit', async () => {
-  const harness = createHarness({ guidancePlan: [[false, false]] });
+  const harness = createHarness({ guidancePlan: [false, false] });
   const result = await harness.runtime.runPostProcessForLatestAssistant();
   assertEqual(result.committed, false, 'total guidance failure does not commit');
   assertEqual(harness.hostCalls.length, 0, 'total guidance failure makes no host call');
@@ -434,7 +434,7 @@ test('11. Progressive guidance failure carries the last valid draft forward', as
   const harness = createHarness({
     initialSettings: settings({ postProcess: { rewriteFlow: 'progressive' } }),
     initialDeck: deckFrom(['natural-prose', 'follow-through']),
-    guidancePlan: [[false, false], [true]],
+    guidancePlan: [false, false, true],
     hostPlan: ['rewrite after follow through']
   });
   const result = await harness.runtime.runPostProcessForLatestAssistant();
@@ -469,7 +469,7 @@ test('13. Partial result forces As Swipe when Replace was requested', async () =
       postProcess: { rewriteFlow: 'progressive', applyMode: 'replace' }
     }),
     initialDeck: deckFrom(['natural-prose', 'follow-through']),
-    guidancePlan: [[false, false], [true]],
+    guidancePlan: [false, false, true],
     hostPlan: ['partial rewrite']
   });
   const result = await harness.runtime.runPostProcessForLatestAssistant();
@@ -483,7 +483,7 @@ test('14. All Progressive categories failing makes no commit', async () => {
   const harness = createHarness({
     initialSettings: settings({ postProcess: { rewriteFlow: 'progressive' } }),
     initialDeck: deckFrom(['natural-prose', 'follow-through']),
-    guidancePlan: [[false, false], [false, false]]
+    guidancePlan: [false, false, false, false]
   });
   const result = await harness.runtime.runPostProcessForLatestAssistant();
   assertEqual(result.committed, false, 'all-category failure does not commit');
@@ -507,7 +507,7 @@ test('16. Stop aborts the operation and prevents commit', async () => {
   const guidanceGate = deferred();
   const activity = createActivityReporter();
   const harness = createHarness({
-    guidancePlan: [[guidanceGate.promise]],
+    guidancePlan: [guidanceGate.promise],
     hostPlan: ['must not be used'],
     activity
   });
@@ -584,7 +584,7 @@ test('19. Settings and deck mutation cannot alter the frozen plan', async () => 
   const harness = createHarness({
     initialSettings: mutableSettings,
     initialDeck: mutableDeck,
-    guidancePlan: [[guidanceGate.promise], [true]],
+    guidancePlan: [guidanceGate.promise, true],
     hostPlan: ['rewrite after natural prose', 'rewrite after follow through']
   });
   const running = harness.runtime.runPostProcessForLatestAssistant();

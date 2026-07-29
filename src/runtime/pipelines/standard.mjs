@@ -69,7 +69,7 @@ export async function runStandardCardPipeline({
       ? requests.map((request) => ({ ...request, signal }))
       : requests;
     const current = typeof isCurrent === 'function' ? isCurrent : () => true;
-    const options = { runId, signal, isCurrent: current };
+    const options = { runId, signal };
     const usedBatch = typeof generationRouter.batch === 'function';
     const results = usedBatch
       ? await generationRouter.batch(signalRequests, options)

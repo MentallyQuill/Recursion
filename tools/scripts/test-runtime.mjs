@@ -2194,8 +2194,8 @@ assertNotEqual(
     settings: { enhancements: { target: 'on', applyMode: 'as-swipe', contextMessages: 3 } },
     hostMessages: proseHost.messages,
     generationRouter: {
-      async generate(roleId, request) {
-        routerCalls.push({ roleId, request });
+      async generate(roleId, request, options = {}) {
+        routerCalls.push({ roleId, request, options });
         return {
           ok: true,
           data: {
@@ -2220,6 +2220,7 @@ assertNotEqual(
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-generation-review' });
   assertEqual(result.ok, true, 'generation review applies a valid bounded patch');
   assertDeepEqual(routerCalls.map((call) => call.roleId), ['generationReviewer'], 'generation review makes one reviewer call');
+  assertEqual(routerCalls[0].options.timeoutMs ?? null, null, 'generation review has no Recursion-owned timeout');
   assertEqual(proseHost.message.swipes.length, 2, 'As Swipe preserves the original and adds one reviewed swipe');
   assert(proseHost.message.text.includes('said quietly'), 'generation review selects the reviewed swipe');
 }
@@ -2235,7 +2236,6 @@ assertNotEqual(
         routerCalls.push({ roleId, request });
         return {
           ok: true,
-          recoverySpent: true,
           data: {
             schema: 'recursion.generationReview.v1',
             sourceHash: proseHost.message.originalHash,
@@ -2249,8 +2249,8 @@ assertNotEqual(
     }
   });
   const result = await runtime.enhanceLatestAssistantMessage({ reason: 'unit-generation-review-budget' });
-  assertEqual(result.ok, false, 'spent structured recovery with no patch remains a failed review');
-  assertEqual(routerCalls.length, 1, 'runtime does not make a second semantic correction after router recovery spent the budget');
+  assertEqual(result.ok, false, 'review with no valid patch remains failed after semantic correction');
+  assertEqual(routerCalls.length, 2, 'runtime semantic correction is visible as a second single-attempt router call');
 }
 
 for (const pipelineMode of ['standard', 'rapid', 'fused']) {

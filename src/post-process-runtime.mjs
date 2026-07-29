@@ -7,6 +7,7 @@ import {
   buildPostProcessGuidanceRequest,
   postProcessGuidanceRoute
 } from './post-process-guidance.mjs';
+import { runModelStageAttempts } from './execution/attempt-policy.mjs';
 
 const POST_PROCESS_WRITER_PACKET_SCHEMA = 'recursion.postProcessWriterPacket.v1';
 const POST_PROCESS_WRITER_BOUNDARIES = Object.freeze([
@@ -208,6 +209,7 @@ export function buildPostProcessPlan({
     sourceHash: frozenSnapshot.sourceHash,
     deckId: safeId(deck?.id, 'post-process-deck'),
     reasoningLevel: cleanText(settings.reasoningLevel || 'medium').toLowerCase(),
+    modelAttemptsPerStep: Math.min(5, Math.max(1, Number.parseInt(settings.modelAttemptsPerStep, 10) || 2)),
     route: cloneValue(route),
     applyMode: normalizedApplyMode(settings?.postProcess?.applyMode),
     rewriteFlow: normalizedRewriteFlow(settings?.postProcess?.rewriteFlow),
@@ -285,50 +287,63 @@ async function synthesizeCategoryGuidance(stage, operation, generationRouter) {
       failureCode: 'RECURSION_POST_PROCESS_GUIDANCE_UNAVAILABLE'
     };
   }
-  let result;
-  try {
-    result = await generationRouter.generate(
+  const attemptResult = await runModelStageAttempts({
+    attemptsPerStep: operation.modelAttemptsPerStep,
+    request: guidanceRequestForStage(stage, operation),
+    signal: operation.signal,
+    invoke: (request) => generationRouter.generate(
       operation.route.roleId,
-      guidanceRequestForStage(stage, operation),
+      request,
       {
-        maxAttempts: 2,
         signal: operation.signal,
         runId: operation.operationId,
         lockRunId: true,
         activityLifecycle: 'nested'
       }
-    );
-  } catch (error) {
-    if (operation.signal.aborted || error?.name === 'AbortError') throw error;
-    return {
-      ok: false,
-      attempts: 1,
-      failureCode: safeCode(error?.code, 'RECURSION_POST_PROCESS_GUIDANCE_FAILED')
-    };
+    ),
+    validate(result) {
+      const guidanceText = cleanText(result?.data?.guidanceText);
+      if (result?.ok !== true || !guidanceText) {
+        return {
+          ok: false,
+          error: result?.error || {
+            code: 'RECURSION_POST_PROCESS_GUIDANCE_EMPTY'
+          }
+        };
+      }
+      return {
+        ok: true,
+        value: {
+          schema: cleanText(result.data.schema),
+          snapshotHash: cleanText(result.data.snapshotHash),
+          sourceHash: cleanText(result.data.sourceHash),
+          guidanceText
+        }
+      };
+    },
+    buildCorrectionRequest: ({ request }) => {
+      const correction = guidanceRequestForStage(stage, operation);
+      correction.prompt = `${cleanText(request.prompt)}\n\nReturn valid post-process guidance matching the requested schema.`;
+      return correction;
+    }
+  });
+  if (attemptResult.aborted || operation.signal.aborted) {
+    return { ok: false, canceled: true, attempts: attemptResult.attempts.length };
   }
-  if (operation.signal.aborted) return { ok: false, canceled: true, attempts: guidanceAttempts(result) };
-  const guidanceText = cleanText(result?.data?.guidanceText);
-  if (result?.ok !== true || !guidanceText) {
+  if (!attemptResult.ok) {
     return {
       ok: false,
-      attempts: guidanceAttempts(result),
-      failureCode: structuralFailureCode(
-        result,
-        guidanceText
-          ? 'RECURSION_POST_PROCESS_GUIDANCE_FAILED'
-          : 'RECURSION_POST_PROCESS_GUIDANCE_EMPTY'
+      attempts: attemptResult.attempts.length,
+      failureCode: safeCode(
+        attemptResult.failure?.code,
+        'RECURSION_POST_PROCESS_GUIDANCE_FAILED'
       )
     };
   }
   return {
     ok: true,
-    attempts: guidanceAttempts(result),
-    data: {
-      schema: cleanText(result.data.schema),
-      snapshotHash: cleanText(result.data.snapshotHash),
-      sourceHash: cleanText(result.data.sourceHash),
-      guidanceText
-    }
+    attempts: attemptResult.attempts.length,
+    data: attemptResult.value
   };
 }
 

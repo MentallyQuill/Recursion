@@ -50,6 +50,7 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   strength: 'balanced',
   minCards: 3,
   maxCards: 10,
+  modelAttemptsPerStep: 2,
   reasoningLevel: 'medium',
   promptFootprint: 'compact',
   focus: 'balanced',
@@ -126,6 +127,12 @@ function numberInRange(value, fallback, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.min(max, Math.max(min, number));
+}
+
+function normalizeModelAttemptsPerStep(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_RECURSION_SETTINGS.modelAttemptsPerStep;
+  return Math.min(5, Math.max(1, parsed));
 }
 
 export function normalizeCardBudgetSettings(value = {}) {
@@ -364,6 +371,7 @@ export function normalizeSettings(value = {}, secretStore = null) {
     strength: enumValue(source.strength, STRENGTHS, DEFAULT_RECURSION_SETTINGS.strength),
     minCards: cardBudget.minCards,
     maxCards: cardBudget.maxCards,
+    modelAttemptsPerStep: normalizeModelAttemptsPerStep(source.modelAttemptsPerStep),
     reasoningLevel,
     promptFootprint: enumValue(source.promptFootprint, FOOTPRINTS, DEFAULT_RECURSION_SETTINGS.promptFootprint),
     focus: enumValue(source.focus, FOCUS, DEFAULT_RECURSION_SETTINGS.focus),

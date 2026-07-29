@@ -115,7 +115,6 @@ export const PROVIDER_CONTRACT_HASH = hashJson({
 const UTILITY_ROLES = new Set(UTILITY_ROLE_IDS);
 const REASONER_ROLES = new Set(REASONER_ROLE_IDS);
 const SECRET_TEXT_PATTERN = /(sk-[a-z0-9_-]+|bearer\s+[a-z0-9._-]+|session-key|secret[-_\s]*value|private[-_\s]*key[-_\s]*material)/ig;
-const DEFAULT_PROVIDER_TIMEOUT_MS = 120000;
 const REASONING_INTENTS = new Set(['minimal', 'medium', 'high']);
 
 function scrubSecretText(value) {
@@ -1736,57 +1735,6 @@ function actionableError(error) {
   return chain.at(-1) || error;
 }
 
-function structuredOutputRecoveryKind(error, request = {}) {
-  const code = String(error?.code || '');
-  if (code === 'RECURSION_PROVIDER_TOKEN_LIMIT' && request?.machineJson === true) return 'token_limit_compact_retry';
-  if (code === 'RECURSION_JSON_PARSE_FAILED'
-    || code === 'RECURSION_JSON_OBJECT_REQUIRED'
-    || code === 'RECURSION_POST_PROCESS_GUIDANCE_INVALID'
-    || code === 'RECURSION_PROVIDER_SCHEMA_MISMATCH') return 'slot_correction_retry';
-  return '';
-}
-
-function structuredOutputRetryableError(error, request = {}) {
-  return Boolean(structuredOutputRecoveryKind(error, request));
-}
-
-function structuredOutputFieldHint(roleId, request = {}) {
-  const expected = expectedResponseSchema(roleId);
-  const fields = [];
-  if (expected) fields.push(`"schema": "${expected}"`);
-  const snapshotHash = String(request?.snapshotHash || '').trim();
-  if (snapshotHash) fields.push(`"snapshotHash": "${snapshotHash}"`);
-  const sourceHash = String(request?.sourceHash || '').trim();
-  if (sourceHash) fields.push(`"sourceHash": "${sourceHash}"`);
-  return fields.length
-    ? `Required top-level fields include ${fields.join(', ')}.`
-    : 'Required top-level fields must match the requested role contract.';
-}
-
-function requestWithStructuredRetryPrompt(request = {}, { roleId = '', error = null } = {}) {
-  const expected = expectedResponseSchema(roleId);
-  const tokenLimit = String(error?.code || '') === 'RECURSION_PROVIDER_TOKEN_LIMIT';
-  const correction = tokenLimit ? [
-    '',
-    'Previous response stopped at the provider token limit.',
-    `Return exactly one complete compact JSON object with schema "${expected}".`,
-    structuredOutputFieldHint(roleId, request),
-    'Use concise claims and evidence references. Do not include markdown, prose, comments, analysis, hidden reasoning, or alternate schemas.'
-  ].join('\n') : [
-    '',
-    'Previous response was rejected by Recursion structured-output validation.',
-    `Return exactly one JSON object with schema "${expected}".`,
-    structuredOutputFieldHint(roleId, request),
-    'Do not include markdown fences, prose, comments, hidden reasoning, or alternate schemas.',
-    `Validation error code: ${String(error?.code || 'RECURSION_PROVIDER_FORMAT_RETRY')}.`
-  ].join('\n');
-  return {
-    ...request,
-    prompt: `${String(request?.prompt ?? '')}${correction}`,
-    ...(tokenLimit ? { reasoningIntent: 'low' } : {})
-  };
-}
-
 function scrubKnownRequestText(value, request = {}) {
   let output = String(value ?? '');
   const needles = [];
@@ -1851,15 +1799,6 @@ function providerFailureDiagnostics(error) {
     visibleContentLength: source.visibleContentLength,
     reasoningLength: source.reasoningLength
   }, 300);
-}
-
-function sanitizedBatchError(error, entries = []) {
-  const safeError = { ...sanitizedError(error) };
-  for (const entry of entries) {
-    safeError.code = scrubKnownRequestText(safeError.code, entry.request);
-    safeError.message = scrubKnownRequestText(safeError.message, entry.request);
-  }
-  return sanitize(safeError, 300);
 }
 
 function statusForError(error) {
@@ -2063,6 +2002,7 @@ async function withBatchTimeout(operation, requests, timeoutMs, externalSignal =
 }
 
 function diagnosticsTimeout(timeoutMs) {
+  if (timeoutMs === null || timeoutMs === undefined) return null;
   const number = Number(timeoutMs);
   return Number.isFinite(number) ? Math.max(0, Math.round(number)) : null;
 }
@@ -2446,7 +2386,7 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
   return { generate, batch, listProfiles, status, fetchModels };
 }
 
-export function createGenerationRouter({ client, activity = null, journal = null, timeoutMs = DEFAULT_PROVIDER_TIMEOUT_MS, isCurrent = null } = {}) {
+export function createGenerationRouter({ client, activity = null, journal = null, timeoutMs = null } = {}) {
   if (!client || typeof client.generate !== 'function') {
     throw new Error('createGenerationRouter requires a client with generate(roleId, request).');
   }
@@ -2458,37 +2398,13 @@ export function createGenerationRouter({ client, activity = null, journal = null
     return write;
   }
 
-  function retryFreshnessGuard(options = {}) {
-    return options.isRetryCurrent || options.isCurrent || isCurrent;
-  }
-
-  async function checkRetryFreshness(context, options = {}, signals = []) {
-    if (signals.some((signal) => signal?.aborted === true)) {
-      return { ok: false, reason: 'aborted' };
-    }
-    const guard = retryFreshnessGuard(options);
-    if (typeof guard !== 'function') return { ok: true };
-    try {
-      const current = await guard(sanitize(context, 300));
-      if (current === false) return { ok: false, reason: 'stale-current-guard' };
-      return { ok: true };
-    } catch {
-      return { ok: false, reason: 'current-guard-failed' };
-    }
-  }
-
   async function generate(roleId, request = {}, options = {}) {
     const providerRoleKnown = isProviderRole(roleId);
     const lane = laneName(requestLane(roleId, request));
     const started = Date.now();
     const startedAt = nowIso();
     const effectiveTimeoutMs = options.timeoutMs ?? timeoutMs;
-    const maxAttempts = Number(options.maxAttempts) === 1 ? 1 : 2;
     let runId = String(options.runId || request.runId || makeId('provider'));
-    let retryCount = 0;
-    let retryFormatError = null;
-    let structuredRecoverySpent = options.allowStructuredRecovery === false;
-    let structuredOutputRecovery = '';
     let lastDiagnostics = diagnosticsBase({ roleId, lane, request, runId, startedAt, timeoutMs: effectiveTimeoutMs });
     const nestedActivityLifecycle = options.activityLifecycle === 'nested';
 
@@ -2525,171 +2441,105 @@ export function createGenerationRouter({ client, activity = null, journal = null
     });
 
     const composedExternalSignal = composeAbortSignal([options.signal, request.signal]);
+    let raw = null;
     try {
-      let raw = null;
-      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        const attemptRequest = attempt === 0
-          ? request
-          : requestWithStructuredRetryPrompt(request, { roleId, error: retryFormatError });
-        activityStage(activity, {
-          runId,
-          phase: attempt === 0 ? 'providerCallRunning' : 'providerCallRetrying',
-          severity: attempt === 0 ? 'info' : 'warning',
-          providerLane: lane,
-          composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
-          label: attempt === 0 ? 'Provider call running.' : 'Retrying provider call.',
-          detail: {
-            roleId,
-            lane,
-            attempt,
-            ...(attempt > 0
-              ? {
-                  retryCount: attempt,
-                  reason: 'Provider call is retrying after a recoverable failure.'
-                }
-              : {})
-          }
-        });
+      activityStage(activity, {
+        runId,
+        phase: 'providerCallRunning',
+        severity: 'info',
+        providerLane: lane,
+        composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
+        label: 'Provider call running.',
+        detail: { roleId, lane, attempt: 1 }
+      });
 
-        try {
-          if (!providerRoleKnown) throw unsupportedRoleError(roleId);
-          raw = await withTimeout(
-            (requestWithSignal) => client.generate(roleId, requestWithSignal),
-            attemptRequest,
-            effectiveTimeoutMs,
-            composedExternalSignal.signal || null
-          );
-          const parsed = parseProviderStructuredOutput(raw.text);
-          const data = normalizeRoleResponseEnvelope(roleId, parsed.data, attemptRequest);
-          validateRoleResponseSchema(roleId, data);
-          const latencyMs = Date.now() - started;
-          const diagnostics = sanitize({
-            ...lastDiagnostics,
-            ...parsed.diagnostics,
-            ...reasoningDiagnostics(raw),
-            providerSource: raw.providerSource,
-            providerId: raw.providerId,
-            model: raw.model,
-            responseId: raw.responseId,
-            responseHash: responseTextHash(raw.text),
-            schema: data.schema,
-            retryCount,
-            ...(structuredOutputRecovery ? { structuredOutputRecovery } : {}),
-            latencyMs,
-            completedAt: nowIso()
-          }, 300);
+      if (!providerRoleKnown) throw unsupportedRoleError(roleId);
+      raw = await withTimeout(
+        (requestWithSignal) => client.generate(roleId, requestWithSignal),
+        request,
+        effectiveTimeoutMs,
+        composedExternalSignal.signal || null
+      );
+      const parsed = parseProviderStructuredOutput(raw.text);
+      const data = normalizeRoleResponseEnvelope(roleId, parsed.data, request);
+      validateRoleResponseSchema(roleId, data);
+      const diagnostics = sanitize({
+        ...lastDiagnostics,
+        ...parsed.diagnostics,
+        ...reasoningDiagnostics(raw),
+        providerSource: raw.providerSource,
+        providerId: raw.providerId,
+        model: raw.model,
+        responseId: raw.responseId,
+        responseHash: responseTextHash(raw.text),
+        schema: data.schema,
+        retryCount: 0,
+        latencyMs: Date.now() - started,
+        completedAt: nowIso()
+      }, 300);
 
-          await queueJournalAppend({
-            ...diagnostics,
-            status: 'success',
-            recordedAt: nowIso()
-          });
-          settleProviderActivity({
-            runId,
-            phase: 'settled',
-            outcome: 'success',
-            providerLane: lane,
-            composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
-            label: 'Provider call completed.',
-            detail: diagnostics
-          });
+      await queueJournalAppend({
+        ...diagnostics,
+        status: 'success',
+        recordedAt: nowIso()
+      });
+      settleProviderActivity({
+        runId,
+        phase: 'settled',
+        outcome: 'success',
+        providerLane: lane,
+        composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
+        label: 'Provider call completed.',
+        detail: diagnostics
+      });
 
-          return {
-            ok: true,
-            roleId,
-            lane,
-            data,
-            text: JSON.stringify(data),
-            diagnostics,
-            recoverySpent: structuredRecoverySpent
-          };
-        } catch (error) {
-          const structuredRecoveryKind = structuredOutputRecoveryKind(error, attemptRequest);
-          const structuredRetry = Boolean(structuredRecoveryKind);
-          const canRetry = attempt + 1 < maxAttempts
-            && (retryableError(error) || (structuredRetry && options.allowStructuredRecovery !== false));
-          let retrySkippedReason = '';
-          const latencyMs = Date.now() - started;
-          if (canRetry) {
-            const retryFreshness = await checkRetryFreshness({
-              roleId,
-              lane,
-              runId,
-              attempt: attempt + 1,
-              batch: false,
-              retryCount: retryCount + 1,
-              error: sanitizedError(error, request),
-              request: cleanRequestForDiagnostics(request)
-            }, options, [options.signal, request.signal]);
-            if (retryFreshness.ok) {
-              retryCount = 1;
-              retryFormatError = structuredRetry ? error : null;
-              if (structuredRetry) {
-                structuredRecoverySpent = true;
-                structuredOutputRecovery = structuredRecoveryKind;
-              }
-              continue;
-            }
-            retrySkippedReason = retryFreshness.reason;
-          }
-          lastDiagnostics = sanitize({
-            ...lastDiagnostics,
-            ...providerFailureDiagnostics(error),
-            retryCount,
-            latencyMs,
-            error: sanitizedError(error, request),
-            failedAt: nowIso(),
-            ...(retrySkippedReason ? { retrySkippedReason } : {})
-          }, 300);
+      return {
+        ok: true,
+        roleId,
+        lane,
+        data,
+        text: JSON.stringify(data),
+        diagnostics
+      };
+    } catch (error) {
+      const safeError = sanitizedError(error, request);
+      const failure = providerFailure(safeError, { stage: failureStageForRole(roleId) });
+      const diagnostics = sanitize({
+        ...lastDiagnostics,
+        ...providerFailureDiagnostics(error),
+        retryCount: 0,
+        latencyMs: Date.now() - started,
+        error: safeError,
+        failure,
+        status: statusForError(error),
+        failedAt: nowIso()
+      }, 300);
+      await queueJournalAppend({
+        ...diagnostics,
+        status: statusForError(error),
+        recordedAt: nowIso()
+      });
+      settleProviderActivity({
+        runId,
+        phase: 'settled',
+        outcome: 'error',
+        providerLane: lane,
+        composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
+        label: 'Provider call failed.',
+        detail: diagnostics
+      });
 
-          const safeError = sanitizedError(error, request);
-          const failure = providerFailure(safeError, { stage: failureStageForRole(roleId) });
-          const diagnostics = sanitize({
-            ...lastDiagnostics,
-            retryCount,
-            ...(structuredOutputRecovery ? { structuredOutputRecovery } : {}),
-            error: safeError,
-            failure,
-            status: statusForError(error)
-          }, 300);
-          await queueJournalAppend({
-            ...diagnostics,
-            status: statusForError(error),
-            recordedAt: nowIso()
-          });
-          settleProviderActivity({
-            runId,
-            phase: 'settled',
-            outcome: 'error',
-            providerLane: lane,
-            composerLane: lane === 'reasoner' ? 'reasoner' : 'utility',
-            label: 'Provider call failed.',
-            detail: diagnostics
-          });
-
-          return {
-            ok: false,
-            roleId,
-            lane,
-            error: safeError,
-            diagnostics,
-            recoverySpent: structuredRecoverySpent,
-            recoverableText: roleId === 'fusedCardBundle' ? truncate(String(raw?.text || ''), 12000) : ''
-          };
-        }
-      }
+      return {
+        ok: false,
+        roleId,
+        lane,
+        error: safeError,
+        diagnostics,
+        recoverableText: roleId === 'fusedCardBundle' ? truncate(String(raw?.text || ''), 12000) : ''
+      };
     } finally {
       composedExternalSignal.cleanup();
     }
-
-    return {
-      ok: false,
-      roleId,
-      lane,
-      error: { code: 'RECURSION_PROVIDER_FAILED', message: 'Provider generation failed.', retryable: false },
-      diagnostics: lastDiagnostics,
-      recoverySpent: structuredRecoverySpent
-    };
   }
 
   async function batch(requests = [], options = {}) {
@@ -2763,18 +2613,16 @@ export function createGenerationRouter({ client, activity = null, journal = null
 
     if (typeof client.batch !== 'function') {
       const entries = rawRequests.map(makeBatchEntry);
-      for (const entry of entries) {
+      return Promise.all(entries.map(async (entry) => {
         if (entry.normalizationError) {
-          results[entry.index] = await failureResult(entry, entry.normalizationError);
-          continue;
+          return failureResult(entry, entry.normalizationError);
         }
-        results[entry.index] = await generate(entry.roleId, entry.request, {
+        return generate(entry.roleId, entry.request, {
           ...options,
           runId: batchRunId,
           lockRunId: true
         });
-      }
-      return results;
+      }));
     }
 
     const entries = rawRequests.map((entry, index) => {
@@ -2978,151 +2826,45 @@ export function createGenerationRouter({ client, activity = null, journal = null
     }
 
     let rawResponses;
-    let batchRetryCount = 0;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        rawResponses = await withBatchTimeout(
-          (requestsWithSignals) => client.batch(requestsWithSignals, {
-            onSlotSettled: (slot = {}) => {
-              const batchIndex = Number(slot.index);
-              if (!Number.isInteger(batchIndex) || batchIndex < 0 || batchIndex >= pendingEntries.length) return;
-              const raw = Object.prototype.hasOwnProperty.call(slot, 'response')
-                ? slot.response
-                : (Object.prototype.hasOwnProperty.call(slot, 'result') ? slot.result : slot.value);
-              emitSlotSettledActivity(pendingEntries[batchIndex], raw, batchRetryCount);
-            }
-          }),
-          pendingEntries.map((entry) => ({ roleId: entry.roleId, ...entry.request })),
-          effectiveTimeoutMs,
-          options.signal || null
-        );
-        if (!Array.isArray(rawResponses) || rawResponses.length !== pendingEntries.length) {
-          throw providerError('RECURSION_PROVIDER_BATCH_INVALID', 'Provider batch response shape did not match request batch.', {
-            retryable: false
-          });
-        }
-        break;
-      } catch (error) {
-        const canRetry = attempt === 0 && retryableError(error);
-        let retrySkippedReason = '';
-        if (canRetry) {
-          const retryFreshness = await checkRetryFreshness({
-            runId: batchRunId,
-            attempt: attempt + 1,
-            batch: true,
-            retryCount: batchRetryCount + 1,
-            error: sanitizedBatchError(error, pendingEntries),
-            entries: pendingEntries.map((entry) => ({
-              index: entry.index,
-              roleId: entry.roleId,
-              lane: entry.lane,
-              request: cleanRequestForDiagnostics(entry.request)
-            }))
-          }, options, [options.signal, ...pendingEntries.map((entry) => entry.request.signal)]);
-          if (!retryFreshness.ok) {
-            retrySkippedReason = retryFreshness.reason;
+    try {
+      rawResponses = await withBatchTimeout(
+        (requestsWithSignals) => client.batch(requestsWithSignals, {
+          onSlotSettled: (slot = {}) => {
+            const batchIndex = Number(slot.index);
+            if (!Number.isInteger(batchIndex) || batchIndex < 0 || batchIndex >= pendingEntries.length) return;
+            const raw = Object.prototype.hasOwnProperty.call(slot, 'response')
+              ? slot.response
+              : (Object.prototype.hasOwnProperty.call(slot, 'result') ? slot.result : slot.value);
+            emitSlotSettledActivity(pendingEntries[batchIndex], raw, 0);
           }
-        }
-        if (canRetry && !retrySkippedReason) {
-          batchRetryCount = 1;
-          activityStage(activity, {
-            runId: batchRunId,
-            phase: 'providerCallRetrying',
-            severity: 'warning',
-            providerLane: pendingEntries[0]?.lane || 'utility',
-            composerLane: pendingEntries[0]?.lane === 'reasoner' ? 'reasoner' : 'utility',
-            label: 'Retrying provider batch call.',
-            detail: { attempt: 1 }
-          });
-          continue;
-        }
-        for (const entry of pendingEntries) {
-          results[entry.index] = await failureResult(entry, error, batchRetryCount, retrySkippedReason ? { retrySkippedReason } : {});
-          emitSlotFailureActivity(entry, error, null, batchRetryCount, { force: true });
-        }
-        settleBatchActivity();
-        return results;
+        }),
+        pendingEntries.map((entry) => ({ roleId: entry.roleId, ...entry.request })),
+        effectiveTimeoutMs,
+        options.signal || null
+      );
+      if (!Array.isArray(rawResponses) || rawResponses.length !== pendingEntries.length) {
+        throw providerError('RECURSION_PROVIDER_BATCH_INVALID', 'Provider batch response shape did not match request batch.', {
+          retryable: false
+        });
       }
+    } catch (error) {
+      for (const entry of pendingEntries) {
+        results[entry.index] = await failureResult(entry, error, 0);
+        emitSlotFailureActivity(entry, error, null, 0, { force: true });
+      }
+      settleBatchActivity();
+      return results;
     }
 
-    const retryCandidates = [];
     for (let batchIndex = 0; batchIndex < rawResponses.length; batchIndex += 1) {
       const raw = rawResponses[batchIndex];
       const entry = pendingEntries[batchIndex];
       try {
-        results[entry.index] = await successResult(entry, raw, batchRetryCount);
-        emitSlotSettledActivity(entry, raw, batchRetryCount);
+        results[entry.index] = await successResult(entry, raw, 0);
+        emitSlotSettledActivity(entry, raw, 0);
       } catch (error) {
-        const structuredOutputRecovery = structuredOutputRecoveryKind(error, entry.request);
-        if (structuredOutputRecovery && options.allowStructuredRecovery !== false && entry.request.signal?.aborted !== true) {
-          retryCandidates.push({ entry, error, raw, structuredOutputRecovery });
-          continue;
-        }
-        results[entry.index] = await failureResult(entry, error, batchRetryCount, batchDiagnosticsFromResponse(raw));
-        emitSlotFailureActivity(entry, error, raw, batchRetryCount, { force: true });
-      }
-    }
-
-    if (retryCandidates.length) {
-      const retryFreshness = await checkRetryFreshness({
-        runId: batchRunId,
-        attempt: 1,
-        batch: true,
-        retryCount: 1,
-        entries: retryCandidates.map(({ entry, error }) => ({
-          index: entry.index,
-          roleId: entry.roleId,
-          lane: entry.lane,
-          error: sanitizedError(error, entry.request),
-          request: cleanRequestForDiagnostics(entry.request)
-        }))
-      }, options, [options.signal, ...retryCandidates.map(({ entry }) => entry.request.signal)]);
-      if (retryFreshness.ok) {
-        try {
-          const retriedRaw = await withBatchTimeout(
-            (requestsWithSignals) => client.batch(requestsWithSignals),
-            retryCandidates.map(({ entry, error }) => ({
-              roleId: entry.roleId,
-              ...requestWithStructuredRetryPrompt(entry.request, { roleId: entry.roleId, error })
-            })),
-            effectiveTimeoutMs,
-            options.signal || null
-          );
-          if (!Array.isArray(retriedRaw) || retriedRaw.length !== retryCandidates.length) {
-            throw providerError('RECURSION_PROVIDER_BATCH_INVALID', 'Provider correction batch response shape did not match its request batch.', { retryable: false });
-          }
-          for (let index = 0; index < retryCandidates.length; index += 1) {
-            const { entry, structuredOutputRecovery } = retryCandidates[index];
-            const raw = retriedRaw[index];
-            try {
-              results[entry.index] = await successResult(entry, raw, 1, { structuredOutputRecovery });
-              emitSlotSettledActivity(entry, raw, 1);
-            } catch (error) {
-              results[entry.index] = await failureResult(entry, error, 1, {
-                ...batchDiagnosticsFromResponse(raw),
-                structuredOutputRecovery
-              });
-              emitSlotFailureActivity(entry, error, raw, 1, { force: true });
-            }
-          }
-        } catch (error) {
-          for (const { entry, raw, structuredOutputRecovery } of retryCandidates) {
-            results[entry.index] = await failureResult(entry, error, 1, {
-              ...batchDiagnosticsFromResponse(raw),
-              structuredOutputRecovery
-            });
-            emitSlotFailureActivity(entry, error, raw, 1, { force: true });
-          }
-        }
-      } else {
-        for (const { entry, error, raw, structuredOutputRecovery } of retryCandidates) {
-          results[entry.index] = await failureResult(entry, error, batchRetryCount, {
-            ...batchDiagnosticsFromResponse(raw),
-            structuredOutputRecovery,
-            retrySkippedReason: retryFreshness.reason
-          });
-          emitSlotFailureActivity(entry, error, raw, batchRetryCount, { force: true });
-        }
+        results[entry.index] = await failureResult(entry, error, 0, batchDiagnosticsFromResponse(raw));
+        emitSlotFailureActivity(entry, error, raw, 0, { force: true });
       }
     }
 

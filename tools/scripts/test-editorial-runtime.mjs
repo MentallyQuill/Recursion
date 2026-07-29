@@ -487,7 +487,6 @@ assert(transformerCalls[1].request.prompt.includes('Editorial pass correction re
           repairDiagnosisOptions.push(options);
           return {
             ok: true,
-            recoverySpent: options.allowStructuredRecovery === false,
             data: {
               schema: 'recursion.editorialDiagnosis.v1',
               mode: 'repair',
@@ -514,7 +513,6 @@ assert(transformerCalls[1].request.prompt.includes('Editorial pass correction re
           repairTransformAttempts += 1;
           return {
             ok: true,
-            recoverySpent: options.allowStructuredRecovery === false,
             data: {
               schema: 'recursion.editorialPass.v1',
               mode: 'repair',
@@ -535,10 +533,7 @@ assert(transformerCalls[1].request.prompt.includes('Editorial pass correction re
           };
         }
         if (roleId === 'editorialVerifier') {
-          return repairVerifierRouter.generate(roleId, request, {
-            allowStructuredRecovery: false,
-            maxAttempts: 1
-          });
+          return repairVerifierRouter.generate(roleId, request);
         }
         throw new Error(`unexpected repair coverage role ${roleId}`);
       }
@@ -557,17 +552,10 @@ assert(transformerCalls[1].request.prompt.includes('Editorial pass correction re
   };
   await repairRuntime.updateSettings({ enhancements: { mode: 'repair', applyMode: 'as-swipe' } });
   const repaired = await repairRuntime.enhanceLatestAssistantMessage({ reason: 'repair-card-coverage-regression' });
-  assertEqual(repairDiagnosisOptions[0]?.allowStructuredRecovery, false, 'Repair reserves diagnosis recovery for runtime semantic correction');
+  assertEqual(repairDiagnosisOptions[0]?.timeoutMs ?? null, null, 'Repair diagnosis has no Recursion-owned timeout');
   assertEqual(repairTransformAttempts, 2, 'Repair uses exactly one runtime semantic correction for an empty bounded-patch list');
-  assertEqual(
-    repairTransformOptions[0]?.allowStructuredRecovery,
-    false,
-    'Repair reserves its single recovery call for a runtime-owned semantic transform correction'
-  );
-  assert(
-    repairTransformOptions[1]?.allowStructuredRecovery === false,
-    'Repair semantic transform correction keeps provider-layer structured recovery disabled'
-  );
+  assertEqual(repairTransformOptions[0]?.maxAttempts, undefined, 'Repair transform does not configure hidden router attempts');
+  assertEqual(repairTransformOptions[1]?.maxAttempts, undefined, 'Repair semantic correction is a separate single-attempt router call');
   assertEqual(repairAuditAttempts, 2, 'Repair corrects one raw unknown-ID compact card audit through the provider normalizer');
   assertEqual(repaired.ok, true, 'Repair applies bounded patches after corrected card-audit coverage');
   assertEqual(repaired.partialFailed, false, 'accepted corrected card audit resolves recovered card coverage');
@@ -837,7 +825,6 @@ function createRedirectHarness({
         if (diagnosisProviderFailureOnFirst && state.diagnosisAttempts === 1) {
           return {
             ok: false,
-            recoverySpent: true,
             error: {
               code: 'RECURSION_PROVIDER_RESPONSE_INVALID',
               message: 'Editorial diagnosis response failed structured-output validation.'
@@ -1165,7 +1152,8 @@ assertEqual(exhaustedWriterCalls.length, 2, 'Medium Redirect makes exactly two w
 assertDeepEqual(exhaustedWriterCalls.map((call) => call.request.lane), ['reasoner', 'reasoner'], 'both Redirect writer attempts stay on Reasoner');
 assert(exhaustedWriterCalls[1].request.prompt.includes('Editorial pass correction required'), 'second Reasoner writer receives correction instructions');
 assert(exhaustedWriterCalls[1].request.prompt.includes('RECURSION_PROVIDER_TIMEOUT'), 'second Reasoner writer receives the first provider failure');
-assert(exhaustedWriterCalls.every((call) => call.options.maxAttempts === 1), 'each Redirect writer wrapper call permits one actual model attempt');
+assert(exhaustedWriterCalls.every((call) => call.options.maxAttempts === undefined), 'Redirect writer calls rely on the single-attempt router contract');
+assert(exhaustedWriterCalls.every((call) => (call.options.timeoutMs ?? null) === null), 'Redirect writer calls have no Recursion-owned timeout');
 assertEqual(exhaustedReasonerWriter.state.calls.some((call) => call.roleId === 'editorialVerifier'), false, 'failed Redirect writer never calls verifier');
 assertEqual(exhaustedReasonerWriter.state.appended.length, 0, 'failed Redirect writer adds no swipe');
 assertEqual(exhaustedReasonerWriter.state.message.text, redirectSource, 'failed Redirect writer preserves the original response');
@@ -1248,9 +1236,9 @@ assertDeepEqual(
   'Redirect diagnosis uses Utility first and Reasoner for its single runtime-owned correction'
 );
 assertEqual(
-  reasonerCorrectedRedirect.state.calls.filter((call) => call.roleId === 'editorialDiagnostician')[0].options.allowStructuredRecovery,
-  false,
-  'Redirect prevents the provider layer from consuming its correction on the original Utility lane'
+  reasonerCorrectedRedirect.state.calls.filter((call) => call.roleId === 'editorialDiagnostician')[0].options.maxAttempts,
+  undefined,
+  'Redirect diagnosis leaves attempt ownership outside the provider router'
 );
 assert(reasonerCorrectedRedirect.state.calls.filter((call) => call.roleId === 'editorialDiagnostician')[1].request.prompt.includes('Editorial diagnosis correction required'), 'Reasoner correction receives the semantic validation failure');
 assertEqual(reasonerCorrectedRedirect.state.appended.length, 1, 'Reasoner-corrected Redirect appends one verified swipe');

@@ -279,7 +279,13 @@ const router = createGenerationRouter({ client });
 const result = await router.generate('utilityArbiter', { prompt: 'Return JSON' });
 assertEqual(result.ok, true, 'generation succeeds');
 assertEqual(result.data.ok, true, 'json data parsed');
-assertEqual(result.diagnostics.timeoutMs, 120000, 'default provider timeout allows slow live connection profiles');
+assertEqual(result.diagnostics.timeoutMs, null, 'ordinary provider generations have no Recursion-owned timeout');
+const boundedDiagnosticResult = await router.generate(
+  'providerTest',
+  { prompt: 'Bound this explicit provider diagnostic.' },
+  { timeoutMs: 30_000 }
+);
+assertEqual(boundedDiagnosticResult.diagnostics.timeoutMs, 30_000, 'provider diagnostics may opt into an explicit timeout');
 assertEqual(calls[0].lane, 'utility', 'utility lane selected');
 assertEqual(calls[0].roleId, 'utilityArbiter', 'role id passed to host');
 assertEqual(calls[0].providerSource, 'host-current-model', 'provider source passed to host');
@@ -1636,7 +1642,7 @@ const repairedMissingSchemaRouter = createGenerationRouter({
 const repairedMissingSchema = await repairedMissingSchemaRouter.generate('utilityArbiter', { prompt: 'Missing schema after repair.' });
 assertEqual(repairedMissingSchema.ok, false, 'repaired json missing schema still fails');
 assertEqual(repairedMissingSchema.error.code, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'repaired json missing schema keeps schema mismatch code');
-assertEqual(repairedMissingSchemaAttempts, 2, 'repaired schema mismatch still gets one correction retry');
+assertEqual(repairedMissingSchemaAttempts, 1, 'repaired schema mismatch settles after one provider request');
 
 let formatRetryAttempts = 0;
 const formatRetryPrompts = [];
@@ -1658,19 +1664,14 @@ const formatRetried = await formatRetryRouter.generate('utilityArbiter', {
   prompt: 'Return Utility Arbiter JSON.',
   snapshotHash: 'retry-snapshot-hash'
 });
-assertEqual(formatRetried.ok, true, 'structured-output schema mismatch retries once');
-assertEqual(formatRetryAttempts, 2, 'structured-output retry makes exactly one retry attempt');
-assertEqual(formatRetried.diagnostics.retryCount, 1, 'structured-output retry records retry count');
-assertEqual(formatRetried.recoverySpent, true, 'structured-output retry marks the shared recovery budget spent');
-assertEqual(formatRetried.diagnostics.structuredOutputRecovery, 'slot_correction_retry', 'structured-output retry has stable recovery metadata');
-assert(formatRetryPrompts[1].includes('Previous response was rejected'), 'structured-output retry adds correction prompt');
-assert(formatRetryPrompts[1].includes('recursion.utilityArbiter.v1'), 'structured-output retry names expected schema');
-assert(formatRetryPrompts[1].includes('"schema": "recursion.utilityArbiter.v1"'), 'structured-output retry spells out schema field');
-assert(formatRetryPrompts[1].includes('"snapshotHash": "retry-snapshot-hash"'), 'structured-output retry spells out snapshot hash field');
+assertEqual(formatRetried.ok, false, 'structured-output schema mismatch settles as one failed request');
+assertEqual(formatRetryAttempts, 1, 'provider router never issues a correction request');
+assertEqual(formatRetried.diagnostics.retryCount, 0, 'single-attempt router records zero internal retries');
+assertDeepEqual(formatRetryPrompts, ['Return Utility Arbiter JSON.'], 'provider router preserves the original request');
 assertEqual(
-  formatRetryActivity.history().find((event) => event.phase === 'providerCallRetrying')?.detail?.reason,
-  'Provider call is retrying after a recoverable failure.',
-  'provider retry activity exposes a concrete safe reason'
+  formatRetryActivity.history().some((event) => event.phase === 'providerCallRetrying'),
+  false,
+  'provider activity never reports a hidden retry'
 );
 
 let noStructuredRecoveryAttempts = 0;
@@ -1684,7 +1685,6 @@ const noStructuredRecovery = await createGenerationRouter({
 }).generate('generationReviewer', { prompt: 'Do not spend another recovery request.' }, { allowStructuredRecovery: false });
 assertEqual(noStructuredRecovery.ok, false, 'explicitly spent recovery budget rejects a second structured retry');
 assertEqual(noStructuredRecoveryAttempts, 1, 'spent recovery budget does not make a second provider call');
-assertEqual(noStructuredRecovery.recoverySpent, true, 'result retains caller-provided recovery-spent state');
 
 const slotBatchCalls = [];
 const slotRecoveryRouter = createGenerationRouter({
@@ -1708,12 +1708,10 @@ const slotRecovered = await slotRecoveryRouter.batch([
   { roleId: 'sceneFrameCard', prompt: 'Scene Frame' },
   { roleId: 'sceneConstraintsCard', prompt: 'Scene Constraints' }
 ]);
-assertEqual(slotBatchCalls.length, 2, 'one invalid structured batch slot gets one correction batch');
-assertEqual(slotBatchCalls[1].length, 1, 'valid batch sibling is not reissued');
+assertEqual(slotBatchCalls.length, 1, 'batch router performs one provider wave');
 assertEqual(slotRecovered[0].diagnostics.retryCount, 0, 'initial valid batch sibling remains clean');
-assertEqual(slotRecovered[1].ok, true, 'corrected batch slot succeeds');
-assertEqual(slotRecovered[1].diagnostics.retryCount, 1, 'corrected batch slot records one retry');
-assertEqual(slotRecovered[1].diagnostics.structuredOutputRecovery, 'slot_correction_retry', 'corrected batch slot records structured recovery');
+assertEqual(slotRecovered[1].ok, false, 'invalid batch slot settles without a hidden correction wave');
+assertEqual(slotRecovered[1].diagnostics.retryCount, 0, 'invalid batch slot records zero internal retries');
 
 const tokenLimitedBatchCalls = [];
 const tokenLimitedBatch = await createGenerationRouter({
@@ -1740,10 +1738,9 @@ const tokenLimitedBatch = await createGenerationRouter({
   prompt: 'Compact Scene Frame JSON.',
   machineJson: true
 }]);
-assertEqual(tokenLimitedBatchCalls.length, 2, 'token-limited batch slot receives one compact recovery batch');
-assert(tokenLimitedBatchCalls[1][0].prompt.includes('token limit'), 'token-limited batch retry uses the compact recovery prompt');
-assertEqual(tokenLimitedBatch[0].ok, true, 'token-limited batch slot can recover');
-assertEqual(tokenLimitedBatch[0].diagnostics.structuredOutputRecovery, 'token_limit_compact_retry', 'token-limited batch slot records the token recovery kind');
+assertEqual(tokenLimitedBatchCalls.length, 1, 'token-limited batch slot does not trigger another provider wave');
+assertEqual(tokenLimitedBatch[0].ok, false, 'token-limited batch slot returns its failure');
+assertEqual(tokenLimitedBatch[0].diagnostics.retryCount, 0, 'token-limited batch slot records zero internal retries');
 
 let retryAttempts = 0;
 const retryHost = {
@@ -1764,9 +1761,9 @@ const retryRouter = createGenerationRouter({
   client: createProviderClient({ host: retryHost, settingsStore: createStore() })
 });
 const retried = await retryRouter.generate('utilityArbiter', { prompt: 'Retry once' });
-assertEqual(retried.ok, true, 'transient retry succeeds');
-assertEqual(retryAttempts, 2, 'transient failure retries exactly once');
-assertEqual(retried.diagnostics.retryCount, 1, 'retry count recorded');
+assertEqual(retried.ok, false, 'transient failure settles at the router boundary');
+assertEqual(retryAttempts, 1, 'transient failure makes one provider request');
+assertEqual(retried.diagnostics.retryCount, 0, 'router records zero internal retries');
 
 let nestedHostRetryAttempts = 0;
 const nestedHostRetryRouter = createGenerationRouter({
@@ -1788,9 +1785,9 @@ const nestedHostRetryRouter = createGenerationRouter({
   })
 });
 const nestedHostRetried = await nestedHostRetryRouter.generate('utilityArbiter', { prompt: 'Retry nested host failure.' });
-assertEqual(nestedHostRetried.ok, true, 'nested SillyTavern connection-profile failure retries');
-assertEqual(nestedHostRetryAttempts, 2, 'nested connection-profile failure retries exactly once');
-assertEqual(nestedHostRetried.diagnostics.retryCount, 1, 'nested connection-profile retry count recorded');
+assertEqual(nestedHostRetried.ok, false, 'nested SillyTavern connection-profile failure settles');
+assertEqual(nestedHostRetryAttempts, 1, 'nested connection-profile failure makes one request');
+assertEqual(nestedHostRetried.diagnostics.retryCount, 0, 'nested connection-profile failure records zero internal retries');
 
 let nestedHostFailureAttempts = 0;
 const nestedHostFailure = await createGenerationRouter({
@@ -1809,7 +1806,7 @@ const nestedHostFailure = await createGenerationRouter({
   })
 }).generate('editorialDiagnostician', { prompt: 'Report nested host failure.' });
 assertEqual(nestedHostFailure.ok, false, 'repeated nested connection-profile failure remains visible');
-assertEqual(nestedHostFailureAttempts, 2, 'repeated nested connection-profile failure spends one retry');
+assertEqual(nestedHostFailureAttempts, 1, 'nested connection-profile failure is not retried by the router');
 assertEqual(nestedHostFailure.error.code, 'ECONNRESET', 'nested connection-profile diagnostics expose the safe root cause code');
 assertEqual(nestedHostFailure.error.message, 'temporary connection profile reset', 'nested connection-profile diagnostics expose the safe root cause message');
 
@@ -1842,12 +1839,7 @@ assertEqual(staleRetry.ok, false, 'stale single retry returns failure result');
 assertEqual(staleRetryAttempts, 1, 'stale single retry guard prevents second attempt');
 assertEqual(staleRetry.error.code, 'ECONNRESET', 'stale single retry keeps sanitized provider failure code');
 assertEqual(staleRetry.diagnostics.retryCount, 0, 'stale single retry does not count a skipped retry');
-assertEqual(staleRetry.diagnostics.retrySkippedReason, 'stale-current-guard', 'stale single retry records skipped retry reason');
-assertEqual(staleRetryGuardContexts.length, 1, 'stale single retry checks freshness once');
-assertEqual(staleRetryGuardContexts[0].roleId, 'utilityArbiter', 'stale single retry guard receives role id');
-assertEqual(staleRetryGuardContexts[0].lane, 'utility', 'stale single retry guard receives lane');
-assertEqual(staleRetryGuardContexts[0].runId, 'stale-single-run', 'stale single retry guard receives run id');
-assertEqual(staleRetryGuardContexts[0].attempt, 1, 'stale single retry guard receives next attempt number');
+assertEqual(staleRetryGuardContexts.length, 0, 'provider router has no retry freshness hook');
 
 let requestSignalRetryAttempts = 0;
 const requestSignalRetryController = new AbortController();
@@ -1875,7 +1867,6 @@ const requestSignalRetry = await createGenerationRouter({
 });
 assertEqual(requestSignalRetry.ok, false, 'aborted request signal blocks single retry even when options signal is open');
 assertEqual(requestSignalRetryAttempts, 1, 'aborted request signal prevents second single attempt');
-assertEqual(requestSignalRetry.diagnostics.retrySkippedReason, 'aborted', 'aborted request signal records skipped retry reason');
 
 let throwingGuardAttempts = 0;
 const throwingGuard = await createGenerationRouter({
@@ -1896,7 +1887,6 @@ const throwingGuard = await createGenerationRouter({
 });
 assertEqual(throwingGuard.ok, false, 'throwing retry guard returns failure result');
 assertEqual(throwingGuardAttempts, 1, 'throwing retry guard prevents second attempt');
-assertEqual(throwingGuard.diagnostics.retrySkippedReason, 'current-guard-failed', 'throwing retry guard records current-guard-failed reason');
 
 let nonTransientAttempts = 0;
 const nonTransientHost = {
@@ -2227,9 +2217,9 @@ const transientBatch = await createGenerationRouter({
   { roleId: 'utilityArbiter', prompt: 'A' },
   { roleId: 'providerTest', prompt: 'B' }
 ], { runId: 'provider-batch-transient-retry' });
-assertEqual(transientBatchCalls, 2, 'router batch retries one transient transport failure');
-assertDeepEqual(transientBatch.map((entry) => entry.ok), [true, true], 'transient retry returns successful batch entries');
-assertDeepEqual(transientBatch.map((entry) => entry.diagnostics.retryCount), [1, 1], 'retried batch entries record retry count');
+assertEqual(transientBatchCalls, 1, 'router batch makes one wave for a transient transport failure');
+assertDeepEqual(transientBatch.map((entry) => entry.ok), [false, false], 'transient batch failure settles every pending slot');
+assertDeepEqual(transientBatch.map((entry) => entry.diagnostics.retryCount), [0, 0], 'failed batch entries record zero internal retries');
 
 let staleBatchCalls = 0;
 const staleBatchGuardContexts = [];
@@ -2260,20 +2250,7 @@ assertEqual(staleBatchCalls, 1, 'stale batch retry guard prevents second batch c
 assertDeepEqual(staleBatch.map((entry) => entry.ok), [false, false], 'stale batch retry returns failure entries');
 assertDeepEqual(staleBatch.map((entry) => entry.error.code), ['ECONNRESET', 'ECONNRESET'], 'stale batch retry keeps sanitized provider failure codes');
 assertDeepEqual(staleBatch.map((entry) => entry.diagnostics.retryCount), [0, 0], 'stale batch retry does not count skipped retry');
-assertDeepEqual(
-  staleBatch.map((entry) => entry.diagnostics.retrySkippedReason),
-  ['stale-current-guard', 'stale-current-guard'],
-  'stale batch retry records skipped retry reason for pending entries'
-);
-assertEqual(staleBatchGuardContexts.length, 1, 'stale batch retry checks freshness once');
-assertEqual(staleBatchGuardContexts[0].runId, 'stale-batch-run', 'stale batch retry guard receives run id');
-assertEqual(staleBatchGuardContexts[0].attempt, 1, 'stale batch retry guard receives next attempt number');
-assertEqual(staleBatchGuardContexts[0].batch, true, 'stale batch retry guard identifies batch retry');
-assertDeepEqual(
-  staleBatchGuardContexts[0].entries.map((entry) => entry.roleId),
-  ['utilityArbiter', 'providerTest'],
-  'stale batch retry guard receives pending batch entries'
-);
+assertEqual(staleBatchGuardContexts.length, 0, 'provider batch has no retry freshness hook');
 
 let malformedSlotBatchCalls = 0;
 const routerMalformedSlot = await createGenerationRouter({
@@ -2389,17 +2366,47 @@ const routerSequentialFallback = await createGenerationRouter({
   { roleId: 'utilityArbiter', prompt: 'A' },
   { roleId: 'providerTest', prompt: 'B' }
 ]);
-assertEqual(routerSequentialFallbackCalls, 2, 'router batch falls back to sequential generate when client batch is absent');
+assertEqual(routerSequentialFallbackCalls, 2, 'router batch fallback invokes each single-attempt request once');
 assertDeepEqual(
   routerSequentialFallback.map((entry) => entry.data.schema),
   ['recursion.utilityArbiter.v1', 'recursion.providerTest.v1'],
-  'router batch sequential fallback validates response schemas'
+  'router batch parallel fallback validates response schemas'
 );
-assert(routerSequentialFallback[0].diagnostics.runId.startsWith('provider-batch-'), 'router sequential fallback mints a batch run id');
+assert(routerSequentialFallback[0].diagnostics.runId.startsWith('provider-batch-'), 'router parallel fallback mints a batch run id');
 assertEqual(
   routerSequentialFallback[1].diagnostics.runId,
   routerSequentialFallback[0].diagnostics.runId,
-  'router sequential fallback uses one shared batch run id'
+  'router parallel fallback uses one shared batch run id'
+);
+
+const parallelFallbackStarted = [];
+const parallelFallbackResolvers = new Map();
+const parallelFallbackRouter = createGenerationRouter({
+  client: {
+    generate(roleId) {
+      parallelFallbackStarted.push(roleId);
+      return new Promise((resolve) => {
+        parallelFallbackResolvers.set(roleId, resolve);
+      });
+    }
+  }
+});
+const pendingParallelFallback = parallelFallbackRouter.batch([
+  { roleId: 'utilityArbiter', prompt: 'A' },
+  { roleId: 'providerTest', prompt: 'B' }
+]);
+await flushMicrotasks();
+assertDeepEqual(
+  parallelFallbackStarted,
+  ['utilityArbiter', 'providerTest'],
+  'batch fallback starts one parallel wave instead of serializing provider requests'
+);
+parallelFallbackResolvers.get('utilityArbiter')({ text: responseTextForRole('utilityArbiter') });
+parallelFallbackResolvers.get('providerTest')({ text: responseTextForRole('providerTest') });
+assertDeepEqual(
+  (await pendingParallelFallback).map((entry) => entry.ok),
+  [true, true],
+  'parallel fallback settles all single-attempt members'
 );
 
 let routerSequentialFallbackActivityStarts = 0;
@@ -2886,19 +2893,14 @@ async function createTokenRecoveryResult({ alwaysFail = false, machineJson = tru
 }
 
 const tokenRecovered = await createTokenRecoveryResult();
-assertEqual(tokenRecovered.result.ok, true, 'machine-JSON token limit receives one compact recovery attempt');
-assertEqual(tokenRecovered.calls.length, 2, 'token-limit recovery makes exactly two provider calls');
-assertEqual(tokenRecovered.result.recoverySpent, true, 'token-limit recovery spends the shared structured recovery token');
-assertEqual(tokenRecovered.result.diagnostics.structuredOutputRecovery, 'token_limit_compact_retry', 'token-limit recovery records stable recovery metadata');
-assert(tokenRecovered.calls[1].messages[0].content.includes('token limit'), 'token-limit retry prompt explains the compact recovery requirement');
-assertEqual(tokenRecovered.calls[1].max_tokens, tokenRecovered.calls[0].max_tokens, 'token-limit recovery preserves the configured output ceiling');
+assertEqual(tokenRecovered.result.ok, false, 'machine-JSON token limit settles at the router boundary');
+assertEqual(tokenRecovered.calls.length, 1, 'token-limit failure makes one provider call');
 
 const tokenRecoveryFailed = await createTokenRecoveryResult({ alwaysFail: true });
-assertEqual(tokenRecoveryFailed.result.ok, false, 'two token-limit responses preserve a hard provider failure');
-assertEqual(tokenRecoveryFailed.result.error.code, 'RECURSION_PROVIDER_TOKEN_LIMIT', 'exhausted token recovery keeps the stable error code');
-assertEqual(tokenRecoveryFailed.calls.length, 2, 'token-limit recovery never makes a third call');
-assertEqual(tokenRecoveryFailed.result.diagnostics.retryCount, 1, 'exhausted token recovery records one retry');
-assertEqual(tokenRecoveryFailed.result.diagnostics.structuredOutputRecovery, 'token_limit_compact_retry', 'exhausted token recovery records its recovery kind');
+assertEqual(tokenRecoveryFailed.result.ok, false, 'token-limit response preserves a hard provider failure');
+assertEqual(tokenRecoveryFailed.result.error.code, 'RECURSION_PROVIDER_TOKEN_LIMIT', 'token-limit failure keeps the stable error code');
+assertEqual(tokenRecoveryFailed.calls.length, 1, 'token-limit failure never makes a second provider call');
+assertEqual(tokenRecoveryFailed.result.diagnostics.retryCount, 0, 'token-limit failure records zero internal retries');
 
 const nonMachineTokenLimit = await createTokenRecoveryResult({ alwaysFail: true, machineJson: false });
 assertEqual(nonMachineTokenLimit.result.ok, false, 'non-machine token exhaustion remains a provider failure');
@@ -3189,17 +3191,16 @@ const timeoutRouter = createGenerationRouter({
 const timedOut = await timeoutRouter.generate('utilityArbiter', { prompt: 'Never resolves' });
 assertEqual(timedOut.ok, false, 'timeout returns failure result');
 assertEqual(timedOut.error.code, 'RECURSION_PROVIDER_TIMEOUT', 'timeout exposes stable code');
-assertEqual(timeoutAttempts, 2, 'timeout retries once before returning failure');
-assertEqual(timedOut.diagnostics.retryCount, 1, 'failed timeout retry records retry count');
+assertEqual(timeoutAttempts, 1, 'explicit timeout returns after one provider request');
+assertEqual(timedOut.diagnostics.retryCount, 0, 'timed-out request records zero internal retries');
 assertEqual(timeoutSignalAborted, true, 'timeout aborts in-flight provider signal');
 timeoutAttempts = 0;
 const singleAttemptTimeout = await timeoutRouter.generate(
   'editorialTransformer',
-  { prompt: 'Do not retry inside the provider router', lane: 'utility' },
-  { maxAttempts: 1 }
+  { prompt: 'Do not retry inside the provider router', lane: 'utility' }
 );
 assertEqual(singleAttemptTimeout.ok, false, 'single-attempt provider call returns its first failure');
-assertEqual(timeoutAttempts, 1, 'maxAttempts one disables provider-internal retry');
+assertEqual(timeoutAttempts, 1, 'provider router always performs one request');
 assertEqual(singleAttemptTimeout.diagnostics.retryCount, 0, 'single-attempt failure records no retry');
 
 let retryableTimeoutAttempts = 0;
@@ -3217,8 +3218,8 @@ const retryableTimeoutRouter = createGenerationRouter({
   timeoutMs: 5
 });
 const retryableTimeout = await retryableTimeoutRouter.generate('utilityArbiter', { prompt: 'Retry timeout once' });
-assertEqual(retryableTimeout.ok, true, 'router timeout retries once while current');
-assertEqual(retryableTimeoutAttempts, 2, 'router timeout makes one retry attempt');
-assertEqual(retryableTimeout.diagnostics.retryCount, 1, 'router timeout retry records retry count');
+assertEqual(retryableTimeout.ok, false, 'router timeout settles without a hidden retry');
+assertEqual(retryableTimeoutAttempts, 1, 'router timeout makes one provider request');
+assertEqual(retryableTimeout.diagnostics.retryCount, 0, 'router timeout records zero internal retries');
 
 console.log('[pass] providers');

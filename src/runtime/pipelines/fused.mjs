@@ -98,8 +98,7 @@ export async function runFusedCardPipeline({
     const requestWithSignal = signal ? { ...fusedRequest, signal } : fusedRequest;
     const result = await generationRouter.generate('fusedCardBundle', requestWithSignal, {
       runId,
-      signal,
-      isCurrent: current
+      signal
     });
     const parsed = cardsFromFusedProviderResult(result, {
       ...sourceContext,
@@ -120,7 +119,7 @@ export async function runFusedCardPipeline({
         const signalRepairRequests = signal
           ? repairRequests.map((request) => ({ ...request, signal }))
           : repairRequests;
-        const repairOptions = { runId, signal, isCurrent: current };
+        const repairOptions = { runId, signal };
         const usedRepairBatch = typeof generationRouter.batch === 'function';
         const repairResults = usedRepairBatch
           ? await generationRouter.batch(signalRepairRequests, repairOptions)

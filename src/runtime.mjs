@@ -110,8 +110,6 @@ import { createRuntimeRunState } from './runtime/run-state.mjs';
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
 const PROVIDER_TEST_SCHEMA = 'recursion.providerTest.v1';
 const PROVIDER_TEST_TIMEOUT_MS = 30000;
-const GENERATION_REVIEW_TIMEOUT_MS = 120000;
-const GENERATION_REVIEW_BARRIER_TIMEOUT_MS = GENERATION_REVIEW_TIMEOUT_MS + 5000;
 const STORAGE_SCHEMA_VERSION = 1;
 const RUNTIME_CACHE_CONTRACT_VERSION = 1;
 const DEFAULT_CHAT_ID = 'chat';
@@ -2209,30 +2207,16 @@ function safeActivityHistory(activity) {
   return [];
 }
 
-function signalAwareGenerationRouter(router, signal, runId, isCurrent = null) {
+function signalAwareGenerationRouter(router, signal, runId) {
   if (!router || !signal) return router;
-  function retryCurrentGuard(options = {}) {
-    const callerGuard = options.isRetryCurrent || options.isCurrent;
-    return async (context) => {
-      if (signal?.aborted === true) return false;
-      if (typeof isCurrent === 'function' && (await isCurrent(runId, context)) === false) return false;
-      if (typeof callerGuard === 'function') {
-        return (await callerGuard(context)) !== false;
-      }
-      return true;
-    };
-  }
   return {
     ...router,
     generate(roleId, request = {}, options = {}) {
       const nextRequest = { ...asObject(request), signal };
-      const retryGuard = retryCurrentGuard(options);
       const nextOptions = {
         ...asObject(options),
         runId: options.runId ?? runId,
-        signal: options.signal ?? signal,
-        isCurrent: retryGuard,
-        isRetryCurrent: retryGuard
+        signal: options.signal ?? signal
       };
       return router.generate(roleId, nextRequest, nextOptions);
     },
@@ -2241,13 +2225,10 @@ function signalAwareGenerationRouter(router, signal, runId, isCurrent = null) {
       const nextRequests = Array.isArray(requests)
         ? requests.map((request) => ({ ...asObject(request), signal: request?.signal ?? signal }))
         : requests;
-      const retryGuard = retryCurrentGuard(options);
       const nextOptions = {
         ...asObject(options),
         runId: options.runId ?? runId,
-        signal: options.signal ?? signal,
-        isCurrent: retryGuard,
-        isRetryCurrent: retryGuard
+        signal: options.signal ?? signal
       };
       return router.batch(nextRequests, nextOptions);
     }
@@ -2732,19 +2713,15 @@ export function createRecursionRuntime({
     return Boolean(pendingProseEnhancement || activeProseEnhancementPromise);
   }
 
-  async function waitForProseEnhancementBarrier(timeoutMs = GENERATION_REVIEW_BARRIER_TIMEOUT_MS) {
-    const startedAt = Date.now();
+  async function waitForProseEnhancementBarrier() {
     let waited = false;
     while (proseEnhancementActive()) {
       waited = true;
-      const remainingMs = Math.max(0, timeoutMs - (Date.now() - startedAt));
-      if (remainingMs <= 0) return { ok: false, timeout: true, waited };
       const active = activeProseEnhancementPromise;
-      const tick = new Promise((resolve) => setTimeout(resolve, Math.min(50, remainingMs)));
       if (active) {
-        await Promise.race([active.catch(() => null), tick]);
+        await active.catch(() => null);
       } else {
-        await tick;
+        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     }
     return { ok: true, waited };
@@ -3909,21 +3886,16 @@ export function createRecursionRuntime({
         lane,
         ...reasonerRequestMetadata(settings, 'generation-review', lane)
       });
-      const generate = async (request, routerOptions = {}) => {
+      const generate = async (request) => {
         const primary = await generationRouter.generate('generationReviewer', request, {
-          runId,
-          timeoutMs: GENERATION_REVIEW_TIMEOUT_MS,
-          ...routerOptions
+          runId
         });
         if (primary?.ok === true || lane !== 'reasoner') return { result: primary, lane };
-        if (primary?.recoverySpent === true) return { result: primary, lane };
         const fallbackRequest = { ...request, lane: 'utility' };
         delete fallbackRequest.reasoningCategory;
         delete fallbackRequest.reasoningIntent;
         const fallback = await generationRouter.generate('generationReviewer', fallbackRequest, {
-          runId,
-          timeoutMs: GENERATION_REVIEW_TIMEOUT_MS,
-          ...routerOptions
+          runId
         });
         return { result: fallback, lane: fallback?.ok === true ? 'utility' : lane, fallbackFrom: fallback?.ok === true ? 'reasoner' : '' };
       };
@@ -3931,7 +3903,7 @@ export function createRecursionRuntime({
       let validation = response.result?.ok === true
         ? validateGenerationReviewResult(response.result.data, { sourceHash, targets, reviewSnapshot: publicSnapshot })
         : { ok: false, error: response.result?.error || { code: 'RECURSION_GENERATION_REVIEW_PROVIDER_FAILED', message: 'Generation review provider failed.' } };
-      if (!validation.ok && validation.retryable === true && response.result?.recoverySpent !== true) {
+      if (!validation.ok && validation.retryable === true) {
         response = await generate(buildGenerationReviewRequest({
           ...baseRequest,
           sourceText: originalText,
@@ -3945,7 +3917,7 @@ export function createRecursionRuntime({
             cardIds: validation.invalidCardIds || validation.missingCardIds || []
           },
           ...reasonerRequestMetadata(settings, 'generation-review', lane)
-        }), { allowStructuredRecovery: false });
+        }));
         validation = response.result?.ok === true
           ? validateGenerationReviewResult(response.result.data, { sourceHash, targets, reviewSnapshot: publicSnapshot })
           : { ok: false, error: response.result?.error || { code: 'RECURSION_GENERATION_REVIEW_PROVIDER_FAILED', message: 'Generation review provider failed.' } };
@@ -4394,30 +4366,18 @@ export function createRecursionRuntime({
       const primaryLane = request?.lane === 'reasoner' ? 'reasoner' : 'utility';
       const primary = await generationRouter.generate(roleId, request, {
         runId,
-        timeoutMs: GENERATION_REVIEW_TIMEOUT_MS,
-        signal: enhancementSignal,
-        allowStructuredRecovery: options.allowStructuredRecovery !== false && recoveryToken.spent !== true,
-        ...(options.maxAttempts === 1 ? { maxAttempts: 1 } : {})
+        signal: enhancementSignal
       });
-      const preserveProviderRecoveryBudget = options.allowStructuredRecovery === false
-        && options.preserveRecoveryBudget === true;
-      const primaryRecoverySpent = primary?.recoverySpent === true
-        && !preserveProviderRecoveryBudget;
-      if (primaryRecoverySpent) recoveryToken.spent = true;
       if (primary?.ok === true || primaryLane !== 'reasoner' || options.allowLaneFallback === false) {
         return { result: primary, lane: primaryLane };
       }
-      if (primaryRecoverySpent) return { result: primary, lane: primaryLane };
       const fallbackRequest = { ...request, lane: 'utility' };
       delete fallbackRequest.reasoningCategory;
       delete fallbackRequest.reasoningIntent;
       const fallback = await generationRouter.generate(roleId, fallbackRequest, {
         runId,
-        timeoutMs: GENERATION_REVIEW_TIMEOUT_MS,
-        signal: enhancementSignal,
-        allowStructuredRecovery: options.allowStructuredRecovery !== false && recoveryToken.spent !== true
+        signal: enhancementSignal
       });
-      if (fallback?.recoverySpent === true && !preserveProviderRecoveryBudget) recoveryToken.spent = true;
       return { result: fallback, lane: fallback?.ok === true ? 'utility' : primaryLane };
     }
     try {
@@ -4435,11 +4395,7 @@ export function createRecursionRuntime({
       };
       let diagnosisResponse = await generateEditorialRole(
         'editorialDiagnostician',
-        diagnosisRequest,
-        {
-          allowStructuredRecovery: editorialMode === 'recompose',
-          preserveRecoveryBudget: editorialMode !== 'recompose'
-        }
+        diagnosisRequest
       );
       if (enhancementSignal?.aborted) return canceledEditorialResult();
       let diagnosisValidation = diagnosisResponse.result?.ok === true
@@ -4483,7 +4439,7 @@ export function createRecursionRuntime({
           }),
           ...reasonerRequestMetadata(settings, 'editorial-transform', correctionLane),
           reasoningIntent: 'low'
-        }, { allowStructuredRecovery: false, allowLaneFallback: false });
+        }, { allowLaneFallback: false });
         if (enhancementSignal?.aborted) return canceledEditorialResult();
         diagnosisValidation = diagnosisResponse.result?.ok === true
           ? validateEditorialDiagnosis(diagnosisResponse.result.data, { mode: editorialMode, sourceText, sourceHash, snapshotHash, snapshot: publicSnapshot })
@@ -4520,10 +4476,8 @@ export function createRecursionRuntime({
         : editorialLane;
       const strictReasonerWriter = editorialMode === 'redirect' && transformLane === 'reasoner';
       const transformOptions = strictReasonerWriter
-        ? { allowStructuredRecovery: false, allowLaneFallback: false, maxAttempts: 1 }
-        : editorialMode === 'repair'
-          ? { allowStructuredRecovery: false, preserveRecoveryBudget: true }
-          : {};
+        ? { allowLaneFallback: false }
+        : {};
       const transformReadinessSkip = strictReasonerWriter
         ? await skipIfRedirectCapabilityChanged('before-transform')
         : null;
@@ -4587,8 +4541,7 @@ export function createRecursionRuntime({
           }),
           ...reasonerRequestMetadata(settings, 'editorial-transform', transformLane)
         }, {
-          allowStructuredRecovery: false,
-          ...(strictReasonerWriter ? { allowLaneFallback: false, maxAttempts: 1 } : {})
+          ...(strictReasonerWriter ? { allowLaneFallback: false } : {})
         });
         if (enhancementSignal?.aborted) return canceledEditorialResult();
         validation = transformResponse.result?.ok === true
@@ -4643,7 +4596,7 @@ export function createRecursionRuntime({
         let auditResponse = await generateEditorialRole('editorialVerifier', {
           ...auditRequest,
           ...reasonerRequestMetadata(settings, 'editorial-transform', transformResponse.lane)
-        }, { allowStructuredRecovery: false });
+        });
         if (enhancementSignal?.aborted) return canceledEditorialResult();
         let auditValidation = auditResponse.result?.ok === true
           ? validateEditorialVerification(auditResponse.result.data, {
@@ -4685,7 +4638,7 @@ export function createRecursionRuntime({
           auditResponse = await generateEditorialRole('editorialVerifier', {
             ...auditRequest,
             ...reasonerRequestMetadata(settings, 'editorial-transform', transformResponse.lane)
-          }, { allowStructuredRecovery: false });
+          });
           if (enhancementSignal?.aborted) return canceledEditorialResult();
           auditValidation = auditResponse.result?.ok === true
             ? validateEditorialVerification(auditResponse.result.data, {
@@ -4748,7 +4701,7 @@ export function createRecursionRuntime({
             const verifierResponse = await generateEditorialRole('editorialVerifier', {
               ...verificationRequest,
               ...reasonerRequestMetadata(settings, 'editorial-verify', verifierLane)
-            }, { allowStructuredRecovery: false });
+            });
             if (enhancementSignal?.aborted) return { canceled: true };
             return {
               result: verifierResponse.result?.ok === true
@@ -4824,8 +4777,7 @@ export function createRecursionRuntime({
             }),
             ...reasonerRequestMetadata(settings, 'editorial-transform', transformLane)
           }, {
-            allowStructuredRecovery: false,
-            ...(strictReasonerWriter ? { allowLaneFallback: false, maxAttempts: 1 } : {})
+            ...(strictReasonerWriter ? { allowLaneFallback: false } : {})
           });
           if (enhancementSignal?.aborted) return canceledEditorialResult();
           validation = transformResponse.result?.ok === true
@@ -5120,8 +5072,7 @@ export function createRecursionRuntime({
       async function generateEnhancementPass(roleId, request) {
         const primaryLane = safeText(request?.lane || 'utility', 40) === 'reasoner' ? 'reasoner' : 'utility';
         const primary = await generationRouter.generate(roleId, request, {
-          runId,
-          timeoutMs: PROSE_ENHANCEMENT_TIMEOUT_MS
+          runId
         });
         if (primary?.ok === true || primaryLane !== 'reasoner') {
           return { result: primary, lane: primaryLane, fallbackFrom: '' };
@@ -5130,8 +5081,7 @@ export function createRecursionRuntime({
         delete fallbackRequest.reasoningCategory;
         delete fallbackRequest.reasoningIntent;
         const fallback = await generationRouter.generate(roleId, fallbackRequest, {
-          runId,
-          timeoutMs: PROSE_ENHANCEMENT_TIMEOUT_MS
+          runId
         });
         return {
           result: fallback,
@@ -6251,7 +6201,7 @@ export function createRecursionRuntime({
           `Scene cache: ${JSON.stringify(cacheView)}`,
           `Snapshot: ${JSON.stringify(providerSafeSnapshot(snapshot, settings.retention))}`
         ].join('\n\n')
-      }, { runId, signal, isCurrent: () => isRuntimeRunCurrent(runId) });
+      }, { runId, signal });
       if (result?.ok) {
         try {
           return mergePlan(fallbackPlan, result.data);
@@ -6324,10 +6274,7 @@ export function createRecursionRuntime({
     if (!generationRouter || typeof generationRouter.generate !== 'function') {
       return { ok: true, skipped: true, reason: 'rapid-utility-unavailable' };
     }
-    const proseBarrier = await waitForProseEnhancementBarrier();
-    if (proseBarrier?.timeout) {
-      return { ok: true, skipped: true, reason: 'prose-enhancement-pending' };
-    }
+    await waitForProseEnhancementBarrier();
     await waitForExternalMutations();
     const runId = makeId('rapid-warm');
     const warmStartedAtMs = Date.now();
@@ -8049,9 +7996,7 @@ export function createRecursionRuntime({
     const runId = safeText(input?.runId || makeId('redirect-eval'), 180);
     try {
       const response = await generationRouter.generate('editorialEffectivenessJudge', request, {
-        runId,
-        timeoutMs: GENERATION_REVIEW_TIMEOUT_MS,
-        retryCount: 0
+        runId
       });
       const diagnostics = {
         providerId: safeText(response?.diagnostics?.providerId || response?.providerId || '', 160),

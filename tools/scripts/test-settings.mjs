@@ -58,6 +58,13 @@ assertEqual(normalizeSettings({ pipelineMode: 'fused' }).pipelineMode, 'fused', 
 assertEqual(normalizeSettings({ pipelineMode: 'FUSED' }).pipelineMode, 'fused', 'Fused pipeline mode normalizes case-insensitively');
 assertEqual(normalizeSettings({ pipelineMode: 'standard' }).pipelineMode, 'standard', 'Standard pipeline mode is accepted');
 assertEqual(normalizeSettings({ pipelineMode: 'fast' }).pipelineMode, 'standard', 'invalid pipeline mode normalizes to Standard');
+assertEqual(normalizeSettings({}).modelAttemptsPerStep, 2, 'model attempts default to two');
+assertEqual(normalizeSettings({ modelAttemptsPerStep: 0 }).modelAttemptsPerStep, 1, 'model attempts clamp low');
+assertEqual(normalizeSettings({ modelAttemptsPerStep: 1 }).modelAttemptsPerStep, 1, 'one model attempt is accepted');
+assertEqual(normalizeSettings({ modelAttemptsPerStep: 4 }).modelAttemptsPerStep, 4, 'four model attempts are accepted');
+assertEqual(normalizeSettings({ modelAttemptsPerStep: 6 }).modelAttemptsPerStep, 5, 'model attempts clamp high');
+assertEqual(normalizeSettings({ modelAttemptsPerStep: '3' }).modelAttemptsPerStep, 3, 'numeric model attempt strings normalize');
+assertEqual(normalizeSettings({ modelAttemptsPerStep: 'many' }).modelAttemptsPerStep, 2, 'invalid model attempts use the default');
 assertDeepEqual(DEFAULT_RECURSION_SETTINGS.postProcess, {
   enabled: false,
   applyMode: 'as-swipe',

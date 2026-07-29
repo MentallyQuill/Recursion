@@ -696,7 +696,7 @@ Stage adapter contract:
 
 - The scheduler writes stage `running` state before invocation.
 - A response becomes reusable only after the artifact body is saved, validated, hashed, and its checkpoint is atomically linked from the manifest.
-- Pause aborts all active controllers for the operation, waits for them to settle, converts uncommitted `running` stages to `paused`, and persists the manifest.
+- Pause aborts all active controllers for the operation, waits for them to settle, converts uncommitted `running` stages to `pending`, and persists the manifest.
 - A late response from an aborted or superseded execution token cannot commit.
 - Resume validates run provenance and every reusable checkpoint before scheduling.
 - A provenance mismatch sets the operation to `stale`, records only changed field names, and offers no Resume.
@@ -1035,7 +1035,7 @@ When no card is useful after the parent attempt window, return a scheduler graph
 
 - [ ] **Step 7: Update pipeline setting normalization and view-model vocabulary**
 
-Change default, label, standby text, and generic invalid fallback. Keep Rapid runtime code temporarily unreachable so Task 9 can delete it in one auditable slice.
+Change default, label, standby text, and generic invalid fallback. Continue directly into Step 8 so Rapid is removed in the same migration task and the repository never retains a half-migrated pipeline enum.
 
 - [ ] **Step 8: Remove Rapid runtime, warm state, and active test/proof paths**
 
@@ -2054,7 +2054,7 @@ No new production interface is introduced in this task. The verification artifac
 | Pause | Running calls abort; completed checkpoints remain |
 | Reload | Paused state and contextual Resume restore without executing |
 | Retry | Only failed stage reruns with a fresh window |
-| Reprocess | Completed stage queues; no immediate call; next send consumes once |
+| Reprocess | Completed stage queues with no immediate call; the next send binds it and selected-stage start consumes it once |
 | Dependency reuse | Unchanged sibling/descendant checkpoints remain |
 | Full fresh | Next send bypasses all checkpoints once |
 | Segmented | Independent children survive sibling failure |

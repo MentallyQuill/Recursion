@@ -27,6 +27,9 @@ Logical JSON records store larger bounded data:
 | `recursion-system-index.v1.json` | Rebuildable index of known Recursion records. |
 | `recursion-scene-{chatKey}-{sceneKey}.v1.json` | Scene-local card deck, latest hand, source hashes, versions, and cache state. |
 | `recursion-run-journal-{chatKey}.v1.json` | Bounded sanitized runtime, provider, prompt, storage, and activity events. |
+| `recursion-pipeline-run-{chatKey}.v1.json` | Metadata-only current execution manifest and checkpoint graph. |
+| `recursion-pipeline-artifact-{chatKey}-{operationId}-{artifactId}-v1.json` | Isolated body for one resumable stage. |
+| `recursion-queued-reprocess-{chatKey}.v1.json` | One-shot full-fresh or dependency-aware stage intent. |
 
 The storage repository constructs keys. Runtime and UI modules do not build physical paths directly.
 
@@ -70,6 +73,14 @@ Provider journal entries are diagnostic only. A journal write failure cannot bre
 
 Committed Auto and Manual prompt install attempts write a `hand.selected` breadcrumb. The entry is metadata only: hand id, selected and omitted counts, up to 16 selected card ids/families/roles/emphasis/token estimates with `listedCount` and `truncated`, source hash, prompt packet hash, and compact metrics. It must not persist card `promptText`, prompt packet sections, inspector notes, raw provider prompts, raw provider responses, transcript text, or secrets.
 
+## Resumable Execution Records
+
+The chat-scoped manifest stores operation phase/state, source and settings provenance, stage states, attempt counts, timestamps, failure classes, dependency hashes, output hashes, artifact byte counts, stale fields, frontier ids, and queued stage ids. Stage prose never belongs in `summary`, activity, journal, exported diagnostics, or chat markers.
+
+Dedicated artifacts may contain the frozen snapshot, Arbiter result, cards, deck, hand, guidance, packet, Post-process source, draft, or commit receipt required by that stage. They are referenced by logical key and SHA-256. A checkpoint is trusted only when the stored body hashes and validates against current stage/dependency/provenance contracts.
+
+Running and paused current operations retain their operation artifacts. Completed Pre-process artifacts remain eligible cache. Successful Post-process cleanup deletes source/guidance/intermediate drafts and keeps the final accepted draft plus host-commit receipt. Stale artifacts are removed during repair/retention, abandoned operations are removed completely, and repair deletes unreferenced artifacts from superseded or interrupted writes.
+
 ## Activity Event Contract
 
 Activity events feed the Recursion Bar, Hero Pixel Array progress menu, Full Viewer, and selected journal entries. Events include run id, phase, foreground/background/review mode, severity, label, compact detail, chips, provider lane, composer lane, card counts, and fallback reason.
@@ -94,6 +105,7 @@ Allowed default diagnostics:
 - source message ranges and hashes
 - prompt packet hashes and omission reasons
 - cache hit, stale, index update, and prune events
+- operation/stage ids and states, attempt counts, elapsed time, failure class, artifact hash/bytes, stale fields, and bounded lifecycle codes
 
 Forbidden default diagnostics:
 
@@ -103,6 +115,7 @@ Forbidden default diagnostics:
 - raw provider prompts
 - raw provider responses
 - full transcripts
+- checkpoint artifact bodies copied into diagnostics, activity, journals, or chat markers
 - hidden reasoning
 - private story plans
 - inspector-only notes in prompt logs
@@ -190,19 +203,21 @@ Runtime must not persist generated card text, provider prompt text, transcript t
 
 ## Cleanup And Index Maintenance
 
-Current storage behavior normalizes records whenever they are loaded or written. Scene cache saves and run journal appends update `recursion-system-index.v1.json` with the logical key, record kind, chat key, and update time. Scene cache clears remove the corresponding index entry. Run journals are bounded to `retention.runJournalEntries` during normalization.
+Current storage behavior normalizes records whenever they are loaded or written. Scene cache, run journal, pipeline manifest, pipeline artifact, and queued-intent writes update `recursion-system-index.v1.json` with bounded logical metadata. Clears remove the corresponding entries. Run journals are bounded to `retention.runJournalEntries` during normalization.
 
-The repository also exposes `repairIndex()` for bounded cleanup. It rebuilds the system index from valid discoverable Recursion scene caches and run journals when the adapter supports key discovery, prunes missing or invalid index entries, preserves unreadable entries instead of guessing, and returns sanitized `storage.repaired` / `storage.pruned` diagnostics. It does not delete scene cache files, run journal files, SillyTavern data, or non-Recursion extension records.
+The repository also exposes `repairIndex()` for bounded cleanup. It rebuilds the system index from valid discoverable Recursion records when the adapter supports key discovery, prunes missing or invalid index entries, removes pipeline artifacts not protected by the authoritative current manifest, preserves unreadable entries instead of guessing, and returns sanitized `storage.repaired` / `storage.pruned` diagnostics. It never touches SillyTavern data or non-Recursion extension records.
 
-`maintainRetention(options)` is the runtime retention pass. It repairs the index, then deletes old unprotected Recursion scene caches beyond `retention.sceneCachesPerChat` and `retention.sceneCachesTotal`, updates the system index, and returns sanitized `storage.pruned` diagnostics. `protectedScenes`, `protectedKeys`, or `activeScene` keep the active scene even when it is older than other caches. The prune pass revalidates each deletion candidate, preserves unreadable entries instead of guessing, deletes only confirmed `recursion-scene-*.v1.json` records, and never touches run journals, SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or non-Recursion extension records.
+`maintainRetention(options)` is the runtime retention pass. It repairs the index, deletes old unprotected scene caches, removes stale operation artifacts and abandoned operations, updates the system index, and returns sanitized `storage.pruned` diagnostics. Running and paused current operations remain protected. `protectedScenes`, `protectedKeys`, or `activeScene` keep the active scene even when it is older than other caches.
 
 If the host storage adapter downgrades a scene-cache or system-index write to memory fallback, the repository returns `storageStatus: { persisted: false, fallback: "memory" }` on the saved record and emits a `storageWarning` activity event instead of `Storage ready`. Generation remains fail-soft, but the UI and diagnostics must not imply durable persistence.
 
 Cleanup never deletes SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or non-Recursion extension records.
 
+`Reset Scene Cache` immediately clears the current chat's scene cache, execution manifest, all operation artifacts, queued intent, in-memory execution view, and Recursion prompt residue. It never deletes chat messages.
+
 ## Artifact Relationship
 
-Test artifacts live under `artifacts/` and follow [Artifact Contract](../testing/ARTIFACT_CONTRACT.md). Artifacts are evidence, not runtime storage. Current runtime storage remains the settings object, scene cache, run journal, and system index.
+Test artifacts live under `artifacts/` and follow [Artifact Contract](../testing/ARTIFACT_CONTRACT.md). Those evidence bundles are unrelated to runtime checkpoint artifacts, which live behind the storage repository and are never exported wholesale.
 
 ## Tests
 

@@ -43,7 +43,7 @@ Before SillyTavern generates, Recursion's Pre-process Cards prepare the focused 
     <td width="50%">
       <div align="center"><img src="assets/documentation/renders/recursion-operator-pipeline-controls.png" alt="Recursion pipeline controls" style="max-width:100%;height:auto"></div><br>
       <strong>Pipelines</strong><br>
-      Pick Standard, Rapid, or Fused depending on whether you want maximum clarity, lower send-time latency, or one larger structured card pass.
+      Pick Segmented for independent simple card calls or Fused for one larger structured card bundle with validated outcomes.
     </td>
     <td width="50%">
       <div align="center"><img src="assets/documentation/renders/recursion-operator-mode-controls.png" alt="Recursion mode controls" style="max-width:100%;height:auto"></div><br>
@@ -111,9 +111,25 @@ Pipeline controls decide how Recursion schedules scene work. Auto and Manual dec
 
 | Pipeline | Best Fit | Tradeoff |
 | --- | --- | --- |
-| Standard | Cheap and fast models such as Gemma, GPT OSS, o3-mini, Flash-style variants from DeepSeek, Gemini, Qwen, and similar. | Most debuggable and reliable path, but it does the full foreground pass before generation continues. |
-| Rapid | Stable scenes where you want a shorter send-time pass after Recursion has warmed exact-source card evidence in the background. | Lower latency when warm, but escalates to Standard if the warm artifact is missing, stale, invalid, empty, or marked with a mandatory gap. |
-| Fused | Lower-cost models with stronger structured reasoning, such as DeepSeek, MiniMax, MiMo, Nemotron, Qwen, and similar. | Fewer card calls through one larger bundle, but depends on the model returning trustworthy structured card output. |
+| Segmented | Smaller, simpler, or locally hosted models that are more reliable with one independent card request at a time. | More model calls, but each request has a narrow contract and completed cards can be resumed independently. |
+| Fused | Models with stronger structured reasoning, such as DeepSeek, MiniMax, MiMo, Nemotron, Qwen, and similar. | Fewer card calls through one larger bundle. Each returned card is validated independently; if the bundle yields zero useful cards, Recursion falls back to the Segmented card path. |
+
+## Resumable Execution
+
+Recursion checkpoints successful stages instead of treating the whole Pre-process and Post-process chain as one disposable request. A late failure or manual stop preserves completed work for Resume or Retry. A completed or stale eligible row can also be queued for dependency-aware Reprocess on the next generation; the full-fresh control similarly shows `Queued` until the next send or swipe consumes it once.
+
+Progress rows stay text-light and expose at most one contextual icon: Stop while the owned stage is running, Resume for a paused frontier, Retry for the blocking failed stage, Reprocess for reusable completed work, or cancel when reprocessing is queued. Each action has a concise tooltip and accessible label.
+
+Advanced settings expose `Attempts per step` from one through five:
+
+```json
+{
+  "pipelineMode": "segmented",
+  "modelAttemptsPerStep": 2
+}
+```
+
+This is the total automatic model-attempt window for each model stage. Local stages do not consume it, and SillyTavern's primary story generation is never automatically retried by Recursion. Recursion imposes no default generation timeout, so slow local and remote models may continue indefinitely until they return, fail, or the user stops them. An automatic attempt can recover a known failed call, but Recursion cannot promise cost recovery when a provider charged for a response that never reached the extension.
 
 ### Cost Shape
 
@@ -121,7 +137,7 @@ Recursion adds provider work around the host model's normal generation: Pre-proc
 
 Cost depends most on pipeline, Reasoning Level, card count, footprint, cache reuse, provider hidden reasoning, and any external model multiplier. For the detailed call breakdown and planning estimates, see [Recursion Cost Research](docs/technical/RECURSION_COST_RESEARCH.md).
 
-Under the medium-reasoning Standard example in that research, Recursion adds roughly 1-1.5 cents per turn on top of normal SillyTavern generation.
+Under the medium-reasoning Segmented example in that research, Recursion adds roughly 1-1.5 cents per turn on top of normal SillyTavern generation.
 
 ## Post-process Cards
 
@@ -156,7 +172,7 @@ Every operation checks source identity, stale-state boundaries, guidance shape, 
 
 1. Install Recursion as a SillyTavern extension and refresh your browser.
 2. Configure and test the Utility provider and Reasoner provider.
-3. Use Standard pipeline for fast-cheap-dumb models (<500B models, like Llama, Qwen, Gemma , GPT OSS, flash-lite models, o3-mini, etc). Use Fused pipeline for fast-lesscheap-smart models (>500B models, like Nemotron, Deepseek, and similar)
+3. Use Segmented for smaller or locally hosted models that benefit from simple independent calls. Use Fused for stronger models that can reliably return a larger structured bundle.
 4. Use Auto for normal hands-off preparation, or Manual when you want explicit control over what cards are pre-processed. Set cards to Priority for semi-auto.
 5. Open Last Brief after generation to inspect what Recursion prepared.
 6. If the completed reply needs further revision, enable Post-process Cards, choose a starter deck, and try `Unified` with `As Swipe` first.
@@ -182,7 +198,7 @@ For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_
 
 Recursion treats provider secrets and raw model I/O as sensitive. OpenAI-compatible direct keys are session-only and do not persist to settings, scene cache, prompt packets, run journals, diagnostics, browser local storage, SillyTavern file storage, or test artifacts.
 
-Normal diagnostics use hashes, compact statuses, bounded metadata, and sanitized activity instead of raw prompts, raw provider responses, hidden reasoning, or full transcript text.
+Normal diagnostics use hashes, compact statuses, bounded metadata, and sanitized activity instead of raw prompts, raw provider responses, hidden reasoning, or full transcript text. Resume-only prompts, cards, guidance, packets, and drafts live in isolated artifact records; manifests contain only checkpoint metadata. Successful Post-process settlement removes intermediate guidance and drafts, stale/abandoned retention removes unusable artifacts, and Reset Scene Cache immediately clears all current-chat execution state.
 
 ## License
 

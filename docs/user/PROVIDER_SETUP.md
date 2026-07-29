@@ -65,7 +65,7 @@ Post-process guidance routing is lane-sticky: Low and Medium use Utility, while 
 
 Post-process uses the configured Evidence Messages count to build a bounded, sender-aware frozen operation snapshot. Recent visible transcript messages, character evidence, the generation-time Pre-process Prompt Packet, ordered Post-process cards, pipeline provenance, and the current writable draft become evidence for guidance synthesis. The guidance response is structured and never replaces prose; SillyTavern's native quiet-generation path writes the draft.
 
-The router may repair common JSON formatting damage or make one correction request for an eligible malformed provider response. Repair reserves that single correction for runtime semantic validation: an empty, malformed, stale, overlapping, or otherwise invalid bounded-patch result receives one explicit correction request while provider-authored fallback signals remain untrusted. Repair card audits return only dynamic `failedCardIds`; Recursion derives the complete ledger locally, preserving resolved rows even when the audit rejects. A safe local patch with unresolved card coverage produces explicit `partial-failed`; unsafe patches are rejected and never applied.
+The router may repair common JSON formatting damage. A known malformed, stale, overlapping, or otherwise invalid result may consume another attempt only when the model stage remains current and has attempts remaining. Repair card audits return only dynamic `failedCardIds`; Recursion derives the complete ledger locally, preserving resolved rows even when the audit rejects. A safe local patch with unresolved card coverage produces explicit `partial-failed`; unsafe patches are rejected and never applied.
 
 Provider tests always use minimal reasoning. Direct OpenAI-compatible endpoints receive native reasoning fields only when Recursion knows the dialect. OpenRouter and OpenAI use an effort field, GLM/Z.AI uses thinking plus `reasoning_effort`, MiniMax M3 uses its thinking mode, and unsupported/unknown endpoints are left alone. SillyTavern connection profiles receive compact reasoning metadata so profile-backed Claude, Gemini, OpenRouter, and other integrations can apply their own native controls.
 
@@ -121,6 +121,11 @@ A safe provider test should:
 
 Provider tests should not store raw prompt bodies, raw responses, API keys, or unbounded error text. Test requests use the configured lane max-token budget and a bounded timeout; the test does not silently impose a smaller response cap than the operator selected.
 
+That bounded deadline belongs only to the explicit diagnostic test. Production
+Pre-process and Post-process calls have no Recursion default generation
+timeout. A slow call remains pending until it returns, its provider fails it,
+or the user stops the operation.
+
 Utility and Reasoner default to `8192`, so an untouched provider test uses an
 `8192` max-token ceiling. Provider Test is single-flight per lane: duplicate
 same-lane clicks share the in-flight test, and a test requested while production
@@ -152,18 +157,20 @@ flowchart TD
 
 Expected fallback behavior:
 
-- Utility auth failure: mark Utility unhealthy and skip or reuse safe cache.
-- Utility timeout: retry once for transient transport failure only if the request is not aborted and the current snapshot is still current, then skip or reuse safe cache.
+- Utility auth failure: mark Utility unhealthy and pause, skip, or reuse a valid checkpoint/cache entry as the affected stage permits.
+- Utility provider or transport failure: use the next `Attempts per step` attempt only if the stage remains current and has attempts remaining; otherwise preserve accepted checkpoints and expose stage recovery.
 - Utility invalid structured output: repair safe JSON syntax when possible, then reject any output that still misses the required schema or snapshot hash and use conservative local behavior.
 - Card job failure: omit failed card and keep valid sibling cards.
 - Reasoner unconfigured: Utility composes for ordinary work. A configured Untested Reasoner remains routable with caution status.
 - Reasoner missing key: Utility composes.
-- Reasoner timeout or invalid output: Utility composes and the fallback is recorded.
+- Reasoner provider failure or invalid output: Utility composes where that fallback is allowed and the fallback is recorded.
 - Prompt install failure after provider success: generation continues without Recursion guidance.
 
 Provider failures should degrade Recursion, not block normal SillyTavern generation.
 
-Post-process recovery is bounded separately from ordinary provider fallback. Guidance receives one same-lane correction retry, and a failed host rewrite may retry with the same guidance without repeating synthesis. Unified failure preserves the original. Progressive records the failed category, keeps the last valid draft, and continues later categories when possible; partial output settles only as a swipe.
+Only model stages consume the configurable attempt window, which ranges from one through five total attempts per stage and defaults to two. Stop pauses the active operation and preserves accepted checkpoints. Resume continues the earliest incomplete stage; Retry Stage resets only the failed stage's attempt window. Recursion never automatically retries SillyTavern's primary story generation.
+
+Post-process checkpoints guidance before native host rewriting, so a failed rewrite may resume with accepted guidance instead of repeating synthesis. Unified failure preserves the original. Progressive records the failed category and keeps the last valid draft; partial output settles only as a swipe.
 
 ![Provider failure surface with normalized reason, Utility fallback, and redacted status](../../assets/documentation/renders/recursion-provider-failure-reason-inline.png)
 

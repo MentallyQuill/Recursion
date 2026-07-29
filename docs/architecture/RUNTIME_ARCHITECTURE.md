@@ -58,7 +58,9 @@ Primary components:
 - Utility Arbiter: returns an Auto Control Plan for action, scene status, prompt footprint, card jobs, Reasoner decision, and budgets.
 - Card Job Runner: executes the plan by creating, refreshing, stowing, discarding, and selecting scene cards according to Arbiter decisions.
 - Scene Cache: stores bounded, per-chat and per-scene card state plus fingerprints and prompt-plan metadata.
-- Rapid Warm Artifact: optional active-variant metadata that records selected raw card ids and provider-authored guidance for an exact source revision so a later send can use a small Utility delta.
+- Execution Manifest: one chat-scoped metadata record for operation state, provenance, stage frontier, attempt counts, checkpoint hashes, and queued stage ids.
+- Execution Artifact Repository: isolated prompt/card/guidance/draft bodies referenced by checkpoints, never copied into manifests or journals.
+- Execution Scheduler: runs dependency-ready stages, checkpoints successful output before dependents start, and restores compatible work after pause or reload.
 - Hand Selector: selects the small card set that should influence the next generation.
 - Composer: deterministic prompt assembly and optional model-mediated synthesis.
 - Reasoner: optional deeper synthesis lane that is never required for generation to continue.
@@ -69,61 +71,22 @@ Primary components:
 
 ## Turn Pipelines
 
-The Standard pipeline is the reference foreground path:
+Every Pre-process operation uses the same durable graph:
 
-1. Observe chat and turn snapshot.
-2. Run Utility Arbiter.
-3. Execute card jobs and cache updates.
-4. Select turn hand.
-5. Optionally run Composer or Reasoner.
-6. Build prompt packet.
-7. Install through SillyTavern injection.
-8. Emit user-visible activity updates for status, fallbacks, and prompt readiness.
-9. Record diagnostics.
+1. Capture the frozen turn snapshot, including the pending user message.
+2. Run the Utility Arbiter.
+3. Execute either Segmented or Fused card work.
+4. Update the deck.
+5. Select the turn hand.
+6. Compose optional guidance.
+7. Build the prompt packet.
+8. Install through the SillyTavern prompt adapter.
 
-Standard and Fused are runtime pipeline modules. The runtime conductor selects the module; each module returns the same card result shape consumed by deck lifecycle, hand selection, guidance/reasoner composition, and prompt install.
+The scheduler commits each successful stage artifact and its metadata checkpoint before a dependent stage starts. Model stages receive the user-configured total attempt window; local and host stages do not consume it. Calls have no default latency deadline. A user Stop aborts the frontier call and pauses the operation while retaining committed work.
 
-The runtime conductor owns sequencing and cancellation; pipeline modules own provider-generation variants. Standard, Rapid, and Fused all return normalized card results to the same deck, hand, prompt composition, and prompt-install path.
+The Segmented pipeline is the reference path for smaller, simpler, and locally hosted models. It gives each requested card an independent model stage. Independent cards may run in one concurrency wave, but each keeps its own checkpoint and validation boundary. A failed optional card can settle under its declared continue policy; a blocking stage pauses the graph for explicit Retry.
 
-The Rapid pipeline moves most scene work out of the send path:
-
-1. Background warm observes the current source revision after assistant output, source changes, or idle time.
-2. Background warm runs provider Arbiter/card work, saves a source-keyed warm artifact into the scene cache, and does not install prompt keys.
-3. On send, Rapid loads the exact warm artifact for the pre-send source revision.
-4. If the artifact is fresh, Rapid calls `rapidTurnDelta` on the Utility lane to select ready cards and adapt them to the new player message.
-5. If the artifact is missing, Rapid abandons its install path and runs Standard for the same turn.
-6. If the provider declares a mandatory missing card, Standard escalation, or invalid Rapid structured output, Rapid abandons its install path and runs Standard for the same turn.
-7. Accepted Rapid output is composed into the normal V3 prompt packet contract with guidance, full selected raw card evidence, and guardrails, then rechecked against the active source before installation.
-
-Rapid does not gain latency by using local cards, local fallback plans, local scene briefs, local turn briefs, summary fast-start packs, or timeout-based quality cuts. Its speed comes from precomputation, exact-source cache reuse, delta work, and optional hedged Utility foreground calls.
-
-Rapid foreground delta generation is a runtime pipeline module. The conductor still owns eligibility, warm-miss escalation, Standard fallback, prompt install, and warm artifact state.
-
-Rapid `backgroundRefreshRequests` are advisory and do not escalate by themselves. Mandatory missing cards do escalate, and Standard fallback diagnostics include bounded `rapid-mandatory-gap:*` entries for the first reported gaps.
-
-Every Rapid warm miss records one bounded miss snapshot in activity details and `rapid.warm_missed` journal entries. The snapshot includes the reason code/label, whether an exact variant existed, whether a join was attempted or timed out, whether an active warm run was present and had a known base hash, candidate and selected-card counts, and sanitized diagnostics. This is the root-cause surface for live Rapid fallbacks before changing pipeline behavior.
-
-Rapid warm artifact eligibility uses a Rapid-specific settings signature rather than the broader scene-cache settings hash. It includes prompt/card/behavior settings and the Utility provider that builds warm and delta outputs, while ignoring retention, UI/diagnostic, and Reasoner-only drift that does not change the reusable warm artifact.
-
-If a Rapid warm Arbiter pass yields no cache cards and requests no provider cards, the warm artifact is persisted as failed with `no-candidate-cards`. Rapid remains provider-artifact-only in this branch; it does not manufacture local warm cards or mark an empty deck ready.
-
-When a foreground Rapid send sees an active warm run whose provider/settings/card/prompt contracts already match but whose base source hash has not been published yet, runtime waits briefly for that hash before declaring a miss. If the warm run publishes a matching base hash or completes during that bounded wait, foreground joins that warm promise instead of immediately falling back to Standard.
-
-Rapid warm status includes elapsed milliseconds for ready, failed, and missed states. Join-wait activity includes the configured wait budget so live `warm-timeout` rows can be compared against actual warm duration before changing the default wait.
-
-The Fused pipeline keeps the Standard foreground sequence but fuses the card-generation stage:
-
-1. Observe chat and turn snapshot.
-2. Run the Arbiter, scope filtering, Manual forced-family reconciliation, and behavior/reasoning policy exactly as Standard does.
-3. Build one `fusedCardBundle` request containing every requested card family, selected sub-item focus, story form, refresh metadata, and safety instructions.
-4. Validate the bundle snapshot first. A wrong snapshot is a hard stop.
-5. Validate each requested item as a normal `recursion.card.v1` card. A damaged top-level schema may still yield trustworthy requested items if the snapshot matches.
-6. Regenerate only damaged or missing requested siblings through individual card generation; run full Standard card generation only when no Fused item is trustworthy.
-7. Continue through the shared deck, hand, guidance, Reasoner composition, prompt packet, cache save, freshness recheck, and prompt install path.
-
-Fused is designed for stronger reasoning model families such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar models that can hold a larger structured card contract in one response. It still obeys Reasoning Level routing: Low and Medium keep the bundle on Utility, High and Ultra use Reasoner when the lane is healthy, and unavailable Reasoner falls back to Utility. Fast, cheaper utility-class models such as 500B-and-lower models, Nemotron, GPT-OSS, Gemma, and similar are better suited to Standard's smaller per-card calls.
-
-When Fused repairs only damaged or missing siblings, diagnostics include `fused-partial-repair-standard` plus `fused-repair:*` entries naming the repaired families. Progress keeps accepted bundle siblings under `fused-card-bundle` and repaired siblings under `utility-card-batch` with source `fused-repair`. `fused-fallback-standard` is reserved for zero-trust fused bundles: wrong snapshot, provider failure with no recoverable item fragments, or a damaged envelope with no valid requested cards.
+The Fused pipeline shares snapshot and Arbiter planning, then sends one `fusedCardBundle` request containing all requested families. Runtime validates the bundle snapshot and each sibling as a normal card. Accepted and rejected siblings remain visible as non-executable validation outcomes. If zero useful cards survive, the Fused stage executes the Segmented fallback stages and records `fused-fallback-segmented`. Otherwise the trusted bundle continues through the shared deck/hand/guidance/packet/install graph.
 
 Power and mode controls change how much of the pipeline runs:
 
@@ -133,9 +96,8 @@ Power and mode controls change how much of the pipeline runs:
 
 Pipeline controls change when work happens:
 
-- Standard: run the foreground Arbiter, card, hand, compose, and install sequence on send.
-- Rapid: warm a provider-generated card packet in the background, then run a foreground Utility delta on send. Warm misses escalate to Standard.
-- Fused: run Standard foreground planning, then generate all requested cards through one `fusedCardBundle` call before the shared hand/compose/install stages.
+- Segmented: run independent simple per-card stages after foreground Arbiter planning.
+- Fused: generate all requested cards through one structured bundle stage, with per-card outcomes and zero-useful-card Segmented fallback.
 
 Pipeline is selected from the compact bar dropdown immediately left of Mode. It is not duplicated in Settings.
 
@@ -145,7 +107,7 @@ Post-process Cards are an independent after-generation deck. When enabled, the r
 
 The older Generation Review/Editorial/Enhancement branches are retired. Their historical specifications remain indexed for archaeology, but `docs/architecture/POST_PROCESS_CARDS_RUNTIME.md` is the current authority.
 
-Regenerate is a one-shot fresh-next-generation override from the Recursion Bar command slot. The bar calls `runtime.requestFreshNextGeneration({ source: 'bar' })`, runtime records a pending token and leaves Last Brief on the previous completed packet; no provider work, prompt installation, prompt clearing, Last Brief clearing, or host generation starts on click. The next `prepareForGeneration({ hostGeneration: true })` consumes the token once, clears Last Brief with reason `user-fresh-next-generation` as the send or swipe begins, bypasses the volatile Prepared Generation Artifact, bypasses Rapid foreground warm, soft-invalidates the current scene cache with reason `user-fresh-next-generation`, prevents cached cards from entering the prompt-eligible hand, and records diagnostics such as `fresh-next-generation:cache-bypassed` and `fresh-next-generation:rapid-bypassed`. Pipeline selection remains a deferred scheduling setting; changing Standard/Rapid/Fused does not start generation or Rapid warming.
+Full fresh is a one-shot queued override from the Recursion Bar command slot. The bar calls `runtime.requestFreshNextGeneration({ source: 'bar' })`, runtime persists a `full-fresh` intent and leaves Last Brief on the previous completed packet; no provider work, prompt installation, prompt clearing, Last Brief clearing, or host generation starts on click. The next `prepareForGeneration({ hostGeneration: true })` consumes the intent once, clears Last Brief with reason `user-fresh-next-generation`, bypasses reusable checkpoints and the volatile Prepared Generation Artifact, invalidates the current scene cache for that run, and prevents cached cards from entering the prompt-eligible hand. Pipeline selection is also deferred; changing Segmented/Fused does not start generation.
 
 `lastPreparedGeneration` is the sole volatile owner of the installed packet and
 hand. Runtime builds a candidate locally and commits it only after the host
@@ -203,7 +165,7 @@ Plan action controls runtime cost and cache churn.
 
 Action choice should be automatic by default. User controls should stay high level, such as the power toggle, Auto/Manual, refresh, Strength, Focus, Reasoning Level, provider setup, Prompt Footprint, and advanced final-packet injection placement.
 
-Rapid foreground calls do not ask the Arbiter which cards should exist. They ask the Utility provider what should condition the immediate reply given the ready provider-generated cards, the new user message, and current source hashes. Missing non-mandatory cards become optional background refresh requests. Mandatory missing cards escalate to Standard.
+Queued reprocessing does not bypass the Arbiter. The next generation still takes a fresh snapshot and runs the semantic plan; the queued stage and all graph descendants are then invalidated while unaffected compatible checkpoints remain eligible.
 
 ## Scene Shift Handling
 
@@ -227,10 +189,11 @@ Expected failure behavior:
 - Utility provider unavailable: skip new Arbiter work, reuse a valid packet if safe, or clear Recursion injection and continue.
 - Arbiter schema invalid or `snapshotHash` missing/mismatched: reject the plan, record diagnostics, and fall back to a conservative local action.
 - Card job failure: keep the last valid cache segment, omit failed cards from the hand, and record omission reasons.
-- Rapid warm miss: run Standard for the current turn instead of inventing local Rapid cards, briefs, or summary fast-start packs.
-- Rapid mandatory gap: run Standard for the current turn and record the escalation diagnostic.
-- Invalid Rapid structured output: reject the output and run Standard for the current turn.
-- Fused bundle invalid or empty: record compact bundle diagnostics and run the Standard individual card path for the same turn.
+- Fused bundle invalid or zero-useful: record compact bundle diagnostics and run the Segmented individual-card stages for the same turn.
+- Model stage attempts exhausted: pause at the blocking failure and expose Retry without discarding prior checkpoints.
+- User Stop: abort the frontier call, persist the paused frontier, and expose Resume.
+- Source/provenance change: mark incompatible work stale and refuse late artifact or host commits.
+- Missing or hash-invalid resume artifact: reject the checkpoint, report `resume-artifact-missing`, and re-enter from the earliest invalid stage.
 - Reasoner failure: continue with Utility guidance plus raw selected Card Evidence.
 - Prompt composition over budget: trim by lane priority and record budget omissions.
 - Injection failure: clear or leave untouched according to host adapter safety rules, then record the failed install attempt.
@@ -299,7 +262,7 @@ In memory:
 - current turn snapshot id and message fingerprint;
 - scene fingerprint and scene status;
 - active Auto Control Plan;
-- active Rapid warm artifact metadata when the selected source variant has one;
+- active execution manifest, frontier, and queued reprocess intent;
 - pending run lock and cancellation marker;
 - provider health and resolved lane status;
 - last prompt packet metadata;
@@ -310,6 +273,8 @@ Persisted:
 - extension settings;
 - provider settings without session-only secrets;
 - bounded scene card cache;
+- current chat-scoped execution manifest and isolated checkpoint artifacts;
+- one queued full-fresh or dependency-aware reprocess intent;
 - prompt plan/cache metadata;
 - last successful prompt packet metadata;
 - bounded diagnostics/run journal.
@@ -363,7 +328,7 @@ Clear failure, missing host clear API, missing scene cache, or invalidation stor
 
 `runtime.refreshScene()` is a first-class refresh operation. It waits for prior mutations, captures the current host snapshot without adding synthetic chat text, best-effort soft-invalidates that snapshot's scene cache with reason `user-refresh`, then runs the normal preparation loop so the Utility Arbiter can review the stale cache before the new active cache is saved.
 
-`runtime.requestFreshNextGeneration()` is different from refresh and reset. It arms the next host generation to run fresh, uses reason `user-fresh-next-generation`, bypasses prompt/cache/Fused/Rapid reuse paths once when consumed, and then returns future generations to the selected Standard, Rapid, or Fused pipeline. It never invokes SillyTavern native generation itself; the host send or swipe remains the generation trigger. `runtime.clearFreshNextGeneration()` cancels an armed token before consumption.
+`runtime.requestFreshNextGeneration()` is different from refresh and reset. It queues the next host generation to run fresh, uses reason `user-fresh-next-generation`, bypasses prompt/cache/checkpoint reuse once when consumed, and then returns future generations to the selected Segmented or Fused pipeline. It never invokes SillyTavern native generation itself; the host send or swipe remains the generation trigger. `runtime.clearFreshNextGeneration()` cancels the queued token before consumption.
 
 ## Diagnostics Events
 
@@ -417,10 +382,10 @@ V1 should be built in small vertical slices that preserve the end-to-end loop.
    - Build prompt packets from the turn hand, enforce footprint budgets, install through the SillyTavern adapter, clear stale packet metadata, and report prompt-ready/install/fallback activity.
 
 7. Optional Composer/Reasoner lane
-   - Add Reasoner trigger handling, timeout/failure fallback, and deterministic composer fallback.
+   - Add Reasoner trigger handling, provider-failure fallback, and deterministic composer fallback. Do not impose a Recursion default generation timeout.
 
 8. Storage hardening
-   - Persist settings, cache metadata, last packet metadata, and bounded diagnostics using logical keys and privacy-safe records.
+   - Persist settings, cache metadata, metadata-only execution manifests, isolated stage artifacts, queued intents, and bounded diagnostics using logical keys and privacy-safe records.
 
 9. UI integration and smoke validation
    - Connect the Recursion Bar, Hero Pixel Array progress menu, status, provider health, mode controls, and inspector diagnostics. Validate power-off, Auto, Manual, provider failure, scene refresh, storage activity, prompt install, and stale-result behavior.

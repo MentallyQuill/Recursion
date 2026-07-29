@@ -197,7 +197,7 @@ Hard invalidation retires or replaces the deck when chat identity, scene fingerp
 
 Soft invalidation marks the deck stale for Arbiter review when manual scene refresh is invoked, provider settings change, the source window advances, the prompt budget changes, or runtime rejects cards for schema, size, freshness, or safety reasons. Manual refresh uses reason `user-refresh` and rechecks the current host snapshot without adding synthetic chat content.
 
-Rapid may attach a `rapid` object to a source variant. This object stores sanitized Rapid V2 warm-artifact metadata for that exact source revision: warm artifact id, base source revision hash, base snapshot hash, selected card ids, generated card ids, provider-authored guidance metadata, contract hashes, artifact hash, and diagnostics. It is not a separate memory layer, and it must not contain raw provider prompts, raw provider responses, hidden reasoning, API keys, inactive swipe text, or installed prompt packets.
+Durable execution checkpoints may reference accepted scene-card artifacts for an exact source revision. Those artifacts are not a memory layer: they are reusable only while source, settings, provider, catalog, pipeline, and prompt contracts remain compatible. Manifests store hashes and references rather than artifact bodies.
 
 Pre-alpha storage can invalidate old experimental records instead of carrying compatibility layers.
 

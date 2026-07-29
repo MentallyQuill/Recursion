@@ -1,6 +1,6 @@
 # Recursion Documentation Index
 
-This is the canonical map for Recursion documentation. Current docs are linked directly. Broader documentation work is tracked in [Documentation Expansion Plan](planning/DOCUMENTATION_EXPANSION_PLAN.md).
+This is the canonical map for Recursion documentation. Undated manuals and specs linked as current authority describe the active V1 contract. Dated files under `release/`, `planning/`, `testing/`, and `superpowers/` are historical decision or evidence snapshots unless a current entry explicitly says otherwise; they may retain the product vocabulary and behavior that existed when written.
 
 ## Release Notes
 
@@ -18,13 +18,13 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Root README](../README.md) - Public route map and fast start.
 - [Docs Folder Guide](README.md) - Folder-level guide for this documentation tree.
 - [User Guides](user/README.md) - Operator-facing table of contents.
-- [First Run Workflow](user/FIRST_RUN_WORKFLOW.md) - First-session path from install through Standard Auto, Tense & PoV Auto, Manual, Rapid trial, inspection, and power-toggle cleanup.
-- [Recursion Operator Manual](user/RECURSION_OPERATOR_MANUAL.md) - Complete practical manual for Pre-process and Post-process Cards, UI surfaces, Standard/Rapid/Fused pipelines, modes, Tense & PoV, settings, operation, diagnostics, storage, mobile behavior, and smoke checks.
+- [First Run Workflow](user/FIRST_RUN_WORKFLOW.md) - First-session path from install through Segmented Auto, Tense & PoV Auto, Manual, Fused trial, inspection, and power-toggle cleanup.
+- [Recursion Operator Manual](user/RECURSION_OPERATOR_MANUAL.md) - Complete practical manual for Pre-process and Post-process Cards, UI surfaces, Segmented/Fused pipelines, resumable stage actions, modes, Tense & PoV, settings, operation, diagnostics, storage, mobile behavior, and smoke checks.
 
 ## Provider, Privacy, And Safety Docs
 
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md) - Current provider lanes, source routing, machine-JSON schema metadata, structured calls, validation, and secret handling contract.
-- [Structured Output Recovery Design](superpowers/specs/2026-07-13-recursion-structured-output-recovery-design.md) - Shared one-budget recovery contract for malformed provider output, batch slots, Fused fragments, raw-text reformat, and structured Post-process guidance recovery.
+- [Structured Output Recovery Design](superpowers/specs/2026-07-13-recursion-structured-output-recovery-design.md) - **Historical recovery design; its fixed correction-budget and deadline claims are superseded by the current per-stage attempt contract.**
 - [Storage and Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md) - Current storage, journal, diagnostics, redaction, and retention contract.
 - [Provider Setup](user/PROVIDER_SETUP.md) - Utility and Reasoner setup, source options, autosaving provider fields, model discovery, session-only keys, provider tests, fallback behavior, and safe verification.
 - [Prompt Privacy And Safety](user/PROMPT_PRIVACY_AND_SAFETY.md) - Prompt packet contents, injection boundary, storage limits, redaction, external extension coexistence, and safety checks.
@@ -32,8 +32,8 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 ## Technical Manuals
 
 - [Technical Manuals](technical/README.md) - Table of contents for the technical manual family.
-- [Recursion Technical Manual](technical/RECURSION_TECHNICAL_MANUAL.md) - Product boundary, runtime spine, component ownership, Standard/Rapid/Fused pipelines, modes, provider lanes, card/hand system, prompt packet, storage, diagnostics, host adapter, UI observability, fail-soft invariants, testing evidence, and non-goals.
-- [Runtime Turn Sequence](technical/RUNTIME_TURN_SEQUENCE.md) - Power toggle, Auto/Manual lifecycle, Standard foreground flow, Rapid warm/delta flow, cancellation, stale results, and failure branches.
+- [Recursion Technical Manual](technical/RECURSION_TECHNICAL_MANUAL.md) - Product boundary, runtime spine, component ownership, Segmented/Fused graphs, checkpoints, attempts, modes, provider lanes, card/hand system, prompt packet, storage, diagnostics, host adapter, UI observability, fail-soft invariants, testing evidence, and non-goals.
+- [Runtime Turn Sequence](technical/RUNTIME_TURN_SEQUENCE.md) - Power toggle, Auto/Manual lifecycle, Segmented/Fused execution, pause/resume/retry/reprocess, cancellation, stale results, and failure branches.
 - [Card Deck And Hand](technical/CARD_DECK_AND_HAND.md) - Fixed V1 card families, card contract, lifecycle, Arbiter decisions, deck/hand separation, invalidation, Character Motivation safety, and inspector visibility.
 - [Prompt Packet And Injection](technical/PROMPT_PACKET_AND_INJECTION.md) - Packet sections, composer inputs, Utility and Reasoner composition, budgets, omissions, critical guardrail exception policy, SillyTavern injection lanes, cleanup, and privacy guardrails.
 - [Model Calls And Provider Routing](technical/MODEL_CALLS_AND_PROVIDER_ROUTING.md) - Utility and Reasoner lanes, provider sources, generation roles, structured output validation, retries, fallbacks, model-call journal, session secret boundary, abort handling, and provider states.
@@ -50,12 +50,12 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Behavior Settings Policy Spec](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) - Source-backed V1 contract for Strength, Min/Max Cards, Focus, and Prompt Footprint backend effects.
 - [UI Spec](design/UI_SPEC.md) - Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief dropdown, viewer, settings, and provider controls.
 - [Turn Context Compiler Seed Note](design/RECURSION_TURN_CONTEXT_COMPILER.md) - Historical seed note superseded by the V1 spec family.
-- [Post-process Cards Design](superpowers/specs/2026-07-18-recursion-post-process-cards-design.md) - Approved V1 product, data, guidance, host-writer, persistence, and privacy contract.
-- [Post-process Cards Implementation Plan](superpowers/plans/2026-07-18-recursion-post-process-cards.md) - Approved task sequence for replacing the old Enhancement feature family.
+- [Post-process Cards Design](superpowers/specs/2026-07-18-recursion-post-process-cards-design.md) - **Historical product design; current resumable execution, attempts, controls, and persistence are authoritative where they differ.**
+- [Post-process Cards Implementation Plan](superpowers/plans/2026-07-18-recursion-post-process-cards.md) - **Historical implementation record retained for decision context.**
 - [Post-process Cards Playwright Test Framework](testing/2026-07-18-post-process-cards-playwright-framework.md) - Required browser, visual, runtime-integration, and privacy proof framework.
 - [Generation Review and Enhancement Design](superpowers/specs/2026-07-12-recursion-generation-review-and-enhancement-design.md) - **Superseded by Post-process Cards; retained as historical context only.**
 - [Editorial Transformation Design](superpowers/specs/2026-07-13-recursion-editorial-transformation-design.md) - **Superseded by Post-process Cards; retained as historical context only.**
-- [Layered Failure Recovery Design](superpowers/specs/2026-07-17-recursion-layered-failure-recovery-design.md) - Provider repair, semantic correction, safe partial results, and explicit failure severity.
+- [Layered Failure Recovery Design](superpowers/specs/2026-07-17-recursion-layered-failure-recovery-design.md) - **Historical failure-recovery design; current stage attempts and resumable controls supersede fixed recovery budgets.**
 - [Redirect Improvement Design](superpowers/specs/2026-07-15-recursion-redirect-improvement-design.md) - **Superseded by Post-process Cards; retained as historical context only.**
 - [Editorial Transformation Implementation Plan](superpowers/plans/2026-07-13-recursion-editorial-transformation.md) - **Superseded by Post-process Cards; retained as historical context only.**
 - [Design Folder Guide](design/README.md)
@@ -65,7 +65,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - [Runtime Architecture](architecture/RUNTIME_ARCHITECTURE.md)
 - [Post-process Cards Runtime Boundary](architecture/POST_PROCESS_CARDS_RUNTIME.md) - Frozen evidence, native SillyTavern writer ownership, Unified/Progressive sequencing, retry/fail-soft, final persistence, and privacy contract.
 - [Generation Review and Enhancement Contract](architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) - **Superseded by Post-process Cards; retained as historical context only.**
-- [Cache Use And Reuse Spec](architecture/CACHE_USE_AND_REUSE_SPEC.md) - Exact-source reuse, Rapid warm artifacts, swipe variants, invalidation, and fresh-next-generation bypasses.
+- [Cache Use And Reuse Spec](architecture/CACHE_USE_AND_REUSE_SPEC.md) - Exact-source reuse, durable stage checkpoints, swipe variants, dependency invalidation, queued reprocessing, and one-shot full-fresh bypasses.
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md)
 - [Prompt Composition Spec](architecture/PROMPT_COMPOSITION_SPEC.md)
 - [Storage and Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md)
@@ -82,7 +82,7 @@ This is the canonical map for Recursion documentation. Current docs are linked d
 - Text diagrams live inline as Mermaid graphs or markdown tables; live UI screenshot gaps stay marked inline with `<Render Needed>` until real SillyTavern surfaces are stable.
 - [Testing Folder Guide](testing/README.md)
 
-## Planning Docs
+## Historical Planning Docs
 
 - [Documentation Expansion Plan](planning/DOCUMENTATION_EXPANSION_PLAN.md)
 - [0.1.0-pre-alpha.6 Documentation Update Brief](planning/2026-07-11-documentation-update-pre-alpha-6.md)

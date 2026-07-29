@@ -18,6 +18,8 @@ Recursion stores the minimum structured state needed to reuse current-scene work
 
 - user-facing controls and provider preferences;
 - bounded scene cache records;
+- one current chat-scoped execution manifest and isolated stage artifacts;
+- one queued reprocess/full-fresh intent per chat;
 - source references and hashes needed to detect drift;
 - sanitized recent run diagnostics;
 - sanitized diagnostic artifacts.
@@ -61,6 +63,9 @@ Logical JSON files are for bounded structured records that are larger than setti
 - `recursion-system-index.v1.json`
 - `recursion-scene-{chatKey}-{sceneKey}.v1.json`
 - `recursion-run-journal-{chatKey}.v1.json`
+- `recursion-pipeline-run-{chatKey}.v1.json`
+- `recursion-pipeline-artifact-{chatKey}-{operationId}-{artifactId}-v1.json`
+- `recursion-queued-reprocess-{chatKey}.v1.json`
 - sanitized diagnostic artifact records
 
 The storage repository is the only layer that should construct those keys. `chatKey` and `sceneKey` must be normalized, path-safe identifiers, preferably derived from stable host ids plus hashes rather than raw chat titles or private story text.
@@ -73,6 +78,9 @@ The storage repository is the only layer that should construct those keys. `chat
 | `recursion-system-index.v1.json` | Recursion storage repository | Index of known scene caches and journals, active schema/catalog versions, record sizes, last update times, and repair status. | Durable but rebuildable. If missing, rebuild from logical records. |
 | `recursion-scene-{chatKey}-{sceneKey}.v1.json` | Recursion storage repository | Bounded scene deck, prompt-plan metadata, source refs/hashes, validation status, and last hand metadata for one chat scene. | Cache. Keep only recent active scenes per chat and prune aggressively. |
 | `recursion-run-journal-{chatKey}.v1.json` | Recursion storage repository | Bounded ring buffer of sanitized runtime, provider, cache, invalidation, and prompt-install events for one chat. | Cache/diagnostic. Prune by count and age. |
+| `recursion-pipeline-run-{chatKey}.v1.json` | Execution scheduler | One metadata-only current operation manifest: provenance, state, stage frontier, attempt counts, checkpoint hashes, and artifact references. | Keep while current and reusable; stale metadata may remain for explanation, while abandoned manifests are pruned. |
+| `recursion-pipeline-artifact-{chatKey}-{operationId}-{artifactId}-v1.json` | Execution scheduler | One isolated JSON body needed to resume a completed stage. | Keep all artifacts for a nonterminal current operation. On terminal Post-process success retain only the final accepted draft and commit receipt; purge stale, abandoned, superseded, and orphaned bodies. |
+| `recursion-queued-reprocess-{chatKey}.v1.json` | Runtime | One-shot `full-fresh` or dependency-aware stage intent for the next generation. | Consume once, cancel explicitly, or clear with current-chat reset. |
 | Diagnostic artifact | Repository and test harnesses | Sanitized snapshot of settings, index summary, selected scene cache metadata, and recent journal events for troubleshooting. | Explicit diagnostic flow only. Not written automatically during normal play. |
 
 All records should include:
@@ -83,6 +91,14 @@ All records should include:
 - `recursionVersion` when available;
 - `chatKey` when chat-scoped;
 - `schemaHash` or contract version metadata when relevant.
+
+## Execution Manifest And Artifact Contract
+
+The manifest is an index of trusted work, never a second artifact store. A stage record may contain only stable ids, kind/state, version, bounded attempt counters, timestamps, failure code/class, safe structural summary, checkpoint hashes, dependency hashes, provenance, and a logical artifact reference with hash and byte count. It must not contain snapshot bodies, Arbiter JSON, generated cards, selected references, prompt packets/hands, Post-process guidance, drafts, final prose, raw prompts, or raw provider responses.
+
+Artifact writes occur before checkpoint commits and are verified by SHA-256. A checkpoint becomes reusable only after its manifest write succeeds. Reuse rechecks stage version, input hash, dependency checkpoint hashes, run provenance, stored artifact hash, and stage validation. Missing or invalid artifacts are a miss, never zero-filled or guessed.
+
+`collectResumeArtifactReferences(manifest)` is the retention authority. Running and paused current operations protect their operation artifacts, including a just-written artifact awaiting manifest commit. Completed Pre-process checkpoints remain cache candidates. Completed Post-process keeps the final accepted rewrite plus idempotent host-commit receipt; intermediate source snapshots, guidance, and earlier progressive drafts are removed. Stale and abandoned operations protect no artifact bodies.
 
 ## Scene Cache Contract
 
@@ -275,7 +291,7 @@ Every `warn` or `error` journal entry must contain `details.failure` with the no
 
 Compact warning/failure UI consumes `failure.message` and optional `failure.suggestedAction`. Journals, the Full Viewer, and sanitized diagnostic exports retain `failure.code`, `stage`, and `category`. Internal codes must not be interpolated into ordinary progress reason/action text.
 
-Successful Post-process categories that required a second SillyTavern rewrite attempt retain `recoveredFailureCode` in bounded runtime diagnostics and the persisted `recursion.postProcessMarker.v1` category record. This field records only a stable `RECURSION_*` code; raw host exception messages, provider bodies, prompts, and response text remain excluded. The persisted code distinguishes empty, unchanged, timeout, and generic host failures after the retry has already recovered.
+Successful Post-process categories that required more than one model attempt retain `recoveredFailureCode` in bounded runtime diagnostics and the persisted `recursion.postProcessMarker.v1` category record. This field records only a stable `RECURSION_*` code; raw host exception messages, provider bodies, prompts, and response text remain excluded. The persisted code distinguishes empty, unchanged, provider-owned timeout, and generic host failures after a later configured attempt recovered.
 
 Journal entries must not record:
 
@@ -334,6 +350,9 @@ Allowed by default:
 - source message id ranges and text hashes;
 - prompt packet hashes and omission reasons;
 - cache hit, miss, stale, repair, and prune events.
+- execution operation/stage ids and states, attempt counts, elapsed milliseconds, failure classes, artifact hashes/byte counts, and stale field names.
+
+Stable bounded lifecycle codes include `operation-paused:user-stop`, `operation-paused:chat-changed`, `operation-stale:source-changed`, `stage-attempt-exhausted`, `stage-checkpoint-reused`, `stage-checkpoint-invalidated`, `stage-reprocess-queued`, `stage-reprocess-canceled`, `stage-reprocess-consumed`, `stage-reprocess-inapplicable`, `resume-checkpoint-restored`, `resume-artifact-missing`, `resume-commit-already-applied`, and `fused-fallback-segmented`.
 
 Forbidden by default:
 
@@ -342,6 +361,7 @@ Forbidden by default:
 - raw SillyTavern transcript archives;
 - complete character cards, World Info entries, Memory Book entries, or other extension-owned context;
 - hidden chain-of-thought;
+- resumable snapshot, Arbiter, card/reference, packet/hand, guidance, draft, or final-prose bodies copied outside their dedicated artifact record;
 - private story plans;
 - inspector-only notes copied into prompt logs;
 - filesystem paths that expose private usernames when a logical key is enough.
@@ -391,9 +411,11 @@ Cleanup responsibilities:
 - rebuild `recursion-system-index.v1.json` if it is missing or stale;
 - remove index entries for missing records;
 - add index entries for valid orphaned Recursion records;
+- delete pipeline artifact records that are not owned by the authoritative current manifest or referenced by a reusable terminal checkpoint;
 - mark corrupt records invalid and exclude them from runtime use;
 - prune scene caches beyond `retention.sceneCachesPerChat` and `retention.sceneCachesTotal` through an explicit retention pass that protects the active scene;
 - prune run journals beyond `retention.runJournalEntries`;
+- preserve nonterminal current-chat operation artifacts, purge stale artifacts, and remove abandoned operations during normal retention;
 - remove records with unsupported schema versions during pre-alpha resets;
 - report cleanup actions through sanitized journal events and UI status.
 
@@ -402,11 +424,14 @@ V1 retention should start small:
 - keep the active scene cache;
 - keep a small number of recently retired scene caches per chat for inspection;
 - keep one bounded run journal per chat;
+- keep one current operation manifest and queued intent per chat;
 - prune discarded-card history unless diagnostics explicitly need it.
 
 Long-chat scaling is handled before cache freshness and provider prompts. Recursion walks backward from the latest visible chat message until Source Freshness Messages or Source Freshness Text Budget is reached, then uses that bounded window for source hashes and cache freshness. Older chat messages remain in SillyTavern and can still be used by SillyTavern presets or other extensions.
 
 Cleanup must never delete SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or any non-Recursion extension records.
+
+`Reset Scene Cache` is stronger than ordinary retention for the current chat. It immediately abandons active work, deletes the scene cache, execution manifest, every operation artifact, and queued intent, clears in-memory execution state, and clears Recursion prompt lanes. It never deletes SillyTavern messages.
 
 ## Storage Progress UX
 

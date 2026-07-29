@@ -273,7 +273,7 @@ Strict: true
 - Pipeline control: pass
 - Manual mode: pass
 - Auto Utility pass: pass
-- Rapid pipeline proof: pass
+- Segmented pipeline proof: pass
 - Prompt cleanup: pass
 
 ## Artifacts

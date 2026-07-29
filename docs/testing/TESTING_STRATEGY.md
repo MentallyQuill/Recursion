@@ -1,254 +1,217 @@
 # Testing Strategy
 
-Recursion testing should prove the extension is useful and safe without turning every verification path into a live SillyTavern run. The test framework has three execution layers plus one documentation evidence register:
+Recursion testing proves the current-scene prompt compiler is resumable, observable, private, and fail-soft without making every verification path a live SillyTavern run.
 
 | Layer | What it proves | Primary evidence |
 | --- | --- | --- |
-| Fast contract suite | Runtime contracts, schemas, card lifecycle, provider routing, storage, redaction, and prompt packet rules work without a live host. | Maintained deterministic gate: `node tools\scripts\run-alpha-gate.mjs`; focused scripts: `tools/scripts/test-*.mjs`. |
-| Playwright readiness | Offline probe proves the local machine can launch/control Chromium through Playwright, use a role locator, switch desktop/phone viewports, and write trace/screenshot artifacts. If Playwright is unavailable, it returns `environment-fail` without contacting SillyTavern. | Current evidence: `check-playwright-readiness` report, trace, and viewport screenshots when Playwright is installed; otherwise a sanitized environment-fail report. |
-| Focused live SillyTavern smoke | Current preflight proves dedicated-user rejection, dry-run behavior, report shape, fail-closed semantics, Recursion-owned storage probes, served-extension freshness, no-generation UI mount/open behavior, pipeline dropdown behavior, and opt-in generation bridge prompt-install evidence. | Current evidence: `check-sillytavern-soak-users`, `smoke-sillytavern-live`, and `prove-live-pipelines` reports, no-generation screenshots/trace, live log, served-extension comparison, storage probe artifact, browser snapshot, prompt-key hashes, Standard hand readiness, Rapid packet readiness, and prompt-packet metadata. |
-| Documentation render tracking | Open screenshot needs remain visible until promoted; explanatory diagrams stay inline as Mermaid graphs or markdown tables. | [Documentation Render Tracking](DOCUMENTATION_RENDER_TRACKING.md), visible `<Render Needed>` markers, and promoted live UI assets under `assets/documentation/renders/`. |
+| Focused contract tests | One contract or state transition in isolation with fake providers, storage, and hosts. | `tools/scripts/test-*.mjs` |
+| Full deterministic suite | Runtime, storage, provider, UI, documentation, and harness contracts agree. | `npm.cmd test` |
+| Alpha gate | Full suite plus offline Playwright readiness. | `node tools/scripts/run-alpha-gate.mjs` |
+| Guarded live smoke | Installed/served-copy identity and real SillyTavern UI, prompt, storage, and optional provider behavior. | Dedicated `recursion-soak-*` users and the live proof scripts |
 
 ```mermaid
 flowchart LR
-    Contract["Fast contract suite"] --> Alpha["Alpha gate"]
-    Alpha --> Playwright["Playwright readiness"]
-    Playwright --> Soak["Dedicated-user preflight"]
-    Soak --> Smoke["Guarded live smoke"]
-    Smoke --> Artifacts["Redacted artifacts"]
-    Artifacts --> Docs["Documentation evidence"]
+    Contract["Focused contracts"] --> Suite["Full deterministic suite"]
+    Suite --> Alpha["Alpha gate"]
+    Alpha --> Preflight["Dedicated-user and installed-copy preflight"]
+    Preflight --> Live["Guarded live smoke"]
+    Live --> Evidence["Sanitized artifacts"]
 ```
-
-The fast contract suite is the normal maintained confidence gate in this checkout. The live-harness scripts validate dedicated users, dry-run behavior, report shape, artifact paths, fail-closed semantics, offline Playwright readiness, SillyTavern storage probes when dedicated users are available, no-generation SillyTavern UI evidence, pipeline-specific visible-send proof, and opt-in generation bridge evidence when Recursion is installed for a dedicated user.
-
-## Current Pre-process/Post-process Proof
-
-Pre-process proof covers independent deck configuration, ordered categories, `off`/`active`/`priority` participation, Manual whitelist behavior, hand selection, prompt composition, and prompt installation before host generation. Post-process proof covers an independent ordered deck, binary card `On`/`Off`, frozen completed-response evidence, sticky guidance-lane routing, one same-lane correction retry, Unified and Progressive sequencing, native host quiet-generation ownership, As Swipe/Replace settlement, source-bound markers, stale/cancel guards, and Progressive partial settlement only as a swipe. The current browser fixture and visual baseline family live under `tests/visual-baselines/post-process-cards/`; historical Editorial/Enhancement proof sections below are retired archaeology.
-
-Enabled Post-process certification uses As Swipe and fails unless the same
-assistant gains exactly one selected, source-bound `recursion.postProcessMarker.v1`
-swipe with aligned `swipe_info`. A completed provider call or returned rewrite
-without the persisted `N + 1` swipe is a failed test.
 
 ## Core Invariants
 
-Highest-priority invariants:
+Every release candidate must preserve these boundaries:
 
-- Power-off performs no chat inspection, provider calls, card updates, or prompt injection.
-- Pipeline selection lives as a compact bar dropdown left of Mode and must not be duplicated as a Settings toggle.
-- Manual mode uses card scope as a strict whitelist and must remain a distinct selectable mode.
-- Auto mode may install prompt packets only through Recursion-owned SillyTavern prompt keys.
-- Standard, Rapid, and Fused remain distinct pipelines; Standard keeps the full foreground path, Rapid uses background provider warm plus foreground Utility delta, and Fused uses one foreground card-bundle call. Warm miss escalates to Standard. Fused repairs damaged or missing siblings with targeted Standard card calls when at least one bundle item is trustworthy, and full Standard fallback is reserved for zero-trust bundles.
-- Rapid background warm never installs prompt keys.
-- Rapid foreground never creates local fallback cards, local scene briefs, local turn briefs, or summary fast-start packs.
-- Rapid warm artifacts are exact-source keyed and must not survive source revision, settings/provider/catalog/prompt contract, or pipeline-version mismatch.
-- Rapid invalid provider output and mandatory gaps escalate to Standard for the same pending user message.
-- Prompt packet installation is replace-or-clear by Recursion metadata, not blind append.
-- Stale provider results cannot update the active scene cache or active prompt packet.
-- Older SillyTavern swipe changes clear stale Recursion prompts and cannot reuse cards from a different active source revision. Latest-assistant native swipe retries must preserve one assistant row with multiple swipe variants, process `MESSAGE_SWIPED` before the generation interceptor's `generationType: "swipe"`, reinstall the same prompt packet, record a `prepared-generation` cache hit, and perform no provider or storage work. The host-boundary regression must keep the assistant in `SillyTavern.getContext().chat` while the interceptor payload ends on the preceding user row, matching SillyTavern's native swipe payload. Post-generation editorial setting changes must not invalidate that artifact or clear its prompt lanes.
-- Utility is the default provider lane for Arbiter and composition work.
-- Reasoner composition is optional. Ordinary work must fall back to Utility or local composition when capability is `unconfigured` or `unhealthy`, or when a routed call fails. A configured `untested` Reasoner remains routable with caution status. Medium+ Redirect remains unavailable and settles as a pre-generation skip only when Reasoner is unconfigured or unhealthy; Low Redirect uses Utility.
-- Runtime must trim over-budget `cardJobs` before provider card calls; deterministic tests should prove provider card-call count cannot exceed the effective hand budget for the turn.
-- Generated card `promptText` must be instruction-shaped private evidence, not story prose or mini-scene narration.
-- `guidanceComposer` provider-call success and prompt packet guidance acceptance are separate; tests should prove fallback reasons persist without raw guidance text.
-- Direct endpoint API keys are session-only and never written to settings, cache, journals, reports, screenshots, artifacts, or prompt packets.
-- Raw provider prompts and raw provider responses are not persisted by default.
-- Character Motivation cards may produce behavior-facing motivation guidance but must not inject private internal-thought dumps.
-- Hero Pixel Array progress stages visibly report foreground model calls, cache reuse, card refresh, prompt install, storage progress, fallback paths, warnings, and errors.
-- Provider failure, storage failure, or injection failure must not block normal SillyTavern generation.
-- Recursion tests must not mutate World Info, Memory Books, Summaryception, VectFox, unrelated SillyTavern data, or non-Recursion extension records.
-- Automated live tests must reject `default-user`. Use dedicated test users such as `recursion-soak-a`, `recursion-soak-b`, and `recursion-soak-c`.
+- Power Off performs no new chat inspection, provider call, card update, or prompt installation and clears Recursion-owned prompt keys.
+- Pipeline selection is an icon-only compact-bar control immediately left of Mode and is not duplicated in Settings.
+- Segmented and Fused are the only V1 pipelines. Invalid persisted values normalize to Segmented.
+- Segmented uses independently checkpointed, narrow per-card stages.
+- Fused validates every requested sibling, uses Segmented repair when any useful item survives, and uses full Segmented fallback only after zero useful cards.
+- The Arbiter remains model-authored; deterministic code validates and safely contains its output but does not replace its narrative judgment.
+- Every Pre-process and Post-process operation has a durable manifest and separate artifact records.
+- A stage advances only after its accepted artifact is durable.
+- Only dispatched model calls consume `Attempts per step`; the setting range is one through five and defaults to two total attempts per model stage.
+- Recursion has no default production generation timeout. Slow pending calls are not duplicated.
+- Recursion never automatically retries SillyTavern's primary story generation.
+- Stop aborts the active Recursion call and pauses the operation while preserving accepted checkpoints.
+- Resume starts at the earliest incomplete stage. Retry Stage resets only that stage's attempt window and output.
+- Reprocess from Here queues next-generation invalidation for the selected stage and its dependents; it does not race the current run.
+- Queue a full fresh generation starts no work on click and is consumed once by the next send or swipe.
+- Late or stale results cannot mutate artifacts, scene cache, prompt keys, activity truth, or host messages.
+- Post-process host commits are idempotent; Resume cannot duplicate a swipe or replacement.
+- Normal manifests and diagnostics never contain artifact bodies, raw prompts, raw provider responses, transcript text, draft prose, hidden reasoning, or secrets.
+- Reset removes all Recursion-owned scene cache, execution manifests/artifacts, queued intents, prepared/in-memory state, journals, and prompt keys without touching SillyTavern chat history.
+- Automated live tests reject `default-user`.
 
-## Fast Contract Suite
+## Deterministic Suite
 
-The contract suite is runnable before any live SillyTavern host work. It uses the installed Playwright dev dependency for offline browser readiness and does not contact SillyTavern. The maintained gate command is:
+Run:
 
 ```powershell
+npm.cmd test
 node tools\scripts\run-alpha-gate.mjs
 ```
 
-The gate calls the focused local suite rather than duplicating test logic. Coverage groups:
+Focused tests use deterministic clocks, fake provider responses, fake host mutations, and in-memory or fake user-file storage before live providers.
 
-- manifest and extension shell identity;
-- host adapter fake contracts;
-- settings normalization and session-only secret handling;
-- pipeline setting normalization and compact pipeline-menu rendering;
-- logical storage key safety;
-- scene cache schema validation;
-- Rapid warm artifact sanitization and exact-source cache validation;
-- source-revision and swipe A/B/A cache-variant behavior;
-- run journal redaction and ring-buffer pruning;
-- provider lane routing, provider-payload normalization, and structured response parsing/repair;
-- Utility Arbiter Auto Control Plan validation;
-- Rapid turn-delta structured schema validation and warm-miss Standard escalation;
-- card catalog, lifecycle, emphasis, detail, and hand-selection contracts;
-- pre-generation card-job budgeting, instruction-shaped card text validation, and multiline Card Evidence rendering;
-- Utility and Reasoner prompt packet composition;
-- provider capability matrices for `unconfigured`, `untested`, `ready`, and `unhealthy`;
-- field-scoped provider compare-and-swap updates, configuration revisions, and hash-bound health;
-- Provider Test at the configured `8192` default ceiling, same-lane single-flight, and active-lane busy rejection;
-- prompt budget trimming and omission reasons;
-- prompt injection metadata, replacement, and clearing through a fake host;
-- Rapid background warm provider calls, no prompt install, foreground warm-v2 install, warm-miss Standard escalation, hedged Utility winner selection, invalid-output Standard escalation, and mandatory-gap Standard escalation;
-- activity event normalization and user-safe status text.
+### Execution Contracts
 
-Focused contract tests should use deterministic fixtures and fake provider responses before live providers. `tools/scripts/test-provider-response-parser.mjs` owns provider-envelope extraction and syntax-repair cases. `tools/scripts/test-host.mjs` proves Connection Manager preserves raw responses for `machineJson` rather than collapsing malformed structured content to an extracted `{}`, and maps normalized low reasoning to SillyTavern's native `reasoning_effort: minimal` with private reasoning excluded. `tools/scripts/test-providers.mjs` owns router integration, sanitized repair diagnostics, stable failure codes, retry behavior, and the reviewer-only recovery that may restore omitted request-known schema/source metadata without accepting a wrong nonempty source hash. `tools/scripts/test-generation-review.mjs` owns the second semantic boundary: source hashes, exact target text, non-overlapping patches, installed-card outcome coverage, allowed status values and aliases, safe partial results, and the single shared correction budget. `tools/scripts/test-runtime.mjs` must exercise semantic correction with a populated installed hand in Standard, Rapid, and Fused, including an invalid status followed by a complete corrected ledger. Runtime/card tests own the remaining semantic boundary: repaired JSON still fails when it lacks the expected schema, snapshot hash, role, family, or valid evidence. If a live smoke finds a defect, add a focused contract regression where the behavior can be isolated without browser control.
+The execution suite includes:
 
-Generation Review regressions additionally prove that SillyTavern streaming remains visible while review is pending and that exhausted invalid-target and invalid-card-outcome corrections are isolated to a red `Generation review` row. Standard, Rapid, and Fused fixtures must retain the original message and the successful prompt-ready state in that case; no invalid review may append a swipe or downgrade an already-installed prompt. The live enhancement proof must first prepare each pipeline's real installed hand and then require complete valid card-outcome coverage from the reviewer.
+- `test-execution-contracts.mjs`: operation, stage, artifact, failure, and queued-intent schema validation;
+- `test-execution-storage.mjs`: manifest/artifact ordering, indexes, repair, retention, and reset;
+- `test-execution-attempt-policy.mjs`: one-to-five attempt normalization, total-attempt semantics, current-operation guards, and model-only consumption;
+- `test-execution-scheduler.mjs`: dependency traversal, checkpoints, pause/resume, retry, stale rejection, and completion;
+- `test-preprocess-graph.mjs`: Segmented/Fused Pre-process stage graphs and invalidation closures;
+- `test-runtime-preprocess.mjs`: runtime integration, accepted checkpoint reuse, full-fresh consumption, and prompt installation;
+- `test-queued-reprocess.mjs`: next-generation stage/dependent invalidation and cancellation;
+- `test-execution-privacy.mjs`: manifest allowlists, artifact separation, sanitized diagnostics, and cleanup;
+- `test-ui-actions.mjs`: contextual action selection, exact labels, and one-action ownership.
 
-Generation Review requests must expose the frozen `sourceHash`, eligible target IDs, and installed card IDs as structured request fields, not prompt prose alone. Provider machine JSON schemas must bind the source hash and constrain patch IDs, evidence target IDs, and card-outcome IDs to those frozen sets before runtime semantic validation.
+Required execution cases:
 
-Editorial regressions must separate mechanical integrity from model-owned semantic judgment. Diagnosis, Transform, and Verification requests expose frozen evidence IDs as structured fields; Repair Transform also exposes complete installed-card and repair-target metadata. Provider tests bind frozen identities and permit Redirect diagnosis fields to cite any request-known evidence ID while Repair/Recompose preservation remains narrower. Deterministic diagnosis tests reject fabricated IDs, stale hashes, malformed layouts, and unsafe bounds, but must not reject or rewrite known citations because of authority placement, character coverage, or pressure interpretation. Runtime tests prove the complete unfiltered Redirect proposal reaches the mandatory Verifier, whose `diagnosis-evidence-grounded` result decides semantic support together with the other eight checks. An accepted Redirect uses exactly Diagnostician, Transformer, and Verifier calls; semantic rejection ends after those three calls with no swipe and no rewrite loop. Repair diagnosis and Transformer provider-layer retries are disabled while preserving one runtime semantic-correction token; primary and fallback paths must not consume that token before bounded-patch validation. Tests also require candidate-hash binding, accepted-marker cache reuse, dynamic `failedCardIds` audit normalization, rejected-audit ledger preservation, and absence of private diagnosis text from prose, prompt, UI, and journal surfaces. Card lifecycle tests must recreate repeated cached/generated same-role waves and prove that only the newest card for each fixed generated role remains active before hand selection; the live enhancement proof rejects same-family `max-cards` omissions.
+1. A successful upstream stage is not called again after a later stage fails and Resume runs.
+2. Stopping a dispatched model call consumes that attempt but preserves earlier artifacts.
+3. Retry Stage resets only the selected stage's configured attempt window.
+4. A slow unresolved call never causes a parallel duplicate attempt.
+5. A stale late success cannot overwrite a newer operation.
+6. A queued reprocess invalidates exactly the selected stage and its dependency closure on the next generation.
+7. A full-fresh intent bypasses every reusable Pre-process artifact exactly once.
+8. Artifact write followed by manifest commit is repair-safe; repair does not delete the just-written in-flight artifact.
+9. Stale runs lose artifacts but keep bounded metadata; abandoned runs are fully pruned.
+10. Post-process Resume reconciles the host-commit receipt before any mutation.
 
-`npm.cmd test` and the alpha gate are deterministic. They prove the oracle and browser-runner contracts with fixtures, but they do not certify any configured provider response. `npm.cmd run prove:enhancements-live` is the dedicated Playwright gate with real configured model calls and must require a `recursion-soak-*` user. By default it runs Redirect and Repair in Standard, Rapid, and Fused. `RECURSION_ENHANCEMENT_PROOF_CASE=standard-repair` (or another pipeline/mode pair) narrows diagnosis without weakening the default matrix.
+### Pipeline Contracts
 
-Every live proof that claims Editorial Enhancement success must use the shared live-enhancement-run oracle. The oracle captures the run-journal baseline and every rendered progress transition before generation, including removed or replaced rows. It fails on any observed caution, warning, failure, warning/error journal entry, `provider.call.failed`, `prompt.install_skipped`, unmatched provider start, skipped Enhancement, `partial-failed` settlement, or unhealthy final Editorial result. The current `prepareForGeneration()` result must be `ok: true`; a retained final prompt-ready row cannot substitute for current-run preparation or a current-run prompt-ready transition. Diagnosis, candidate, and prompt-ready rows are mandatory for every enabled proof; Editorial verification is additionally mandatory for Redirect, which actually runs the Verifier, and is not fabricated for Repair. Progress rows and `provider.call.completed` are never mutation proof by themselves. Enabled `As Swipe` succeeds only when the same assistant message changes from N swipes to N+1, the appended swipe is selected, its text differs from the source, and a persisted `recursion.editorialMarker.v1` binds the chat, message, source swipe, mode, apply mode, source hash, candidate hash, diagnosis hash, and `applied` outcome. Enabled `Replace` instead requires an unchanged swipe count and selected index, changed text, and the same marker binding. Enhancement `Off` requires no Recursion mutation.
+`test-pipeline-segmented.mjs`, `test-pipeline-fused.mjs`, card tests, and runtime tests prove:
 
-The live Repair row additionally requires a nonempty validated `patches` artifact; a parseable full candidate, skipped result, partial failure, or red final settlement fails the command. The live Redirect row retains its nine-check production verifier and independent four-criterion effectiveness judge. This corpus is classified `served-runtime-synthetic-message-real-provider`: it drives the production runtime, provider, host adapter, and message metadata in a real served SillyTavern page while isolating its deterministic source messages from durable chat storage. It proves the in-page mutation contract, not a save/reload durability contract. `prove:card-progress-live` owns the visible-send native-chat mutation boundary.
+- Segmented creates one independently accepted outcome per requested card family;
+- valid siblings survive a failed sibling;
+- Fused rejects unrequested, duplicate, malformed, wrong-source, or wrong-family items independently;
+- a useful partial bundle checkpoints accepted items before Segmented repair;
+- a zero-useful bundle enters the full Segmented card path;
+- Manual scope remains a strict whitelist;
+- runtime trims over-budget card jobs before provider dispatch;
+- generated card text remains instruction-shaped evidence rather than story prose.
 
-Repair card-ledger regressions must prepare a real frozen hand from configurable
-source cards, preserve only the source-card IDs that contributed to that hand,
-and use generated packet text through frozen `packetRefs` without replacing
-those IDs. Tests include an explicitly empty configured hand, the full supported
-20-card generated packet, and more than 48 configured source-card obligations
-to prevent generated-ID fallback or fixed-count truncation. The first Transform
-result is validated strictly. A missing,
-duplicate, unknown, or invalid outcome may consume exactly one shared correction
-request. If the corrected Repair still lacks coverage while its bounded patch
-remains independently safe, tests require exactly one applied swipe or
-replacement, terminal `partial-failed` status, error journal severity, and red
-children only for the dynamically unresolved card IDs. Recompose must continue
-to reject incomplete coverage because it is a full rewrite. Redirect's existing
-audit reconstruction must remain non-failing. A persisted `partial-failed`
-marker must never be reused as a healthy cached Editorial result.
+### Provider And Attempt Contracts
 
-The checked-in `core` evaluation pack contains six Redirect cases covering turn
-deferral, wrong focus, unsupported outcome, character pressure, supported
-restraint, and unclear character-want evidence. Every explicit Redirect case must
-return `proceed`, append exactly one verified swipe, and pass both the production
-nine-check verifier and the independent four-criterion effectiveness judge.
-Provider-authored Redirect decision noise is pinned to the selected `proceed`
-identity when the structural proposal is usable; an empty proposal may spend the
-single shared malformed-output correction token. Machine-JSON token exhaustion may
-spend that same token on one compact retry. No Redirect operation may exceed four
-model calls.
-A skipped result never counts as Redirect success.
+Provider tests prove:
 
-Run the focused deterministic gates before the real-model proof:
+- Utility/Reasoner routing and capability states;
+- current-host-model, connection-profile, and direct OpenAI-compatible request shapes;
+- session-only secret handling;
+- structured response extraction, safe JSON repair, and semantic rejection;
+- stable failure classes and sanitized messages;
+- production calls have no implicit Recursion deadline;
+- Provider Test may use its own explicit bounded diagnostic deadline;
+- another attempt is dispatched only after a known failure, while current, with budget remaining;
+- provider failure cannot block ordinary SillyTavern chat generation;
+- no Recursion path automatically retries the host's primary story request.
 
-```powershell
-npm.cmd run test:providers
-node tools\scripts\test-provider-response-parser.mjs
-node tools\scripts\test-editorial-transform.mjs
-node tools\scripts\test-editorial-runtime.mjs
-npm.cmd run test:runtime
-npm.cmd run test:ui
-npm.cmd run test:model-eval
-npm.cmd run test:live-harness
-node tools\scripts\test-live-enhancement-run-oracle.mjs
-```
+### Post-process Contracts
 
-Then deploy the checkout only to a dedicated `recursion-soak-*` installation,
-hash-check the served files, and run `npm.cmd run prove:enhancements-live`. Its exit
-code comes exclusively from the shared strict oracle and mode-specific semantic
-evaluation. Screenshots under `artifacts/live-enhancements/<run-id>/` are supporting
-visual evidence, not a substitute for the machine verdict. Automated proof must
-never mutate `default-user`.
+The Post-process suite proves:
 
-For the full live `core` pack, run `tools/scripts/eval-recursion-models.mjs`
-directly with `--live --strict`; `npm.cmd run test:model-eval` is the deterministic
-harness regression and does not forward CLI arguments into a live evaluation. The
-live command must also name an existing dedicated-soak `--character-name` and
-`--chat-file`, because its preliminary visible-send traversal is not synthetic.
+- the source assistant response, visible evidence, Pre-process packet, active deck, and settings are frozen before work;
+- Unified and Progressive preserve their ordering;
+- guidance and each accepted draft are separate resumable artifacts;
+- Stop leaves the original response visible and unmodified;
+- As Swipe adds exactly one selected source-bound swipe;
+- Replace changes only the selected response after complete success;
+- host-commit receipts make replay idempotent;
+- stale, failed, or exhausted work cannot mutate host text;
+- terminal cleanup keeps only the final accepted rewrite and commit receipt.
 
-`npm.cmd run prove:card-progress-live` is the real-model visual health gate for the rendered progress tree. It uses a dedicated `recursion-soak-*` user, selects Fused + Auto + Redirect through the mounted controls, installs the shared live-enhancement-run oracle, sends a real host turn, waits for rendered Editorial rows to become terminal, reopens the popover, and captures desktop and phone screenshots. The proof fails when the tree is empty or closed, when prompt readiness is not `done`, when any current or historical row is caution/warning/failed/skipped, when the run journal is unhealthy or incomplete, or when the fresh assistant message does not move from one source swipe to exactly two swipes with the Recursion-owned second swipe selected and hash-bound. Repair's corresponding hard mutation proof is owned by `prove:enhancements-live`.
+### UI Contracts
+
+The UI/view-model suite proves:
+
+- Pipeline offers Segmented and Fused only;
+- Advanced exposes `Attempts per step` with default two and range one through five;
+- every progress row reserves one fixed 24px action slot;
+- untouched/ineligible rows have no action;
+- active shows Stop;
+- paused shows Resume;
+- retryable failed shows Retry Stage;
+- reusable completed/cached shows Clear Cache;
+- eligible completed/stale shows Reprocess from Here;
+- only one action is rendered at a time;
+- the action is direct, without a secondary expansion/menu;
+- selected or queued action state is cyan;
+- full-fresh accessible labels are exactly `Queue a full fresh generation` and `Full fresh generation: Queued`;
+- mobile truncates stage text before shrinking the action target;
+- tooltips and accessible names remain available when buttons are icon-only.
+
+### Storage And Privacy Contracts
+
+Tests must canary raw prompt, response, transcript, secret, and draft values, then prove those canaries do not appear in:
+
+- execution manifests;
+- normal diagnostics;
+- activity rows;
+- journals;
+- settings;
+- browser storage;
+- live report JSON or Markdown.
+
+Explicit diagnostic excerpts remain opt-in, bounded, and redacted. Artifact files may hold the minimum active-operation content required for Resume, but must be chat-scoped, hash-addressed, absent from manifest bodies, and removed by terminal cleanup or Reset.
 
 ## Playwright Readiness
 
-### Editorial transformation UI matrix
+`npm.cmd run check:playwright` is offline. It must:
 
-`npm.cmd run prove:editorial-ui -- --dry-run` prints the complete no-generation
-matrix. A live run requires `SILLYTAVERN_BASE_URL` and drives every editorial
-mode (`Off`, `Repair`, `Recompose`, `Redirect`) across Standard, Rapid, and
-Fused pipelines at desktop and compact-phone widths:
-
-```powershell
-$env:SILLYTAVERN_BASE_URL = 'http://127.0.0.1:8000'
-$env:RECURSION_SILLYTAVERN_USER = 'recursion-soak-a'
-npm.cmd run prove:editorial-ui
-```
-
-Each row opens the visible controls, checks the selected mode and pipeline,
-captures a screenshot artifact, and fails on visible caution/error surfaces.
-The run writes `artifacts/editorial-ui/report.json`; generation is never
-triggered by this matrix. Set `EDITORIAL_UI_VISUAL_BASELINES=1` to enable the
-stable screenshot baseline capture and dimension gate; dynamic regions must be
-marked `data-recursion-visual-volatile` and are masked before comparison.
-
-The Playwright readiness command must not contact SillyTavern. It proves browser automation is available before any live chat, user file, prompt, or provider state is touched. When Playwright is missing, it returns `environment-fail` with sanitized details.
-
-The readiness probe should:
-
-- launch Chromium through Playwright;
-- drive a role or label locator click;
-- capture console errors and page errors;
+- launch Chromium;
+- use an accessible role or label locator;
+- capture console and page errors;
 - switch between desktop and phone viewports;
-- write screenshots and a trace when artifact capture is enabled;
-- emit a concise JSON report and Markdown summary.
+- write a concise sanitized report;
+- return `environment-fail` without contacting SillyTavern when browser automation is unavailable.
 
-Readiness failures are environment failures, not Recursion runtime failures.
+Readiness proves the browser harness works. It does not certify a provider, an installed extension copy, or live host behavior.
 
 ## Live SillyTavern Smoke
 
-The current live smoke command is a guardrail script that validates safe user configuration and fails closed before mutation. The target live smoke proves Recursion in the real host. It should be focused and repeatable, not a Directive-style campaign certification run.
+Live mutation requires:
 
-Live smoke must start with these gates:
+- a reachable `SILLYTAVERN_BASE_URL`;
+- an explicit `recursion-soak-*` user;
+- `default-user` rejection before navigation or mutation;
+- `verify-installed-copy.mjs` SHA-256 identity across checkout, installed user copy, and served public copy;
+- a passing Recursion-owned write/read/delete storage probe;
+- a current Playwright readiness result.
 
-- `SILLYTAVERN_BASE_URL` is configured and reachable.
-- The configured SillyTavern user is a dedicated `recursion-soak-*` user.
-- `default-user` is rejected before any mutation.
-- Served extension manifest and selected source assets match the checkout under test, or the report clearly marks the run as stale/untrusted.
-- The dedicated user can write, read, verify, and delete a Recursion-owned storage probe.
-- Multi-user runs prove each configured soak user can see its own probe and cannot see another user's probe.
-- Playwright readiness has passed in the current environment.
+Primary scenarios:
 
-Primary live scenarios:
+- extension mount, compact Recursion Bar, menus, Last Brief, and Full Viewer;
+- Segmented/Fused selector location and persistence;
+- Auto/Manual and Power Off cleanup;
+- exact contextual action matrix at desktop and phone widths;
+- queued full-fresh and queued reprocess controls start no work until the next send/swipe;
+- Segmented prompt-ready flow;
+- Fused success, targeted Segmented repair, and zero-useful Segmented fallback;
+- Stop during a Recursion model stage, checkpoint preservation, and Resume without upstream replay;
+- Retry Stage after a controlled known failure;
+- prompt packet installation with finite numeric SillyTavern placement, role, and depth;
+- Post-process As Swipe/Replace mutation shape and commit idempotency;
+- chat/source change stale guards;
+- terminal artifact cleanup and complete Reset;
+- no raw private content in reports.
 
-- extension mount and Recursion Bar render;
-- Pipeline dropdown location and behavior: icon-only button left of Mode, Standard/Rapid/Fused rows, no duplicate Settings toggle;
-- mode transitions: disabled power, Auto, Manual;
-- pipeline transitions: Standard, Rapid, and Fused;
-- provider setup display and Test Provider action for Utility and Reasoner;
-- Manual prompt-install proof through the strict card-scope path;
-- Auto mode Utility Arbiter pass, card refresh, hand selection, prompt packet composition, and prompt installation;
-- Rapid warm evidence after assistant/source settle, proving cache-only provider work with no prompt-key installation;
-- Rapid foreground evidence for warm-v2 prompt install or warm-miss Standard escalation, with no local fallback card or local brief diagnostics;
-- Rapid mandatory-gap evidence, when fixtureable, proving Standard escalation rather than unsafe install;
-- Last Brief dropdown reflects the cards used for the last prompt packet;
-- Last Brief remains `ready` with the same packet and cards through Repair, Recompose, Redirect, delayed Enhancement-owned `MESSAGE_UPDATED` / `MESSAGE_SWIPED` events, and existing-swipe navigation;
-- Last Brief leaves `ready` only after the native send/swipe/regenerate generation interceptor begins, with explicit swipe generation distinguished from a low-level swipe event;
-- Hero Pixel Array progress menu shows model-call, cache, storage, composition, injection, fallback, and settled states;
-- full viewer opens Now, Deck, Activity, Prompt Packet, Settings, and Providers views;
-- prompt packet clear on power-off, chat change, disable, and teardown;
-- Utility provider failure falls back without blocking host generation;
-- Reasoner failure falls back to Utility or local composition without blocking host generation;
-- storage repair and journal pruning report logical progress without leaking physical paths.
+Generation-enabled smoke is opt-in. It hashes or counts outbound evidence and never persists raw generation request bodies. Setter calls alone are not prompt-install proof: the runner verifies the shared SillyTavern prompt store and marker-only evidence that the outbound request contains Guidance, Card Evidence, and Guardrails.
 
-Generation-enabled smoke may use real model calls only when explicitly enabled by `RECURSION_LIVE_GENERATION=1` or `RECURSION_LIVE_REASONER=1`. The runner first completes the same dedicated-user, served-extension, storage, and UI checks as no-generation smoke, then switches Recursion to Auto, wraps `setExtensionPrompt` to record only Recursion prompt keys, hashes, lengths, and numeric placement metadata, drives the visible SillyTavern send controls when both input and send button are available and enabled, and asserts visible hand readiness plus prompt-packet metadata. Setter calls alone are not prompt-install proof: the runner also verifies finite numeric metadata in the shared `extensionPrompts` store and records marker-only evidence that the final `/api/backends/chat-completions/generate` request contains Guidance, Card Evidence, and Guardrails. It never persists raw request content. If no visible send controls exist, non-strict runs may use the public `recursionGenerationInterceptor` as a diagnostic direct-bridge fallback and must record that trigger source as `direct-bridge`. Strict generation runs fail direct-bridge fallback with `generation-direct-bridge-diagnostic`; V1 release proof requires visible send controls, serialized Recursion prompt evidence, and host generation continuation. If only one visible send control exists, or controls are visible but disabled, the run fails instead of falling back. Generation-enabled runs suppress screenshots and Playwright traces because those binary artifacts can capture chat/model text. The smoke does not score writing quality or store raw provider prompts/responses.
-
-Pipeline-specific live proof is handled by:
+Pipeline proof commands use current values:
 
 ```powershell
-node tools\scripts\prove-live-pipelines.mjs --live --pipeline standard
-node tools\scripts\prove-live-pipelines.mjs --live --pipeline rapid
+node tools\scripts\prove-live-pipelines.mjs --live --pipeline segmented
 node tools\scripts\prove-live-pipelines.mjs --live --pipeline fused
 ```
 
-The script uses the same `SILLYTAVERN_BASE_URL`, `RECURSION_SILLYTAVERN_USER`, and dedicated-user guardrails as the smoke harness. It drives the real compact Pipeline dropdown, verifies the Pipeline button is left of Mode, verifies no Pipeline control appears in Settings, selects Injection placement, role, and depth through the visible Advanced settings controls, sends through visible SillyTavern controls, proves an assistant message follows the exact proof user message, and fails on browser console warnings/errors or page errors. The default live matrix covers Standard, Rapid, and Fused under both `in_prompt` and `in_chat`, with each placement isolated in its own browser context. Every row inspects the request-time SillyTavern prompt store and the actual `/api/backends/chat-completions/generate` request: `in_prompt` must store numeric position `0`, `in_chat` must store numeric position `1`, and all blocks must preserve the configured depth and role. Guidance, Card evidence, and Guardrails must then appear only in `system`-role outbound messages. Standard proof requires a ready hand. Rapid proof requires a `warm-v2` Rapid packet; a warm miss must be reported as Standard escalation, not as a Rapid summary install. Fused proof requires accepted bundle cards or a reported Standard fallback from an unusable bundle, never a silent empty-card install.
+If the live script has not yet been migrated to accept `segmented`, that is a failing harness gap; do not document or exercise a retired value as a compatibility path.
 
 ## Dedicated Live Users
 
-Automated live tests use dedicated SillyTavern users:
+Automated live tests use dedicated users such as:
 
 ```text
 recursion-soak-a
@@ -256,74 +219,35 @@ recursion-soak-b
 recursion-soak-c
 ```
 
-Additional users may follow the same `recursion-soak-*` prefix. Scripts must normalize user handles and reject empty handles, `default-user`, ambiguous aliases for the default profile, and any non-dedicated handle before login, browser navigation, storage probes, chat mutation, prompt injection, or provider calls.
+Scripts normalize user handles and reject empty handles, `default-user`, ambiguous default aliases, and non-dedicated handles before login, navigation, storage probes, chat mutation, prompt installation, or provider calls.
 
-Harness code must not use `default-user` as a convenience fallback when a user is missing. Missing or unsafe user configuration is either a dry-run checklist for non-mutating commands or an `unsafe-user` failure for state-mutating commands.
-
-`default-user` is manual-only. It may be used by a human operator for exploratory checks, but it must not produce automated pass/fail evidence and must not be accepted by state-mutating scripts.
+`default-user` is manual-only and cannot produce automated pass/fail evidence.
 
 ## Artifact Policy
 
-Every live run writes a timestamped report folder under:
+Normal evidence stores hashes, ids, counts, dimensions, bounded lifecycle codes, and sanitized status text. It does not store:
 
-```text
-artifacts/live-smoke/sillytavern/<run-id>/
-```
+- raw provider prompts or responses;
+- full transcripts;
+- draft or final story prose;
+- API keys, cookies, or authorization headers;
+- hidden reasoning;
+- artifact bodies;
+- unbounded local paths.
 
-Required artifact families are defined in [Artifact Contract](ARTIFACT_CONTRACT.md). Normal no-generation UI reports should store hashes, ids, counts, bounded status text, screenshots, and traces. Generation-enabled reports should store text/JSON evidence only. They should not store raw provider prompts, raw provider responses, full transcript archives, API keys, cookies, authorization headers, private notes, or hidden reasoning.
+No-generation screenshots and traces may be captured after the page is scrubbed of private chat content. Generation-enabled proofs suppress screenshots and traces unless the operator explicitly approves a safe synthetic fixture.
 
-Documentation renders are separate from run artifacts. Draft captures, raw traces, browser profiles, and local renderer output stay under `artifacts/` or `.recursion-doc-renderer/`. Only reviewed final assets move into `assets/documentation/renders/` and only then replace visible `<Render Needed>` markers. The open inventory and promotion rules live in [Documentation Render Tracking](DOCUMENTATION_RENDER_TRACKING.md).
+## Result Semantics
 
-## Pass And Fail Semantics
+- `pass`: every required assertion completed.
+- `fail`: Recursion or its harness violated a current contract.
+- `environment-fail`: browser, host, provider, auth, filesystem, or network conditions prevented a valid run.
+- `stale-extension`: served code differs from the checkout under test.
+- `manual-required`: a safety boundary requires human action.
+- `skipped`: an optional check was not enabled.
 
-## Card And Editorial Proof Matrix
-
-The focused suite must cover the live-facing contracts added on `card-system`: bundled Default Deck read-only behavior; custom deck/category/card CRUD; authored-card draft gating; `off`/`active`/`priority` cycles; bulk state actions; category/card drag ordering; Manual scope and Auto priority overflow; Card Assist commit boundaries; exact-source Rapid and swipe reuse; Fused partial repair; and visible normalized failure reasons.
-
-Prepared Generation Artifact coverage is maintained by
-`test-prepared-generation.mjs`, `test-runtime.mjs`,
-`test-extension-smoke.mjs`, `test-diagnostics.mjs`, and
-`test-live-harness.mjs`. The matrix includes exact and host-bounded suffix
-identity, leading-deletion rejection, settings/deck/provider drift, artifact
-integrity, zero-card hands, atomic install commit, final-snapshot races,
-install failure, Force Fresh/Regenerate bypass, stop/retry, repeated swipes in
-Standard/Rapid/Fused, zero provider calls, zero storage writes, one final cache
-decision per attempt, teardown, and diagnostic redaction. The pure contract
-test is part of `npm.cmd test` and the alpha gate, not a standalone optional
-check.
-
-Editorial tests must separately prove Repair, Recompose, and Redirect source binding, evidence references, patch bounds, installed-card outcome coverage, Repair's reserved semantic correction, verifier rejection, `As Swipe`, `Replace`, and no-write failure. Redirect coverage must include Low Utility routing, Ready and Untested Medium+ Reasoner routing, a visibly unavailable Medium+ row for blocking states, unchanged selection on unavailable click, and a pre-generation blocked path that makes no Editorial calls and settles `skipped`. Capability-journal tests must cover configuration transitions, health transitions, stale results, and redaction. The live UI matrix must include the experimental Redirect label and red failure rows.
-
-Live generation proof remains dedicated-user-only. Before browser navigation,
-chat mutation, or provider calls, run
-`node tools/scripts/verify-installed-copy.mjs --user <recursion-soak-user>` and
-require byte-for-byte SHA-256 identity across the repository production
-allowlist, installed user extension, and served public extension. Missing,
-extra, mismatched, or symlinked production files fail the proof. Repeat the
-verifier for `default-user` before any approved default-user proof.
-
-Use these result categories:
-
-- `pass`: required checks completed and no blocking warnings remain.
-- `fail`: Recursion behavior violates a contract.
-- `environment-fail`: browser, SillyTavern, auth, provider, filesystem, or network conditions prevented a valid run.
-- `stale-extension`: SillyTavern served code does not match the checkout under test.
-- `manual-required`: the script cannot safely proceed without a human action.
-- `skipped`: a check was intentionally not run because its opt-in flag was absent.
-
-Warnings may be acceptable for exploratory local smoke. Strict mode should promote warnings to failures.
+Strict proof promotes warnings to failures. A retained old success row, prior packet, or previous host mutation cannot substitute for current-run evidence.
 
 ## Non-Goals
 
-V1 testing should not build:
-
-- a 50-turn campaign soak;
-- story-quality certification;
-- campaign-specific factual-grounding review;
-- cross-extension certification for Memory Books, Summaryception, VectFox, or World Info;
-- long-form transcript replay;
-- save branching proof;
-- destructive edit/delete recovery proof beyond Recursion-owned prompt/cache cleanup;
-- model-cost benchmarking beyond basic duration and token diagnostics.
-
-Those are useful for Directive because Directive owns campaign state. Recursion owns a current-scene prompt compiler. Its live proof should stay aligned to that boundary.
+V1 testing does not build a long campaign soak, story-quality benchmark, continuity-memory proof, cross-extension certification, destructive chat recovery suite, or provider-cost benchmark. Those are outside Recursion's current-scene prompt-compiler boundary.

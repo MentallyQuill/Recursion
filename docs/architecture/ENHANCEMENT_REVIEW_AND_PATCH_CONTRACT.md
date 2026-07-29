@@ -494,7 +494,7 @@ await appendJournalSafe(runId, identity.chatKey, {
 | `src/runtime.mjs` | Replace the sequential full-message Dialogue/Prose loop with one review call, one capped retry, generation-snapshot persistence, cache identity, and review progress. |
 | `src/dialogue-enhancement.mjs` | Move reusable dialogue detection rules into generation-review helpers, then remove the full-message request/validator path. |
 | `src/prose-enhancement.mjs` | Move `dialogueSpans` and the common slop list into generation-review helpers, then remove the full-message request/validator path. |
-| `src/pre-process-decks.mjs`, `src/cards.mjs` | Expose a stable generation-time deck/installed-hand manifest and preserve individual source-card lineage through Standard and Fused results. |
+| `src/pre-process-decks.mjs`, `src/cards.mjs` | Expose a stable generation-time deck/installed-hand manifest and preserve individual source-card lineage through Segmented and Fused results. |
 | `src/enhancement-context.mjs` | Supply bounded Prompt Packet, Last Brief, installed-card evidence, character evidence, and context identifiers. |
 | `src/progress.mjs`, `src/ui.mjs`, `src/ui/view-model.mjs` | Render the fixed Generation Review tree, card-outcome children, concise detail, and truthful cached/partial/failure states. |
 | `src/settings.mjs` and user docs | Replace separate Prose/Dialogue user controls and copy with one Enhancement operation. |
@@ -528,10 +528,10 @@ This is a pre-alpha contract replacement. Remove obsolete `recursion.dialogueEnh
 
 Run each test against the installed extension copy and a real configured provider:
 
-1. Generate a response with each pipeline: Standard, Rapid, and Fused.
+1. Generate a response with each pipeline: Segmented and Fused.
 2. Run the single Enhancement As Swipe path and confirm its bounded revision is visible in the selected swipe.
 3. Confirm one review provider call per eligible enhancement, or one semantic correction after a contract violation; verify exact review-domain statuses, complete individual installed-card outcomes, and anti-slop findings in the progress tree.
-4. Exercise Standard, Rapid, and Fused custom-deck paths; verify a card appears in review only when it was installed and that Fused source-card children retain correct lineage.
+4. Exercise Segmented and Fused custom-deck paths; verify a card appears in review only when it was installed and that Fused source-card children retain correct lineage.
 5. Confirm a repeated identical swipe reuses the validated review result when its cache contract permits it; verify purple cached states.
 6. Confirm a changed source message, changed card/deck state, changed enhancement context depth, changed anti-slop profile, and force-fresh action bypass cache.
 7. Capture desktop and mobile screenshots. Verify the progress tree remains compact, status text is truthful, rows do not flicker across refresh heartbeats, and no success color is shown for skipped or unvalidated work.

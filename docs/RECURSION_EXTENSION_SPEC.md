@@ -17,7 +17,7 @@ Start here, then follow the focused specs:
 - [Product Scope](design/RECURSION_PRODUCT_SCOPE.md): product promise, V1 scope, non-goals, success criteria.
 - [Card System Spec](design/CARD_SYSTEM_SPEC.md): scene-local cards, card families, lifecycle, Utility Arbiter responsibilities, turn hand.
 - [Behavior Settings Policy Spec](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md): Strength, Min/Max Cards, Focus, and Prompt Footprint backend effects.
-- [Runtime Architecture](architecture/RUNTIME_ARCHITECTURE.md): host boundary, Standard/Rapid/Fused turn pipelines, Auto Control Plan, failure behavior, implementation slices.
+- [Runtime Architecture](architecture/RUNTIME_ARCHITECTURE.md): host boundary, Segmented/Fused stage graphs, durable checkpoints, Auto Control Plan, failure behavior, implementation slices.
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md): Utility and Reasoner lanes, source routing, machine-JSON schema metadata, structured calls, validation, session-only secrets, model-call journal.
 - [Prompt Composition Spec](architecture/PROMPT_COMPOSITION_SPEC.md): prompt packet contract, Utility/Reasoner composition, injection lanes, footprint profiles, omissions.
 - [Storage and Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md): settings, logical JSON records, scene cache, run journal, activity events, redaction, invalidation.
@@ -39,12 +39,11 @@ Current V1 decisions:
 - Ship the full fixed V1 card catalog described in [Card System Spec](design/CARD_SYSTEM_SPEC.md).
 - Build provider settings, provider contracts, and structured call contracts before the card loop depends on them.
 - The first working loop must support both Utility Composer and Reasoner Composer, with Utility Composer as the default and fail-soft path.
-- Pipeline selection is separate from Auto/Manual. Standard is the default full foreground path; Rapid warms a provider-generated card packet in the background and uses foreground Utility `rapidTurnDelta` when that warm packet is exact-source valid; Fused runs the foreground Arbiter and then generates all requested cards in one `fusedCardBundle` call.
-- Rapid must not create local fallback cards, local scene briefs, local turn briefs, or summary fast-start packs. Warm misses, missing mandatory guidance, invalid Rapid output, or provider-declared escalation continue through Standard for the same pending user message.
+- Pipeline selection is separate from Auto/Manual. Segmented is the default and generates each requested card through an independent simple call; Fused asks for one structured card bundle, validates siblings independently, and falls back to Segmented only when it yields zero useful cards.
 - Support all three provider sources for both lanes where the host permits it: current host model, host connection profile, and OpenAI-compatible endpoint.
 - Machine-readable Recursion provider jobs carry the expected response schema, request structured output where the host supports it, and still validate visible JSON before runtime trusts the result.
 - Advanced users can control where the conditioned final prompt packet is injected by setting placement, role, and depth; defaults use the recommended concrete `in_prompt`, `system`, depth `1` plan.
-- Use Directive-style runtime discipline for retries, timeouts, aborts, fallbacks, structured validation, and sanitized model-call diagnostics without importing Directive's campaign architecture.
+- Use durable checkpoints, bounded per-stage model-attempt windows, aborts, fallbacks, structured validation, and sanitized model-call diagnostics without importing Directive's campaign architecture. Recursion sets no default generation timeout.
 - Do not store raw provider prompts or raw provider responses by default.
 - Recursion lives in its own chat-attached top bar. It should sit as the lowest bar in the top-bar stack when the host layout makes that possible.
 - Invisible model calls, cache updates, prompt installs, and fallback actions must be visible through the Hero Pixel Array progress menu and current-step status instead of popup spam.
@@ -79,12 +78,12 @@ Recursion does not own:
 
 1. The SillyTavern host adapter captures a stable turn snapshot.
 2. Runtime derives the behavior influence policy for Strength, Min/Max Cards, Focus, and Prompt Footprint.
-3. Runtime selects the Standard, Rapid, or Fused pipeline from normalized settings.
-4. Standard sends the snapshot, current scene cache metadata, fixed V1 card catalog, provider status, behavior influence policy, and prompt budget context to the Utility Arbiter.
-5. Standard validates the Arbiter plan, enforces schema and budget caps, applies current behavior policy and card-scope policy, and executes requested card jobs from one frozen snapshot.
-6. Standard updates the scene deck with generated, refreshed, stowed, discarded, or stale cards, then passes the selected turn hand to prompt composition.
-7. Rapid uses exact-source warm provider artifacts when available; when no warm artifact is ready it continues through Standard.
-8. Utility `guidanceComposer` builds the guidance layer, Reasoner Composer assists when the shared capability resolver reports a configured Ready or Untested lane and policy selects it, and Standard, Rapid, and Fused preserve full selected raw card evidence in the normal prompt-install contract.
+3. Runtime creates or restores a source-bound operation manifest and selects Segmented or Fused from normalized settings.
+4. The Utility Arbiter receives the snapshot, current scene-cache metadata, fixed V1 card catalog, provider status, behavior influence policy, and prompt budget context.
+5. Runtime validates the Arbiter plan, enforces schema and budget caps, applies current behavior and card-scope policy, then runs the requested card graph from one frozen snapshot.
+6. Segmented runs independent per-card stages. Fused runs one bundle stage with per-card validation outcomes and zero-useful-card Segmented fallback.
+7. Successful stages commit isolated artifacts and metadata-only checkpoints before their dependents may run. Resume reuses only source-, settings-, provider-, version-, input-, dependency-, and artifact-hash-compatible checkpoints.
+8. Utility `guidanceComposer` builds the guidance layer, Reasoner Composer assists when policy and lane readiness select it, and both pipelines preserve full selected raw card evidence in the normal prompt-install contract.
 9. Runtime validates the packet and installs it through Recursion-owned SillyTavern prompt keys.
 10. The UI and storage layers receive sanitized diagnostics and latest-hand metadata.
 
@@ -149,7 +148,7 @@ RECURSION | Power | Pipeline | Mode | Cards | Hero Pixel Array + current step   
 It replaces the earlier shelf/drawer idea. The bar is thin, stable, mostly observational, and paired with:
 
 - a Hero Pixel Array progress menu for live status, model-call progress, cache writes, prompt installation, and fallback visibility;
-- an icon-only Pipeline menu for Standard, Rapid, and Fused;
+- an icon-only Pipeline menu for Segmented and Fused;
 - an icon-only Cards scope menu that Auto treats as focus and Manual treats as a strict whitelist;
 - an options/settings menu opened from the ellipsis;
 - a Last Brief dropdown opened from the dropdown arrow;
@@ -168,9 +167,26 @@ Storage is cache-oriented:
 - `recursion-system-index.v1.json`: rebuildable index of Recursion records.
 - `recursion-scene-{chatKey}-{sceneKey}.v1.json`: bounded scene deck and latest hand metadata.
 - `recursion-run-journal-{chatKey}.v1.json`: bounded sanitized diagnostics.
-- sanitized diagnostic artifacts.
+- `recursion-pipeline-run-{chatKey}.v1.json`: one metadata-only current operation manifest.
+- `recursion-pipeline-artifact-{chatKey}-{operationId}-{artifactId}-v1.json`: isolated resumable stage bodies.
+- `recursion-queued-reprocess-{chatKey}.v1.json`: one-shot full-fresh or dependency-aware stage intent.
 
 Cards are cache artifacts, not memories. Records can be invalidated aggressively on chat changes, hard scene shifts, source edits/deletes, provider/settings changes, or schema/catalog changes.
+
+## Resumable Execution Contract
+
+```json
+{
+  "pipelineMode": "segmented",
+  "modelAttemptsPerStep": 2
+}
+```
+
+`Attempts per step` is the total automatic attempt window for each model stage, from one through five. Local storage, validation, composition, and host-mutation stages do not consume it. Slow calls are not retried merely for being slow: there is no default latency deadline, and an attempt continues until it succeeds, fails, or is stopped. Recursion never automatically retries SillyTavern's primary story generation.
+
+Stop pauses the active operation after aborting its frontier call and preserves committed checkpoints. Resume continues from the saved frontier. Retry is available only for the blocking failed stage and reruns its descendants. Reprocess queues an eligible completed/cached stage and all dependents for the next generation. Full fresh is also one-shot and `Queued`; neither queued action starts work immediately.
+
+Checkpoints are cache, not authority over changed source material. A message, swipe, character/group identity, settings, provider, prompt version, stage version, dependency hash, or artifact integrity change makes incompatible work stale. Reset Scene Cache clears the current chat's scene cache, manifest, isolated artifacts, queued intent, and installed prompt state immediately.
 
 ## Provider Shape
 

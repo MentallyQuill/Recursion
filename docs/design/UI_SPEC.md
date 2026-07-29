@@ -57,17 +57,16 @@ Canonical desktop layout:
 
 The first control is a dedicated icon-only power toggle. It uses the same power icon shape as the mode menu previously used and is the only control that enables or disables Recursion. It must expose matching accessible label and hover tooltip copy (`Turn Recursion off` / `Turn Recursion on`). When disabled, Recursion clears or avoids installed prompt entries and does not inspect chat for prompt compilation.
 
-The Stop generation button is a separate active-only control, not a second power state. It appears while Recursion is preparing a prompt for a SillyTavern generation or while that host generation is still active. The button uses a square stop icon with accessible label and hover tooltip copy `Stop generation`. Clicking it must call the unified stop path: request SillyTavern generation stop through the host adapter, abort active Recursion provider work, prevent stale prompt installation, clear Recursion-owned prompt keys, mark the canceled attempt neutral/skipped, and close any active progress popover.
+The Stop button is a separate active-only control, not a second power state. During a Recursion stage, it aborts the current call, pauses the operation, preserves accepted checkpoints, and exposes Resume or Retry Stage in the progress row. During SillyTavern's primary story generation, it follows the native host stop seam, clears Recursion-owned prompt keys, and cancels the pending Post-process trigger. Recursion never automatically retries the primary story generation.
 
-When no active run or host generation exists, the same command slot shows an icon-only restart button with accessible label `Force next generation fresh`. Clicking it arms a one-shot fresh-next-generation token for the next send or swipe; it does not start Recursion provider work, install a prompt packet, or call SillyTavern native generation. While armed, the button remains visible in a pressed state and can be clicked again to cancel the token. Stop appears only while Recursion preparation or SillyTavern host generation is actually active. The next generation consumes the token once, bypasses cached cards, Fused bundle reuse, Rapid warm, latest-assistant swipe packet reuse, and same-turn packet reinstall, then returns to the selected pipeline. Regenerate is not Reset Scene Cache; it soft-invalidates current cache for the fresh run but does not delete scene cache records or SillyTavern messages.
+When no active run or host generation exists, the same command slot shows an icon-only full-fresh button with accessible label `Queue a full fresh generation`. Clicking it queues a one-shot full-fresh intent for the next send or swipe; it does not start Recursion provider work, install a prompt packet, or call SillyTavern native generation. While selected, its accessible label is `Full fresh generation: Queued`, it remains visible in a pressed state, and a second click cancels the intent. Stop appears only while Recursion preparation or SillyTavern host generation is actually active. The next generation consumes the intent once, bypasses cached cards, Fused bundle reuse, latest-assistant swipe packet reuse, and same-turn packet reinstall, then returns to the selected pipeline. Full fresh is not Reset Scene Cache; it invalidates current reusable work for one generation but does not delete SillyTavern messages.
 
-The pipeline control is a single icon-only button immediately to the left of the Mode button. It is not duplicated in Settings. It opens a compact dropdown with three choices:
+The pipeline control is a single icon-only button immediately to the left of the Mode button. It is not duplicated in Settings. It opens a compact dropdown with two choices:
 
-- Three stacked layer icon, `Standard`: runs the full foreground Arbiter, card, compose, and install path on send.
-- Tapered layer spike icon, `Rapid`: warms a provider-generated card packet in the background and uses a short provider delta on send.
+- Three stacked layer icon, `Segmented`: runs requested card families as separate narrow stages, suitable for smaller or simpler models.
 - Thick fused-layer icon, `Fused`: runs the normal foreground Arbiter, then asks one provider call to generate every requested card family as a structured bundle.
 
-The icons share one layer-based visual language. Standard shows three large stacked layers, signaling broad foreground scene coverage and detailed conditioning. Rapid shows one compressed layer shape tapering into a forward spike, signaling warmed provider-generated context moving through a faster foreground turn-delta path. Fused shows a thick combined layer, almost cube-like, as if multiple card layers have been compressed into one generated bundle. Rapid must not use a lightning bolt, timer, or empty shortcut glyph because the product promise is smarter-faster rather than lower-quality or skipped work. Fused must not use a sparkle, magic wand, or generic stack icon; the shape should imply combined card layers becoming one structured call.
+The icons share one layer-based visual language. Segmented shows three distinct stacked layers, signaling a series of small, independently checkpointed calls. Fused shows a thick combined layer, almost cube-like, as if multiple card layers have been compressed into one generated bundle. Fused must not use a sparkle, magic wand, or generic stack icon; the shape should imply combined card layers becoming one structured call.
 
 The selected pipeline changes the compact button icon immediately after selection. The dropdown follows the Mode menu pattern: icon, short name, hover/focus tip, native SillyTavern popup compactness, and close on selection, outside click, or `Esc`.
 
@@ -235,9 +234,8 @@ Standby phrase defaults:
 
 - Fresh enabled load or newly opened chat with no composed hand: `Ready for Recursion.`
 - Settled prompt install: `Recursion prompt ready.`
-- Idle Standard mode with selected cached/generated cards available: `Scene deck standing by.`
-- Idle Rapid mode with a warmed hand available: `Rapid deck standing by.`; `rapidWarmReady` activity may show `Rapid deck ready.`
-- Idle Manual mode: `Manual scope armed.`
+- Idle Segmented or Fused mode with selected cached/generated cards available: `Scene deck standing by.`
+- Idle Manual mode: `Manual scope ready.`
 - Disabled: `Recursion off.`
 - Warning or error standby: `Needs attention.`
 
@@ -279,6 +277,26 @@ failed pixels. Normal, running, successful, cached, and skipped text stays neutr
 
 The Hero Pixel Array is both a compact block-based state indicator and the entry point for live generation progress. Clicking it opens a popover that behaves like Codex-style task progress: a compact progress list where each row moves independently from waiting to running to a final outcome.
 
+Every progress row reserves exactly one fixed 24px action slot after metadata. The slot contains zero or one direct contextual icon:
+
+| Row state | Action owner | Icon action |
+| --- | --- | --- |
+| Running frontier | Executable owner | `Stop and pause this operation` |
+| Paused frontier | Executable owner | `Resume from saved checkpoint` |
+| Blocking failed | Executable owner | `Retry this step` |
+| Completed or cached | Executable owner | `Reprocess from here on the next generation` |
+| Queued | Executable owner | `Cancel queued reprocess` |
+| Stale | Earliest meaningful executable owner | `Reprocess from here on the next generation` |
+| Pending, blocked, or skipped | Any | none |
+| Fused validation child | Non-executable detail | none |
+| Unified Post-process child detail | Non-owner detail | none |
+
+Segmented card children own their independent actions. The Fused bundle parent owns the Fused action; its validation outcome children do not. The Unified Post-process parent owns its action; Progressive category parents own theirs. When multiple Segmented stages run concurrently, only one owner exposes Stop.
+
+The icons are square for Stop, play for Resume, rotate arrow for Retry, branching refresh for Reprocess, and x for cancel. The action itself uses Recursion cyan, while the row preserves green completion, purple cache reuse, red failure, or its other normal state color. The button's `aria-label` and `title` use the exact action copy above. It is keyboard focusable and touch-safe. There is no expansion dependency, safety flap, confirmation panel, second action, or mobile text label.
+
+Narrow-screen layout protects the action target: reason text truncates first, then metadata; the 24px action slot never shrinks. Rows without an action render the reserved slot so labels and metadata do not jump as state changes.
+
 The progress menu header keeps the title and subtitle in the same left-flow group with the reference 8px gap. The subtitle must not be pinned to the right edge; right alignment is reserved for row metadata and footer chips.
 
 The Hero Pixel Array and progress menu must render from the same normalized `progressRun.steps[]` view model. Do not maintain separate array state and menu state. Each visible top-level generation/progress row gets exactly one Hero Pixel Array block. If a UI control interaction creates only successful prompt cleanup/install rows, discard those rows from the progress menu and render no Hero Pixel Array blocks; clicking power, mode, reasoning level, settings tabs, Last Brief, or options must not populate generation progress. Keep control-side prompt warning or failed rows visible so the user can see a cleanup issue, but still do not create compact pixels for them. If provider subcalls are nested under a grouped row, they do not get separate Hero Pixel Array blocks unless they are also visible as top-level rows.
@@ -299,9 +317,9 @@ When a turn reaches a terminal prompt outcome (`Recursion prompt ready`, prompt 
 
 A successful generic `settled` event may complete `Recursion prompt ready`. A warning or error generic settlement must instead update the step named by its `logicalStage`; an unknown logical stage uses `Preparing Recursion response`. A failed settlement must never render `Recursion prompt ready` as failed.
 
-Successful provider work that required a retry is not plain green success. A successful retry is `warning` / amber with visible `retried` row meta and a safe reason such as `Provider card batch retried once before this card completed.` in tooltip/accessibility text. Parent rows follow the normal aggregation rule, so a batch containing retried-but-successful cards stays amber until superseded by a later clean run.
+Successful provider work that required more than one attempt is not plain green success. It is `warning` / amber with visible `retried` row meta and a safe reason such as `Provider card batch needed another attempt before this card completed.` in tooltip/accessibility text. Parent rows follow the normal aggregation rule, so a batch containing recovered cards stays amber until superseded by a later clean run.
 
-A SillyTavern Post-process rewrite that succeeds on attempt two retains the first attempt's stable `recoveredFailureCode`. The category and retried host-rewrite child show fixed recovered copy for empty text, unchanged text, timeout, or generic host failure. Because recovery already succeeded, these rows omit `suggestedAction`; they must not tell the user to retry again or copy a code that was not persisted. The code remains diagnostic metadata and is also stored on the successful category in the Post-process marker.
+A SillyTavern Post-process rewrite that succeeds on a later configured attempt retains the prior stable `recoveredFailureCode`. The category and recovered host-rewrite child show fixed copy for empty text, unchanged text, provider-owned timeout, or generic host failure. Because recovery already succeeded, these rows omit `suggestedAction`; they must not tell the user to retry again or copy a code that was not persisted. The code remains diagnostic metadata and is also stored on the successful category in the Post-process marker.
 
 Swipes and other source mutations start a fresh visible run. The new run must not inherit warning or failed row state from the prior generation. If the new run only checks or invalidates stale cache metadata before planning, render that as `Checking scene cache` with neutral completed state. Actual `Reusing scene deck` rows are cache reads and must use `cached` / purple, not amber.
 
@@ -1202,7 +1220,7 @@ Play is the default tab. It contains one open `Behavior` disclosure for controls
 
 The backend meaning of these controls is defined by [Behavior Settings Policy Spec](BEHAVIOR_SETTINGS_POLICY_SPEC.md). In short: Strength controls intervention pressure, Min/Max Cards control Reasoning Level card-count bounds, Max Cards also caps Manual selected families, Focus controls soft family priority, and Prompt Footprint controls final packet size/detail. They should be visible as high-level controls, not exposed as per-card weights or prompt-fragment editors.
 
-Pipeline, Mode, and Reasoning Level belong to the compact bar controls and must not be duplicated in Settings. Pipeline is selected from its bar dropdown only; Settings may persist the value but must not render a separate Standard/Rapid/Fused toggle. Reasoning Level is the user-facing provider-bias control. The compact bar uses the four-node chain visual:
+Pipeline, Mode, and Reasoning Level belong to the compact bar controls and must not be duplicated in Settings. Pipeline is selected from its bar dropdown only; Settings may persist the value but must not render a separate Segmented/Fused toggle. Reasoning Level is the user-facing provider-bias control. The compact bar uses the four-node chain visual:
 
 - Low: Utility-only bias with card pressure capped at Min Cards.
 - Medium: Utility Arbiter and Utility cards, then Reasoner guidance composition; card pressure capped at Normal Cards.
@@ -1240,6 +1258,7 @@ Provider Source changes the field context inside each lane immediately, matching
 Advanced contains low-frequency controls grouped into collapsible sections:
 
 - Injection: placement, role, and depth controls for the composed prompt packet.
+- Execution: `Attempts per step`, a numeric one-through-five control with default two and helper copy `Total automatic model attempts for each Recursion step. Slow calls are not retried unless they fail.` Production model calls have no Recursion default timeout.
 - UI: Tooltips, Sub-tier Rows, and Progress Rows. Tooltips are enabled by default on first install so new users can discover icon-only controls and compact status surfaces. Turning Tooltips off auto-saves immediately and removes Recursion tooltip and hover-help titles across the compact bar, popovers, card rows, settings, and diagnostics; normal buttons and click-open panels continue to work.
 - Context Windows: Post-process Evidence Messages, Source Freshness Messages, Source Freshness Text Budget, and Provider Analysis Messages. These controls bound Recursion-owned evidence and analysis windows; they do not replace or limit SillyTavern writer context.
 - Storage Retention: Scene Caches / Chat, Scene Caches Total, Swipe Variants / Scene, and Journal Entries. These controls tune Recursion-owned cache files and journals; they do not delete SillyTavern chat.

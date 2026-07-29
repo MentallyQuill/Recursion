@@ -60,8 +60,7 @@ Recursion exposes route visibility as a compact Reasoning Level summary rather t
 | `utilityArbiter` | Utility by default; configured Ready or Untested Reasoner at High/Ultra | Plan action, scene status, card jobs, Reasoner decision, budgets, and compact diagnostics. |
 | Card roles | Utility by default; configured Ready or Untested Reasoner for high-priority High cards and Ultra card calls | Generate fixed-family card JSON from the frozen snapshot. |
 | `fusedCardBundle` | Utility at Low/Medium; configured Ready or Untested Reasoner at High/Ultra | Generate all requested card families in one structured bundle for the Fused pipeline. |
-| `guidanceComposer` | Utility | Provider-authored direction for using selected raw card evidence in Standard, Rapid warm, Fused packets, and Post-process operations. Guidance remains structured; native host quiet generation writes prose. |
-| `rapidTurnDelta` | Utility | Foreground Rapid role that selects from warmed raw cards and emits a small user-message guidance delta. |
+| `guidanceComposer` | Utility | Provider-authored direction for using selected raw card evidence in Segmented and Fused packets, and for Post-process operations. Guidance remains structured; native host quiet generation writes prose. |
 | `reasonerComposer` | Reasoner | Medium+ synthesis for Pre-process and Post-process Guidance when the configured lane is ready or untested. |
 | `postProcessGuidance` | Utility or sticky Reasoner lane | Structured guidance for one frozen completed response and the active Post-process deck. It never writes prose. |
 | `editorialDiagnostician` | Utility for Repair/Recompose; Redirect follows its readiness-specific lane | Diagnoses the frozen response and emits the mode-bound editorial brief before any candidate or patch is written. |
@@ -70,13 +69,11 @@ Recursion exposes route visibility as a compact Reasoning Level summary rather t
 | `editorialEffectivenessJudge` | Reasoner-capable Redirect proof lane | Independently judges Redirect effectiveness in live certification; it is not semantic authority for Repair. |
 | `providerTest` | Selected lane | Connectivity and structured response test for provider settings UI. |
 
-Card roles are `sceneFrameCard`, `activeCastCard`, `characterMotivationCard`, `dialogueRelationshipCard`, `socialSubtextCard`, `sceneConstraintsCard`, `knowledgeSecretsCard`, `clocksConsequencesCard`, `environmentAffordancesCard`, `possessionsItemsCard`, and `openThreadsCard`. Fused wraps those card families in `fusedCardBundle` with response schema `recursion.cardBundle.v1`; each accepted item inside the bundle still validates as one `recursion.card.v1` card. Rapid foreground roles are Utility-only; they do not run on the Reasoner lane.
+Card roles are `sceneFrameCard`, `activeCastCard`, `characterMotivationCard`, `dialogueRelationshipCard`, `socialSubtextCard`, `sceneConstraintsCard`, `knowledgeSecretsCard`, `clocksConsequencesCard`, `environmentAffordancesCard`, `possessionsItemsCard`, and `openThreadsCard`. Fused wraps those card families in `fusedCardBundle` with response schema `recursion.cardBundle.v1`; each accepted item inside the bundle still validates as one `recursion.card.v1` card.
 
 Runtime sends card roles only for jobs that can fit the effective selected-hand budget. The Arbiter is still instructed to respect `budgets.maxCards`, but runtime enforces that boundary before the expensive provider-call layer and records `card-jobs-budgeted` when it trims over-requested jobs.
 
-Fused is meant for stronger reasoning model families that can maintain a larger multi-card structured contract in one response, such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar models. Standard is a better fit for fast, cheaper utility-class models, including 500B-and-lower models, Nemotron, GPT-OSS, Gemma, and similar, because each call has a narrower one-card contract.
-
-Rapid foreground roles are latency-sensitive structured Utility calls. `rapidTurnDelta` is used only when an exact-source warm artifact is ready. If no warm artifact is available, Rapid escalates to Standard for that same pending user message. Runtime must not replace missing Rapid output with local scene briefs, turn briefs, or summary packs.
+Fused is meant for stronger reasoning model families that can maintain a larger multi-card structured contract in one response, such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar models. Segmented is a better fit for smaller or simpler local and utility-class models because each call has a narrower one-card contract. Fused validates every returned sibling independently, repairs missing or damaged siblings with Segmented calls when any useful item survives, and falls back to the full Segmented card path only when the bundle yields no useful cards.
 
 ## Routing Diagram
 
@@ -120,7 +117,7 @@ disable provider-layer structured retries while preserving the single runtime
 semantic-correction budget, so a parse-valid but semantically invalid result
 gets one explicit correction request rather than silently losing its retry.
 
-The structured parser may recover common provider formatting damage: markdown fences, wrapper prose, `<think>` / `<reasoning>` blocks, comments, trailing commas, smart quotes, BOMs, and literal line breaks inside JSON strings. Repair never supplies missing contract fields. A repaired object that lacks the expected `schema`, role/family, valid evidence, or composer envelope remains invalid and is retried or rejected by the same semantic validators as strict JSON. Roles that require a provider-echoed `snapshotHash` still reject missing or mismatched hashes. Rapid foreground roles instead stamp local revision hashes from the frozen request after schema validation, because those hashes are runtime bookkeeping rather than provider-authored guidance.
+The structured parser may recover common provider formatting damage: markdown fences, wrapper prose, `<think>` / `<reasoning>` blocks, comments, trailing commas, smart quotes, BOMs, and literal line breaks inside JSON strings. Repair never supplies missing contract fields. A repaired object that lacks the expected `schema`, role/family, valid evidence, or composer envelope remains invalid and is retried or rejected by the same semantic validators as strict JSON. Roles that require a provider-echoed `snapshotHash` still reject missing or mismatched hashes.
 
 Every generation-role request carries `responseSchema` and `machineJson: true` into the host adapter. Requests with a frozen snapshot also carry `snapshotHash`. Host adapters may use that metadata to request structured JSON support, but the metadata is advisory until the router validates the visible response body.
 
@@ -146,19 +143,19 @@ If a known endpoint rejects reasoning fields, the adapter retries once without t
 
 ## Retries And Fallbacks
 
-Provider calls use a 120 second default timeout unless a caller overrides it. The longer default keeps live host connection-profile routes from failing early while still bounding stalled Recursion work.
+Recursion sets no default generation timeout. A slow local or remote model may remain pending until it returns, the provider fails it, or the user stops the operation. Provider-owned deadlines still surface as provider failures, and the small Provider Test action may use an explicit bounded diagnostic deadline without changing production generation behavior.
 
-Transient transport and server failures can receive one same-lane retry only while the abort signal has not fired and the current-run or current-snapshot guard still passes. Recoverable structured-output schema failures receive one correction retry that names the expected `schema` field and, when present, the frozen `snapshotHash` field. Repair's initial diagnosis and Transformer calls reserve the shared correction for runtime semantic validation; provider-layer retry is disabled for those calls without consuming the budget. Provider results normalize to statuses such as success, validation failed, provider failed, timeout, aborted, or stale.
+The advanced `Attempts per step` setting controls the total automatic model attempts for each model stage. Its range is one through five and its default is two. Local validation, persistence, cache reads, host commits, and other non-model stages do not consume attempts. An attempt is consumed when Recursion dispatches a model call. A known transport, provider, or structured-output failure may use another attempt only while the operation is current, its abort signal has not fired, and the stage has attempts remaining. Slow-but-pending calls are not retried.
 
-Rapid foreground Utility calls may hedge: runtime starts the primary Utility call immediately and starts a backup Utility call after the configured short delay if no valid structured output has returned. The first valid structured output wins, diagnostics record whether `primary` or `backup` won, and late results cannot install prompt packets after the run is no longer current. Hedging is limited to Rapid foreground roles and is not used for final Story generation.
+The attempt window belongs to the durable stage, not an individual browser callback. Stop pauses the operation and aborts the current call while preserving accepted checkpoints. Resume continues the earliest incomplete stage. Retry Stage discards that stage's failed or partial output and gives it a fresh configured attempt window. Reprocess from Here is queued for the next generation and invalidates the selected stage plus its dependents; it never races the active run.
+
+Recursion never automatically retries SillyTavern's primary story generation. It can retry only its own Pre-process and Post-process model stages. A provider may still charge for a response that never reaches Recursion, so automatic recovery cannot guarantee cost recovery.
 
 Fallback behavior:
 
-- Utility provider unavailable, timed out, or transport-failed reuses valid cache when safe; otherwise runtime clears Recursion injection and skips new guidance.
+- Utility provider unavailable or transport-failed reuses a valid checkpoint or scene cache entry when safe; otherwise runtime pauses or fails the affected operation without discarding unrelated accepted work.
 - Invalid Utility Arbiter schema or missing/mismatched Arbiter `snapshotHash` can use a conservative local fallback plan because a provider result existed but failed structured validation.
-- Rapid warm miss escalates to Standard for the same pending user message; it does not permit local Rapid cards, local Rapid scene briefs, local Rapid turn briefs, or summary fast-start packs.
-- Rapid invalid structured output, mandatory missing cards, or provider-declared Standard escalation continue through the Standard pipeline for that same pending user message.
-- Fused bundle validation reports accepted, invalid, rejected, omitted, and missing requested families. When at least one requested item is trustworthy, runtime repairs only damaged or missing siblings through individual Standard card calls for the same pending user message. Wrong snapshot, provider failure with no recoverable item fragments, or zero trustworthy items triggers full Standard card fallback.
+- Fused bundle validation reports accepted, invalid, rejected, omitted, and missing requested families. When at least one requested item is trustworthy, runtime repairs only damaged or missing siblings through individual Segmented card calls for the same pending user message. Wrong snapshot, provider failure with no recoverable item fragments, or zero trustworthy items triggers full Segmented card fallback.
 - Card call failure omits failed cards and keeps valid siblings.
 - Reasoner failure falls back to Utility guidance plus raw selected Card Evidence.
 - Provider test completion records compact hash-bound health without changing provider configuration.
@@ -174,8 +171,8 @@ Journal entries are sanitized and bounded. They can include:
 - provider id and model label
 - schema id
 - latency
-- retry count
-- effective timeout
+- attempt number and configured attempt window
+- provider-reported timeout or failure classification, when applicable
 - frozen snapshot hash when the request carries one
 - request hash
 - response hash
@@ -201,9 +198,9 @@ OpenAI-compatible requests read the key only at call time. Error text and diagno
 
 ## Abort And Stale Handling
 
-Provider calls receive abort signals from runtime. Timeouts use an internal abort controller. Batch calls combine the runtime signal with per-request signals. Retry guards may be synchronous or asynchronous; when they report that the run is no longer current, the router skips the transient retry and returns sanitized failure results for the pending call or batch entries.
+Provider calls receive abort signals from runtime. Batch calls combine the runtime signal with per-request signals. Attempt guards may be synchronous or asynchronous; when they report that the operation is no longer current, the router skips the next attempt and returns a sanitized result for the pending call or batch entries.
 
-If a run is no longer active, runtime returns a superseded result and refuses to apply late cache, prompt, or activity updates. Aborted calls are recorded as aborted rather than installed. When the abort comes from SillyTavern `GENERATION_STOPPED`, runtime performs host-stop cleanup and reports skipped progress so the user sees cancellation, not a provider warning or failure.
+If an operation is no longer active, runtime returns a stale result and refuses to apply late cache, prompt, or activity updates. Aborted calls are recorded as aborted rather than installed. Stop preserves durable accepted checkpoints and exposes Resume or Retry Stage. When SillyTavern's own `GENERATION_STOPPED` event ends primary story generation, Recursion cleans up its prompt and pending Post-process trigger but does not attempt to restart the host generation.
 
 ## Operator-Visible Provider States
 

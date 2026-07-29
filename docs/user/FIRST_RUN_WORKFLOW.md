@@ -1,179 +1,153 @@
 # First Run Workflow
 
-This guide walks through the first useful Recursion session in SillyTavern. It assumes Recursion is installed or served as an extension and that you are using the current V1 pre-alpha contract.
+Recursion is a current-scene prompt compiler. It observes the active chat, builds a compact scene deck and turn hand, and installs a bounded prompt packet when Auto or Manual mode is active. Pipeline selection is separate from Auto and Manual: Segmented generates cards through a series of narrow calls, while Fused asks a stronger model for one multi-card bundle and repairs or falls back through Segmented when needed.
 
-Recursion is a current-scene prompt compiler. It observes the active chat, builds a compact scene deck and turn hand, and installs a bounded prompt packet when Auto or Manual mode is active. Pipeline selection is separate from Auto and Manual: Standard runs the full foreground pass on send, Rapid warms a provider-generated card packet in the background and uses a shorter foreground delta, and Fused generates all requested foreground cards in one structured bundle call. Recursion is not a memory manager, lore database, summary engine, vector recall layer, or campaign save system; its editable card decks are local operator configuration, not durable lore.
+Recursion is not a memory manager, lore database, summary engine, vector recall layer, or campaign save system. Its editable card decks are local operator configuration, not durable lore.
 
-## 1. Install And Enable
+## 1. Open Recursion
 
-1. Install or serve Recursion as a SillyTavern extension.
-2. Open SillyTavern extension settings.
-3. Enable `Recursion`.
-4. Return to the active chat and confirm the Recursion Bar appears near the chat surface.
-
-![SillyTavern with Recursion enabled and the Recursion Bar mounted](../../assets/documentation/renders/recursion-first-run-install-enable.png)
-
-The bar should expose the power toggle, icon-only Pipeline control, icon-only mode control, adjacent Pre-process Cards and Post-process Cards controls, Tense & PoV control, Hero Pixel Array plus current-step text, active-only Stop generation button during a running turn, Reasoning Level chain, Last Brief dropdown arrow, and ellipsis options entry. On narrow screens, the process controls compact while their menus remain available.
-
-![Recursion Bar mounted below the SillyTavern chat header](../../assets/documentation/renders/recursion-first-run-bar-mounted.png)
+1. Open a SillyTavern chat.
+2. Find the compact Recursion Bar attached to the chat.
+3. Turn Recursion on.
+4. Open the ellipsis menu and choose Providers.
 
 ## 2. Configure Utility
 
-Utility is required. It is the default lane for Arbiter planning, card work, provider tests, guidance composition, and fail-soft fallback guidance.
+Utility is required.
 
-1. Open the Recursion options menu from the ellipsis.
-2. Choose the `Providers` tab.
-3. Configure the Utility provider source:
-   - Current Host Model;
-   - Host Connection Profile; or
-   - OpenAI-Compatible Endpoint.
-4. If using an OpenAI-compatible endpoint, enter base URL and a session API key.
-5. Use `Fetch Models` if the endpoint exposes `/models`, then select a fetched model or type the model id manually.
-6. Run `Test Provider`.
+1. Choose Current Host Model, a Host Connection Profile, or an OpenAI-Compatible Endpoint.
+2. Complete the visible fields.
+3. If using a direct endpoint, enter the session-only API key.
+4. Run Test Provider.
+5. Confirm Utility reports Ready.
 
-Session API keys are memory-only for the browser session. Recursion may remember that a session key is present, but it must not save the key in settings, scene cache, prompt packets, journals, diagnostics, browser local storage, SillyTavern file storage, reports, or test artifacts.
+Provider Test uses a bounded diagnostic deadline. Normal Recursion model stages do not: a slow local or remote model may remain pending until it returns, fails, or you stop the operation.
 
-## 3. Optionally Configure Reasoner
+## 3. Choose Segmented
 
-Reasoner is optional. Leave it unconfigured for the first pass unless you intentionally want Medium/High/Ultra routing to use the extra synthesis lane.
+Start with Segmented. It gives each requested card family a smaller, simpler structured call and is the safest first choice for local, small, or less capable models.
 
-Reasoning Level controls how strongly Recursion tries to use Reasoner. Low is Utility-only. Medium uses configured Ready or Untested Reasoner for guidance. High adds that Reasoner lane for Arbiter and priority card families. Ultra is Reasoner-heavy. Untested is caution-only and remains routable. If Reasoner is unconfigured, unhealthy, or a routed call fails, Recursion keeps the selected level visible and falls back to Utility for ordinary Pre-process work. High/Ultra Post-process guidance fails soft only when its required Reasoner lane is unconfigured, unhealthy, or fails.
+1. Open the icon-only Pipeline selector immediately left of Mode.
+2. Select Segmented.
+3. Set Mode to Auto.
+4. Leave Tense & PoV on Auto.
+5. Send a message.
+6. Watch the progress tree reach Prompt ready or show a clear fail-soft outcome.
 
-## 4. Run The First Auto Pass
+SillyTavern's primary story generation remains host-owned. Recursion never automatically retries it.
 
-Auto prepares and installs the next Recursion prompt packet.
+## 4. Understand Recovery
 
-1. Confirm the power toggle is on.
-2. Set Pipeline to `Standard`.
-3. Leave Tense & PoV on `Auto` unless the chat has a known tense or point-of-view mismatch.
-4. Set mode to `Auto`.
-5. Send a safe, ordinary chat message.
-6. Watch the Hero Pixel Array progress menu for visible progress.
-7. Wait for `Recursion prompt ready.` or a clear fallback state.
-8. Confirm the Stop generation button is visible while the host turn remains active.
-9. Let SillyTavern generation continue normally.
+Recursion checkpoints accepted stage work, so one failed late call does not require replaying the whole pipeline.
 
-![Hero Pixel Array progress menu during a first Auto pass](../../assets/documentation/renders/recursion-first-run-auto-pass.png)
+The progress tree exposes one contextual icon per eligible row:
 
-Use the Last Brief dropdown and Prompt Packet panel when you want to inspect exactly what Recursion installed.
+| State | Action |
+| --- | --- |
+| Active | Stop |
+| Paused | Resume |
+| Retryable failure | Retry Stage |
+| Reusable completed/cached | Clear Cache |
+| Eligible completed/stale | Reprocess from Here |
 
-Tense & PoV controls the story-form contract used by card generation and guidance. `Auto` asks the Arbiter to infer the form from the latest visible assistant narration. Forced past/present first-, second-, third-person, and mixed POV options are available for correction, but they should not be needed for a normal first pass.
+Stop pauses the Recursion operation and preserves accepted checkpoints. Resume continues from the earliest incomplete stage. Retry Stage resets only the failed stage. Reprocess from Here queues that stage and its dependents for the next generation.
 
-## 5. Try Manual
+Hover the icon for its tooltip. On touch devices, the accessible label supplies the same meaning. The action slot stays fixed while long stage text truncates.
 
-Manual uses the Pre-process Cards selector as a strict whitelist. Disabled families stay out of planning, deck reuse, hand selection, composition, and injection.
+## 5. Tune Attempts
 
-1. Set mode to `Manual`.
-2. Send a safe, ordinary chat message.
-3. Confirm the Hero Pixel Array progresses and prompt readiness reflects the selected card scope.
+Open Advanced settings and find Attempts per step.
 
-![Hero Pixel Array progress menu during a Manual pass with narrowed card scope](../../assets/documentation/renders/recursion-first-run-manual-pass.png)
+- Default: 2
+- Range: 1 through 5
+- Meaning: total automatic model attempts for each Recursion model stage
 
-A normal Auto pass may show stages such as reading the current turn, planning the card pass, generating or reusing scene cards, selecting the turn hand, composing the prompt packet, installing the Recursion prompt, saving cache, and ready state.
+Only dispatched model calls consume attempts. Local validation, persistence, cache reads, prompt installation, and host commits do not. A pending slow call is not duplicated.
 
-## 6. Try The Card Deck
+## 6. Try Manual
 
-After the first pass, open the Pre-process Cards surface and inspect the bundled Default Deck.
+Manual uses the same Segmented or Fused execution graph but limits runnable card work to the families and sub-items you select.
 
-1. Review the fixed card families and their focus sub-items.
-2. Duplicate the Pre-process Default Deck so it becomes editable.
-3. Create or rename a category and add an authored card.
-4. Cycle one card through `off`, `active`, and `priority` in Auto mode.
-5. Drag a category or card handle to change its order.
-6. Run another pass and inspect which cards entered the turn hand and which were omitted.
+1. Open Cards.
+2. Select the card scope you want.
+3. Set Mode to Manual.
+4. Send or swipe.
+5. Confirm only the allowed runnable cards appear in the completed hand.
 
-Card Assist may suggest authored content, but the suggestion is not committed until you review and save it. The deck is separate from the scene-local generated cache and the one-turn hand.
+## 7. Try Fused
 
-## 7. Try Rapid
+Use Fused when the configured model is strong at larger structured JSON contracts.
 
-Rapid is useful after Standard is already working. It does not skip provider-authored guidance; instead, it moves card-packet work into a background warm step and uses a short Utility foreground delta on the next send.
+1. Confirm Segmented works first.
+2. Select Fused from the Pipeline control.
+3. Send a message.
+4. Watch for bundle generation and validation.
 
-1. Confirm Utility is configured and passing provider tests.
-2. Set Pipeline to `Rapid`.
-3. Let an assistant message land or wait for the scene to settle so Recursion can warm a Rapid scene artifact.
-4. Send a safe, ordinary chat message.
-5. Confirm the progress text reports Rapid warm, Rapid turn delta, warm-miss Standard escalation, or a clear fallback honestly.
+Fused keeps useful siblings from a partial bundle and repairs only damaged siblings through Segmented calls. It uses the full Segmented card path only when no useful bundle cards survive.
 
-```mermaid
-flowchart LR
-    Standard["Standard first"] --> Confirm["Confirm prompt ready or clear fallback"]
-    Confirm --> Rapid["Switch to Rapid"]
-    Rapid --> Warm["Let scene warm"]
-    Warm --> Send["Send next message"]
-    Send --> Outcome["Rapid delta, Standard escalation, or clear fallback"]
-```
+## 8. Queue Fresh Work
 
-## 8. Try Fused
+When Recursion is idle, the command slot shows Regenerate.
 
-Fused is optional for a first session, but it is useful to verify once Standard works and you have a stronger provider model configured.
+1. Click it once.
+2. The button's state becomes `Full fresh generation: Queued`.
+3. Send or swipe when ready.
 
-1. Set Pipeline to `Fused`.
-2. Send a safe, ordinary chat message.
-3. Confirm progress reports `Generating fused card bundle...`, targeted Standard repair, or a clear full Standard fallback.
-4. Inspect Last Brief or Prompt Packet to confirm accepted Fused cards enter the normal Card Evidence path.
+The click itself starts no model or host work. The next generation consumes the intent once and bypasses reusable Pre-process checkpoints and scene-cache work. Clicking again before consumption cancels it.
 
-```mermaid
-flowchart LR
-    Standard["Standard works"] --> Fused["Switch to Fused"]
-    Fused --> Bundle["One fusedCardBundle call"]
-    Bundle --> Packet["Normal prompt packet"]
-    Bundle -. "damaged sibling" .-> Repair["Targeted Standard repair"]
-    Repair --> Packet
-    Bundle -. "zero trustworthy cards" .-> Fallback["Full Standard fallback"]
-```
+Use Reprocess from Here when only one stage and its dependents need rebuilding. Use Clear Cache when a specific cached stage should no longer be reusable.
 
-## 9. Inspect Last Brief And Viewer
+## 9. Inspect Results
 
-After Auto or Manual has produced a hand:
+Use Last Brief and Full Viewer to inspect:
 
-1. Open the Last Brief dropdown arrow from the Recursion Bar.
-2. Review compact selected cards, emphasis, omission hints, and composition route.
-3. Expand card rows when you need full card text.
-4. Use `Prompt Packet` when available.
-5. Open the Full Viewer from options/settings.
-6. Inspect `Now`, `Deck`, `Activity`, `Prompt Packet`, `Settings`, and `Providers`.
+- selected cards and omissions;
+- Guidance, Card Evidence, and Guardrails;
+- operation and stage states;
+- attempts and normalized failure classes;
+- cache and checkpoint reuse;
+- queued, stale, and completed lifecycle states.
 
-![Last Brief dropdown after a first Auto pass](../../assets/documentation/renders/recursion-first-run-inspection.png)
+Diagnostics remain sanitized. Raw prompts, raw provider responses, transcript text, draft prose, hidden reasoning, API keys, and artifact bodies do not appear in normal diagnostic output.
 
-The prompt packet should be bounded and inspectable. It should contain current-scene guidance, not raw provider output, hidden reasoning, broad lore, or transcript-scale summaries.
+## 10. Optional Post-process
 
-## 10. Clear Or Disable Safely
+Post-process is off by default. When enabled, it begins only after SillyTavern completes an assistant response.
 
-Use these controls when you want Recursion out of the next generation:
+- Unified applies the enabled Post-process deck in one guidance/rewrite sequence.
+- Progressive carries the latest valid draft through enabled categories.
+- As Swipe appends a selected Recursion-owned swipe.
+- Replace commits only a complete successful result.
 
-- Click the power toggle off to stop Recursion and clear or skip Recursion-owned prompt lanes.
-- During an active generation, click Stop generation to stop the SillyTavern generation, abort Recursion work, and clear Recursion-owned prompt lanes in one action.
-- Disable the extension if you want Recursion fully inactive.
-- Clear session keys when you are finished with direct endpoint testing.
+Guidance and rewrite drafts are checkpointed. Stop preserves the original response and accepted work. Resume continues from the earliest incomplete Post-process stage. A host-commit receipt prevents a resumed operation from duplicating a swipe or replacement.
 
-Prompt cleanup should remove stale Recursion prompt packets. If prompt cleanup fails, normal generation should continue without trusting stale Recursion guidance, and the UI should show a warning.
+## 11. Reset
 
-## First Run Pass Criteria
+Use Reset only when you want to remove all Recursion-owned operational state. It clears:
 
-The first run is healthy when:
+- scene cache;
+- execution manifests and artifacts;
+- queued intents;
+- prepared-generation state;
+- in-memory packet, hand, and plan state;
+- journals;
+- Recursion prompt keys.
 
-- Recursion Bar is mounted and stable.
-- Utility provider can be configured and tested.
-- Standard Auto mode reaches prompt ready or a clear fail-soft fallback.
-- Tense & PoV defaults to Auto and can expose forced story-form options without disrupting the bar.
-- Manual mode respects the selected card scope and reaches prompt ready or a clear fallback.
-- Rapid mode reports warm, turn-delta, warm-miss Standard escalation, or clear fallback states without installing local substitute Rapid guidance.
-- Fused mode reports bundle generation, targeted Standard repair, or full Standard fallback, and accepted bundle cards appear as normal Card Evidence.
-- Active Stop generation cancels both the host generation and Recursion prompt work without showing a provider failure.
-- Last Brief and Full Viewer inspection are available.
-- Prompt Packet inspection shows bounded current-scene guidance.
-- Power-off or extension disable removes Recursion from the next prompt path.
-- An optional Post-process Cards trial reports guidance, host rewrite, category settlement, and swipe/replace outcome, or a specific safe failure reason without changing the original response.
+Reset does not delete or rewrite SillyTavern chat history.
 
-## 11. Optional Post-process Cards Trial
+## First-Session Checklist
 
-After a normal assistant response lands, open Post-process Cards, enable the Starter Post-process Deck, and start with `Unified` plus `As Swipe`. Confirm that the progress tree shows guidance synthesis, native host rewrite, and swipe settlement, or a specific safe failure reason. Then try `Progressive` with one optional card enabled and confirm category order and partial-failure behavior leave the original available.
-
-![First-session Post-process Cards result with frozen evidence, guidance, host rewrite, and swipe settlement](../../assets/documentation/renders/recursion-first-run-post-process-result.png)
+- Utility provider is configured and tested.
+- Segmented reaches Prompt ready or a clear fail-soft outcome.
+- The progress tree shows at most one contextual action per row.
+- Stop preserves accepted checkpoints; Resume does not replay successful upstream stages.
+- Attempts per step reflects the amount of automatic recovery you want.
+- Fused either accepts its bundle, performs targeted Segmented repair, or reports full Segmented fallback.
+- A queued full-fresh generation begins only on the next send or swipe.
+- Power Off clears Recursion-owned prompt keys.
 
 Related docs:
 
-- [Operator Manual](RECURSION_OPERATOR_MANUAL.md)
 - [Provider Setup](PROVIDER_SETUP.md)
-- [Prompt Privacy And Safety](PROMPT_PRIVACY_AND_SAFETY.md)
-- [Live Smoke Test Plan](../testing/LIVE_SMOKE_TEST_PLAN.md)
+- [Recursion Operator Manual](RECURSION_OPERATOR_MANUAL.md)
+- [Runtime Turn Sequence](../technical/RUNTIME_TURN_SEQUENCE.md)

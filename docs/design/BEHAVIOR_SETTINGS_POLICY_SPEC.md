@@ -342,6 +342,23 @@ Visible surfaces:
 - Full Viewer should show the full sanitized behavior policy for the last run.
 - Export Diagnostics may include the policy object, but not raw prompts or provider responses.
 
+### Execution controls
+
+Pipeline scheduling is an orthogonal behavior setting. The canonical settings shape is:
+
+```json
+{
+  "pipelineMode": "segmented",
+  "modelAttemptsPerStep": 2
+}
+```
+
+`pipelineMode` accepts `segmented` or `fused`. Segmented uses independent, simple per-card calls and is the safer fit for smaller or locally hosted models. Fused makes one structured bundle call, validates each outcome, and uses the Segmented card path only when no useful bundle item survives.
+
+Advanced settings label the numeric attempt control `Attempts per step` and explain: `Total automatic model attempts for each Recursion step. Slow calls are not retried unless they fail.` Values are one through five, default two. Only model stages consume the window. Recursion has no default generation timeout and does not automatically retry primary SillyTavern story generation.
+
+Changing pipeline or attempt settings invalidates incompatible active work through the normal provenance rules. It does not start generation. Resume continues a paused compatible operation; Retry explicitly reruns a blocking failed stage; Reprocess is `Queued` for the next generation and invalidates that stage plus dependents; full fresh is also a one-shot queued action.
+
 ## Implementation Status
 
 The deterministic V1 policy surface is implemented in `src/settings-policy.mjs` and covered by focused settings-policy, runtime, prompt, card-scope, and UI tests.

@@ -208,12 +208,11 @@ Generation roles describe why a model call exists. They are not the same thing a
 | `environmentAffordancesCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances | Omit card with diagnostic |
 | `possessionsItemsCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them | Omit card with diagnostic |
 | `openThreadsCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture immediate unresolved pressures and promises visible in play | Omit card with diagnostic |
-| `fusedCardBundle` | Utility by default, Reasoner when Fused routing selects it | Generate every requested card family together in one structured foreground bundle | Fused bundle validation reports accepted, invalid, rejected, omitted, and missing requested families. Runtime uses that structure to rerun only damaged or missing requested families when at least one fused item is trustworthy. |
-| `rapidTurnDelta` | Utility | Select warm raw cards and write provider-authored turn guidance for the Rapid foreground path | Escalate to Standard only when a missing card is mandatory |
+| `fusedCardBundle` | Utility by default, Reasoner when Fused routing selects it | Generate every requested card family together in one structured foreground bundle | Validate every sibling independently; if zero useful cards survive, run the Segmented per-card stages. |
 | `guidanceComposer` | Utility | Write provider-authored direction for using selected raw cards in the next generation | Fall back to raw-card-only packet when invalid or unavailable |
 | `cardAuthoringAssist` | Utility | Rewrite a user draft or intent into a compact high-value Recursion card suggestion | Keep the user draft as local fallback and expose provider-fallback diagnostics |
-| `postProcessGuidanceUtility` | Utility at Low/Medium only | Analyze where and how the frozen ordered Post-process cards apply; return concise structured guidance, never revised story prose | One same-role Utility correction retry at most; invalid or unavailable guidance fails the operation/category without Reasoner fallback |
-| `postProcessGuidanceReasoner` | Reasoner at High/Ultra only | Analyze where and how the frozen ordered Post-process cards apply; return concise structured guidance, never revised story prose | One same-role Reasoner correction retry at most; invalid or unavailable guidance fails the operation/category without Utility fallback |
+| `postProcessGuidanceUtility` | Utility at Low/Medium only | Analyze where and how the frozen ordered Post-process cards apply; return concise structured guidance, never revised story prose | May use the remaining configured stage attempts on Utility; exhaustion fails the operation/category without Reasoner fallback |
+| `postProcessGuidanceReasoner` | Reasoner at High/Ultra only | Analyze where and how the frozen ordered Post-process cards apply; return concise structured guidance, never revised story prose | May use the remaining configured stage attempts on Reasoner; exhaustion fails the operation/category without Utility fallback |
 | `reasonerComposer` | Reasoner | Fuse crowded or conflicted card hands into a compact instruction patch | Fall back to Utility guidance plus raw selected Card Evidence |
 | `providerTest` | Selected lane | Validate lane connectivity and structured response capability at the configured max-token ceiling | Record hash-bound health only; never mutate provider configuration |
 
@@ -223,8 +222,7 @@ The literal `compose-brief` Arbiter action remains a V1 enum name for the
 Pre-process Guidance/Card Evidence/Guardrails packet. The router rejects
 undeclared role ids and requires each role to return its expected schema before
 reporting `ok: true`: Arbiter uses `recursion.utilityArbiter.v1`, card roles use
-`recursion.card.v1`, Fused card bundles use `recursion.cardBundle.v1`, Rapid
-foreground uses `recursion.rapidTurnDelta.v2`, Guidance Composer uses
+`recursion.card.v1`, Fused card bundles use `recursion.cardBundle.v1`, Guidance Composer uses
 `recursion.guidanceComposer.v1`, Card Authoring Assist uses
 `recursion.cardAuthoringAssist.v1`, Post-process guidance uses
 `recursion.postProcessGuidance.v1`, Reasoner Composer uses
@@ -316,7 +314,7 @@ Low Redirect uses Utility for diagnosis, transformation, and verification.
 Medium, High, and Ultra require a configured Reasoner capability in `ready` or
 `untested` state before host generation.
 Diagnosis remains on its normal Utility-first policy; transformation and
-verification remain on the exact armed Reasoner configuration with no Utility
+verification remain on the exact selected Reasoner configuration with no Utility
 fallback. Runtime revalidates that configuration before diagnosis and before
 each mandatory Reasoner stage.
 
@@ -334,11 +332,11 @@ the produced candidate independently on exact criteria `replacement-objective`,
 `forbidden-source-beats`, `character-pressure`, and `evidence-and-constraints`.
 Normal chat generation never invokes it.
 
-`generationReviewer` first follows the global Structured Output Recovery contract. Its request carries the frozen source hash, eligible patch target IDs, and installed card IDs as structured fields so the provider machine schema can bind `sourceHash` and constrain patch, evidence, and outcome identifiers before semantic validation. Once its JSON and role schema pass, its role validator confirms the frozen source hash, exact eligible dialogue/prose target text, non-overlap, installed card IDs, outcome labels, and evidence target IDs. The active mode-specific Editorial path adds the Repair compact-audit contract: `editorialVerifier` returns only dynamic `failedCardIds`, and Recursion derives the complete canonical ledger and decision locally. Parser/schema correction, raw JSON reformat, and semantic review correction are mutually exclusive uses of one external correction request; Repair initial diagnosis/Transform calls preserve that budget by disabling provider-layer structured retry. A correction always preserves lane, provider source, model configuration, frozen snapshot, and pipeline provenance; raw provider text and hidden reasoning never reach review state, cache, journals, or UI details.
+`generationReviewer` follows the centralized stage-attempt policy. Its request carries the frozen source hash, eligible patch target IDs, and installed card IDs as structured fields so the provider machine schema can bind `sourceHash` and constrain patch, evidence, and outcome identifiers before semantic validation. Once its JSON and role schema pass, its role validator confirms the frozen source hash, exact eligible dialogue/prose target text, non-overlap, installed card IDs, outcome labels, and evidence target IDs. The active mode-specific Editorial path adds the Repair compact-audit contract: `editorialVerifier` returns only dynamic `failedCardIds`, and Recursion derives the complete canonical ledger and decision locally. Parser/schema failure, raw JSON reformat failure, and semantic review failure may motivate the next attempt only while the model stage remains current and has attempts remaining. Every attempt preserves lane, provider source, model configuration, frozen snapshot, and pipeline provenance; raw provider text and hidden reasoning never reach review state, cache, journals, or UI details.
 
-Card roles, `guidanceComposer`, `reasonerComposer`, and `rapidTurnDelta` receive the Arbiter-normalized `recursion.storyForm.v1` object as request context. Card roles must return instruction-shaped `promptText` in that form rather than narrative prose, mini-scenes, dialogue, sensory recap, or decorative narration. Guidance roles must align their prompt guidance to the same tense and point of view rather than deriving an independent form from the prompt.
+Card roles, `guidanceComposer`, and `reasonerComposer` receive the Arbiter-normalized `recursion.storyForm.v1` object as request context. Card roles must return instruction-shaped `promptText` in that form rather than narrative prose, mini-scenes, dialogue, sensory recap, or decorative narration. Guidance roles must align their prompt guidance to the same tense and point of view rather than deriving an independent form from the prompt.
 
-When a `fusedCardBundle` provider call fails structured-output parsing but exposes visible response text, runtime may recover complete card objects from the `items` array prefix. Recovered fragments still pass the normal snapshot and per-card validation before use. Full Standard card fallback is reserved for zero trusted Fused cards.
+When a `fusedCardBundle` provider call fails structured-output parsing but exposes visible response text, runtime may recover complete card objects from the `items` array prefix. Recovered fragments still pass the normal snapshot and per-card validation before use. Full Segmented card fallback is reserved for zero trusted Fused cards.
 
 ## Utility Arbiter Call
 
@@ -590,10 +588,10 @@ Journal entries may include:
 - request hash;
 - response hash;
 - schema id;
-- retry count;
+- attempt count;
 - compact error code and compact error message.
 
-Successful calls with a nonzero retry count are success-with-caution for visible progress. Runtime may accept their data, but the progress row should remain amber with compact `retried` meta and a sanitized reason instead of turning green.
+Successful stages that required more than one attempt are success-with-caution for visible progress. Runtime may accept their data, but the progress row remains amber with compact `retried` meta and a sanitized reason instead of turning green.
 
 Normalized provider error codes include:
 
@@ -603,7 +601,7 @@ Normalized provider error codes include:
 
 Machine-JSON token exhaustion receives at most one compact structured recovery.
 Sanitized failure diagnostics retain the provider model, effective output ceiling,
-finish reason, token usage, visible response size, retry count, and recovery kind
+finish reason, token usage, visible response size, attempt count, and recovery kind
 when the provider supplies them. They never retain provider text or reasoning.
 
 Journal entries must not include:
@@ -622,11 +620,11 @@ The Inspector may show the latest calls and validation status, but raw prompt/re
 
 Provider failures must degrade Recursion, not the chat.
 
-Provider failures cross the runtime/activity boundary only as normalized failure descriptors. Known errors use fixed, sanitized user copy; unknown provider errors say that the selected model connection could not complete the request. Timeout copy says `before the time limit` unless the classifier owns the exact effective duration. Provider retry and routing policy is unchanged.
+Provider failures cross the runtime/activity boundary only as normalized failure descriptors. Known errors use fixed, sanitized user copy; unknown provider errors say that the selected model connection could not complete the request. A provider-owned timeout may still be classified as a timeout, but Recursion does not impose a default generation deadline.
 
 Utility failure:
 
-- retry the same Utility call once only for transient transport failures or timeout classes when the runtime still owns the current snapshot;
+- let the owning model stage consume another attempt when its configured attempt window remains open and the runtime still owns the current snapshot;
 - do not block normal SillyTavern generation;
 - reuse a still-valid installed prompt packet only if its snapshot/settings hashes match;
 - otherwise clear or skip Recursion injection for the turn;
@@ -641,7 +639,7 @@ Card failure:
 
 Reasoner failure:
 
-- retry the same Reasoner call once only for transient transport failures or timeout classes when the runtime still owns the current snapshot and the current configuration hash remains eligible;
+- let the owning model stage consume another attempt when its configured attempt window remains open, the runtime still owns the snapshot, and the current configuration hash remains eligible;
 - fall back to Utility guidance plus raw selected Card Evidence;
 - do not run an additional hidden Utility model call solely to recover the Reasoner result; use the Guidance composer output that is already part of the normal route, or compose locally from accepted cards if available;
 - record a compact reason such as auth failure, timeout, validation failure, or provider error.
@@ -653,7 +651,7 @@ OpenAI-compatible authentication failure:
 - keep the API key out of error messages;
 - require the user to re-enter or clear the session key before another direct-endpoint test.
 
-Timeouts and aborts:
+Slow calls, provider-owned timeouts, and aborts:
 
 - provider calls must receive an abort signal from the runtime;
 - user disable, chat change, settings change, and host generation stop should abort in-flight Recursion calls when their output would be stale;
@@ -662,19 +660,20 @@ Timeouts and aborts:
 
 ## Retry and Fallback Policy
 
-Recursion should borrow Directive's robustness discipline in smaller form:
+All Recursion-owned model stages use one centralized attempt policy:
 
-- every provider call has a role, lane, timeout, run id, snapshot hash, and abort signal;
-- every result is normalized into success, validation failure, provider failure, timeout, abort, or stale result;
-- default provider timeout is 120 seconds unless a caller overrides it;
-- transient transport failures may get one same-lane retry only while the abort signal is still open and the current-run or current-snapshot guard passes; classification walks bounded nested `cause` chains because SillyTavern connection profiles wrap upstream failures in a generic `API request failed` error;
-- schema failures do not get blind retries unless the failure is clearly recoverable, such as schema mismatch or likely truncation; correction prompts must restate the required response `schema` and frozen `snapshotHash` when present;
-- card failures, including malformed batch entries, omit only the failed card and keep valid siblings;
-- Utility Arbiter failure reuses valid cache or skips injection;
-- Reasoner failure falls back to Utility guidance plus raw selected card evidence;
-- all fallbacks emit progress status and sanitized journal events.
+- Advanced `Attempts per step` is an integer from one through five and defaults to two.
+- The value is the total number of automatic model calls available to each model stage, including the first call. It is not “retries plus one.”
+- Local, storage, validation, packet-build, prompt-install, and host-commit stages do not consume model attempts.
+- Each call keeps the same logical role and lane. A validation failure may use a correction request for the next attempt; transport failure may repeat the request.
+- Abort, stale source, or supersession ends the attempt window immediately.
+- Recursion supplies no default timeout. A slow call may remain pending indefinitely until the provider returns, fails, or the user stops it.
+- SillyTavern's primary story generation is outside this attempt policy and is never automatically retried by Recursion.
+- Exhausting a blocking stage pauses the operation and exposes explicit Retry. Retry opens a new attempt window for that stage and invalidates its dependents without rerunning unrelated valid checkpoints.
+- Card failures keep accepted siblings under their declared failure policy. Fused with zero useful cards falls back to Segmented.
+- Every fallback and exhausted window emits bounded status and diagnostics without provider bodies.
 
-The retry policy should be conservative. Reattempts are for resilience, not for chasing better creative output.
+Automatic attempts are for recovery from failure, not for chasing a more pleasing creative answer. A provider may still charge for an attempt whose response never reached Recursion; checkpointing prevents unrelated successful work from being discarded but cannot reverse that charge.
 
 ## V1 Cuts
 

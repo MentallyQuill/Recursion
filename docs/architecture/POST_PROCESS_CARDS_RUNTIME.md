@@ -4,6 +4,10 @@
 **Approved design:** [Post-process Cards Design](../superpowers/specs/2026-07-18-recursion-post-process-cards-design.md)
 **Implementation plan:** [Post-process Cards Implementation Plan](../superpowers/plans/2026-07-18-recursion-post-process-cards.md)
 
+The dated design remains the product origin, but its fixed two-attempt and
+ephemeral-intermediate claims are superseded by this runtime boundary and the
+[resumable execution design](../superpowers/specs/2026-07-29-recursion-resumable-pipeline-execution-design.md).
+
 ## Supersession Boundary
 
 Post-process Cards replace the old Generation Review, Enhancements, Dialogue
@@ -63,8 +67,8 @@ prose writer.
 
 ```text
 ordered runnable categories/cards
-  -> one same-lane guidance synthesis (at most two attempts)
-  -> one native quiet host rewrite (at most two attempts)
+  -> one same-lane guidance model stage
+  -> one native quiet host rewrite model stage
   -> one final commit
 ```
 
@@ -89,27 +93,32 @@ latest valid draft -> one final commit
 
 Each category receives unchanged frozen evidence and only its enabled cards.
 After a successful category, its host result is the writable draft for the next
-category; the original draft is not reintroduced.  Progressive is per category,
-not per card, and intermediate drafts remain operation memory only.
+category; the original draft is not reintroduced. Progressive is per category,
+not per card. Guidance and drafts are isolated durable artifacts while the
+operation is resumable, then intermediate artifacts are deleted after commit.
 
 ## Retries, Failure, and Cancellation
 
-Guidance gets an initial call plus one retry on the same frozen role and lane.
-There is no cross-lane fallback.  A guidance failure ends Unified unchanged; in
-Progressive it marks that category failed and later categories continue from the
-last valid draft.
+Guidance and native quiet rewrite are model stages. Each receives the configured
+`Attempts per step` total window, from one through five, and preserves its frozen
+role/lane or identical host packet across attempts. There is no cross-lane
+fallback. An accepted guidance checkpoint is reused while its rewrite stage
+retries or resumes; guidance is not synthesized again. Empty, exact-no-op, and
+invalid host results consume attempts. Abort or stale source ends the window
+immediately.
 
-A successful guidance packet is retained in operation memory.  If its quiet
-rewrite fails, retry the host rewrite once with the identical packet; do not
-repeat guidance.  Empty, exact-no-op, stale, and canceled host results are
-unusable and consume that host retry.  A second Unified host failure leaves the
-original unchanged.  A Progressive failure leaves the prior valid draft in
-place and continues later categories.  If every Progressive category fails,
-there is no final mutation.
+Exhausting Unified leaves the original unchanged and pauses at the blocking
+stage for explicit Retry. A failed Progressive category preserves the prior
+valid draft and may allow later categories under the graph's continue policy.
+If every Progressive category fails, there is no final mutation. Recursion sets
+no default deadline for either guidance or quiet rewrite; the user may Stop a
+stalled call.
 
 The operation is stale, and therefore cannot commit, when chat, source message,
-selected swipe, source hash, active character, or active group changes.  The
-unified Stop action aborts the active guidance request or quiet generation.
+selected swipe, source hash, active character, or active group changes. The
+unified Stop action aborts the active guidance request or quiet generation,
+checkpoints the paused frontier, and preserves completed guidance and drafts for
+Resume.
 While quiet generation runs, its internal host events belong to the active
 Post-process operation: they cannot arm or recurse into another operation.
 Host controls stay locked, normal Pre-process cleanup settles safely, and the
@@ -117,19 +126,19 @@ transient prompt key is cleared in `finally`.
 
 Control ownership begins before guidance synthesis, not only when the quiet
 writer starts. SillyTavern's native `#mes_stop` therefore remains visible for
-guidance, its retry, the native rewrite and retry, source validation, and final
+guidance attempts, native rewrite attempts, source validation, and final
 commit. Its native `GENERATION_STOPPED` event is the authoritative cancellation
 input for both Recursion provider work and the host writer.
 If native control acquisition fails, Post-process cancels before guidance and
 performs one best-effort unlock. Switching Post-process Off after a generation
-was armed also cancels before control acquisition. Canceled work does not start
-Rapid warming, and terminal progress settles any running pixel blocks.
+was queued for Post-process also cancels before control acquisition. Terminal
+progress settles any running pixel blocks.
 
 SillyTavern emits scalar `GENERATION_ENDED` with `chat.length`. Recursion
 normalizes that count to the current latest assistant identity before final
 target validation. Explicit object message ids are preserved. Valid,
 invalid, and duplicate terminal events all settle host-generation state;
-only one verified target may claim the armed Post-process operation.
+only one verified target may claim the queued Post-process operation.
 
 ## Final Output, Marker, and Privacy
 
@@ -147,6 +156,14 @@ counts.  It must not persist raw card prompts, guidance text, provider output,
 transcript excerpts, intermediate drafts, hidden reasoning, or provider
 secrets.  Generation-enabled proof likewise stores only safe metadata and no
 screenshots, traces, or raw text.
+
+Durable execution keeps Post-process bodies only in isolated artifact records.
+After the host-commit receipt is safely checkpointed, runtime deletes the frozen
+source artifact, guidance artifacts, and earlier Progressive drafts while
+retaining the final accepted draft and receipt. Resume checks the receipt and
+the source-bound host marker before mutation; if the commit is already present,
+`resume-commit-already-applied` completes without creating a duplicate swipe or
+replacement.
 
 ## Dependency Classification
 

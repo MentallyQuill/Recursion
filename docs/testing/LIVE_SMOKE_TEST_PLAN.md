@@ -4,7 +4,7 @@ The live smoke plan proves Recursion inside a real SillyTavern browser session. 
 
 It is not a long-form story soak or campaign certification run.
 
-Post-process smoke uses the same dedicated-user gate after the assistant response lands. It freezes the source and bounded evidence, verifies Unified and Progressive guidance/rewrite progress, checks native host quiet-generation settlement, and proves that As Swipe and Replace produce the documented marker and mutation shape. The event fixture must use SillyTavern's real scalar `GENERATION_ENDED` payload (`chat.length`) and prove it binds to the latest assistant. The Hero Pixel Array must show running and terminal Post-process blocks. SillyTavern's native Stop must remain visible from guidance synthesis through quiet rewrite and final commit, and clicking it during guidance or rewrite must abort without a late mutation. Post-process Off must not extend native Stop ownership. A Progressive category failure must retain the latest valid draft and settle only as a swipe; no failed or stale run may mutate the host message.
+Post-process smoke uses the same dedicated-user gate after the assistant response lands. It freezes the source and bounded evidence, verifies Unified and Progressive guidance/rewrite progress, checks native host quiet-generation settlement, and proves that As Swipe and Replace produce the documented marker and mutation shape. The event fixture must use SillyTavern's real scalar `GENERATION_ENDED` payload (`chat.length`) and prove it binds to the latest assistant. The Hero Pixel Array must show running and terminal Post-process blocks. Stop during guidance or rewrite must pause the Recursion operation without a late mutation, preserve accepted checkpoints, and expose Resume or Retry Stage. Post-process Off must not extend native Stop ownership. A Progressive category failure must retain the latest valid draft and settle only as a swipe; no failed or stale run may mutate the host message.
 
 Every enabled Post-process certification run uses **As Swipe**. It is a failed
 test unless the same assistant message changes from `N` swipes to exactly
@@ -137,9 +137,10 @@ Live Editorial Enhancement proofs use `tools/scripts/lib/live-enhancement-run-or
 | Scenario | Mutates chat | Requires provider | Must prove |
 | --- | --- | --- | --- |
 | Mount smoke | no | no | Recursion extension loads, Recursion Bar renders, Hero Pixel Array progress menu can open, settings/options can open, viewer can open. |
-| Pipeline smoke | no | no | Pipeline button appears immediately left of Mode, opens the Standard/Rapid/Fused menu, persists selected pipeline mode, and does not duplicate Pipeline controls in Settings. |
+| Pipeline smoke | no | no | Pipeline button appears immediately left of Mode, opens the Segmented/Fused menu, persists selected pipeline mode, and does not duplicate Pipeline controls in Settings. |
+| Execution-control smoke | no, unless provider work is explicitly enabled | no for fixture path | Each stage row reserves one 24px action slot and shows only its state-valid Stop, Resume, Retry Stage, Clear Cache, or Reprocess from Here action; queued actions do not start work. |
 | Mode smoke | no | no | Disabled power, Auto, Manual, and return-to-disabled controls update runtime state, clear Recursion prompt keys, and record sanitized `modeSmoke` proof. |
-| Swipe smoke | temporary in-page only | no | Older-message `MESSAGE_SWIPED` clears Recursion prompts, changes active source revision A -> B, and returns to the same A revision on swipe back; deterministic latest-assistant retry tests prove no clear, no Rapid warm, and same-packet reinstall. |
+| Swipe smoke | temporary in-page only | no | Older-message `MESSAGE_SWIPED` clears Recursion prompts, changes active source revision A -> B, and returns to the same A revision on swipe back; deterministic latest-assistant tests prove source-bound prepared-generation reuse only. |
 | Storage probe | files only | no | Dedicated user can write/read/delete Recursion-owned files and records are isolated from other users. |
 | Manual smoke | optional | Utility | Manual applies as a distinct mode, blocks over-cap family selection, forces selected family coverage, installs prompts, and records sanitized proof for the Manual branch. |
 | Utility provider smoke | yes | Utility | Arbiter/card/composer work runs, progress menu reports it, prompt packet installs, and generation continues. |
@@ -182,7 +183,7 @@ The smoke should fail if controls overlap chat input, if text escapes compact co
 
 - Seed a Recursion-owned prompt key as a cleanup sentinel.
 - Turn power off and verify prompt keys are absent or cleared.
-- Open the Pipeline menu and verify Standard, Rapid, and Fused choices are present, selectable, and persisted through `pipelineMode`.
+- Open the Pipeline menu and verify Segmented and Fused choices are present, selectable, and persisted through `pipelineMode`.
 - Set Auto mode and verify the runtime is ready to compile when a generation begins.
 - Set Manual mode and verify it applies as a distinct mode.
 - Return to power off and verify cleanup.
@@ -201,6 +202,10 @@ When providers are configured:
 - Verify model, lane, status, duration, and redacted error category appear in diagnostics.
 
 Provider tests must not persist API keys, raw prompts, or raw responses. They use the lane's configured max-token ceiling, default `8192`, with a bounded timeout and strict structured health response.
+
+The Provider Test deadline is diagnostic-only. Production Pre-process and
+Post-process model stages have no Recursion default generation timeout. Smoke
+must verify a pending call is not duplicated merely because it is slow.
 
 ### 5. Manual Pass
 
@@ -251,7 +256,7 @@ Reasoner output must not add unsupported lore, hidden story plans, private thoug
 The runner should exercise at least one controlled failure path:
 
 - invalid provider response;
-- provider timeout;
+- provider-reported timeout or transport failure;
 - injection failure from a fake adapter path;
 - storage write failure in a fake host or guarded live path.
 

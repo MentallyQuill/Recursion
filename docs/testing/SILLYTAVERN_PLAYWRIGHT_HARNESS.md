@@ -55,7 +55,7 @@ $env:RECURSION_SILLYTAVERN_USER = 'recursion-soak-a'
 npm.cmd run prove:enhancements-live
 ```
 
-The default matrix runs both `Redirect` and `Repair` under Standard, Rapid, and Fused. A diagnostic run may set `RECURSION_ENHANCEMENT_PROOF_CASE` to a pipeline/mode pair such as `standard-repair`; only the unfiltered command is the complete matrix.
+The default matrix runs both `Redirect` and `Repair` under Segmented and Fused. A diagnostic run may set `RECURSION_ENHANCEMENT_PROOF_CASE` to a pipeline/mode pair such as `segmented-repair`; only the unfiltered command is the complete matrix.
 
 The shared live-enhancement oracle receives the configured Enhancement mode, concrete assistant state before and after the run, the runtime Enhancement return value, and the final Editorial settlement. For enabled `As Swipe`, pass requires exactly one appended swipe, selection of that appended swipe, changed text, and a persisted Recursion marker whose identity and hashes match the source and candidate. `Replace` has a separate in-place contract and must not change swipe count. `Off` must not mutate.
 
@@ -200,7 +200,7 @@ When only one user is configured, the script verifies that user's storage but em
 - locate the Recursion Bar;
 - open the options/settings menu;
 - open the Hero Pixel Array progress menu;
-- switch disabled power, Standard/Rapid/Fused Pipeline, Auto, and Manual states;
+- switch disabled power, Segmented/Fused Pipeline, Auto, and Manual states;
 - render Utility and Reasoner capability as Configure, Untested, Ready, or Unhealthy with no provider enable control;
 - keep Medium+ Redirect visible but unavailable when Reasoner is unconfigured or unhealthy, show Untested as a routable caution, preserve the prior Enhancement selection on an unavailable click, and keep Low Redirect available through Utility;
 - seed and clear a Recursion-owned prompt sentinel during no-generation mode smoke;

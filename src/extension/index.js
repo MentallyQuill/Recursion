@@ -424,7 +424,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
                     .then(() => ({
                       ok: true,
                       skipped: true,
-                      reason: runReady?.reason || 'post-process-arm-canceled'
+                      reason: runReady?.reason || 'post-process-trigger-canceled'
                     }));
                 }
                 deferPostProcessFinalization(async () => {

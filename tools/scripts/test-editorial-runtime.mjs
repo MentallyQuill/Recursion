@@ -130,7 +130,7 @@ assertEqual(runtime.view().activity.severity, 'success', 'successful Editorial t
 assertEqual(runtime.view().editorialResult?.status, 'success', 'successful Editorial transform records a success result');
 const callsAfterEditorialSettlement = calls.length;
 const duplicateAssistantLanded = await runtime.enhanceLatestAssistantMessage({ reason: 'assistant-message-landed' });
-assertEqual(duplicateAssistantLanded.reason, 'enhancement-not-armed', 'runtime rejects an assistant-landed Enhancement without a generation authorization');
+assertEqual(duplicateAssistantLanded.reason, 'enhancement-not-pending', 'runtime rejects an assistant-landed Enhancement without a generation authorization');
 assertEqual(calls.length, callsAfterEditorialSettlement, 'unarmed assistant-landed Enhancement makes no provider call');
 
 const pendingCommitSource = 'Mara kept her answer brief and watched the sealed door.';

@@ -285,7 +285,7 @@ test('1a. A host-triggered run without its verified operation token fails soft',
     operationToken: 'missing-operation-token'
   });
   assertEqual(result.committed, false, 'unbound host-triggered run leaves the original unchanged');
-  assertEqual(result.reason, 'post-process-arm-canceled', 'unbound host-triggered run returns the stable canceled-arm reason');
+  assertEqual(result.reason, 'post-process-trigger-canceled', 'unbound host-triggered run returns the stable canceled-trigger reason');
   assertEqual(harness.generationRouterCalls.length, 0, 'unbound host-triggered run makes no guidance call');
   assertEqual(harness.hostCalls.length, 0, 'unbound host-triggered run makes no host rewrite call');
   assertEqual(harness.commitCalls.length, 0, 'unbound host-triggered run makes no commit call');
@@ -719,7 +719,7 @@ test('21. Final commit receives a structural marker bound to actual source and c
   assert(!markerSerialized.includes(candidateText), 'marker omits candidate prose');
 });
 
-test('22. Arming is consumed once and cancellation aborts an active host rewrite', async () => {
+test('22. Pending trigger is consumed once and cancellation aborts an active host rewrite', async () => {
   const hostGate = deferred();
   const events = [];
   const activity = createActivityReporter({ onEvent: (event) => events.push(event) });
@@ -728,14 +728,14 @@ test('22. Arming is consumed once and cancellation aborts an active host rewrite
     activity
   });
   assertEqual(
-    harness.runtime.armPostProcess({ requireFinalTargetVerification: false }).armed,
+    harness.runtime.preparePostProcessTrigger({ requireFinalTargetVerification: false }).pending,
     true,
-    'Post-process operation arms'
+    'Post-process trigger becomes pending'
   );
-  assertEqual(harness.runtime.postProcessPending(), true, 'armed operation reports pending');
+  assertEqual(harness.runtime.postProcessPending(), true, 'prepared trigger reports pending');
   const running = harness.runtime.runPostProcessForLatestAssistant();
-  await waitUntil(() => harness.hostCalls.length === 1, 'armed fixture host rewrite did not start');
-  assertEqual(harness.runtime.postProcessPending(), false, 'starting consumes the pending arm');
+  await waitUntil(() => harness.hostCalls.length === 1, 'pending trigger host rewrite did not start');
+  assertEqual(harness.runtime.postProcessPending(), false, 'starting consumes the pending trigger');
   assertEqual(harness.runtime.postProcessRunning(), true, 'started operation reports running');
   const nativeEventSource = {
     async emit(eventName) {

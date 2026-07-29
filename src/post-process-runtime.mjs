@@ -1038,7 +1038,7 @@ export function createPostProcessRuntime({
   durableExecution = null
 } = {}) {
   let active = null;
-  let armed = null;
+  let pendingTrigger = null;
   let finalizationClaim = null;
   let lastDiagnostics = diagnosticsFor(null);
   const durableOperations = new Map();
@@ -1552,7 +1552,7 @@ export function createPostProcessRuntime({
         if (!matchesVerifiedTarget) {
           return finishWithoutCommit(null, 'stale-source', [], {}, record);
         }
-      } else if (record.consumedArm && record.consumedArm.requireFinalTargetVerification !== false) {
+      } else if (record.consumedTrigger && record.consumedTrigger.requireFinalTargetVerification !== false) {
         return finishWithoutCommit(null, 'final-target-unverified', [], {}, record);
       }
       const deck = await deckProvider(currentSettings);
@@ -1754,29 +1754,29 @@ export function createPostProcessRuntime({
     if (
       options.hostTriggered === true
       && (
-        !armed
+        !pendingTrigger
         || !finalizationClaim
-        || cleanText(options.operationToken) !== armed.operationToken
-        || finalizationClaim.operationToken !== armed.operationToken
+        || cleanText(options.operationToken) !== pendingTrigger.operationToken
+        || finalizationClaim.operationToken !== pendingTrigger.operationToken
       )
     ) {
       return Promise.resolve({
         ok: true,
         committed: false,
         skipped: true,
-        reason: 'post-process-arm-canceled'
+        reason: 'post-process-trigger-canceled'
       });
     }
-    const consumedArm = armed;
+    const consumedTrigger = pendingTrigger;
     const expectedFinalTarget = finalizationClaim;
-    armed = null;
+    pendingTrigger = null;
     finalizationClaim = null;
     const record = {
       controller: new AbortController(),
       phase: 'pending',
       activityStarted: false,
       activitySettled: false,
-      consumedArm,
+      consumedTrigger,
       expectedFinalTarget,
       promise: null
     };
@@ -1787,13 +1787,13 @@ export function createPostProcessRuntime({
     return record.promise;
   }
 
-  function armPostProcess(input = {}) {
+  function preparePostProcessTrigger(input = {}) {
     if (settingsStore?.get?.()?.postProcess?.enabled !== true) {
-      armed = null;
+      pendingTrigger = null;
       finalizationClaim = null;
-      return { ok: true, armed: false, reason: 'disabled' };
+      return { ok: true, pending: false, reason: 'disabled' };
     }
-    if (active) return { ok: true, armed: false, reason: 'running' };
+    if (active) return { ok: true, pending: false, reason: 'running' };
     const before = isObject(input.preGenerationSourceIdentity)
       ? {
           chatIdentityHash: cleanText(input.preGenerationSourceIdentity.chatIdentityHash),
@@ -1807,19 +1807,19 @@ export function createPostProcessRuntime({
           activeGroupHash: cleanText(input.preGenerationSourceIdentity.activeGroupHash)
         }
       : null;
-    armed = deepFreeze({
-      operationToken: makeId('post-process-arm'),
+    pendingTrigger = deepFreeze({
+      operationToken: makeId('post-process-trigger'),
       generationType: cleanText(input.generationType || 'normal').toLowerCase(),
       requireFinalTargetVerification: input.requireFinalTargetVerification !== false,
       before
     });
     finalizationClaim = null;
-    return { ok: true, armed: true };
+    return { ok: true, pending: true };
   }
 
   function cancelPostProcess() {
-    const canceled = Boolean(armed || active);
-    armed = null;
+    const canceled = Boolean(pendingTrigger || active);
+    pendingTrigger = null;
     finalizationClaim = null;
     if (!active) return { ok: true, canceled };
     if (durableEnabled && active.operationId) {
@@ -1845,9 +1845,9 @@ export function createPostProcessRuntime({
   }
 
   async function postProcessFinalTargetReady(details = {}) {
-    const arm = armed;
-    if (!arm) return { ok: true, ready: false, reason: 'post-process-not-armed' };
-    if (finalizationClaim?.operationToken === arm.operationToken) {
+    const trigger = pendingTrigger;
+    if (!trigger) return { ok: true, ready: false, reason: 'post-process-trigger-missing' };
+    if (finalizationClaim?.operationToken === trigger.operationToken) {
       return { ok: true, ready: false, reason: 'post-process-finalization-in-progress' };
     }
     if (typeof host?.messages?.postProcessSourceIdentity !== 'function') {
@@ -1859,8 +1859,8 @@ export function createPostProcessRuntime({
     } catch {
       current = null;
     }
-    if (armed !== arm) {
-      return { ok: true, ready: false, reason: 'post-process-arm-canceled' };
+    if (pendingTrigger !== trigger) {
+      return { ok: true, ready: false, reason: 'post-process-trigger-canceled' };
     }
     if (finalizationClaim) {
       return { ok: true, ready: false, reason: 'post-process-finalization-in-progress' };
@@ -1876,7 +1876,7 @@ export function createPostProcessRuntime({
     ) {
       return { ok: true, ready: false, reason: 'post-process-final-target-mismatch' };
     }
-    const before = arm.before;
+    const before = trigger.before;
     if (before) {
       if (
         cleanText(current.chatIdentityHash) !== before.chatIdentityHash
@@ -1888,13 +1888,13 @@ export function createPostProcessRuntime({
       const messageChanged = Number(current.messageId) !== Number(before.messageId);
       const swipeChanged = Number(current.swipeId ?? 0) !== Number(before.swipeId ?? 0);
       const textChanged = cleanText(current.originalHash) !== before.sourceTextHash;
-      const requiresNewMessage = !['swipe', 'regenerate', 'continue'].includes(arm.generationType);
+      const requiresNewMessage = !['swipe', 'regenerate', 'continue'].includes(trigger.generationType);
       if (requiresNewMessage ? !messageChanged : !(messageChanged || swipeChanged || textChanged)) {
         return { ok: true, ready: false, reason: 'post-process-final-target-unchanged' };
       }
     }
     finalizationClaim = deepFreeze({
-      operationToken: arm.operationToken,
+      operationToken: trigger.operationToken,
       chatIdentityHash: cleanText(current.chatIdentityHash),
       messageId: current.messageId,
       swipeId: Number(current.swipeId ?? 0),
@@ -1905,25 +1905,25 @@ export function createPostProcessRuntime({
     return {
       ok: true,
       ready: true,
-      operationToken: arm.operationToken,
+      operationToken: trigger.operationToken,
       target: cloneValue(finalizationClaim)
     };
   }
 
   async function postProcessHostRunReady(operationToken) {
-    const arm = armed;
+    const trigger = pendingTrigger;
     const expected = finalizationClaim;
     if (settingsStore?.get?.()?.postProcess?.enabled !== true) {
       cancelPostProcess('post-process-disabled');
       return { ok: true, ready: false, reason: 'post-process-disabled' };
     }
     if (
-      !arm
+      !trigger
       || !expected
-      || cleanText(operationToken) !== arm.operationToken
-      || expected.operationToken !== arm.operationToken
+      || cleanText(operationToken) !== trigger.operationToken
+      || expected.operationToken !== trigger.operationToken
     ) {
-      return { ok: true, ready: false, reason: 'post-process-arm-canceled' };
+      return { ok: true, ready: false, reason: 'post-process-trigger-canceled' };
     }
     if (typeof host?.messages?.postProcessSourceIdentity !== 'function') {
       return { ok: true, ready: false, reason: 'post-process-target-unavailable' };
@@ -1935,11 +1935,11 @@ export function createPostProcessRuntime({
       current = null;
     }
     if (
-      armed !== arm
+      pendingTrigger !== trigger
       || finalizationClaim !== expected
-      || cleanText(operationToken) !== arm.operationToken
+      || cleanText(operationToken) !== trigger.operationToken
     ) {
-      return { ok: true, ready: false, reason: 'post-process-arm-canceled' };
+      return { ok: true, ready: false, reason: 'post-process-trigger-canceled' };
     }
     if (
       !current
@@ -1952,7 +1952,7 @@ export function createPostProcessRuntime({
     ) {
       return { ok: true, ready: false, reason: 'post-process-final-target-changed' };
     }
-    return { ok: true, ready: true, operationToken: arm.operationToken };
+    return { ok: true, ready: true, operationToken: trigger.operationToken };
   }
 
   async function restoreExecutionState(manifest) {
@@ -2053,9 +2053,9 @@ export function createPostProcessRuntime({
 
   return {
     postProcessPending() {
-      return Boolean(armed);
+      return Boolean(pendingTrigger);
     },
-    armPostProcess,
+    preparePostProcessTrigger,
     postProcessRunning() {
       return Boolean(active);
     },

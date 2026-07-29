@@ -71,7 +71,6 @@ function responseSchemaForRole(roleId) {
   if (roleId === 'postProcessGuidanceUtility' || roleId === 'postProcessGuidanceReasoner') return 'recursion.postProcessGuidance.v1';
   if (roleId === 'reasonerComposer') return 'recursion.reasonerComposer.v1';
   if (roleId === 'utilityArbiter') return 'recursion.utilityArbiter.v1';
-  if (roleId === 'rapidTurnDelta') return 'recursion.rapidTurnDelta.v2';
   if (roleId === 'guidanceComposer') return 'recursion.guidanceComposer.v1';
   if (roleId === 'cardAuthoringAssist') return 'recursion.cardAuthoringAssist.v1';
   if (roleId === 'generationReviewer') return 'recursion.generationReview.v1';
@@ -99,6 +98,7 @@ async function flushMicrotasks(count = 6) {
 assertEqual(parseStructuredOutput('```json\n{"schema":"x"}\n```').schema, 'x', 'structured parser accepts fenced json');
 assertEqual(parseStructuredOutput('Here is the JSON:\n{"schema":"x","ok":true}\nDone.').schema, 'x', 'structured parser extracts a JSON object from wrapper prose');
 assertEqual(roleLane('unknownRole'), '', 'unknown roles have no provider lane');
+assertEqual(roleLane('rapidTurnDelta'), '', 'retired Rapid role has no provider lane');
 assertEqual(roleLane('reasonerComposer'), 'reasoner', 'reasonerComposer uses reasoner lane');
 const expectedUtilityRoles = [
   'utilityArbiter',
@@ -114,7 +114,6 @@ const expectedUtilityRoles = [
   'possessionsItemsCard',
   'openThreadsCard',
   'fusedCardBundle',
-  'rapidTurnDelta',
   'guidanceComposer',
   'cardAuthoringAssist',
   'generationReviewer',
@@ -141,6 +140,7 @@ for (const utilityRole of expectedUtilityRoles) {
 for (const reasonerRole of REASONER_ROLE_IDS) {
   assert(providerSpec.includes(`\`${reasonerRole}\``), `provider spec documents ${reasonerRole}`);
 }
+assert(!providerSpec.includes('rapidTurnDelta'), 'provider spec omits the retired Rapid role');
 assert(!/characterLensCard|environmentTextureCard/.test(providerSpec), 'provider spec omits legacy card role names');
 
 const delegatedProfiles = [

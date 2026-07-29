@@ -1113,7 +1113,7 @@ if (false) {
   assertEqual(await globalThis.recursionOnActivate(), true, 'prose assistant-landed setup activates');
   assertEqual(await globalThis.recursionGenerationInterceptor('prose event order payload'), 'prose event order payload', 'prose event order interceptor arms generation');
   interceptorComplete = true;
-  assertEqual(globalThis.__recursionLiveHarnessRuntime.proseEnhancementPending(), true, 'generation review is armed after the generation interceptor');
+  assertEqual(globalThis.__recursionLiveHarnessRuntime.proseEnhancementPending(), true, 'generation review is pending after the generation interceptor');
   assertEqual(fakeDocumentElement.classList.contains('recursion-enhancement-capture-active'), false, 'generation review never hides the streaming assistant response');
   context.chat.push({
     mesid: 2,
@@ -2291,16 +2291,16 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
 
   pending = true;
   await eventSource.emit('message_updated', { mesid: 1 });
-  assertEqual(cancelCalls, 1, 'source edits cancel armed Post-process work');
+  assertEqual(cancelCalls, 1, 'source edits cancel pending Post-process work');
   pending = true;
   await eventSource.emit('message_deleted', { mesid: 1 });
-  assertEqual(cancelCalls, 2, 'source deletion cancels armed Post-process work');
+  assertEqual(cancelCalls, 2, 'source deletion cancels pending Post-process work');
   pending = true;
   await eventSource.emit('message_swiped', { mesid: 1 });
-  assertEqual(cancelCalls, 3, 'source swipe changes cancel armed Post-process work');
+  assertEqual(cancelCalls, 3, 'source swipe changes cancel pending Post-process work');
   pending = true;
   await eventSource.emit('chat_changed');
-  assertEqual(cancelCalls, 4, 'chat changes cancel armed Post-process work');
+  assertEqual(cancelCalls, 4, 'chat changes cancel pending Post-process work');
 
   await globalThis.recursionOnDelete();
   delete globalThis.__recursionLiveHarness;
@@ -2310,5 +2310,14 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
   if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
   else globalThis.extension_settings = previousGlobals.extensionSettings;
 }
+
+if (previousGlobals.fetch === undefined) delete globalThis.fetch;
+else globalThis.fetch = previousGlobals.fetch;
+
+assertEqual(
+  globalThis.fetch,
+  previousGlobals.fetch,
+  'extension smoke restores the process fetch implementation for later test modules'
+);
 
 console.log('[pass] extension smoke');

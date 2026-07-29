@@ -464,7 +464,7 @@ async function fillSendInput(input, text, timeoutMs) {
   }, text);
 }
 
-async function armHostGenerationEnded(page) {
+async function registerHostGenerationEnded(page) {
   return page.evaluate(() => {
     const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
     const eventSource = context.eventSource || globalThis.eventSource;
@@ -477,7 +477,7 @@ async function armHostGenerationEnded(page) {
     ].filter(Boolean))];
     const id = `generation-ended-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     globalThis.__recursionProofGenerationEnded = { id, seen: false, eventName: '', at: 0 };
-    if (!eventSource || names.length === 0) return { id, armed: false };
+    if (!eventSource || names.length === 0) return { id, registered: false };
     const handler = (eventName) => {
       globalThis.__recursionProofGenerationEnded = { id, seen: true, eventName, at: Date.now() };
     };
@@ -485,16 +485,16 @@ async function armHostGenerationEnded(page) {
       if (typeof eventSource.on === 'function') eventSource.on(name, () => handler(name));
       else if (typeof eventSource.addEventListener === 'function') eventSource.addEventListener(name, () => handler(name));
     }
-    return { id, armed: true };
-  }).catch(() => ({ id: '', armed: false }));
+    return { id, registered: true };
+  }).catch(() => ({ id: '', registered: false }));
 }
 
-async function waitForHostGenerationEnded(page, armed, timeoutMs) {
-  if (!armed?.armed || !armed.id) return;
+async function waitForHostGenerationEnded(page, registration, timeoutMs) {
+  if (!registration?.registered || !registration.id) return;
   await page.waitForFunction((id) => {
     const state = globalThis.__recursionProofGenerationEnded || {};
     return state.id === id && state.seen === true;
-  }, armed.id, { timeout: timeoutMs });
+  }, registration.id, { timeout: timeoutMs });
 }
 
 async function waitForChatSettled(page, { message = '', requirePrompt = false, timeoutMs }) {
@@ -540,7 +540,7 @@ async function waitForChatSettled(page, { message = '', requirePrompt = false, t
 async function sendAndWait(page, message, { requirePrompt, timeoutMs }) {
   const before = await page.evaluate(contextChatSummaryScript());
   const surface = await findSendSurface(page, timeoutMs);
-  const generationEnded = await armHostGenerationEnded(page);
+  const generationEnded = await registerHostGenerationEnded(page);
   await fillSendInput(surface.input, message, timeoutMs);
   await surface.button.click({ timeout: timeoutMs });
   await waitForHostGenerationEnded(page, generationEnded, timeoutMs).catch(() => {});
@@ -812,7 +812,6 @@ export async function runLivePipelineProof({ argv = process.argv.slice(2), env =
             assistantBefore: proof.send.before.assistantCount,
             assistantAfter: proof.send.after.assistantCount,
             messageProof: proof.send.messageProof,
-            rapidPath: proof.snapshot.packet?.diagnostics?.rapidPath || proof.snapshot.promptPacketPreview?.diagnostics?.rapidPath || '',
             planDiagnostics: Array.isArray(proof.diagnosticsExport?.runtime?.plan?.diagnostics)
               ? proof.diagnosticsExport.runtime.plan.diagnostics
               : [],

@@ -2525,7 +2525,7 @@ export function createRecursionRuntime({
     pendingProseEnhancement = {
       target,
       applyMode: enhancementApplyMode(settings),
-      armedAt: nowIso(),
+      preparedAt: nowIso(),
       runId: safeText(runId || '', 120),
       ...(redirectCapability?.required
         ? {
@@ -4098,17 +4098,17 @@ export function createRecursionRuntime({
       if (editorialMode !== 'redirect') return null;
       const capability = runtimeProviderCapability(settingsStore.get(), 'reasoner', 'redirect');
       if (!capability.required) return null;
-      const armed = asObject(pendingProseEnhancement?.requiredCapability);
+      const preparedCapability = asObject(pendingProseEnhancement?.requiredCapability);
       if (!capability.eligible) return sanitizeProviderCapability(capability);
       if (
-        safeText(armed.configHash, 180) !== capability.configHash
-        || Number(armed.configRevision) !== capability.configRevision
+        safeText(preparedCapability.configHash, 180) !== capability.configHash
+        || Number(preparedCapability.configRevision) !== capability.configRevision
       ) {
         return {
           ...sanitizeProviderCapability(capability),
           eligible: false,
           reasonCode: 'reasoner-configuration-changed',
-          message: 'Reasoner settings changed after Redirect was armed. Generate again.'
+          message: 'Reasoner settings changed after Redirect was prepared. Generate again.'
         };
       }
       return null;
@@ -4970,7 +4970,7 @@ export function createRecursionRuntime({
 
   async function enhanceLatestAssistantMessageImpl(details = {}) {
     if (safeText(details.reason || '', 80) === 'assistant-message-landed' && !pendingProseEnhancement) {
-      return { ok: true, skipped: true, reason: 'enhancement-not-armed' };
+      return { ok: true, skipped: true, reason: 'enhancement-not-pending' };
     }
     if (['repair', 'recompose', 'redirect'].includes(safeText(settingsStore.get()?.enhancements?.mode || '', 32))) {
       return runEditorialTransform(details);
@@ -7880,7 +7880,7 @@ export function createRecursionRuntime({
         } catch {
           preGenerationSourceIdentity = null;
         }
-        postProcessRuntime.armPostProcess({
+        postProcessRuntime.preparePostProcessTrigger({
           preGenerationSourceIdentity,
           generationType: hostGenerationType || 'normal'
         });
@@ -7964,7 +7964,7 @@ export function createRecursionRuntime({
       } catch {
         preGenerationSourceIdentity = null;
       }
-      postProcessRuntime.armPostProcess({
+      postProcessRuntime.preparePostProcessTrigger({
         preGenerationSourceIdentity,
         generationType: hostGenerationType || 'normal'
       });
@@ -9016,7 +9016,7 @@ export function createRecursionRuntime({
     handleHostGenerationEnded,
     postProcessPending: postProcessRuntime.postProcessPending,
     postProcessRunning: postProcessRuntime.postProcessRunning,
-    armPostProcess: postProcessRuntime.armPostProcess,
+    preparePostProcessTrigger: postProcessRuntime.preparePostProcessTrigger,
     runPostProcessForLatestAssistant: postProcessRuntime.runPostProcessForLatestAssistant,
     cancelPostProcess: postProcessRuntime.cancelPostProcess,
     waitForPostProcessSettlement: postProcessRuntime.waitForPostProcessSettlement,

@@ -1015,7 +1015,7 @@ function createLivePostProcessRuntimeHarness({
   });
 
   for (const method of [
-    'armPostProcess',
+    'preparePostProcessTrigger',
     'postProcessPending',
     'postProcessRunning',
     'runPostProcessForLatestAssistant',
@@ -1046,7 +1046,7 @@ function createLivePostProcessRuntimeHarness({
 
 {
   const live = createLivePostProcessRuntimeHarness({
-    chatId: 'post-process-arming-chat'
+    chatId: 'post-process-trigger-chat'
   });
   await live.runtime.prepareForGeneration({
     userMessage: 'Arm Post-process for the next host response.',
@@ -1055,7 +1055,7 @@ function createLivePostProcessRuntimeHarness({
   });
   assertEqual(live.runtime.postProcessPending(), true, 'host generation preparation arms Post-process exactly once');
   const canceled = live.runtime.cancelPostProcess('source-edited');
-  assertEqual(canceled.canceled, true, 'source mutation can cancel an armed Post-process operation');
+  assertEqual(canceled.canceled, true, 'source mutation can cancel a pending Post-process operation');
   assertEqual(live.runtime.postProcessPending(), false, 'cancel clears the pending Post-process arm');
 }
 
@@ -11000,7 +11000,7 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
     hostGeneration: true
   });
   assertEqual(prepared.ok, true, 'blocked Redirect does not block host prompt preparation');
-  assertEqual(runtime.proseEnhancementPending(), true, 'blocked Redirect remains armed for deterministic settlement');
+  assertEqual(runtime.proseEnhancementPending(), true, 'blocked Redirect remains pending for deterministic settlement');
   const preflightActivity = runtime.view().activityHistory.find((entry) => entry.phase === 'editorialPreflight');
   assert(preflightActivity, 'blocked Redirect marker is recorded before host generation continues');
   assertEqual(preflightActivity.outcome, 'skipped', 'blocked Redirect marker records a pending skip');

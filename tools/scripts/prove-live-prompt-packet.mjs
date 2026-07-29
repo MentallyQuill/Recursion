@@ -178,7 +178,6 @@ function installProviderRequestRecorderScript() {
       if (/recursion\.card\.v1/.test(source)) return 'card';
       if (/recursion\.guidanceComposer\.v1/.test(source)) return 'guidanceComposer';
       if (/recursion\.reasonerComposer\.v1/.test(source)) return 'reasonerComposer';
-      if (/recursion\.rapidTurnDelta\.v2/.test(source)) return 'rapidTurnDelta';
       return 'unknown';
     };
 

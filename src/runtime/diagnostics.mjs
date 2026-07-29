@@ -181,7 +181,6 @@ function mapPacketDiagnostics(diagnostics) {
     sectionHashes: source.sectionHashes || null,
     footprint: safeText(source.footprint, 40),
     pipelineMode: safeText(source.pipelineMode, 40),
-    rapidPath: safeText(source.rapidPath, 80),
     planDiagnostics: asArray(source.planDiagnostics).slice(0, 24).map((entry) => safeText(entry, 160)),
     storyFormTense: safeText(source.storyFormTense, 80),
     storyFormPov: safeText(source.storyFormPov, 80),

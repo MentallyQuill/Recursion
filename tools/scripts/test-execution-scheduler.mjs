@@ -523,6 +523,66 @@ function createIds() {
 
 {
   const repository = createRepository();
+  const originalLoad = repository.loadPipelineRun.bind(repository);
+  const originalSave = repository.savePipelineRun.bind(repository);
+  const siblingCommit = deferred();
+  let delayedSiblingRead = false;
+  repository.loadPipelineRun = async (chatKey) => {
+    const snapshot = await originalLoad(chatKey);
+    const siblingRecords = [
+      snapshot?.stageRecords?.left,
+      snapshot?.stageRecords?.right
+    ];
+    if (
+      !delayedSiblingRead
+      && repository.artifactWrites.some((entry) => (
+        entry.artifactId.startsWith('left.')
+        || entry.artifactId.startsWith('right.')
+      ))
+      && siblingRecords.every((record) => record?.state === 'running')
+    ) {
+      delayedSiblingRead = true;
+      await siblingCommit.promise;
+    }
+    return snapshot;
+  };
+  repository.savePipelineRun = async (chatKey, nextManifest) => {
+    const stored = await originalSave(chatKey, nextManifest);
+    if (
+      stored.stageRecords?.left?.state === 'completed'
+      || stored.stageRecords?.right?.state === 'completed'
+    ) {
+      siblingCommit.resolve();
+    }
+    return stored;
+  };
+  const graph = createExecutionGraph({
+    stages: [
+      stage('root', [], async () => ({ value: 'root' })),
+      stage('left', ['root'], async () => ({ value: 'left' })),
+      stage('right', ['root'], async () => ({ value: 'right' }))
+    ]
+  });
+  const scheduler = createExecutionScheduler({
+    repository,
+    now: createClock(),
+    createId: createIds(),
+    attemptsPerStep: 1
+  });
+  await scheduler.start({
+    manifest: manifest({ operationId: 'slow-storage-siblings' }),
+    graph,
+    context: {}
+  });
+  const saved = await repository.loadPipelineRun('chat-a');
+  assertEqual(delayedSiblingRead, true, 'test forces one stale sibling pre-commit read');
+  assertEqual(saved.state, 'completed', 'slow storage must not strand a completed sibling wave');
+  assertEqual(saved.stageRecords.left.state, 'completed', 'left sibling checkpoint commits');
+  assertEqual(saved.stageRecords.right.state, 'completed', 'right sibling checkpoint commits');
+}
+
+{
+  const repository = createRepository();
   const graph = createExecutionGraph({
     stages: [stage('root', [], async () => ({ value: 'root' }))]
   });

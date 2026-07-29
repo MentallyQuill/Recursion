@@ -317,8 +317,7 @@ export function createExecutionScheduler({
     const stored = await repository.loadPipelineRun(runtime.manifest.chatKey);
     return stored?.operationId === runtime.manifest.operationId
       && stored?.state === 'running'
-      && stored?.stageRecords?.[stageId]?.executionToken === executionToken
-      && Number(stored.revision || 0) === Number(runtime.manifest.revision || 0);
+      && stored?.stageRecords?.[stageId]?.executionToken === executionToken;
   }
 
   async function consumeQueuedIntent(runtime, stageId) {

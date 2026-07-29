@@ -2245,4 +2245,65 @@ for (const mode of ['as-swipe', 'replace']) {
   assertEqual(persistedMessage.mes, sourceText, 'commit-save cancellation persists the source response');
 }
 
+for (const mode of ['as-swipe', 'replace']) {
+  const sourceText = `Idempotent ${mode} source.`;
+  const candidate = `Idempotent ${mode} candidate.`;
+  let saveCount = 0;
+  const context = {
+    chatId: `post-process-idempotent-${mode}`,
+    chat: [{
+      mesid: 51,
+      is_user: false,
+      mes: sourceText,
+      swipe_id: 0,
+      swipes: [sourceText],
+      swipe_info: [{ extra: {} }]
+    }],
+    saveChat() {
+      saveCount += 1;
+    },
+    updateMessageBlock() {},
+    swipe: { refresh() {} }
+  };
+  const idempotentHost = createSillyTavernHost({
+    contextFactory: () => context,
+    settingsRoot: {}
+  });
+  const identity = await idempotentHost.messages.postProcessSourceIdentity();
+  const input = {
+    operationId: `post-process-idempotent-${mode}`,
+    commitId: `commit-${mode}`,
+    sourceMessageId: 51,
+    sourceIdentity: {
+      ...identity,
+      sourceTextHash: identity.originalHash
+    },
+    finalArtifactHash: hashJson(candidate),
+    text: candidate,
+    mode,
+    marker: {
+      schema: 'recursion.postProcessMarker.v1',
+      sourceHash: hashJson(sourceText),
+      candidateHash: hashJson(candidate),
+      committedApplyMode: mode
+    }
+  };
+  const first = await idempotentHost.commitPostProcessResult(input);
+  const second = await idempotentHost.commitPostProcessResult(input);
+  assertEqual(first.applied, true, `${mode} commit applies once`);
+  assertEqual(second.applied, false, `${mode} duplicate commit does not mutate`);
+  assertEqual(second.reason, 'already-applied', `${mode} duplicate commit returns a stable reason`);
+  assertEqual(saveCount, 1, `${mode} duplicate commit performs one host save`);
+  const restoredHost = createSillyTavernHost({
+    contextFactory: () => context,
+    settingsRoot: {}
+  });
+  const restored = await restoredHost.findPostProcessCommit({
+    operationId: input.operationId,
+    commitId: input.commitId,
+    sourceIdentity: input.sourceIdentity
+  });
+  assertEqual(restored.commitId, input.commitId, `${mode} receipt survives host recreation`);
+}
+
 console.log('[pass] host');

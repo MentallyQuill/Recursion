@@ -1432,6 +1432,17 @@ export function createStorageRepository({
     return { ok: true, deletedKeys: keys };
   }
 
+  async function deletePipelineArtifact(chatKey, operationId, artifactId) {
+    const key = pipelineArtifactKey(chatKey, operationId, artifactId);
+    const deleted = await storage.deleteJson(key);
+    await removeIndexEntry(key);
+    return {
+      ok: deleted?.ok !== false,
+      key,
+      deleted: deleted?.ok !== false
+    };
+  }
+
   async function clearPipelineExecution(chatKey) {
     const artifacts = await clearPipelineArtifacts(chatKey);
     const manifest = await clearPipelineRun(chatKey);
@@ -1587,6 +1598,7 @@ export function createStorageRepository({
     saveQueuedReprocess,
     clearPipelineRun,
     clearPipelineArtifacts,
+    deletePipelineArtifact,
     clearQueuedReprocess,
     clearPipelineExecution,
     prunePipelineExecution,

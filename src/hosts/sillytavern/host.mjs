@@ -1586,6 +1586,168 @@ export function createSillyTavernHost({
     };
   }
 
+  function postProcessMarkers(raw = {}) {
+    const markers = [];
+    const add = (value) => {
+      const marker = asObject(value);
+      if (marker.schema === 'recursion.postProcessMarker.v1') markers.push(marker);
+    };
+    add(raw.__recursionPostProcess);
+    for (const marker of Array.isArray(raw.__recursionPostProcessSwipes)
+      ? raw.__recursionPostProcessSwipes
+      : []) {
+      add(marker);
+    }
+    add(raw.extra?.recursion?.postProcess);
+    for (const info of Array.isArray(raw.swipe_info) ? raw.swipe_info : []) {
+      add(info?.extra?.recursion?.postProcess);
+    }
+    return markers;
+  }
+
+  function commitReceiptFromMarker(marker = {}) {
+    const source = asObject(marker);
+    const receipt = asObject(source.commitReceipt);
+    const commitId = stringValue(receipt.commitId || source.commitId);
+    if (!commitId) return null;
+    return {
+      schema: 'recursion.postProcessCommitReceipt.v1',
+      operationId: stringValue(receipt.operationId || source.operationId),
+      commitId,
+      sourceIdentity: cloneJsonSafe(receipt.sourceIdentity || {}),
+      mode: receipt.mode === 'replace' ? 'replace' : 'as-swipe',
+      targetMessageId: receipt.targetMessageId ?? null,
+      targetSwipeId: finiteNonNegativeInteger(receipt.targetSwipeId) ?? 0,
+      finalArtifactHash: stringValue(
+        receipt.finalArtifactHash || source.candidateHash
+      ),
+      appliedAt: stringValue(receipt.appliedAt)
+    };
+  }
+
+  async function findPostProcessCommit({
+    operationId,
+    commitId,
+    sourceIdentity = null
+  } = {}) {
+    const expectedOperationId = stringValue(operationId);
+    const expectedCommitId = stringValue(commitId);
+    if (!expectedCommitId) return null;
+    const context = currentContext(contextFactory);
+    for (const raw of rawChatMessages(context)) {
+      for (const marker of postProcessMarkers(raw)) {
+        const receipt = commitReceiptFromMarker(marker);
+        if (!receipt || receipt.commitId !== expectedCommitId) continue;
+        if (expectedOperationId && receipt.operationId !== expectedOperationId) continue;
+        if (
+          sourceIdentity
+          && hashJson(receipt.sourceIdentity) !== hashJson(asObject(sourceIdentity))
+        ) {
+          continue;
+        }
+        return receipt;
+      }
+    }
+    return null;
+  }
+
+  let postProcessCommitTail = Promise.resolve();
+
+  function commitPostProcessResult(input = {}) {
+    const operation = async () => {
+      const source = asObject(input);
+      const operationId = stringValue(source.operationId);
+      const finalArtifactHash = stringValue(
+        source.finalArtifactHash || hashJson(stringValue(source.text))
+      );
+      const commitId = stringValue(source.commitId)
+        || hashJson({ operationId, finalArtifactHash });
+      const sourceIdentity = cloneJsonSafe(
+        source.sourceIdentity || source.expectedSourceIdentity || {}
+      );
+      const existing = await findPostProcessCommit({
+        operationId,
+        commitId,
+        sourceIdentity
+      });
+      if (existing) {
+        return {
+          ok: true,
+          applied: false,
+          reason: 'already-applied',
+          receipt: existing
+        };
+      }
+
+      const context = currentContext(contextFactory);
+      const found = findRawAssistantMessage(context, source.sourceMessageId);
+      if (!found) {
+        return {
+          ok: false,
+          applied: false,
+          error: {
+            code: 'RECURSION_MESSAGE_NOT_FOUND',
+            message: 'Assistant message not found.'
+          }
+        };
+      }
+      const mode = source.mode === 'replace' ? 'replace' : 'as-swipe';
+      const targetSwipeId = mode === 'replace'
+        ? (finiteNonNegativeInteger(found.raw.swipe_id) ?? 0)
+        : (Array.isArray(found.raw.swipes) ? found.raw.swipes.length : 1);
+      const receipt = {
+        schema: 'recursion.postProcessCommitReceipt.v1',
+        operationId,
+        commitId,
+        sourceIdentity,
+        mode,
+        targetMessageId: found.normalized.mesid,
+        targetSwipeId,
+        finalArtifactHash,
+        appliedAt: new Date().toISOString()
+      };
+      const marker = {
+        ...asObject(source.marker),
+        schema: 'recursion.postProcessMarker.v1',
+        operationId,
+        commitId,
+        candidateHash: finalArtifactHash,
+        commitReceipt: receipt
+      };
+      const options = {
+        markerNamespace: 'postProcess',
+        marker,
+        expectedSourceIdentity: sourceIdentity,
+        signal: source.signal,
+        select: true
+      };
+      const mutation = mode === 'replace'
+        ? await messagesApi.replaceAssistantMessageText(
+            found.normalized.mesid,
+            source.text,
+            options
+          )
+        : await messagesApi.appendAssistantMessageSwipe(
+            found.normalized.mesid,
+            source.text,
+            options
+          );
+      if (mutation?.ok === false) {
+        return { ...mutation, applied: false };
+      }
+      return {
+        ok: true,
+        applied: true,
+        reason: 'applied',
+        receipt,
+        mutation
+      };
+    };
+    const pending = postProcessCommitTail.then(operation, operation);
+    postProcessCommitTail = pending.catch(() => {});
+    return pending;
+  }
+
   async function persistAssistantMutation(context, target, original, options = {}) {
     const saved = await saveChatRequired(context);
     if (!saved.ok) {
@@ -1897,6 +2059,8 @@ export function createSillyTavernHost({
     storageAdapter: storage,
     generation,
     messages: messagesApi,
+    findPostProcessCommit,
+    commitPostProcessResult,
     settings: {
       async flush() {
         await resolvedSaveSettings({ immediate: true });

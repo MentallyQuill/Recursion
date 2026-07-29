@@ -1,5 +1,6 @@
 import {
   buildPostProcessPlan,
+  createPostProcessStages,
   createPostProcessRuntime
 } from '../../src/post-process-runtime.mjs';
 import { createActivityReporter } from '../../src/activity.mjs';
@@ -7,6 +8,13 @@ import { hashJson } from '../../src/core.mjs';
 import { createSillyTavernHost } from '../../src/hosts/sillytavern/host.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
+import { createExecutionScheduler } from '../../src/execution/scheduler.mjs';
+import { createPipelineRun } from '../../src/execution/checkpoints.mjs';
+import { buildRunProvenance } from '../../src/execution/provenance.mjs';
+import {
+  createMemoryStorageAdapter,
+  createStorageRepository
+} from '../../src/storage.mjs';
 
 const GUIDANCE_SCHEMA = 'recursion.postProcessGuidance.v1';
 
@@ -808,6 +816,344 @@ test('23. Enabled As Swipe is not complete unless the persisted assistant gains 
   );
 });
 
+test('24. Unified scheduler Resume reuses guidance and retries only the interrupted rewrite', async () => {
+  const storage = createStorageRepository({
+    storage: createMemoryStorageAdapter()
+  });
+  const firstRewrite = deferred();
+  const secondRewrite = deferred();
+  const guidanceCalls = [];
+  const rewriteCalls = [];
+  const commitCalls = [];
+  const operationId = 'post-process-unified-resume';
+  const sourceSnapshot = snapshot({
+    chatKey: 'post-process-unified-resume-chat'
+  });
+  const graph = createPostProcessStages({
+    operationId,
+    mode: 'unified',
+    categories: [category('natural-prose')],
+    sourceSnapshot,
+    buildGuidanceRequest: ({ draft }) => ({ prompt: 'guide', draft }),
+    buildRewriteRequest: ({ draft, guidance }) => ({ draft, guidance }),
+    generateGuidance: async (request) => {
+      guidanceCalls.push(request);
+      return { guidanceText: 'Tighten the prose.' };
+    },
+    rewrite: async (request, details) => {
+      rewriteCalls.push({ request, details });
+      return rewriteCalls.length === 1 ? firstRewrite.promise : secondRewrite.promise;
+    },
+    commit: async (input) => {
+      commitCalls.push(input);
+      return {
+        ok: true,
+        applied: true,
+        reason: 'applied',
+        receipt: {
+          commitId: input.commitId,
+          finalArtifactHash: input.finalArtifactHash
+        }
+      };
+    }
+  });
+  const provenance = buildRunProvenance({
+    chatKey: sourceSnapshot.chatKey,
+    sourceIdentity: {
+      sourceRevisionHash: sourceSnapshot.sourceHash,
+      latestMessageId: String(sourceSnapshot.sourceMessageId)
+    },
+    settingsHash: 'post-process-settings',
+    provider: { id: 'post-process-provider', model: 'test-model' },
+    pipelineMode: 'segmented',
+    promptVersions: { postProcess: 1 },
+    providerContractHash: 'post-process-provider-contract',
+    deckRevisionHash: 'post-process-deck',
+    cardConfigurationHash: 'post-process-cards',
+    promptContractHash: 'post-process-prompt'
+  });
+  const manifest = createPipelineRun({
+    operationId,
+    chatKey: sourceSnapshot.chatKey,
+    phase: 'postprocess',
+    pipelineMode: 'segmented',
+    sourceIdentity: provenance.sourceIdentity,
+    provenance
+  });
+  const scheduler = createExecutionScheduler({
+    repository: storage,
+    attemptsPerStep: 2
+  });
+  const running = scheduler.start({ manifest, graph, context: {} });
+  await waitUntil(() => rewriteCalls.length === 1, 'Unified rewrite did not start');
+  await scheduler.pause({ operationId, reason: 'user' });
+  firstRewrite.resolve({ ok: true, text: 'Late rewrite must not commit.' });
+  await running;
+  let saved = await storage.loadPipelineRun(sourceSnapshot.chatKey);
+  assertEqual(saved.stageRecords['postprocess.unified.guidance'].state, 'completed', 'Unified guidance checkpoint survives Stop');
+  assertEqual(saved.stageRecords['postprocess.unified.rewrite'].state, 'pending', 'interrupted Unified rewrite returns to pending');
+
+  const resumed = scheduler.resume({
+    operationId,
+    graph,
+    context: {},
+    provenance
+  });
+  await waitUntil(() => rewriteCalls.length === 2, 'Unified Resume did not open a fresh rewrite window');
+  secondRewrite.resolve({ ok: true, text: 'Resumed rewrite commits once.' });
+  await resumed;
+  saved = await storage.loadPipelineRun(sourceSnapshot.chatKey);
+  assertEqual(saved.state, 'completed', 'Unified Resume reaches terminal completion');
+  assertEqual(guidanceCalls.length, 1, 'Unified Resume never repeats valid guidance');
+  assertEqual(rewriteCalls.length, 2, 'Unified Resume repeats only the interrupted rewrite');
+  assertEqual(commitCalls.length, 1, 'Unified Resume commits exactly once');
+});
+
+test('25. Durable Post-process reload restores paused work without executing and resumes the rewrite only', async () => {
+  const storage = createStorageRepository({
+    storage: createMemoryStorageAdapter()
+  });
+  const firstRewrite = deferred();
+  const secondRewrite = deferred();
+  const guidanceCalls = [];
+  const rewriteCalls = [];
+  const commitCalls = [];
+  const settingsStore = {
+    get: () => settings({
+      postProcess: {
+        enabled: true,
+        rewriteFlow: 'unified',
+        applyMode: 'as-swipe'
+      }
+    })
+  };
+  const generationRouter = {
+    async generate(_roleId, request) {
+      guidanceCalls.push(request);
+      return {
+        ok: true,
+        data: {
+          schema: GUIDANCE_SCHEMA,
+          snapshotHash: request.snapshotHash,
+          sourceHash: request.sourceHash,
+          guidanceText: 'Tighten the response.'
+        }
+      };
+    }
+  };
+  const firstScheduler = createExecutionScheduler({
+    repository: storage,
+    attemptsPerStep: 2
+  });
+  const firstRuntime = createPostProcessRuntime({
+    host: {
+      generation: {
+        async rewriteWithPostProcess(input) {
+          rewriteCalls.push(input);
+          return firstRewrite.promise;
+        }
+      }
+    },
+    generationRouter,
+    settingsStore,
+    snapshotProvider: async () => snapshot({
+      chatKey: 'post-process-reload-chat'
+    }),
+    deckProvider: async () => deckFrom(['natural-prose']),
+    sourceGuard: async () => true,
+    commitResult: async (input) => {
+      commitCalls.push(input);
+      return { ok: true };
+    },
+    durableExecution: {
+      scheduler: firstScheduler,
+      repository: storage
+    }
+  });
+  const running = firstRuntime.runPostProcessForLatestAssistant();
+  await waitUntil(() => rewriteCalls.length === 1, 'durable Post-process rewrite did not start');
+  firstRuntime.cancelPostProcess('user');
+  firstRewrite.resolve({ ok: true, text: 'Late rewrite must not commit.' });
+  const pausedResult = await running;
+  assertEqual(pausedResult.paused, true, 'Stop pauses rather than discards durable Post-process work');
+  let manifest = await storage.loadPipelineRun('post-process-reload-chat');
+  assertEqual(manifest.stageRecords['postprocess.unified.guidance'].state, 'completed', 'durable guidance survives Stop');
+  assertEqual(manifest.stageRecords['postprocess.unified.rewrite'].state, 'pending', 'interrupted durable rewrite returns to pending');
+
+  const secondScheduler = createExecutionScheduler({
+    repository: storage,
+    attemptsPerStep: 2
+  });
+  const secondRuntime = createPostProcessRuntime({
+    host: {
+      generation: {
+        async rewriteWithPostProcess(input) {
+          rewriteCalls.push(input);
+          return secondRewrite.promise;
+        }
+      }
+    },
+    generationRouter,
+    settingsStore,
+    snapshotProvider: async () => snapshot({
+      chatKey: 'post-process-reload-chat'
+    }),
+    deckProvider: async () => deckFrom(['natural-prose']),
+    sourceGuard: async () => true,
+    commitResult: async (input) => {
+      commitCalls.push(input);
+      return { ok: true };
+    },
+    durableExecution: {
+      scheduler: secondScheduler,
+      repository: storage
+    }
+  });
+  await secondRuntime.restoreExecutionState(manifest);
+  assertEqual(guidanceCalls.length, 1, 'reload restoration performs no guidance call');
+  assertEqual(rewriteCalls.length, 1, 'reload restoration performs no rewrite call');
+  const resumed = secondRuntime.resumeOperation({
+    operationId: manifest.operationId
+  });
+  await waitUntil(() => rewriteCalls.length === 2, 'reloaded Post-process Resume did not restart rewrite');
+  secondRewrite.resolve({ ok: true, text: 'Reloaded rewrite commits once.' });
+  const completed = await resumed;
+  assertEqual(completed.committed, true, 'reloaded Post-process Resume commits');
+  assertEqual(guidanceCalls.length, 1, 'reloaded Resume reuses durable guidance');
+  assertEqual(rewriteCalls.length, 2, 'reloaded Resume reruns only interrupted rewrite');
+  assertEqual(commitCalls.length, 1, 'reloaded Resume commits exactly once');
+  const guidanceCheckpoint = manifest.stageRecords['postprocess.unified.guidance'].checkpoint;
+  assertEqual(
+    await storage.loadPipelineArtifact(
+      manifest.chatKey,
+      manifest.operationId,
+      guidanceCheckpoint.artifactRef.artifactId
+    ),
+    null,
+    'terminal completion purges resume-only guidance bodies'
+  );
+  assert(
+    await storage.loadPipelineArtifact(
+      completed.execution.chatKey,
+      completed.execution.operationId,
+      completed.execution.stageRecords['postprocess.unified.rewrite'].checkpoint.artifactRef.artifactId
+    ),
+    'terminal completion retains the final accepted draft artifact'
+  );
+});
+
+test('26. Progressive Resume reuses prior drafts and current category guidance', async () => {
+  const storage = createStorageRepository({
+    storage: createMemoryStorageAdapter()
+  });
+  const firstSecondRewrite = deferred();
+  const resumedSecondRewrite = deferred();
+  const guidanceCalls = [];
+  const rewriteCalls = [];
+  const commits = [];
+  const operationId = 'post-process-progressive-resume';
+  const sourceSnapshot = snapshot({
+    chatKey: 'post-process-progressive-resume-chat'
+  });
+  const categories = [category('natural-prose'), category('dialogue')];
+  const graph = createPostProcessStages({
+    operationId,
+    mode: 'progressive',
+    categories,
+    sourceSnapshot,
+    buildGuidanceRequest: ({ categoryIds, draft }) => ({ categoryIds, draft }),
+    buildRewriteRequest: ({ categoryIds, draft, guidance }) => ({
+      categoryIds,
+      draft,
+      guidance
+    }),
+    generateGuidance: async (request, details) => {
+      guidanceCalls.push(details.categoryIds[0]);
+      return { guidanceText: `Guide ${request.categoryIds[0]}.` };
+    },
+    rewrite: async (request, details) => {
+      const categoryId = details.categoryIds[0];
+      rewriteCalls.push(categoryId);
+      if (categoryId === 'natural-prose') {
+        return { ok: true, text: 'Draft after category A.' };
+      }
+      return rewriteCalls.filter((id) => id === 'dialogue').length === 1
+        ? firstSecondRewrite.promise
+        : resumedSecondRewrite.promise;
+    },
+    commit: async (input) => {
+      commits.push(input);
+      return {
+        ok: true,
+        applied: true,
+        reason: 'applied',
+        receipt: {
+          commitId: input.commitId,
+          finalArtifactHash: input.finalArtifactHash
+        }
+      };
+    }
+  });
+  const provenance = buildRunProvenance({
+    chatKey: sourceSnapshot.chatKey,
+    sourceIdentity: {
+      sourceRevisionHash: sourceSnapshot.sourceHash,
+      latestMessageId: String(sourceSnapshot.sourceMessageId)
+    },
+    settingsHash: 'post-process-progressive-settings',
+    provider: { id: 'post-process-provider', model: 'test-model' },
+    pipelineMode: 'segmented',
+    promptVersions: { postProcess: 1 },
+    providerContractHash: 'post-process-provider-contract',
+    deckRevisionHash: 'post-process-progressive-deck',
+    cardConfigurationHash: 'post-process-progressive-cards',
+    promptContractHash: 'post-process-prompt'
+  });
+  const manifest = createPipelineRun({
+    operationId,
+    chatKey: sourceSnapshot.chatKey,
+    phase: 'postprocess',
+    pipelineMode: 'segmented',
+    sourceIdentity: provenance.sourceIdentity,
+    provenance
+  });
+  const scheduler = createExecutionScheduler({
+    repository: storage,
+    attemptsPerStep: 2
+  });
+  const running = scheduler.start({ manifest, graph, context: {} });
+  await waitUntil(
+    () => rewriteCalls.filter((id) => id === 'dialogue').length === 1,
+    'Progressive category B rewrite did not start'
+  );
+  await scheduler.pause({ operationId, reason: 'user' });
+  firstSecondRewrite.resolve({ ok: true, text: 'Late category B draft.' });
+  await running;
+  let saved = await storage.loadPipelineRun(sourceSnapshot.chatKey);
+  assertEqual(saved.stageRecords['postprocess.natural-prose.rewrite'].state, 'completed', 'category A draft is checkpointed');
+  assertEqual(saved.stageRecords['postprocess.dialogue.guidance'].state, 'completed', 'category B guidance is checkpointed');
+  assertEqual(saved.stageRecords['postprocess.dialogue.rewrite'].state, 'pending', 'category B rewrite returns to pending');
+
+  const resumed = scheduler.resume({
+    operationId,
+    graph,
+    context: {},
+    provenance
+  });
+  await waitUntil(
+    () => rewriteCalls.filter((id) => id === 'dialogue').length === 2,
+    'Progressive Resume did not reopen category B rewrite'
+  );
+  resumedSecondRewrite.resolve({ ok: true, text: 'Final progressive draft.' });
+  await resumed;
+  saved = await storage.loadPipelineRun(sourceSnapshot.chatKey);
+  assertEqual(saved.state, 'completed', 'Progressive Resume reaches terminal completion');
+  assertDeepEqual(guidanceCalls, ['natural-prose', 'dialogue'], 'Progressive Resume repeats no guidance');
+  assertEqual(rewriteCalls.filter((id) => id === 'natural-prose').length, 1, 'Progressive Resume reuses category A draft');
+  assertEqual(rewriteCalls.filter((id) => id === 'dialogue').length, 2, 'Progressive Resume reruns only category B rewrite');
+  assertEqual(commits[0].text, 'Final progressive draft.', 'Progressive commit uses the latest valid draft');
+});
+
 let passed = 0;
 for (const entry of cases) {
   try {
@@ -819,5 +1165,5 @@ for (const entry of cases) {
   }
 }
 
-assertEqual(passed, 24, 'the complete 24-case state-machine matrix ran');
-console.log('[pass] post-process runtime (24 cases)');
+assertEqual(passed, 27, 'the complete 27-case state-machine matrix ran');
+console.log('[pass] post-process runtime (27 cases)');

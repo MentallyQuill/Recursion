@@ -8,6 +8,9 @@ import {
   postProcessGuidanceRoute
 } from './post-process-guidance.mjs';
 import { runModelStageAttempts } from './execution/attempt-policy.mjs';
+import { createExecutionGraph } from './execution/stage-registry.mjs';
+import { createPipelineRun } from './execution/checkpoints.mjs';
+import { buildRunProvenance } from './execution/provenance.mjs';
 
 const POST_PROCESS_WRITER_PACKET_SCHEMA = 'recursion.postProcessWriterPacket.v1';
 const POST_PROCESS_WRITER_BOUNDARIES = Object.freeze([
@@ -393,44 +396,69 @@ async function rewriteWithRetry(stage, guidance, operation, host) {
   }
   const guidancePacket = buildPostProcessWriterPacket(stage, guidance.data);
   const writerDirective = buildWriterDirective(stage);
-  let lastFailureCode = 'RECURSION_POST_PROCESS_WRITER_FAILED';
-  let recoveredFailureCode = '';
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    if (operation.signal.aborted) return { ok: false, canceled: true, attempts: attempt - 1 };
-    let result;
-    try {
-      result = await host.generation.rewriteWithPostProcess({
-        guidancePacket,
-        writerDirective,
-        signal: operation.signal
-      });
-    } catch (error) {
-      if (operation.signal.aborted || error?.name === 'AbortError') throw error;
-      result = {
+  const attemptResult = await runModelStageAttempts({
+    attemptsPerStep: operation.modelAttemptsPerStep,
+    request: {
+      guidancePacket,
+      writerDirective,
+      draft: stage.draft
+    },
+    signal: operation.signal,
+    invoke: (request) => host.generation.rewriteWithPostProcess({
+      guidancePacket: request.guidancePacket,
+      writerDirective: request.writerDirective,
+      signal: operation.signal
+    }),
+    validate(result) {
+      const text = usableRewrite(result, stage.draft);
+      if (text) return { ok: true, value: { text } };
+      return {
         ok: false,
         error: {
-          code: safeCode(error?.code, 'RECURSION_POST_PROCESS_WRITER_FAILED')
+          code: result?.ok === true
+            ? (cleanText(result?.text)
+                ? 'RECURSION_POST_PROCESS_WRITER_NOOP'
+                : 'RECURSION_POST_PROCESS_WRITER_EMPTY')
+            : structuralFailureCode(result, 'RECURSION_POST_PROCESS_WRITER_FAILED'),
+          retryable: true
         }
       };
-    }
-    if (operation.signal.aborted) return { ok: false, canceled: true, attempts: attempt };
-    const text = usableRewrite(result, stage.draft);
-    if (text) {
-      return {
-        ok: true,
-        text,
-        attempts: attempt,
-        ...(recoveredFailureCode ? { recoveredFailureCode } : {})
-      };
-    }
-    lastFailureCode = result?.ok === true
-      ? (cleanText(result?.text)
-          ? 'RECURSION_POST_PROCESS_WRITER_NOOP'
-          : 'RECURSION_POST_PROCESS_WRITER_EMPTY')
-      : structuralFailureCode(result, 'RECURSION_POST_PROCESS_WRITER_FAILED');
-    recoveredFailureCode = lastFailureCode;
+    },
+    buildCorrectionRequest: ({ request }) => request
+  });
+  if (attemptResult.aborted || operation.signal.aborted) {
+    return {
+      ok: false,
+      canceled: true,
+      attempts: attemptResult.attempts.length
+    };
   }
-  return { ok: false, attempts: 2, failureCode: lastFailureCode };
+  if (!attemptResult.ok) {
+    return {
+      ok: false,
+      attempts: attemptResult.attempts.length,
+      failureCode: safeCode(
+        attemptResult.failure?.code,
+        'RECURSION_POST_PROCESS_WRITER_FAILED'
+      )
+    };
+  }
+  const recoveredFailure = attemptResult.attempts.find((attempt) => (
+    ['failed', 'invalid'].includes(attempt.outcome) && attempt.failure?.code
+  ));
+  return {
+    ok: true,
+    text: attemptResult.value.text,
+    attempts: attemptResult.attempts.length,
+    ...(recoveredFailure
+      ? {
+          recoveredFailureCode: safeCode(
+            recoveredFailure.failure.code,
+            'RECURSION_POST_PROCESS_WRITER_FAILED'
+          )
+        }
+      : {})
+  };
 }
 
 function successfulOutcome(category, guidance, rewrite) {
@@ -665,6 +693,306 @@ function guardAllowsCommit(value) {
   return true;
 }
 
+export function createPostProcessStages({
+  operationId = '',
+  mode = 'unified',
+  categories = [],
+  sourceSnapshot = {},
+  buildGuidanceRequest = ({ categoryIds, draft }) => ({ categoryIds, draft }),
+  buildRewriteRequest = ({ categoryIds, draft, guidance }) => ({
+    categoryIds,
+    draft,
+    guidance
+  }),
+  validateGuidance = (result) => {
+    const data = isObject(result?.data) ? result.data : result;
+    return cleanText(data?.guidanceText)
+      ? { ok: true, value: data }
+      : {
+          ok: false,
+          error: {
+            code: 'RECURSION_POST_PROCESS_GUIDANCE_EMPTY',
+            retryable: true
+          }
+        };
+  },
+  validateRewrite = (result, { draft }) => {
+    const text = usableRewrite(result, draft);
+    return text
+      ? { ok: true, value: { text } }
+      : {
+          ok: false,
+          error: {
+            code: cleanText(result?.text)
+              ? 'RECURSION_POST_PROCESS_WRITER_NOOP'
+              : 'RECURSION_POST_PROCESS_WRITER_EMPTY',
+            retryable: true
+          }
+        };
+  },
+  generateGuidance,
+  rewrite,
+  commit
+} = {}) {
+  const normalizedMode = normalizedRewriteFlow(mode);
+  const orderedCategories = Array.isArray(categories)
+    ? categories.map((category) => cloneValue(category))
+    : [];
+  const sourceStageId = 'postprocess.source-snapshot';
+  const stages = [{
+    id: sourceStageId,
+    version: 1,
+    kind: 'local',
+    executable: true,
+    dependencies: [],
+    checkpoint: 'durable',
+    failurePolicy: 'blocking',
+    buildInputFingerprint() {
+      return {
+        snapshotHash: cleanText(sourceSnapshot.snapshotHash),
+        sourceHash: cleanText(sourceSnapshot.sourceHash)
+      };
+    },
+    run() {
+      return {
+        snapshot: cloneValue(sourceSnapshot),
+        originalDraft: String(sourceSnapshot.originalDraft || ''),
+        mode: normalizedMode,
+        categories: cloneValue(orderedCategories)
+      };
+    },
+    validate(artifact) {
+      return cleanText(artifact?.snapshot?.sourceHash)
+        && cleanText(artifact?.originalDraft)
+        ? { ok: true, value: artifact }
+        : {
+            ok: false,
+            error: { code: 'RECURSION_POST_PROCESS_SOURCE_INVALID' }
+          };
+    },
+    summarizeArtifact(artifact) {
+      return {
+        sourceHash: cleanText(artifact?.snapshot?.sourceHash),
+        draftHash: hashJson(String(artifact?.originalDraft || '')),
+        draftLength: String(artifact?.originalDraft || '').length
+      };
+    }
+  }];
+
+  const groups = normalizedMode === 'progressive'
+    ? orderedCategories.map((category) => [category])
+    : [orderedCategories];
+  let priorRewriteStageId = '';
+  for (const [index, group] of groups.entries()) {
+    const categoryIds = group.map((category) => safeId(category?.id, `category-${index + 1}`));
+    const suffix = normalizedMode === 'unified'
+      ? 'unified'
+      : safeId(categoryIds[0], `category-${index + 1}`);
+    const guidanceStageId = `postprocess.${suffix}.guidance`;
+    const rewriteStageId = `postprocess.${suffix}.rewrite`;
+    const previousRewriteStageId = priorRewriteStageId;
+    const draftDependencyId = previousRewriteStageId || sourceStageId;
+    const draftFromDependencies = (dependencies) => (
+      previousRewriteStageId
+        ? dependencies[draftDependencyId]?.artifact?.text
+        : dependencies[sourceStageId]?.artifact?.originalDraft
+    );
+    stages.push({
+      id: guidanceStageId,
+      version: 1,
+      kind: 'model',
+      executable: true,
+      dependencies: previousRewriteStageId
+        ? [sourceStageId, previousRewriteStageId]
+        : [sourceStageId],
+      checkpoint: 'durable',
+      failurePolicy: 'blocking',
+      buildInputFingerprint(_context, dependencies) {
+        return {
+          sourceHash: dependencies[sourceStageId].checkpoint.outputHash,
+          draftHash: hashJson(String(draftFromDependencies(dependencies) || '')),
+          categoryIds
+        };
+      },
+      buildRequest(_context, dependencies) {
+        return buildGuidanceRequest({
+          operationId,
+          categories: group,
+          categoryIds,
+          sourceSnapshot,
+          draft: String(draftFromDependencies(dependencies) || ''),
+          dependencies
+        });
+      },
+      run({ request, signal, attempt }) {
+        if (typeof generateGuidance !== 'function') {
+          throw Object.assign(new Error('Post-process guidance is unavailable.'), {
+            code: 'RECURSION_POST_PROCESS_GUIDANCE_UNAVAILABLE',
+            retryable: false
+          });
+        }
+        return generateGuidance(request, {
+          signal,
+          attempt,
+          categoryIds
+        });
+      },
+      validate(result) {
+        return validateGuidance(result, {
+          sourceSnapshot,
+          categories: group,
+          categoryIds
+        });
+      },
+      buildCorrectionRequest({ request, error, attempt }) {
+        return {
+          ...request,
+          prompt: [
+            cleanText(request?.prompt),
+            `Correction required after attempt ${attempt}: ${cleanText(error?.message || error?.code || 'invalid guidance')}.`,
+            'Return valid post-process guidance matching the requested schema.'
+          ].filter(Boolean).join('\n\n')
+        };
+      },
+      summarizeArtifact(artifact) {
+        return {
+          categoryIds,
+          guidanceHash: hashJson(artifact),
+          guidanceLength: cleanText(artifact?.guidanceText).length
+        };
+      }
+    });
+    stages.push({
+      id: rewriteStageId,
+      version: 1,
+      kind: 'model',
+      executable: true,
+      dependencies: [
+        sourceStageId,
+        guidanceStageId,
+        ...(previousRewriteStageId ? [previousRewriteStageId] : [])
+      ],
+      checkpoint: 'durable',
+      failurePolicy: 'blocking',
+      buildInputFingerprint(_context, dependencies) {
+        return {
+          guidanceHash: dependencies[guidanceStageId].checkpoint.outputHash,
+          draftHash: hashJson(String(draftFromDependencies(dependencies) || '')),
+          categoryIds
+        };
+      },
+      buildRequest(_context, dependencies) {
+        const draft = String(draftFromDependencies(dependencies) || '');
+        return buildRewriteRequest({
+          operationId,
+          categories: group,
+          categoryIds,
+          sourceSnapshot,
+          draft,
+          guidance: dependencies[guidanceStageId].artifact,
+          dependencies
+        });
+      },
+      run({ request, signal, attempt, dependencies }) {
+        if (typeof rewrite !== 'function') {
+          throw Object.assign(new Error('Post-process rewrite is unavailable.'), {
+            code: 'RECURSION_POST_PROCESS_WRITER_UNAVAILABLE',
+            retryable: false
+          });
+        }
+        return rewrite(request, {
+          signal,
+          attempt,
+          categoryIds,
+          dependencies
+        });
+      },
+      validate(result, validationContext = {}) {
+        if (
+          validationContext.reuse === true
+          && cleanText(result?.text)
+          && cleanText(result.text) !== cleanText(
+            draftFromDependencies(validationContext.dependencies || {})
+          )
+        ) {
+          return { ok: true, value: result };
+        }
+        return validateRewrite(result, {
+          draft: String(draftFromDependencies(validationContext.dependencies || {}) || ''),
+          sourceSnapshot,
+          categories: group,
+          categoryIds
+        });
+      },
+      summarizeArtifact(artifact) {
+        return {
+          categoryIds,
+          draftHash: hashJson(String(artifact?.text || '')),
+          draftLength: String(artifact?.text || '').length,
+          validationStatus: 'accepted'
+        };
+      }
+    });
+    priorRewriteStageId = rewriteStageId;
+  }
+
+  const finalRewriteStageId = priorRewriteStageId;
+  stages.push({
+    id: 'postprocess.host-commit',
+    version: 1,
+    kind: 'host',
+    executable: true,
+    dependencies: [sourceStageId, finalRewriteStageId],
+    checkpoint: 'durable',
+    failurePolicy: 'blocking',
+    buildInputFingerprint(_context, dependencies) {
+      return {
+        sourceHash: dependencies[sourceStageId].checkpoint.outputHash,
+        finalDraftHash: dependencies[finalRewriteStageId].checkpoint.outputHash
+      };
+    },
+    async run({ dependencies, signal }) {
+      const text = String(dependencies[finalRewriteStageId].artifact?.text || '');
+      const finalArtifactHash = hashJson(text);
+      const commitId = hashJson({ operationId, finalArtifactHash });
+      if (typeof commit !== 'function') {
+        throw Object.assign(new Error('Post-process commit is unavailable.'), {
+          code: 'RECURSION_POST_PROCESS_COMMIT_UNAVAILABLE',
+          retryable: false
+        });
+      }
+      return commit({
+        operationId,
+        commitId,
+        sourceSnapshot,
+        text,
+        finalArtifactHash,
+        signal
+      });
+    },
+    validate(artifact) {
+      return artifact?.ok !== false && (artifact?.applied === true || artifact?.reason === 'already-applied')
+        ? { ok: true, value: artifact }
+        : {
+            ok: false,
+            error: artifact?.error || {
+              code: 'RECURSION_POST_PROCESS_COMMIT_FAILED'
+            }
+          };
+    },
+    summarizeArtifact(artifact) {
+      return {
+        applied: artifact?.applied === true,
+        reason: cleanText(artifact?.reason),
+        commitId: cleanText(artifact?.receipt?.commitId),
+        finalArtifactHash: cleanText(artifact?.receipt?.finalArtifactHash)
+      };
+    }
+  });
+
+  return createExecutionGraph({ stages });
+}
+
 async function defaultCommitResult(host, input) {
   const messages = host?.messages;
   const messageId = input.sourceMessageId;
@@ -701,12 +1029,17 @@ export function createPostProcessRuntime({
   snapshotProvider = () => host?.snapshot?.(),
   deckProvider = (settings) => getActivePostProcessDeck(settings?.postProcessDecks),
   sourceGuard = async () => true,
-  commitResult = (input) => defaultCommitResult(host, input)
+  commitResult = (input) => defaultCommitResult(host, input),
+  durableExecution = null
 } = {}) {
   let active = null;
   let armed = null;
   let finalizationClaim = null;
   let lastDiagnostics = diagnosticsFor(null);
+  const durableOperations = new Map();
+  const durableScheduler = durableExecution?.scheduler || null;
+  const durableRepository = durableExecution?.repository || null;
+  const durableEnabled = Boolean(durableScheduler && durableRepository);
 
   function publish(method, event) {
     try {
@@ -835,6 +1168,337 @@ export function createPostProcessRuntime({
     };
   }
 
+  function durableProvenance(operation, currentSettings) {
+    return buildRunProvenance({
+      chatKey: operation.snapshot.chatKey,
+      sourceIdentity: {
+        sourceRevisionHash: operation.sourceHash,
+        latestMessageId: String(operation.snapshot.sourceMessageId ?? ''),
+        selectedSwipeId: String(operation.snapshot.sourceSwipeId ?? ''),
+        characterHash: cleanText(operation.snapshot.activeCharacterHash),
+        groupHash: cleanText(operation.snapshot.activeGroupHash)
+      },
+      settingsHash: hashJson({
+        reasoningLevel: currentSettings.reasoningLevel,
+        modelAttemptsPerStep: currentSettings.modelAttemptsPerStep,
+        postProcess: currentSettings.postProcess,
+        postProcessDecks: currentSettings.postProcessDecks
+      }),
+      provider: {
+        id: cleanText(operation.route?.lane || 'utility'),
+        model: ''
+      },
+      pipelineMode: 'segmented',
+      promptVersions: { postProcess: 1 },
+      providerContractHash: 'recursion.postprocess.provider.v1',
+      deckRevisionHash: hashJson({
+        deckId: operation.deckId,
+        categories: operation.categories
+      }),
+      cardConfigurationHash: hashJson(operation.categories),
+      promptContractHash: hashJson({
+        writerPacketSchema: POST_PROCESS_WRITER_PACKET_SCHEMA,
+        boundaries: POST_PROCESS_WRITER_BOUNDARIES
+      })
+    });
+  }
+
+  function durableGraph(operation) {
+    const outcomes = operation.categories.map((category) => ({
+      categoryId: safeId(category.id, 'category'),
+      status: 'success',
+      guidanceAttempts: 1,
+      hostAttempts: 1
+    }));
+    return createPostProcessStages({
+      operationId: operation.operationId,
+      mode: operation.rewriteFlow,
+      categories: operation.categories,
+      sourceSnapshot: operation.snapshot,
+      buildGuidanceRequest({ categories, draft }) {
+        return guidanceRequestForStage(
+          stageInput(operation, categories, draft),
+          operation
+        );
+      },
+      async generateGuidance(request, { signal }) {
+        if (typeof generationRouter?.generate !== 'function') {
+          throw Object.assign(new Error('Post-process guidance is unavailable.'), {
+            code: 'RECURSION_POST_PROCESS_GUIDANCE_UNAVAILABLE',
+            retryable: false
+          });
+        }
+        return generationRouter.generate(
+          operation.route.roleId,
+          request,
+          {
+            signal,
+            runId: operation.operationId,
+            lockRunId: true,
+            activityLifecycle: 'nested'
+          }
+        );
+      },
+      validateGuidance(result) {
+        const data = isObject(result?.data) ? result.data : result;
+        const guidanceText = cleanText(data?.guidanceText);
+        if (
+          result?.ok === false
+          || !guidanceText
+          || (
+            cleanText(data?.snapshotHash)
+            && cleanText(data.snapshotHash) !== operation.snapshotHash
+          )
+          || (
+            cleanText(data?.sourceHash)
+            && cleanText(data.sourceHash) !== operation.sourceHash
+          )
+        ) {
+          return {
+            ok: false,
+            error: result?.error || {
+              code: 'RECURSION_POST_PROCESS_GUIDANCE_INVALID',
+              retryable: true
+            }
+          };
+        }
+        return {
+          ok: true,
+          value: {
+            schema: cleanText(data.schema),
+            snapshotHash: operation.snapshotHash,
+            sourceHash: operation.sourceHash,
+            guidanceText
+          }
+        };
+      },
+      buildRewriteRequest({ categories, draft, guidance }) {
+        const stage = stageInput(operation, categories, draft);
+        return {
+          draft,
+          guidancePacket: buildPostProcessWriterPacket(stage, guidance),
+          writerDirective: buildWriterDirective(stage)
+        };
+      },
+      rewrite(request, { signal }) {
+        if (typeof host?.generation?.rewriteWithPostProcess !== 'function') {
+          throw Object.assign(new Error('Post-process rewrite is unavailable.'), {
+            code: 'RECURSION_POST_PROCESS_WRITER_UNAVAILABLE',
+            retryable: false
+          });
+        }
+        return host.generation.rewriteWithPostProcess({
+          guidancePacket: request.guidancePacket,
+          writerDirective: request.writerDirective,
+          signal
+        });
+      },
+      async commit({
+        commitId,
+        text,
+        finalArtifactHash,
+        signal
+      }) {
+        let current = false;
+        try {
+          current = guardAllowsCommit(
+            await sourceGuard(operation.snapshot, operation)
+          );
+        } catch {
+          current = false;
+        }
+        if (!current) {
+          return {
+            ok: false,
+            applied: false,
+            error: {
+              code: 'RECURSION_POST_PROCESS_SOURCE_STALE'
+            }
+          };
+        }
+        const marker = markerForCommit(
+          operation,
+          text,
+          outcomes,
+          operation.applyMode,
+          false
+        );
+        const sourceIdentity = {
+          chatIdentityHash: operation.snapshot.chatIdentityHash,
+          messageId: operation.snapshot.sourceMessageId,
+          swipeId: operation.snapshot.sourceSwipeId,
+          sourceTextHash: marker.sourceHash,
+          activeCharacterHash: operation.snapshot.activeCharacterHash,
+          activeGroupHash: operation.snapshot.activeGroupHash
+        };
+        const input = {
+          operationId: operation.operationId,
+          commitId,
+          sourceMessageId: operation.snapshot.sourceMessageId,
+          sourceSwipeId: operation.snapshot.sourceSwipeId,
+          sourceHash: operation.sourceHash,
+          snapshotHash: operation.snapshotHash,
+          sourceIdentity,
+          expectedSourceIdentity: sourceIdentity,
+          finalArtifactHash,
+          text,
+          mode: operation.applyMode,
+          marker,
+          signal
+        };
+        const result = typeof host?.commitPostProcessResult === 'function'
+          ? await host.commitPostProcessResult(input)
+          : await commitResult({
+              ...input,
+              markerNamespace: 'postProcess'
+            });
+        return {
+          ok: result?.ok !== false,
+          applied: result?.applied !== false,
+          reason: cleanText(result?.reason || (result?.applied === false ? 'already-applied' : 'applied')),
+          receipt: cloneValue(result?.receipt || {
+            commitId,
+            finalArtifactHash
+          }),
+          ...(result?.error ? { error: cloneValue(result.error) } : {})
+        };
+      }
+    });
+  }
+
+  async function durableArtifact(manifest, stageId) {
+    const checkpoint = manifest?.stageRecords?.[stageId]?.checkpoint;
+    if (!checkpoint) return null;
+    return durableRepository.loadPipelineArtifact(
+      manifest.chatKey,
+      manifest.operationId,
+      checkpoint.artifactRef?.artifactId || stageId
+    );
+  }
+
+  function finalRewriteStageId(operation) {
+    if (operation.rewriteFlow !== 'progressive') {
+      return 'postprocess.unified.rewrite';
+    }
+    const last = operation.categories.at(-1);
+    return `postprocess.${safeId(last?.id, 'category')}.rewrite`;
+  }
+
+  async function purgeDurableIntermediateArtifacts(manifest, operation) {
+    if (typeof durableRepository?.deletePipelineArtifact !== 'function') return;
+    const finalStageId = finalRewriteStageId(operation);
+    const stageIds = Object.keys(manifest?.stageRecords || {}).filter((stageId) => (
+      stageId.endsWith('.guidance')
+      || (stageId.endsWith('.rewrite') && stageId !== finalStageId)
+    ));
+    await Promise.allSettled(stageIds.map((stageId) => {
+      const checkpoint = manifest.stageRecords?.[stageId]?.checkpoint;
+      if (!checkpoint) return null;
+      return durableRepository.deletePipelineArtifact(
+        manifest.chatKey,
+        manifest.operationId,
+        checkpoint.artifactRef?.artifactId || stageId
+      );
+    }));
+  }
+
+  async function finalizeDurableOperation(record, operation, manifest) {
+    if (manifest?.state !== 'completed') {
+      lastDiagnostics = diagnosticsFor(operation, {
+        status: 'paused',
+        reason: manifest?.pauseReason || 'paused'
+      });
+      return {
+        ok: false,
+        committed: false,
+        paused: manifest?.state === 'paused',
+        execution: manifest,
+        diagnostics: lastDiagnostics
+      };
+    }
+    const [draftArtifact, commitArtifact] = await Promise.all([
+      durableArtifact(manifest, finalRewriteStageId(operation)),
+      durableArtifact(manifest, 'postprocess.host-commit')
+    ]);
+    await purgeDurableIntermediateArtifacts(manifest, operation);
+    const candidate = cleanText(draftArtifact?.text);
+    const outcomes = operation.categories.map((category) => {
+      const suffix = operation.rewriteFlow === 'progressive'
+        ? safeId(category.id, 'category')
+        : 'unified';
+      return {
+        categoryId: safeId(category.id, 'category'),
+        status: 'success',
+        guidanceAttempts: Number(
+          manifest.stageRecords?.[`postprocess.${suffix}.guidance`]?.attempts?.total || 0
+        ),
+        hostAttempts: Number(
+          manifest.stageRecords?.[`postprocess.${suffix}.rewrite`]?.attempts?.total || 0
+        )
+      };
+    });
+    lastDiagnostics = diagnosticsFor(operation, {
+      outcomes,
+      status: 'committed',
+      committedApplyMode: operation.applyMode
+    });
+    settleActivity(record, operation, {
+      outcome: 'success',
+      label: 'Post-processing complete.',
+      detail: {
+        partial: false,
+        requestedApplyMode: operation.applyMode,
+        committedApplyMode: operation.applyMode,
+        candidateHash: hashJson(candidate),
+        categories: diagnosticCategories(outcomes)
+      }
+    });
+    return {
+      ok: true,
+      committed: true,
+      candidate,
+      partial: false,
+      requestedApplyMode: operation.applyMode,
+      committedApplyMode: operation.applyMode,
+      outcomes,
+      diagnostics: lastDiagnostics,
+      commit: commitArtifact,
+      execution: manifest
+    };
+  }
+
+  async function startDurableOperation(record, operation, currentSettings) {
+    const provenance = durableProvenance(operation, currentSettings);
+    const graph = durableGraph(operation);
+    const manifest = createPipelineRun({
+      operationId: operation.operationId,
+      chatKey: operation.snapshot.chatKey,
+      phase: 'postprocess',
+      pipelineMode: 'segmented',
+      sourceIdentity: provenance.sourceIdentity,
+      provenance
+    });
+    record.operationId = operation.operationId;
+    durableOperations.set(operation.operationId, {
+      operation,
+      graph,
+      provenance,
+      record
+    });
+    durableExecution?.onOperation?.({
+      operation,
+      graph,
+      provenance,
+      record
+    });
+    const settled = await durableScheduler.start({
+      manifest,
+      graph,
+      context: {}
+    });
+    return finalizeDurableOperation(record, operation, settled);
+  }
+
   async function execute(record) {
     let operation = null;
     try {
@@ -882,6 +1546,10 @@ export function createPostProcessRuntime({
         return finishWithoutCommit(operation, 'no-runnable-cards', [], {}, record);
       }
       startActivity(record, operation);
+
+      if (durableEnabled) {
+        return startDurableOperation(record, operation, currentSettings);
+      }
 
       const runResult = operation.rewriteFlow === 'progressive'
         ? await runProgressive(operation, { generationRouter, host, stageCategory })
@@ -1127,6 +1795,13 @@ export function createPostProcessRuntime({
     armed = null;
     finalizationClaim = null;
     if (!active) return { ok: true, canceled };
+    if (durableEnabled && active.operationId) {
+      void durableScheduler.pause({
+        operationId: active.operationId,
+        reason: 'post-process-stopped'
+      });
+      return { ok: true, canceled: true, paused: true };
+    }
     active.controller.abort();
     return { ok: true, canceled: true };
   }
@@ -1253,6 +1928,102 @@ export function createPostProcessRuntime({
     return { ok: true, ready: true, operationToken: arm.operationToken };
   }
 
+  async function restoreExecutionState(manifest) {
+    if (!durableEnabled || manifest?.phase !== 'postprocess') return null;
+    const sourceArtifact = await durableArtifact(
+      manifest,
+      'postprocess.source-snapshot'
+    );
+    if (!sourceArtifact?.snapshot) return null;
+    const currentSettings = cloneValue(settingsStore?.get?.() || {});
+    const deck = await deckProvider(currentSettings);
+    const basePlan = buildPostProcessPlan({
+      settings: currentSettings,
+      deck,
+      snapshot: sourceArtifact.snapshot
+    });
+    const operation = {
+      ...basePlan,
+      operationId: manifest.operationId,
+      rewriteFlow: normalizedRewriteFlow(
+        sourceArtifact.mode || basePlan.rewriteFlow
+      ),
+      categories: Array.isArray(sourceArtifact.categories)
+        ? cloneValue(sourceArtifact.categories)
+        : basePlan.categories
+    };
+    const graph = durableGraph(operation);
+    const provenance = durableProvenance(operation, currentSettings);
+    durableOperations.set(operation.operationId, {
+      operation,
+      graph,
+      provenance,
+      record: null
+    });
+    durableExecution?.onOperation?.({
+      operation,
+      graph,
+      provenance,
+      record: null
+    });
+    return {
+      operation,
+      graph,
+      provenance
+    };
+  }
+
+  async function resumeOperation({ operationId } = {}) {
+    const id = cleanText(operationId);
+    const restored = durableOperations.get(id);
+    if (!durableEnabled || !restored) {
+      throw new Error('Post-process operation context is unavailable for Resume.');
+    }
+    const record = restored.record || {
+      controller: new AbortController(),
+      phase: 'pending',
+      activityStarted: false,
+      activitySettled: false,
+      operationId: id,
+      promise: null
+    };
+    restored.record = record;
+    startActivity(record, restored.operation);
+    const manifest = await durableScheduler.resume({
+      operationId: id,
+      graph: restored.graph,
+      context: {},
+      provenance: restored.provenance
+    });
+    return finalizeDurableOperation(record, restored.operation, manifest);
+  }
+
+  async function retryStage({ operationId, stageId } = {}) {
+    const id = cleanText(operationId);
+    const restored = durableOperations.get(id);
+    if (!durableEnabled || !restored) {
+      throw new Error('Post-process operation context is unavailable for Retry.');
+    }
+    const record = restored.record || {
+      controller: new AbortController(),
+      phase: 'pending',
+      activityStarted: false,
+      activitySettled: false,
+      operationId: id,
+      promise: null
+    };
+    restored.record = record;
+    startActivity(record, restored.operation);
+    const manifest = await durableScheduler.retry({
+      operationId: id,
+      stageId,
+      graph: restored.graph,
+      context: {},
+      provenance: restored.provenance
+    });
+    return finalizeDurableOperation(record, restored.operation, manifest);
+  }
+
   return {
     postProcessPending() {
       return Boolean(armed);
@@ -1266,6 +2037,9 @@ export function createPostProcessRuntime({
     waitForPostProcessSettlement,
     postProcessFinalTargetReady,
     postProcessHostRunReady,
+    restoreExecutionState,
+    resumeOperation,
+    retryStage,
     postProcessDiagnostics() {
       return cloneValue(lastDiagnostics);
     }

@@ -2391,7 +2391,13 @@ export function createRecursionRuntime({
       preProcessPromptPacket: lastBriefPacket,
       storyForm: lastBriefPacket?.storyForm ?? null
     }),
-    sourceGuard: postProcessSourceStillCurrent
+    sourceGuard: postProcessSourceStillCurrent,
+    durableExecution: durablePreprocess
+      ? {
+          scheduler: executionScheduler,
+          repository: storage
+        }
+      : null
   });
 
   function createPreparedGenerationCandidate(packet, hand, snapshot, settings) {
@@ -8599,6 +8605,42 @@ export function createRecursionRuntime({
         updatedAt: nowIso()
       });
     }
+    if (manifest.phase === 'postprocess') {
+      const restored = await postProcessRuntime.restoreExecutionState(manifest);
+      const status = restored
+        ? compareRunProvenance(restored.provenance, manifest.provenance)
+        : { reusable: false, changedFields: ['executionContext'] };
+      const sourceCurrent = manifest.state === 'completed'
+        ? true
+        : (restored
+            ? await postProcessSourceStillCurrent(
+                restored.operation.snapshot,
+                restored.operation
+              )
+            : false);
+      if (
+        (!status.reusable || !sourceCurrent)
+        && manifest.state !== 'stale'
+        && manifest.state !== 'abandoned'
+      ) {
+        manifest = await storage.savePipelineRun(chatKey, {
+          ...manifest,
+          revision: Number(manifest.revision || 0) + 1,
+          state: 'stale',
+          pauseReason: 'provenance-changed',
+          staleChangedFields: [
+            ...new Set([
+              ...(status.changedFields || []),
+              ...(!sourceCurrent ? ['sourceIdentity'] : [])
+            ])
+          ],
+          frontierStageIds: [],
+          updatedAt: nowIso()
+        });
+      }
+      executionView = manifest;
+      return redact(manifest);
+    }
     const provenance = executionProvenance(snapshot, settingsStore.get());
     const status = compareRunProvenance(provenance, manifest.provenance);
     if (!status.reusable && manifest.state !== 'stale' && manifest.state !== 'abandoned') {
@@ -8636,6 +8678,13 @@ export function createRecursionRuntime({
 
   async function resumeOperation({ operationId = executionView?.operationId } = {}) {
     const id = safeText(operationId || '', 180);
+    if (executionView?.phase === 'postprocess') {
+      const result = await postProcessRuntime.resumeOperation({
+        operationId: id
+      });
+      if (result?.execution) executionView = result.execution;
+      return result;
+    }
     const graph = preprocessGraphs.get(id);
     const context = preprocessContexts.get(id);
     if (!id || !graph || !context) {
@@ -8657,6 +8706,14 @@ export function createRecursionRuntime({
     stageId
   } = {}) {
     const id = safeText(operationId || '', 180);
+    if (executionView?.phase === 'postprocess') {
+      const result = await postProcessRuntime.retryStage({
+        operationId: id,
+        stageId
+      });
+      if (result?.execution) executionView = result.execution;
+      return result;
+    }
     const graph = preprocessGraphs.get(id);
     const context = preprocessContexts.get(id);
     if (!id || !graph || !context) {

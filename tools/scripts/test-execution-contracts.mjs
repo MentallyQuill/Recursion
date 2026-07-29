@@ -89,7 +89,8 @@ const run = createPipelineRun({
   phase: 'preprocess',
   pipelineMode: 'segmented',
   createdAt: '2026-07-29T12:00:00.000Z',
-  sourceIdentity: provenance.sourceIdentity
+  sourceIdentity: provenance.sourceIdentity,
+  provenance
 });
 
 assertDeepEqual(run, {
@@ -100,8 +101,11 @@ assertDeepEqual(run, {
   pipelineMode: 'segmented',
   chatKey: 'chat-a',
   sourceIdentity: provenance.sourceIdentity,
+  provenance,
+  revision: 0,
   state: 'paused',
   pauseReason: 'created',
+  staleChangedFields: [],
   frontierStageIds: [],
   queuedStageIds: [],
   stageRecords: {},
@@ -129,6 +133,7 @@ assertDeepEqual(stageRecord, {
   kind: 'model',
   state: 'pending',
   checkpoint: null,
+  summary: null,
   failure: null,
   attempts: { window: 0, limit: 2, used: 0, total: 0 },
   executionToken: null,

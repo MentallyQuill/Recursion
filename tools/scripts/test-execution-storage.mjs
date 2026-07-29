@@ -170,7 +170,11 @@ await repairStorage.writeJson(queuedReprocessKey('Invalid Chat'), {
   recordType: 'recursion.queuedReprocess',
   schemaVersion: 1,
   chatKey: 'Invalid-Chat',
-  intent: { artifactBody: 'invalid intent' },
+  intent: {
+    mode: 'stage',
+    stageIds: ['preprocess.arbiter'],
+    artifactBody: 'invalid intent'
+  },
   createdAt: '2026-07-29T12:00:00.000Z',
   updatedAt: '2026-07-29T12:00:00.000Z'
 });

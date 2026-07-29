@@ -4,6 +4,10 @@ import { UNKNOWN_STORY_FORM, normalizeStoryForm } from './story-form.mjs';
 import { normalizeRetentionSettings } from './retention-policy.mjs';
 import { stableHash } from './execution/provenance.mjs';
 import { normalizePipelineRun } from './execution/checkpoints.mjs';
+import {
+  QUEUED_REPROCESS_SCHEMA,
+  normalizeQueuedReprocess
+} from './execution/queued-reprocess.mjs';
 
 const RECURSION_VERSION = '0.1.0-pre-alpha.5';
 const MAX_JOURNAL_ENTRIES = 500;
@@ -734,22 +738,6 @@ function isStorageObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value);
 }
 
-function normalizeQueuedReprocessIntent(value) {
-  if (!isStorageObject(value) || value.schema !== 'recursion.queued-reprocess.v1') return null;
-  const mode = value.mode === 'full-fresh' ? 'full-fresh' : 'stage';
-  const stageIds = [...new Set(
-    (Array.isArray(value.stageIds) ? value.stageIds : [])
-      .map((stageId) => stringValue(stageId, '').trim())
-      .filter(Boolean)
-  )];
-  if (mode === 'stage' && stageIds.length === 0) return null;
-  return {
-    schema: 'recursion.queued-reprocess.v1',
-    mode,
-    stageIds
-  };
-}
-
 function indexRecordFromStoredRecord(key, value) {
   const kind = indexKindForKey(key);
   if (!kind || !isStorageObject(value) || value.schemaVersion !== 1) return null;
@@ -817,7 +805,8 @@ function indexRecordFromStoredRecord(key, value) {
   if (kind === 'queuedReprocess') {
     if (
       value.recordType !== 'recursion.queuedReprocess'
-      || !normalizeQueuedReprocessIntent(value.intent)
+      || value.intent?.schema !== QUEUED_REPROCESS_SCHEMA
+      || !normalizeQueuedReprocess(value.intent)
     ) {
       return null;
     }
@@ -1375,7 +1364,9 @@ export function createStorageRepository({
     return {
       kind: 'logical-storage',
       key,
-      hash: artifactHash
+      hash: artifactHash,
+      operationId: safeId(operationId, 'operation'),
+      artifactId: safeId(artifactId, 'artifact')
     };
   }
 
@@ -1426,14 +1417,15 @@ export function createStorageRepository({
       || record.recordType !== 'recursion.queuedReprocess'
       || record.schemaVersion !== 1
       || record.chatKey !== safeId(chatKey, 'chat')
+      || record.intent?.schema !== QUEUED_REPROCESS_SCHEMA
     ) {
       return null;
     }
-    return normalizeQueuedReprocessIntent(record.intent);
+    return normalizeQueuedReprocess(record.intent);
   }
 
   async function saveQueuedReprocess(chatKey, intent) {
-    const normalized = normalizeQueuedReprocessIntent(intent);
+    const normalized = normalizeQueuedReprocess(intent);
     if (!normalized) throw new TypeError('Queued reprocess intent is invalid.');
     const key = queuedReprocessKey(chatKey);
     const record = baseRecord('recursion.queuedReprocess', {
@@ -1444,7 +1436,7 @@ export function createStorageRepository({
     if (storageWriteStatus(writeResult).persisted === false) {
       throw new Error('Queued reprocess write failed.');
     }
-    const persistedIntent = normalizeQueuedReprocessIntent((await storage.readJson(key))?.intent);
+    const persistedIntent = normalizeQueuedReprocess((await storage.readJson(key))?.intent);
     if (!persistedIntent || await stableHash(persistedIntent) !== await stableHash(normalized)) {
       throw new Error('Queued reprocess write verification failed.');
     }

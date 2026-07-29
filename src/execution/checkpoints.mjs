@@ -66,6 +66,28 @@ function normalizeHashMap(value = {}) {
   );
 }
 
+function normalizeStageSummary(value, depth = 0) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') return value.slice(0, 240);
+  if (depth >= 3) return null;
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 30)
+      .map((entry) => normalizeStageSummary(entry, depth + 1))
+      .filter((entry) => entry !== null);
+  }
+  if (!value || Object.getPrototypeOf(value) !== Object.prototype) return null;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .slice(0, 40)
+      .map((key) => [key.slice(0, 80), normalizeStageSummary(value[key], depth + 1)])
+      .filter(([, entry]) => entry !== null)
+  );
+}
+
 function normalizeAttempts(value = {}) {
   return {
     window: nonNegativeInteger(value.window),
@@ -82,8 +104,14 @@ function normalizeArtifactRef(value = {}) {
     : '';
   const key = cleanText(value.key);
   const hash = cleanText(value.hash);
+  const artifactId = cleanText(value.artifactId);
   if (!kind || !hash || (kind === 'logical-storage' && !key)) return null;
-  return { kind, key, hash };
+  return {
+    kind,
+    key,
+    hash,
+    ...(artifactId ? { artifactId } : {})
+  };
 }
 
 export function createCheckpoint({
@@ -183,6 +211,7 @@ export function createStageRecord({
     kind: cleanText(kind),
     state: 'pending',
     checkpoint: null,
+    summary: null,
     failure: null,
     attempts: {
       window: 0,
@@ -208,6 +237,7 @@ export function normalizeStageRecord(value) {
     kind: cleanText(value.kind),
     state: STAGE_STATES.includes(value.state) ? value.state : 'pending',
     checkpoint: normalizeCheckpoint(value.checkpoint),
+    summary: normalizeStageSummary(value.summary),
     failure: value.failure && typeof value.failure === 'object'
       ? {
           code: cleanText(value.failure.code),
@@ -238,7 +268,8 @@ export function createPipelineRun({
   phase,
   pipelineMode,
   createdAt,
-  sourceIdentity
+  sourceIdentity,
+  provenance
 }) {
   return {
     schema: PIPELINE_RUN_SCHEMA,
@@ -248,8 +279,11 @@ export function createPipelineRun({
     pipelineMode: cleanText(pipelineMode),
     chatKey: cleanText(chatKey),
     sourceIdentity: normalizeSourceIdentity(sourceIdentity),
+    provenance: normalizeExecutionProvenance(provenance),
+    revision: 0,
     state: 'paused',
     pauseReason: 'created',
+    staleChangedFields: [],
     frontierStageIds: [],
     queuedStageIds: [],
     stageRecords: {},
@@ -272,8 +306,11 @@ export function normalizePipelineRun(value) {
     pipelineMode: cleanText(value.pipelineMode),
     chatKey: cleanText(value.chatKey),
     sourceIdentity: normalizeSourceIdentity(value.sourceIdentity),
+    provenance: normalizeExecutionProvenance(value.provenance),
+    revision: nonNegativeInteger(value.revision),
     state: OPERATION_STATES.includes(value.state) ? value.state : 'paused',
     pauseReason: cleanText(value.pauseReason),
+    staleChangedFields: cleanStringList(value.staleChangedFields),
     frontierStageIds: cleanStringList(value.frontierStageIds),
     queuedStageIds: cleanStringList(value.queuedStageIds),
     stageRecords: normalizeStageRecordMap(value.stageRecords),

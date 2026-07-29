@@ -47,3 +47,51 @@ export function createUiActionStatus() {
     }
   };
 }
+
+export function progressActionControl(action) {
+  if (!action || typeof action !== 'object' || !String(action.kind || '').trim()) return null;
+  const label = String(action.label || '').trim();
+  const stageId = String(action.stageId || '').trim();
+  if (!label || !stageId) return null;
+  return {
+    tagName: 'button',
+    className: 'recursion-progress-action',
+    attrs: {
+      type: 'button',
+      'aria-label': label,
+      title: label
+    },
+    dataset: {
+      recursionProgressAction: String(action.kind),
+      recursionProgressStageId: stageId,
+      recursionProgressOperationId: String(action.operationId || '').trim(),
+      recursionProgressActionIcon: String(action.icon || '').trim()
+    }
+  };
+}
+
+export function isProgressActionActivation(event) {
+  return event?.key === 'Enter' || event?.key === ' ';
+}
+
+export function dispatchProgressAction(runtime, action) {
+  const source = action && typeof action === 'object' ? action : {};
+  const operationId = String(source.operationId || '').trim();
+  const stageId = String(source.stageId || '').trim();
+  if (source.kind === 'stop') {
+    return runtime?.pauseOperation?.({ reason: 'user' });
+  }
+  if (source.kind === 'resume') {
+    return runtime?.resumeOperation?.({ operationId });
+  }
+  if (source.kind === 'retry') {
+    return runtime?.retryStage?.({ operationId, stageId });
+  }
+  if (source.kind === 'reprocess') {
+    return runtime?.queueStageReprocess?.({ stageId });
+  }
+  if (source.kind === 'cancel-reprocess') {
+    return runtime?.cancelQueuedStageReprocess?.({ stageId });
+  }
+  return null;
+}

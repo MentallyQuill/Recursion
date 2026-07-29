@@ -50,6 +50,40 @@ const CARD_ROLE_LABELS = Object.freeze({
   possessionsItemsCard: 'Items',
   openThreadsCard: 'Open Threads'
 });
+const PROGRESS_ACTIONS = Object.freeze({
+  stop: Object.freeze({
+    label: 'Stop and pause this operation',
+    icon: 'square'
+  }),
+  resume: Object.freeze({
+    label: 'Resume from saved checkpoint',
+    icon: 'play'
+  }),
+  retry: Object.freeze({
+    label: 'Retry this step',
+    icon: 'rotate'
+  }),
+  reprocess: Object.freeze({
+    label: 'Reprocess from here on the next generation',
+    icon: 'branch-refresh'
+  }),
+  'cancel-reprocess': Object.freeze({
+    label: 'Cancel queued reprocess',
+    icon: 'x'
+  })
+});
+const EXECUTION_LABELS = Object.freeze({
+  'preprocess.snapshot': 'Reading current turn',
+  'preprocess.arbiter': 'Planning card pass',
+  'preprocess.cards.fused': 'Fused card bundle',
+  'preprocess.deck': 'Updating scene deck',
+  'preprocess.hand': 'Selecting turn hand',
+  'preprocess.guidance': 'Reasoner guidance',
+  'preprocess.packet': 'Composing prompt packet',
+  'preprocess.install': 'Installing Recursion prompt',
+  'postprocess.source-snapshot': 'Reading generated response',
+  'postprocess.host-commit': 'Adding Post-process result'
+});
 
 const STEP_ORDER = [
   'read-turn',
@@ -184,6 +218,102 @@ function normalizeProviderLane(value, fallback = 'utility') {
 function normalizeState(value, fallback = 'pending') {
   const state = cleanText(value, fallback).toLowerCase();
   return VALID_STATES.has(state) ? state : fallback;
+}
+
+function executionStageId(stage) {
+  return cleanText(asObject(stage).stageId || asObject(stage).id);
+}
+
+function actionDescriptor(kind, operation, stage) {
+  const definition = PROGRESS_ACTIONS[kind];
+  if (!definition) return null;
+  return {
+    kind,
+    stageId: executionStageId(stage),
+    operationId: cleanText(asObject(operation).operationId),
+    label: definition.label,
+    icon: definition.icon
+  };
+}
+
+function queuedStageIds(value) {
+  const queued = asObject(value);
+  if (queued.mode !== 'stage' || !Array.isArray(queued.stageIds)) return new Set();
+  return new Set(queued.stageIds.map((stageId) => cleanText(stageId)).filter(Boolean));
+}
+
+export function actionForProgressStage({
+  operation,
+  stage,
+  queuedReprocess
+} = {}) {
+  const operationSource = asObject(operation);
+  const stageSource = asObject(stage);
+  const stageId = executionStageId(stageSource);
+  if (
+    !stageId
+    || stageSource.executable === false
+    || stageSource.actionOwner === false
+  ) {
+    return null;
+  }
+  if (queuedStageIds(queuedReprocess).has(stageId)) {
+    return actionDescriptor('cancel-reprocess', operationSource, stageSource);
+  }
+
+  const operationState = cleanText(operationSource.state).toLowerCase();
+  const stageState = cleanText(stageSource.state, 'pending').toLowerCase();
+  const frontier = Array.isArray(operationSource.frontierStageIds)
+    ? operationSource.frontierStageIds.map((stageIdValue) => cleanText(stageIdValue)).filter(Boolean)
+    : [];
+  if (
+    operationState === 'running'
+    && stageState === 'running'
+    && frontier[0] === stageId
+  ) {
+    return actionDescriptor('stop', operationSource, stageSource);
+  }
+  const failedStageId = cleanText(operationSource.pauseReason)
+    .replace(/^stage-failed:/, '');
+  if (
+    operationState === 'paused'
+    && stageState === 'failed'
+    && stageSource.failurePolicy !== 'continue'
+    && failedStageId === stageId
+  ) {
+    return actionDescriptor('retry', operationSource, stageSource);
+  }
+  if (
+    operationState === 'paused'
+    && stageState === 'pending'
+    && operationSource.resumable !== false
+    && frontier[0] === stageId
+  ) {
+    return actionDescriptor('resume', operationSource, stageSource);
+  }
+  if (operationState === 'stale') {
+    return stageSource.reprocessOwner === true
+      ? actionDescriptor('reprocess', operationSource, stageSource)
+      : null;
+  }
+  if (stageState === 'completed' || stageState === 'cached' || stageState === 'done') {
+    return actionDescriptor('reprocess', operationSource, stageSource);
+  }
+  return null;
+}
+
+function normalizeProgressAction(value) {
+  const source = asObject(value);
+  const definition = PROGRESS_ACTIONS[source.kind];
+  const stageId = cleanText(source.stageId);
+  if (!definition || !stageId) return null;
+  return {
+    kind: source.kind,
+    stageId,
+    operationId: cleanText(source.operationId),
+    label: definition.label,
+    icon: definition.icon
+  };
 }
 
 function normalizeChildSource(value) {
@@ -816,9 +946,11 @@ function normalizeChildStep(input, index = 0) {
   const roleId = safeDisplayText(source.sourceRoleId || source.roleId || source.role, '', 80);
   const label = roleLabel(roleId, safeDisplayText(source.label, `Item ${index + 1}`, 80));
   const rawId = source.id || roleId || label;
-  const id = roleId && !source.id
-    ? childIdFromRole(roleId, `child-${index + 1}`)
-    : idFromText(rawId, `child-${index + 1}`);
+  const id = source.executionStage === true
+    ? cleanText(rawId, `child-${index + 1}`)
+    : (roleId && !source.id
+        ? childIdFromRole(roleId, `child-${index + 1}`)
+        : idFromText(rawId, `child-${index + 1}`));
   const retryCount = retryCountFromSource(source);
   const state = normalizeStateWithRetry(source.state, retryCount);
   const childSource = normalizeChildSource(source.source || source.sourceType || (state === 'cached' ? 'cache' : ''));
@@ -844,6 +976,7 @@ function normalizeChildStep(input, index = 0) {
     retryCount,
     reason: reason || null,
     suggestedAction: safeDisplayText(source.suggestedAction, '', 180) || null,
+    action: normalizeProgressAction(source.action),
     failureCode: safeDisplayText(source.failureCode, '', 120)
       .replace(/[^A-Z0-9_]+/gi, '_')
       .toUpperCase() || null,
@@ -856,9 +989,11 @@ function normalizeChildStep(input, index = 0) {
 function normalizeStep(input, index = 0) {
   const source = asObject(input);
   const rawId = source.id || source.label;
-  const id = UNSAFE_DISPLAY_PATTERN.test(String(rawId ?? ''))
+  const id = source.executionStage === true
+    ? cleanText(rawId, `step-${index + 1}`)
+    : (UNSAFE_DISPLAY_PATTERN.test(String(rawId ?? ''))
     ? `step-${index + 1}`
-    : idFromText(rawId, `step-${index + 1}`);
+    : idFromText(rawId, `step-${index + 1}`));
   const definition = STEP_DEFINITIONS[id] || {};
   const children = Array.isArray(source.children)
     ? source.children.map((child, childIndex) => normalizeChildStep(child, childIndex)).sort(compareChildOrder)
@@ -884,6 +1019,7 @@ function normalizeStep(input, index = 0) {
     suggestedAction: safeDisplayText(source.suggestedAction, '', 180)
       || aggregateSuggestedAction(children)
       || null,
+    action: normalizeProgressAction(source.action),
     failureCode: (safeDisplayText(source.failureCode, '', 120)
       || aggregateFailureCode(children))
       .replace(/[^A-Z0-9_]+/gi, '_')
@@ -1222,8 +1358,274 @@ function finalizeProgress(progress, options = {}) {
   };
 }
 
+function titleFromId(value, fallback = 'Step') {
+  const words = cleanText(value)
+    .replace(/^preprocess\./, '')
+    .replace(/^postprocess\./, '')
+    .split(/[.\-_]+/)
+    .filter(Boolean);
+  if (!words.length) return fallback;
+  return words.map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`).join(' ');
+}
+
+function executionStageLabel(stage) {
+  const source = asObject(stage);
+  const id = executionStageId(source);
+  const explicit = safeDisplayText(source.label || source.uiLabel, '', 80);
+  if (explicit) return explicit;
+  const family = safeDisplayText(source.summary?.family, '', 80);
+  if (family) return family;
+  if (EXECUTION_LABELS[id]) return EXECUTION_LABELS[id];
+  if (/^postprocess\.[^.]+\.guidance$/.test(id)) return 'Guidance';
+  if (/^postprocess\.[^.]+\.rewrite$/.test(id)) return 'Rewrite';
+  if (id.startsWith('preprocess.cards.segmented.')) {
+    return titleFromId(id.slice('preprocess.cards.segmented.'.length), 'Card');
+  }
+  return titleFromId(id);
+}
+
+function executionStages(execution) {
+  const source = asObject(execution);
+  const records = Array.isArray(source.stages)
+    ? source.stages
+    : Object.values(asObject(source.stageRecords));
+  return records.map((record, order) => ({
+    ...asObject(record),
+    id: executionStageId(record),
+    order
+  })).filter((stage) => stage.id);
+}
+
+function meaningfulExecutionStage(stage) {
+  const id = executionStageId(stage);
+  return !['preprocess.snapshot', 'postprocess.source-snapshot'].includes(id)
+    && asObject(stage).executable !== false;
+}
+
+function operationForProgress(execution, stages) {
+  const source = asObject(execution);
+  const operation = {
+    ...source,
+    frontierStageIds: Array.isArray(source.frontierStageIds)
+      ? source.frontierStageIds.map((value) => cleanText(value)).filter(Boolean)
+      : []
+  };
+  if (operation.state === 'running' && operation.frontierStageIds.length === 0) {
+    const running = stages.find((stage) => cleanText(stage.state).toLowerCase() === 'running');
+    if (running) operation.frontierStageIds = [running.id];
+  }
+  if (
+    operation.state === 'paused'
+    && !cleanText(operation.pauseReason).startsWith('stage-failed:')
+    && operation.frontierStageIds.length === 0
+  ) {
+    const next = stages.find((stage) => (
+      stage.executable !== false
+      && cleanText(stage.state, 'pending').toLowerCase() === 'pending'
+    ));
+    if (next) operation.frontierStageIds = [next.id];
+  }
+  return operation;
+}
+
+function progressStateForExecutionStage(stage, operation) {
+  const state = cleanText(asObject(stage).state, 'pending').toLowerCase();
+  if (state === 'completed') {
+    return operation.state === 'completed' ? 'done' : 'cached';
+  }
+  if (state === 'running') return 'running';
+  if (state === 'failed') return 'failed';
+  if (state === 'skipped' || state === 'blocked') return 'skipped';
+  if (state === 'cached') return 'cached';
+  return 'pending';
+}
+
+function executionProgressStep(stage, operation, queuedReprocess, overrides = {}) {
+  const source = { ...asObject(stage), ...asObject(overrides) };
+  const state = progressStateForExecutionStage(source, operation);
+  const retryCount = normalizeRetryCount(source.attempts?.total);
+  const reason = source.failure
+    ? safeReasonText(source.failure.message || source.failure.code)
+    : '';
+  return {
+    id: executionStageId(source),
+    executionStage: true,
+    label: executionStageLabel(source),
+    providerLane: source.providerLane || 'utility',
+    state,
+    source: state === 'cached' ? 'cache' : null,
+    retryCount: retryCount > 1 ? retryCount - 1 : 0,
+    reason: reason || null,
+    action: actionForProgressStage({
+      operation,
+      stage: source,
+      queuedReprocess
+    }),
+    order: Number.isFinite(Number(source.order)) ? Number(source.order) : 0
+  };
+}
+
+function groupedExecutionStep({
+  id,
+  label,
+  stages,
+  operation,
+  queuedReprocess,
+  order
+}) {
+  const children = stages.map((stage, index) => executionProgressStep(
+    { ...stage, actionOwner: false },
+    operation,
+    queuedReprocess,
+    { order: index }
+  ));
+  const actionPriority = new Map([
+    ['cancel-reprocess', 0],
+    ['retry', 1],
+    ['stop', 2],
+    ['resume', 3],
+    ['reprocess', 4]
+  ]);
+  const ownerAction = stages
+    .map((stage) => actionForProgressStage({
+      operation,
+      stage: { ...stage, actionOwner: true },
+      queuedReprocess
+    }))
+    .filter(Boolean)
+    .sort((left, right) => (
+      (actionPriority.get(left.kind) ?? 99) - (actionPriority.get(right.kind) ?? 99)
+    ))[0] || null;
+  const state = childAggregateState(children) || 'pending';
+  return {
+    id,
+    executionStage: true,
+    label,
+    providerLane: stages.some((stage) => stage.providerLane === 'reasoner')
+      ? 'reasoner'
+      : 'utility',
+    state,
+    source: state === 'cached' ? 'cache' : null,
+    action: ownerAction,
+    children,
+    order
+  };
+}
+
+function fusedOutcomeSteps(stage, operation) {
+  const outcomes = Array.isArray(stage.outcomeChildren) ? stage.outcomeChildren : [];
+  const accepted = new Set(
+    Array.isArray(stage.summary?.acceptedFamilies)
+      ? stage.summary.acceptedFamilies.map((value) => cleanText(value).toLowerCase())
+      : []
+  );
+  const settled = ['completed', 'failed'].includes(cleanText(stage.state).toLowerCase());
+  return outcomes.map((outcome, index) => {
+    const id = executionStageId(outcome);
+    const family = cleanText(outcome.label || outcome.family || outcome.selectedCard?.family)
+      || titleFromId(id.split('.').at(-1), `Card ${index + 1}`);
+    const acceptedOutcome = accepted.has(family.toLowerCase())
+      || accepted.has(cleanText(outcome.selectedCard?.family).toLowerCase());
+    return {
+      id,
+      executionStage: true,
+      label: family,
+      providerLane: stage.providerLane || 'utility',
+      state: !settled ? 'pending' : (acceptedOutcome ? 'done' : 'failed'),
+      executable: false,
+      action: null,
+      order: index
+    };
+  });
+}
+
+export function progressFromExecution(execution, queuedReprocess = null) {
+  const source = asObject(execution);
+  const stages = executionStages(source);
+  if (!cleanText(source.operationId) || stages.length === 0) {
+    return finalizeProgress({
+      runId: cleanText(source.operationId) || null,
+      title: 'Ready',
+      subtitle: '',
+      steps: []
+    }, { sort: false });
+  }
+  const operation = operationForProgress(source, stages);
+  if (operation.state === 'stale') {
+    const earliest = stages.find(meaningfulExecutionStage);
+    if (earliest) earliest.reprocessOwner = true;
+  }
+
+  const topLevel = [];
+  const segmented = stages.filter((stage) => stage.id.startsWith('preprocess.cards.segmented.'));
+  const postProcessGroups = new Map();
+  for (const stage of stages) {
+    if (stage.id.startsWith('preprocess.cards.segmented.')) continue;
+    if (stage.id === 'preprocess.cards.fused') {
+      const parent = executionProgressStep(stage, operation, queuedReprocess);
+      const children = fusedOutcomeSteps(stage, operation);
+      if (children.length) parent.children = children;
+      topLevel.push(parent);
+      continue;
+    }
+    const postProcessMatch = stage.id.match(/^postprocess\.([^.]+)\.(guidance|rewrite)$/);
+    if (postProcessMatch) {
+      const suffix = postProcessMatch[1];
+      if (!postProcessGroups.has(suffix)) postProcessGroups.set(suffix, []);
+      postProcessGroups.get(suffix).push(stage);
+      continue;
+    }
+    topLevel.push(executionProgressStep(stage, operation, queuedReprocess));
+  }
+  if (segmented.length) {
+    const children = segmented.map((stage, index) => executionProgressStep(
+      stage,
+      operation,
+      queuedReprocess,
+      { order: index }
+    ));
+    const state = childAggregateState(children) || 'pending';
+    topLevel.push({
+      id: 'preprocess.cards.segmented',
+      executionStage: true,
+      label: 'Segmented cards',
+      providerLane: 'utility',
+      state,
+      source: state === 'cached' ? 'cache' : null,
+      action: null,
+      children,
+      order: Math.min(...segmented.map((stage) => stage.order))
+    });
+  }
+  for (const [suffix, groupStages] of postProcessGroups) {
+    topLevel.push(groupedExecutionStep({
+      id: `postprocess.${suffix}`,
+      label: suffix === 'unified' ? 'Unified' : titleFromId(suffix, 'Post-process category'),
+      stages: groupStages,
+      operation,
+      queuedReprocess,
+      order: Math.min(...groupStages.map((stage) => stage.order))
+    }));
+  }
+  topLevel.sort((left, right) => left.order - right.order);
+  const title = operation.state === 'running'
+    ? 'Generating'
+    : (operation.state === 'completed'
+        ? 'Ready'
+        : (operation.state === 'failed' ? 'Issue' : 'Needs attention'));
+  return finalizeProgress({
+    runId: cleanText(operation.operationId) || null,
+    title,
+    subtitle: '',
+    steps: topLevel
+  }, { sort: false });
+}
+
 export function createProgressRunModel(view = {}) {
   const source = asObject(view);
+  if (source.execution && typeof source.execution === 'object') {
+    return progressFromExecution(source.execution, source.queuedReprocess);
+  }
   if (source.progressRun && typeof source.progressRun === 'object') {
     const explicit = normalizeExplicitProgress(source.progressRun);
     if (shouldDiscardIdlePendingProgress(source, explicit)) {

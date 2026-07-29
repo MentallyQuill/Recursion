@@ -1123,7 +1123,9 @@ assert(/\.recursion-status-popover\[data-recursion-severity="error"\][\s\S]*?col
 assert(/\.recursion-step-row\.warning > \.recursion-step-label[\s\S]*?color:\s*var\(--recursion-warning\);/.test(recursionCss), 'warning progress row labels use the warning token');
 assert(/\.recursion-step-row\.failed > \.recursion-step-label[\s\S]*?color:\s*var\(--recursion-error\);/.test(recursionCss), 'failed progress row labels use the error token');
 assert(recursionUi.includes('data-recursion-progress-reason'), 'progress rows render a dedicated visible reason element');
-assert(/\.recursion-step-reason\s*\{[\s\S]*?grid-column:\s*4 \/ -1;[\s\S]*?overflow-wrap:\s*anywhere;/.test(recursionCss), 'progress reasons wrap beneath the row label without resizing indicators');
+assert(/\.recursion-step-reason\s*\{[\s\S]*?grid-column:\s*4 \/ 6;[\s\S]*?overflow-wrap:\s*anywhere;/.test(recursionCss), 'progress reasons wrap beneath the row label without resizing indicators or the action slot');
+assert(/\.recursion-progress-action-slot\s*\{[\s\S]*?block-size:\s*24px;[\s\S]*?inline-size:\s*24px;/.test(recursionCss), 'progress rows reserve one compact 24px action slot');
+assert(/\.recursion-progress-action\s*\{[\s\S]*?color:\s*var\(--recursion-accent\);/.test(recursionCss), 'contextual progress control alone uses the cyan accent');
 assert(/\.recursion-step-row\.warning > \.recursion-step-reason[\s\S]*?color:\s*var\(--recursion-warning\);/.test(recursionCss), 'warning progress reasons use the warning token');
 assert(/\.recursion-step-row\.failed > \.recursion-step-reason[\s\S]*?color:\s*var\(--recursion-error\);/.test(recursionCss), 'failed progress reasons use the error token');
 assert(/const progressTop = Math\.max\(viewportTop,\s*rect\.bottom \+ 3\);/.test(recursionUi), 'production progress popover uses the reference vertical gap with visual viewport top clamping');
@@ -1877,6 +1879,7 @@ try {
   const freshNextGenerationDetails = [];
   let clearFreshNextGenerationCalls = 0;
   const clearFreshNextGenerationDetails = [];
+  const pipelineActionCalls = [];
   function fakeRuntimeConnectionProfiles() {
     return globalThis.SillyTavern.getContext().ConnectionManagerRequestService.getSupportedProfiles().map((profile) => {
       const id = profile.id || profile.profileId;
@@ -2167,6 +2170,35 @@ try {
           freshNextGeneration: { pending: false }
         };
         return { ok: true, freshNextGeneration: view.freshNextGeneration };
+      },
+      pauseOperation: (details) => {
+        pipelineActionCalls.push(['pauseOperation', details]);
+        return { ok: true };
+      },
+      resumeOperation: (details) => {
+        pipelineActionCalls.push(['resumeOperation', details]);
+        return { ok: true };
+      },
+      retryStage: (details) => {
+        pipelineActionCalls.push(['retryStage', details]);
+        return { ok: true };
+      },
+      queueStageReprocess: (details) => {
+        pipelineActionCalls.push(['queueStageReprocess', details]);
+        view = {
+          ...view,
+          queuedReprocess: {
+            schema: 'recursion.queued-reprocess.v1',
+            mode: 'stage',
+            stageIds: [details.stageId]
+          }
+        };
+        return { ok: true, queuedReprocess: view.queuedReprocess };
+      },
+      cancelQueuedStageReprocess: (details) => {
+        pipelineActionCalls.push(['cancelQueuedStageReprocess', details]);
+        view = { ...view, queuedReprocess: null };
+        return { ok: true, queuedReprocess: null };
       }
     },
     mountPoint: fakeDocument.body
@@ -3079,7 +3111,7 @@ try {
     'routine progress rows omit visible reason copy'
   );
   assert(!routineProgressRow.className.includes('has-reason'), 'routine progress rows keep compact fixed-height geometry');
-  assertEqual(routineProgressRow.querySelector('[data-recursion-progress-action]').textContent, '', 'routine row omits action copy');
+  assertEqual(routineProgressRow.querySelector('[data-recursion-progress-suggestion]').textContent, '', 'routine row omits action copy');
   assert(!routineProgressRow.className.includes('has-action'), 'routine row keeps compact geometry');
   assert(routineProgressRow.getAttribute('title').includes(`Reason: ${routineReason}`), 'routine progress row tooltip retains its explanation');
   const timeoutReason = 'The selected model connection did not respond before the time limit.';
@@ -3100,13 +3132,149 @@ try {
   const timeoutRow = root.querySelectorAll('[data-recursion-progress-row]')
     .find((row) => row.dataset.recursionProgressStepId === 'composing-prompt-packet');
   assertEqual(timeoutRow.querySelector('[data-recursion-progress-reason]').textContent, timeoutReason, 'failed row shows readable reason');
-  assertEqual(timeoutRow.querySelector('[data-recursion-progress-action]').textContent, `Try: ${timeoutAction}`, 'failed row shows next action');
+  assertEqual(timeoutRow.querySelector('[data-recursion-progress-suggestion]').textContent, `Try: ${timeoutAction}`, 'failed row shows next action');
   assert(timeoutRow.className.includes('has-action'), 'failed row expands for next action');
   assert(timeoutRow.getAttribute('title').includes(`Reason: ${timeoutReason}`), 'tooltip repeats reason');
   assert(timeoutRow.getAttribute('title').includes(`Try: ${timeoutAction}`), 'tooltip repeats action');
   assert(!fakeDocument.textTree(timeoutRow).includes('RECURSION_PROVIDER_TIMEOUT'), 'ordinary row text hides diagnostic code');
   view = {
     ...view,
+    activity: originalActivity,
+    progressRun: originalProgressRun
+  };
+  ui.update();
+  view = {
+    ...view,
+    execution: {
+      operationId: 'ui-durable-paused',
+      phase: 'preprocess',
+      state: 'paused',
+      pauseReason: 'user',
+      frontierStageIds: ['preprocess.arbiter'],
+      stages: [
+        {
+          stageId: 'preprocess.snapshot',
+          state: 'completed',
+          executable: true,
+          kind: 'local',
+          checkpoint: { outputHash: 'snapshot' }
+        },
+        {
+          stageId: 'preprocess.arbiter',
+          state: 'pending',
+          executable: true,
+          kind: 'model'
+        },
+        {
+          stageId: 'preprocess.deck',
+          state: 'pending',
+          executable: true,
+          kind: 'local'
+        }
+      ]
+    },
+    queuedReprocess: null
+  };
+  ui.update();
+  const durableResumeRow = root.querySelectorAll('[data-recursion-progress-row]')
+    .find((row) => row.dataset.recursionProgressStepId === 'preprocess.arbiter');
+  const durableResumeButton = durableResumeRow.querySelector('[data-recursion-progress-action]');
+  assert(durableResumeRow.querySelector('[data-recursion-progress-action-slot]'), 'durable row always reserves one action slot');
+  assertEqual(durableResumeRow.querySelectorAll('[data-recursion-progress-action]').length, 1, 'actionable durable row renders exactly one button');
+  assertEqual(durableResumeButton.dataset.recursionProgressAction, 'resume', 'paused frontier renders Resume');
+  assertEqual(durableResumeButton.getAttribute('aria-label'), 'Resume from saved checkpoint', 'Resume has its exact accessible label');
+  assertEqual(durableResumeButton.getAttribute('title'), 'Resume from saved checkpoint', 'Resume has its exact tooltip');
+  durableResumeButton.click();
+  assertDeepEqual(
+    pipelineActionCalls.at(-1),
+    ['resumeOperation', { operationId: 'ui-durable-paused' }],
+    'contextual Resume delegates directly to the runtime'
+  );
+  const pendingDeckRow = root.querySelectorAll('[data-recursion-progress-row]')
+    .find((row) => row.dataset.recursionProgressStepId === 'preprocess.deck');
+  assert(pendingDeckRow.querySelector('[data-recursion-progress-action-slot]'), 'non-actionable row retains the reserved action slot');
+  assertEqual(pendingDeckRow.querySelector('[data-recursion-progress-action]'), null, 'non-actionable row does not render a button');
+  assertEqual(pendingDeckRow.querySelector('[data-recursion-progress-expander]'), null, 'progress row does not render an expander');
+  assertEqual(pendingDeckRow.querySelector('[data-recursion-progress-action-menu]'), null, 'progress row does not render a secondary action menu');
+
+  view = {
+    ...view,
+    execution: {
+      operationId: 'ui-durable-running',
+      phase: 'preprocess',
+      state: 'running',
+      frontierStageIds: [
+        'preprocess.cards.segmented.character',
+        'preprocess.cards.segmented.relationship'
+      ],
+      stages: [
+        {
+          stageId: 'preprocess.cards.segmented.character',
+          state: 'running',
+          executable: true,
+          kind: 'model',
+          summary: { family: 'Character' }
+        },
+        {
+          stageId: 'preprocess.cards.segmented.relationship',
+          state: 'running',
+          executable: true,
+          kind: 'model',
+          summary: { family: 'Relationship' }
+        }
+      ]
+    }
+  };
+  ui.update();
+  const contextualStops = root.querySelectorAll('[data-recursion-progress-action]')
+    .filter((button) => button.dataset.recursionProgressAction === 'stop');
+  assertEqual(contextualStops.length, 1, 'concurrent Segmented rows render one contextual Stop');
+  assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, true, 'durable running work does not duplicate Stop in the main bar');
+  contextualStops[0].click();
+  assertDeepEqual(
+    pipelineActionCalls.at(-1),
+    ['pauseOperation', { reason: 'user' }],
+    'contextual Stop delegates to the shared pause path'
+  );
+
+  view = {
+    ...view,
+    execution: {
+      operationId: 'ui-durable-completed',
+      phase: 'preprocess',
+      state: 'completed',
+      frontierStageIds: [],
+      stages: [{
+        stageId: 'preprocess.arbiter',
+        state: 'completed',
+        executable: true,
+        kind: 'model',
+        checkpoint: { outputHash: 'arbiter' }
+      }]
+    },
+    queuedReprocess: null
+  };
+  ui.update();
+  let reprocessButton = root.querySelector('[data-recursion-progress-action]');
+  assertEqual(reprocessButton.dataset.recursionProgressAction, 'reprocess', 'completed row renders Reprocess');
+  reprocessButton.click();
+  assertDeepEqual(
+    pipelineActionCalls.at(-1),
+    ['queueStageReprocess', { stageId: 'preprocess.arbiter' }],
+    'Reprocess queues the selected stage'
+  );
+  reprocessButton = root.querySelector('[data-recursion-progress-action]');
+  assertEqual(reprocessButton.dataset.recursionProgressAction, 'cancel-reprocess', 'queued row replaces Reprocess with Cancel queued');
+  reprocessButton.click();
+  assertDeepEqual(
+    pipelineActionCalls.at(-1),
+    ['cancelQueuedStageReprocess', { stageId: 'preprocess.arbiter' }],
+    'Cancel queued removes the selected stage intent'
+  );
+  view = {
+    ...view,
+    execution: null,
+    queuedReprocess: null,
     activity: originalActivity,
     progressRun: originalProgressRun
   };

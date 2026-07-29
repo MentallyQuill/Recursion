@@ -1,5 +1,199 @@
-import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
+import {
+  actionForProgressStage,
+  createHeroPixelBlocks,
+  createProgressRunModel,
+  progressFromExecution
+} from '../../src/progress.mjs';
 import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
+import { assertDeepEqual } from '../../tests/helpers/assert.mjs';
+
+const progressActionCases = [
+  {
+    name: 'running frontier owns Stop',
+    operation: { operationId: 'run-a', state: 'running', frontierStageIds: ['preprocess.arbiter'] },
+    stage: { id: 'preprocess.arbiter', state: 'running', executable: true },
+    expected: {
+      kind: 'stop',
+      stageId: 'preprocess.arbiter',
+      operationId: 'run-a',
+      label: 'Stop and pause this operation',
+      icon: 'square'
+    }
+  },
+  {
+    name: 'paused frontier owns Resume',
+    operation: {
+      operationId: 'run-a',
+      state: 'paused',
+      frontierStageIds: ['preprocess.cards.segmented.character']
+    },
+    stage: {
+      id: 'preprocess.cards.segmented.character',
+      state: 'pending',
+      executable: true
+    },
+    expected: {
+      kind: 'resume',
+      stageId: 'preprocess.cards.segmented.character',
+      operationId: 'run-a',
+      label: 'Resume from saved checkpoint',
+      icon: 'play'
+    }
+  },
+  {
+    name: 'blocking failure owns Retry',
+    operation: {
+      operationId: 'run-a',
+      state: 'paused',
+      frontierStageIds: [],
+      pauseReason: 'stage-failed:preprocess.arbiter'
+    },
+    stage: {
+      id: 'preprocess.arbiter',
+      state: 'failed',
+      executable: true,
+      failurePolicy: 'blocking'
+    },
+    expected: {
+      kind: 'retry',
+      stageId: 'preprocess.arbiter',
+      operationId: 'run-a',
+      label: 'Retry this step',
+      icon: 'rotate'
+    }
+  },
+  {
+    name: 'completed stage owns Reprocess',
+    operation: { operationId: 'run-a', state: 'completed', frontierStageIds: [] },
+    stage: { id: 'preprocess.arbiter', state: 'completed', executable: true },
+    expected: {
+      kind: 'reprocess',
+      stageId: 'preprocess.arbiter',
+      operationId: 'run-a',
+      label: 'Reprocess from here on the next generation',
+      icon: 'branch-refresh'
+    }
+  },
+  {
+    name: 'queued stage owns Cancel',
+    operation: { operationId: 'run-a', state: 'completed', frontierStageIds: [] },
+    stage: { id: 'preprocess.arbiter', state: 'completed', executable: true },
+    queuedReprocess: { mode: 'stage', stageIds: ['preprocess.arbiter'] },
+    expected: {
+      kind: 'cancel-reprocess',
+      stageId: 'preprocess.arbiter',
+      operationId: 'run-a',
+      label: 'Cancel queued reprocess',
+      icon: 'x'
+    }
+  },
+  {
+    name: 'stale owner offers Reprocess',
+    operation: { operationId: 'run-a', state: 'stale', frontierStageIds: [] },
+    stage: {
+      id: 'preprocess.arbiter',
+      state: 'completed',
+      executable: true,
+      reprocessOwner: true
+    },
+    expected: {
+      kind: 'reprocess',
+      stageId: 'preprocess.arbiter',
+      operationId: 'run-a',
+      label: 'Reprocess from here on the next generation',
+      icon: 'branch-refresh'
+    }
+  }
+];
+
+for (const testCase of progressActionCases) {
+  assertDeepEqual(
+    actionForProgressStage({
+      operation: testCase.operation,
+      stage: testCase.stage,
+      queuedReprocess: testCase.queuedReprocess || null
+    }),
+    testCase.expected,
+    testCase.name
+  );
+}
+
+for (const [name, stage] of [
+  ['pending row has no action', { id: 'preprocess.deck', state: 'pending', executable: true }],
+  ['blocked row has no action', { id: 'preprocess.deck', state: 'blocked', executable: true }],
+  ['skipped row has no action', { id: 'preprocess.deck', state: 'skipped', executable: true }],
+  ['Fused validation child has no action', { id: 'preprocess.cards.fused.character', state: 'completed', executable: false }],
+  ['Unified child detail has no action', { id: 'postprocess.unified.guidance', state: 'completed', executable: true, actionOwner: false }]
+]) {
+  assertEqual(
+    actionForProgressStage({
+      operation: { operationId: 'run-none', state: 'running', frontierStageIds: [stage.id] },
+      stage,
+      queuedReprocess: null
+    }),
+    null,
+    name
+  );
+}
+
+const concurrentSegmented = progressFromExecution({
+  operationId: 'run-concurrent',
+  phase: 'preprocess',
+  state: 'running',
+  frontierStageIds: [
+    'preprocess.cards.segmented.character',
+    'preprocess.cards.segmented.relationship'
+  ],
+  stages: [
+    {
+      stageId: 'preprocess.cards.segmented.character',
+      state: 'running',
+      executable: true,
+      kind: 'model',
+      summary: { family: 'Character' }
+    },
+    {
+      stageId: 'preprocess.cards.segmented.relationship',
+      state: 'running',
+      executable: true,
+      kind: 'model',
+      summary: { family: 'Relationship' }
+    }
+  ]
+});
+const segmentedChildren = concurrentSegmented.steps
+  .find((step) => step.id === 'preprocess.cards.segmented')
+  .children;
+assertEqual(
+  segmentedChildren.filter((step) => step.action?.kind === 'stop').length,
+  1,
+  'concurrent Segmented children expose only one Stop'
+);
+
+const ownershipProgress = progressFromExecution({
+  operationId: 'run-owners',
+  phase: 'postprocess',
+  state: 'paused',
+  pauseReason: 'stage-failed:postprocess.unified.rewrite',
+  frontierStageIds: [],
+  stages: [
+    { stageId: 'postprocess.source-snapshot', state: 'completed', executable: true, kind: 'local' },
+    { stageId: 'postprocess.unified.guidance', state: 'completed', executable: true, kind: 'model' },
+    {
+      stageId: 'postprocess.unified.rewrite',
+      state: 'failed',
+      executable: true,
+      kind: 'model',
+      failurePolicy: 'blocking'
+    }
+  ]
+});
+const unifiedOwner = ownershipProgress.steps.find((step) => step.id === 'postprocess.unified');
+assertEqual(unifiedOwner.action.kind, 'retry', 'Unified Post-process parent owns Retry');
+assert(
+  unifiedOwner.children.every((child) => child.action === null),
+  'Unified Post-process detail children do not own actions'
+);
 
 const unsafeProgress = createProgressRunModel({
   progressRun: {

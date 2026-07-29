@@ -1,5 +1,5 @@
 import { createRecursionViewModel } from '../../src/ui/view-model.mjs';
-import { assertEqual } from '../../tests/helpers/assert.mjs';
+import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
 
 assertEqual(
   createRecursionViewModel({
@@ -15,6 +15,36 @@ assertEqual(
   }).pipelineMode,
   'segmented',
   'view model sends removed modes through the generic fallback'
+);
+
+const durableModel = createRecursionViewModel({
+  settings: { pipelineMode: 'segmented' },
+  execution: {
+    operationId: 'view-run',
+    phase: 'preprocess',
+    state: 'paused',
+    frontierStageIds: ['preprocess.arbiter'],
+    stages: [
+      {
+        stageId: 'preprocess.snapshot',
+        state: 'completed',
+        executable: true,
+        kind: 'local',
+        checkpoint: { outputHash: 'snapshot' }
+      },
+      {
+        stageId: 'preprocess.arbiter',
+        state: 'pending',
+        executable: true,
+        kind: 'model'
+      }
+    ]
+  }
+});
+assertEqual(durableModel.progressRun.runId, 'view-run', 'view model projects durable operation id');
+assert(
+  durableModel.progressRun.steps.some((step) => step.action?.kind === 'resume'),
+  'view model exposes the contextual Resume action'
 );
 
 console.log('ui view-model tests passed');

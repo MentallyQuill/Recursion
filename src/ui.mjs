@@ -64,7 +64,11 @@ import {
 import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
 import { FOCUS_BOOSTED_FAMILIES } from './settings-policy.mjs';
 import { DEFAULT_RETENTION_SETTINGS, RETENTION_LIMITS } from './retention-policy.mjs';
-import { createUiActionStatus } from './ui/action-status.mjs';
+import {
+  createUiActionStatus,
+  dispatchProgressAction,
+  progressActionControl
+} from './ui/action-status.mjs';
 import {
   renderDeckCard,
   renderDeckCategory,
@@ -1421,6 +1425,11 @@ function createProgressRowShell(step, child = false) {
       dataset: { recursionProgressMeta: '' }
     }),
     el('span', {
+      className: 'recursion-progress-action-slot',
+      attrs: { 'aria-hidden': 'true' },
+      dataset: { recursionProgressActionSlot: '' }
+    }),
+    el('span', {
       className: 'recursion-step-reason',
       text: step.reason || '',
       dataset: { recursionProgressReason: '' }
@@ -1428,9 +1437,64 @@ function createProgressRowShell(step, child = false) {
     el('span', {
       className: 'recursion-step-action',
       text: step.suggestedAction ? `Try: ${step.suggestedAction}` : '',
-      dataset: { recursionProgressAction: '' }
+      dataset: { recursionProgressSuggestion: '' }
     })
   ]);
+}
+
+function progressActionIcon(kind) {
+  if (kind === 'square') return modeIconSvg('stop');
+  if (kind === 'play') {
+    return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true' } }, [
+      el('path', { attrs: { d: 'M5 3.2 12 8l-7 4.8V3.2Z', fill: 'currentColor' } })
+    ]);
+  }
+  if (kind === 'x') {
+    return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true' } }, [
+      el('path', { attrs: { d: 'm4.2 4.2 7.6 7.6m0-7.6-7.6 7.6', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round' } })
+    ]);
+  }
+  if (kind === 'branch-refresh') {
+    return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true' } }, [
+      el('path', { attrs: { d: 'M4 3v2.2c0 1.4 1.1 2.5 2.5 2.5H9m0 0L7.2 5.9M9 7.7 7.2 9.5M9.2 3.4a4.5 4.5 0 1 1-1 8.8', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.35', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } })
+    ]);
+  }
+  return el('svg', { attrs: { width: '16', height: '16', viewBox: '0 0 16 16', 'aria-hidden': 'true' } }, [
+    el('path', { attrs: { d: 'M12.3 5.5A5 5 0 1 0 13 9M12.3 2.8v2.7H9.6', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.4', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } })
+  ]);
+}
+
+function updateProgressActionSlot(row, action, tooltipsEnabled = true) {
+  const slot = row.querySelector?.('[data-recursion-progress-action-slot]');
+  if (!slot) return;
+  const control = progressActionControl(action);
+  let button = slot.querySelector?.('[data-recursion-progress-action]');
+  if (!control) {
+    button?.remove?.();
+    slot.setAttribute?.('aria-hidden', 'true');
+    return;
+  }
+  const sameControl = button
+    && button.dataset?.recursionProgressAction === control.dataset.recursionProgressAction
+    && button.dataset?.recursionProgressStageId === control.dataset.recursionProgressStageId;
+  if (!sameControl) {
+    button?.remove?.();
+    button = el(control.tagName, {
+      className: control.className,
+      attrs: control.attrs,
+      dataset: control.dataset
+    }, [progressActionIcon(control.dataset.recursionProgressActionIcon)]);
+    slot.appendChild?.(button);
+  } else {
+    for (const [name, value] of Object.entries(control.attrs)) button.setAttribute?.(name, value);
+    for (const [name, value] of Object.entries(control.dataset)) button.dataset[name] = value;
+    if (button.dataset.recursionProgressRenderedIcon !== control.dataset.recursionProgressActionIcon) {
+      button.replaceChildren?.(progressActionIcon(control.dataset.recursionProgressActionIcon));
+    }
+  }
+  button.dataset.recursionProgressRenderedIcon = control.dataset.recursionProgressActionIcon;
+  slot.setAttribute?.('aria-hidden', 'false');
+  setTooltip(button, tooltipsEnabled, control.attrs.title);
 }
 
 function progressStepTooltip(step, child = false) {
@@ -1467,7 +1531,7 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
     || row.dataset.recursionProgressLabel !== label
     || row.dataset.recursionProgressMeta !== meta
     || row.dataset.recursionProgressReason !== reason
-    || row.dataset.recursionProgressAction !== suggestedAction
+    || row.dataset.recursionProgressSuggestion !== suggestedAction
     || row.dataset.recursionProgressProvider !== providerLane
   );
   row.className = progressRowClass(step, child, firstRender ? 'is-entering' : (changed ? 'is-updating' : ''));
@@ -1477,13 +1541,14 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
   row.dataset.recursionProgressLabel = label;
   row.dataset.recursionProgressMeta = meta;
   row.dataset.recursionProgressReason = reason;
-  row.dataset.recursionProgressAction = suggestedAction;
+  row.dataset.recursionProgressSuggestion = suggestedAction;
   row.dataset.recursionProgressProvider = providerLane;
   setText(row, '[data-recursion-progress-provider-mark]', providerMark(providerLane));
   setText(row, '[data-recursion-progress-label]', label);
   setText(row, '[data-recursion-progress-meta]', meta);
+  updateProgressActionSlot(row, step.action, tooltipsEnabled);
   setText(row, '[data-recursion-progress-reason]', visibleReason);
-  setText(row, '[data-recursion-progress-action]', visibleAction);
+  setText(row, '[data-recursion-progress-suggestion]', visibleAction);
   if (visibleReason) addClassName(row, 'has-reason');
   else removeClassName(row, 'has-reason');
   if (visibleAction) addClassName(row, 'has-action');
@@ -5960,6 +6025,23 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   });
   statusButton?.addEventListener('click', () => {
     setProgressPopoverOpen(statusPopover.hidden);
+  });
+  statusPopover?.addEventListener('click', (event) => {
+    const button = closestDatasetElement(
+      event?.target,
+      'recursionProgressAction',
+      statusPopover
+    );
+    if (!button) return;
+    consumeClickEvent(event);
+    const action = {
+      kind: cleanText(button.dataset.recursionProgressAction),
+      operationId: cleanText(button.dataset.recursionProgressOperationId),
+      stageId: cleanText(button.dataset.recursionProgressStageId)
+    };
+    const result = dispatchProgressAction(runtime, action);
+    update();
+    runAction(result, () => update(), 'Pipeline action failed.');
   });
   stopGenerationButton?.addEventListener('click', (event) => {
     consumeClickEvent(event);

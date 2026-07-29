@@ -272,12 +272,16 @@ export function createRecursionViewModel(view = {}) {
   const heroPixelBlocks = createHeroPixelBlocks(progressRun);
   const freshNextGeneration = asObject(source.freshNextGeneration);
   const freshNextGenerationPending = freshNextGeneration.pending === true;
-  const generationStopVisible = enabled && (
+  const executionState = cleanText(source.execution?.state).toLowerCase();
+  const contextualPipelineControlActive = ['running', 'paused', 'stale'].includes(executionState);
+  const generationStopVisible = enabled && !contextualPipelineControlActive && (
     Boolean(cleanText(source.activeRunId))
     || source.hostGenerationActive === true
     || Number(progressRun.activeCount || 0) > 0
   );
-  const freshNextGenerationVisible = enabled && !generationStopVisible;
+  const freshNextGenerationVisible = enabled
+    && !generationStopVisible
+    && !contextualPipelineControlActive;
   const defaultUi = DEFAULT_RECURSION_SETTINGS.ui;
   const progressChildVisibleLimit = integerInRange(settings.ui?.progressChildVisibleLimit, defaultUi.progressChildVisibleLimit, 1, 20);
   const progressListVisibleLimit = integerInRange(settings.ui?.progressListVisibleLimit, defaultUi.progressListVisibleLimit, 5, 80);

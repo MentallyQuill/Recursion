@@ -2040,6 +2040,9 @@ export function createPostProcessRuntime({
     restoreExecutionState,
     resumeOperation,
     retryStage,
+    executionGraph(operationId) {
+      return durableOperations.get(cleanText(operationId))?.graph || null;
+    },
     postProcessDiagnostics() {
       return cloneValue(lastDiagnostics);
     }

@@ -3226,6 +3226,39 @@ export function createRecursionRuntime({
 
   function safeRuntimeView() {
     const state = runState.current();
+    const activeExecutionGraph = executionView
+      ? (
+          preprocessGraphs.get(executionView.operationId)
+          || postProcessRuntime.executionGraph?.(executionView.operationId)
+          || null
+        )
+      : null;
+    const stageForView = (record) => {
+      const safeRecord = redact(record);
+      const stage = activeExecutionGraph?.getStage?.(record?.stageId);
+      if (!stage) return safeRecord;
+      return {
+        ...safeRecord,
+        executable: stage.executable !== false,
+        failurePolicy: safeText(stage.failurePolicy || 'blocking', 40),
+        dependencies: safeStringList(stage.dependencies, 180),
+        outcomeChildren: Array.isArray(stage.outcomeChildren)
+          ? stage.outcomeChildren.map((child) => ({
+              stageId: safeIdentifier(child?.id || '', 'outcome', 180),
+              id: safeIdentifier(child?.id || '', 'outcome', 180),
+              kind: safeText(child?.kind || 'validation-outcome', 80),
+              executable: false,
+              label: safeText(
+                child?.selectedCard?.family
+                || child?.selectedCard?.name
+                || child?.id
+                || '',
+                120
+              )
+            }))
+          : []
+      };
+    };
     return {
       activeRunId: state.activeRunId,
       hostGenerationActive: state.hostGenerationActive,
@@ -3252,7 +3285,7 @@ export function createRecursionRuntime({
               && !(executionView.staleChangedFields || []).length,
             staleFields: safeStringList(executionView.staleChangedFields, 120),
             pauseReason: safeText(executionView.pauseReason || '', 160),
-            stages: Object.values(asObject(executionView.stageRecords)).map((record) => redact(record)),
+            stages: Object.values(asObject(executionView.stageRecords)).map(stageForView),
             stageRecords: redact(executionView.stageRecords || {})
           }
         : null,

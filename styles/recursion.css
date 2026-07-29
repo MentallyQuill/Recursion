@@ -861,7 +861,7 @@
   display: grid;
   font-size: 11.5px;
   gap: 7px;
-  grid-template-columns: 14px 1px 18px minmax(0, 1fr) auto;
+  grid-template-columns: 14px 1px 18px minmax(0, 1fr) auto 24px;
   min-height: 30px;
   padding: 5px 9px;
 }
@@ -920,7 +920,7 @@
 
 .recursion-step-reason {
   font-size: 10px;
-  grid-column: 4 / -1;
+  grid-column: 4 / 6;
   line-height: 1.25;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -934,7 +934,7 @@
 .recursion-step-action {
   color: var(--SmartThemeEmColor, var(--recursion-muted));
   font-size: 10px;
-  grid-column: 4 / -1;
+  grid-column: 4 / 6;
   line-height: 1.25;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -947,6 +947,48 @@
 
 .recursion-step-row.has-action {
   height: auto;
+}
+
+.recursion-progress-action-slot {
+  align-items: center;
+  block-size: 24px;
+  display: inline-flex;
+  flex: 0 0 24px;
+  grid-column: 6;
+  inline-size: 24px;
+  justify-content: center;
+}
+
+.recursion-progress-action {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  block-size: 24px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--recursion-accent);
+  cursor: pointer;
+  display: inline-flex;
+  inline-size: 24px;
+  justify-content: center;
+  margin: 0;
+  min-block-size: 24px;
+  min-inline-size: 24px;
+  padding: 0;
+  touch-action: manipulation;
+}
+
+.recursion-progress-action:hover {
+  background: color-mix(in srgb, var(--recursion-accent) 12%, transparent);
+}
+
+.recursion-progress-action:focus-visible {
+  outline: 1px solid var(--recursion-accent);
+  outline-offset: 1px;
+}
+
+.recursion-progress-action:active {
+  background: color-mix(in srgb, var(--recursion-accent) 20%, transparent);
 }
 
 .recursion-step-row.child-row.has-nested {
@@ -3597,6 +3639,21 @@
 
   .recursion-current-step {
     display: none;
+  }
+
+  .recursion-step-reason,
+  .recursion-step-action {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .recursion-progress-action-slot,
+  .recursion-progress-action {
+    block-size: 24px;
+    inline-size: 24px;
+    min-block-size: 24px;
+    min-inline-size: 24px;
   }
 
   .recursion-mobile-status-drawer:not([hidden]) {

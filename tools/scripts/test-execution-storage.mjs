@@ -52,6 +52,7 @@ assertEqual(
   'artifact reference points at the isolated body record'
 );
 assert(/^[a-f0-9]{64}$/.test(artifactRef.hash), 'artifact reference includes a SHA-256 body hash');
+assert(artifactRef.artifactBytes > 0, 'artifact reference includes a bounded body byte count');
 assertDeepEqual(
   await repository.loadPipelineArtifact('Chat One', 'Run One', 'preprocess.arbiter'),
   artifact,
@@ -240,6 +241,27 @@ await pruneRepository.savePipelineArtifact('Paused Chat', 'paused-run', 'arbiter
 });
 await pruneRepository.savePipelineRun('Paused Chat', pausedManifest);
 
+const staleManifest = createPipelineRun({
+  operationId: 'stale-run',
+  chatKey: 'Stale Chat',
+  phase: 'preprocess',
+  pipelineMode: 'segmented',
+  sourceIdentity: {
+    sourceRevisionHash: 'source-stale',
+    latestMessageId: 'message-stale',
+    selectedSwipeId: 'swipe-stale',
+    characterHash: 'character-stale',
+    groupHash: ''
+  },
+  createdAt: '2026-07-29T12:00:00.000Z'
+});
+staleManifest.state = 'stale';
+staleManifest.staleChangedFields = ['sourceRevisionHash'];
+await pruneRepository.savePipelineArtifact('Stale Chat', 'stale-run', 'arbiter', {
+  value: 'remove stale artifact'
+});
+await pruneRepository.savePipelineRun('Stale Chat', staleManifest);
+
 await pruneRepository.prunePipelineExecution();
 assertEqual(
   await pruneRepository.loadPipelineRun('Abandoned Chat'),
@@ -258,6 +280,15 @@ assert(
 assert(
   await pruneRepository.loadPipelineArtifact('Paused Chat', 'paused-run', 'arbiter'),
   'pipeline retention preserves artifacts owned by a paused operation'
+);
+assert(
+  await pruneRepository.loadPipelineRun('Stale Chat'),
+  'pipeline retention preserves stale metadata for the current chat'
+);
+assertEqual(
+  await pruneRepository.loadPipelineArtifact('Stale Chat', 'stale-run', 'arbiter'),
+  null,
+  'pipeline retention removes artifacts from a stale operation'
 );
 
 const maintainedManifest = createPipelineRun({

@@ -37,7 +37,15 @@ const FORBIDDEN_STORAGE_KEY_PARTS = [
   'hiddenreasoning',
   'privatestoryplan',
   'privateplan',
-  'sessionid'
+  'sessionid',
+  'artifactbody',
+  'arbiterbody',
+  'cardbody',
+  'packetbody',
+  'handbody',
+  'guidancebody',
+  'draftbody',
+  'prosebody'
 ];
 const PROVIDER_REASONING_STORAGE_KEYS = [
   'reasoning',
@@ -108,6 +116,78 @@ export function pipelineArtifactKey(chatKey, operationId, artifactId) {
 
 export function queuedReprocessKey(chatKey) {
   return `recursion-queued-reprocess-${safeId(chatKey, 'chat')}.v1.json`;
+}
+
+function resumeArtifactReferences(manifest) {
+  const normalized = normalizePipelineRun(manifest);
+  if (!normalized) return [];
+  return Object.values(normalized.stageRecords)
+    .map((record) => {
+      const checkpoint = record?.checkpoint;
+      const artifactRef = checkpoint?.artifactRef;
+      if (!checkpoint || artifactRef?.kind !== 'logical-storage') return null;
+      return {
+        stageId: record.stageId,
+        operationId: checkpoint.operationId || normalized.operationId,
+        artifactId: artifactRef.artifactId || record.stageId,
+        key: artifactRef.key,
+        hash: checkpoint.outputHash || artifactRef.hash,
+        artifactBytes: normalizeNonNegativeInteger(artifactRef.artifactBytes, 0)
+      };
+    })
+    .filter(Boolean);
+}
+
+export function collectResumeArtifactReferences(manifest) {
+  const normalized = normalizePipelineRun(manifest);
+  if (!normalized || ['stale', 'abandoned'].includes(normalized.state)) return [];
+  const references = resumeArtifactReferences(normalized);
+  if (normalized.state !== 'completed' || normalized.phase !== 'postprocess') {
+    return references;
+  }
+  const commitRecord = normalized.stageRecords['postprocess.host-commit'];
+  const finalRewriteStageIds = Object.keys(commitRecord?.checkpoint?.dependencyHashes || {})
+    .filter((stageId) => stageId.startsWith('postprocess.') && stageId.endsWith('.rewrite'));
+  const retainedStageIds = new Set([
+    'postprocess.host-commit',
+    ...finalRewriteStageIds
+  ]);
+  return references.filter((reference) => retainedStageIds.has(reference.stageId));
+}
+
+export async function purgeTerminalResumeArtifacts({ repository, manifest } = {}) {
+  const normalized = normalizePipelineRun(manifest);
+  if (
+    !normalized
+    || normalized.state !== 'completed'
+    || normalized.phase !== 'postprocess'
+    || typeof repository?.deletePipelineArtifact !== 'function'
+  ) {
+    return {
+      ok: true,
+      deletedArtifactIds: [],
+      retainedArtifactIds: collectResumeArtifactReferences(normalized)
+        .map((reference) => reference.artifactId)
+    };
+  }
+  const retained = collectResumeArtifactReferences(normalized);
+  const retainedKeys = new Set(retained.map((reference) => reference.key));
+  const disposable = resumeArtifactReferences(normalized)
+    .filter((reference) => !retainedKeys.has(reference.key));
+  const settled = await Promise.allSettled(disposable.map((reference) => (
+    repository.deletePipelineArtifact(
+      normalized.chatKey,
+      reference.operationId,
+      reference.artifactId
+    )
+  )));
+  return {
+    ok: settled.every((result) => (
+      result.status === 'fulfilled' && result.value?.ok !== false
+    )),
+    deletedArtifactIds: disposable.map((reference) => reference.artifactId),
+    retainedArtifactIds: retained.map((reference) => reference.artifactId)
+  };
 }
 
 export function createMemoryStorageAdapter() {
@@ -1143,6 +1223,46 @@ export function createStorageRepository({
       }
     }
 
+    const manifestsByChat = new Map();
+    const unreadableManifestChats = new Set();
+    for (const runRecord of Object.values(desiredRecords)) {
+      if (runRecord.kind !== 'pipelineRun') continue;
+      const read = await readRepairRecord(runRecord.key);
+      if (!read.ok) {
+        unreadableManifestChats.add(runRecord.chatKey);
+        continue;
+      }
+      const manifest = normalizePipelineRun(read.value?.manifest);
+      if (manifest) manifestsByChat.set(runRecord.chatKey, manifest);
+    }
+    for (const artifactRecord of Object.values({ ...desiredRecords })) {
+      if (artifactRecord.kind !== 'pipelineArtifact') continue;
+      if (unreadableManifestChats.has(artifactRecord.chatKey)) continue;
+      const manifest = manifestsByChat.get(artifactRecord.chatKey);
+      const ownsCurrentOperation = manifest?.operationId === artifactRecord.operationId;
+      const nonterminalCurrentOperation = ownsCurrentOperation
+        && ['running', 'paused'].includes(manifest.state);
+      const referencedKeys = ownsCurrentOperation
+        ? new Set(collectResumeArtifactReferences(manifest).map((reference) => reference.key))
+        : new Set();
+      if (nonterminalCurrentOperation || referencedKeys.has(artifactRecord.key)) continue;
+      try {
+        await storage.deleteJson(artifactRecord.key);
+        delete desiredRecords[artifactRecord.key];
+        pruned.push(repairDiagnostic('pipeline-artifact-deleted', {
+          kind: 'pipelineArtifact',
+          chatKey: artifactRecord.chatKey,
+          reason: 'orphaned-pipeline-artifact'
+        }));
+      } catch {
+        skipped.push(repairDiagnostic('index-skipped', {
+          kind: 'pipelineArtifact',
+          chatKey: artifactRecord.chatKey,
+          reason: 'delete-failed'
+        }));
+      }
+    }
+
     if (rawIndex === null || rawIndexRequiresRewrite(rawIndex, existingIndex) || repaired.length > 0 || pruned.length > 0) {
       const nextIndex = normalizeIndex({
         createdAt: existingIndex.createdAt,
@@ -1316,6 +1436,7 @@ export function createStorageRepository({
       kind: 'logical-storage',
       key,
       hash: artifactHash,
+      artifactBytes,
       operationId: safeId(operationId, 'operation'),
       artifactId: safeId(artifactId, 'artifact')
     };

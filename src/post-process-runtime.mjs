@@ -15,6 +15,7 @@ import {
   bindQueuedReprocess,
   normalizeQueuedReprocess
 } from './execution/queued-reprocess.mjs';
+import { purgeTerminalResumeArtifacts } from './storage.mjs';
 
 const POST_PROCESS_WRITER_PACKET_SCHEMA = 'recursion.postProcessWriterPacket.v1';
 const POST_PROCESS_WRITER_BOUNDARIES = Object.freeze([
@@ -1388,24 +1389,6 @@ export function createPostProcessRuntime({
     return `postprocess.${safeId(last?.id, 'category')}.rewrite`;
   }
 
-  async function purgeDurableIntermediateArtifacts(manifest, operation) {
-    if (typeof durableRepository?.deletePipelineArtifact !== 'function') return;
-    const finalStageId = finalRewriteStageId(operation);
-    const stageIds = Object.keys(manifest?.stageRecords || {}).filter((stageId) => (
-      stageId.endsWith('.guidance')
-      || (stageId.endsWith('.rewrite') && stageId !== finalStageId)
-    ));
-    await Promise.allSettled(stageIds.map((stageId) => {
-      const checkpoint = manifest.stageRecords?.[stageId]?.checkpoint;
-      if (!checkpoint) return null;
-      return durableRepository.deletePipelineArtifact(
-        manifest.chatKey,
-        manifest.operationId,
-        checkpoint.artifactRef?.artifactId || stageId
-      );
-    }));
-  }
-
   async function finalizeDurableOperation(record, operation, manifest) {
     if (manifest?.state !== 'completed') {
       lastDiagnostics = diagnosticsFor(operation, {
@@ -1424,7 +1407,10 @@ export function createPostProcessRuntime({
       durableArtifact(manifest, finalRewriteStageId(operation)),
       durableArtifact(manifest, 'postprocess.host-commit')
     ]);
-    await purgeDurableIntermediateArtifacts(manifest, operation);
+    await purgeTerminalResumeArtifacts({
+      repository: durableRepository,
+      manifest
+    });
     const candidate = cleanText(draftArtifact?.text);
     const outcomes = operation.categories.map((category) => {
       const suffix = operation.rewriteFlow === 'progressive'

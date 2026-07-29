@@ -1618,4 +1618,56 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   assert(dump[sceneCacheKey('Maintain Chat B', 'Other Scene')], 'maintenance keeps other chat cache');
 }
 
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  await repo.savePipelineArtifact(
+    'Orphan Artifact Chat',
+    'superseded-operation',
+    'preprocess.arbiter',
+    { body: 'orphan body' }
+  );
+  const repaired = await repo.repairIndex();
+  assertEqual(
+    await repo.loadPipelineArtifact(
+      'Orphan Artifact Chat',
+      'superseded-operation',
+      'preprocess.arbiter'
+    ),
+    null,
+    'repair removes an artifact that is not referenced by an authoritative manifest'
+  );
+  assert(
+    repaired.pruned.some((entry) => (
+      entry.kind === 'pipelineArtifact'
+      && entry.reason === 'orphaned-pipeline-artifact'
+    )),
+    'repair reports orphan artifact cleanup without exposing its body'
+  );
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  const saved = await repo.saveSceneCache('Retired Warm Chat', 'Scene One', {
+    cards: [],
+    activeSourceRevisionHash: 'source-a',
+    variantOrder: ['source-a'],
+    variants: {
+      'source-a': {
+        sourceRevisionHash: 'source-a',
+        cards: [],
+        rapid: {
+          status: 'ready',
+          guidance: 'retired warm body'
+        }
+      }
+    }
+  });
+  assert(
+    !JSON.stringify(saved).toLowerCase().includes('rapid'),
+    'retired warm metadata is ignored instead of migrated into the current cache contract'
+  );
+}
+
 console.log('[pass] storage');

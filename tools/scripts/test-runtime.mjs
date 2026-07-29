@@ -742,6 +742,7 @@ function createRuntimeHarness({
   generationRouter = undefined,
   activity = createActivityReporter(),
   storage: providedStorage = null,
+  durablePreprocess = false,
 } = {}) {
   const calls = {
     snapshot: 0,
@@ -815,7 +816,14 @@ function createRuntimeHarness({
     messages: hostMessages,
     generation: hostGeneration
   };
-  const runtime = createRecursionRuntime({ host, settingsStore, storage, activity, generationRouter: resolvedGenerationRouter });
+  const runtime = createRecursionRuntime({
+    host,
+    settingsStore,
+    storage,
+    activity,
+    generationRouter: resolvedGenerationRouter,
+    durablePreprocess
+  });
   return { runtime, calls, installed, cleared, storage, settingsStore, activity, adapter };
 }
 
@@ -2234,6 +2242,65 @@ async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, 
   assertEqual(result.reason, 'cache-unavailable', `${label}: unavailable reason returned`);
   assertEqual(installed.length, 0, `${label}: prompt is not installed`);
   assert(!serialized.includes(card.promptText), `${label}: stale prompt text is not exposed`);
+}
+
+function immediateDurableCardRouter() {
+  return {
+    async generate(roleId, request = {}) {
+      if (roleId === 'utilityArbiter') {
+        return {
+          ok: true,
+          data: {
+            schema: UTILITY_ARBITER_SCHEMA,
+            snapshotHash: request.snapshotHash,
+            action: 'compose-brief',
+            sceneStatus: 'same-scene',
+            promptFootprint: 'normal',
+            cardJobs: [{
+              family: 'Scene Frame',
+              role: 'sceneFrameCard',
+              reason: 'Preserve the current scene.'
+            }],
+            budgets: { targetBriefTokens: 500, maxCards: 4 },
+            reasonerDecision: { mode: 'skip', reason: 'runtime reset fixture', signals: [] },
+            diagnostics: []
+          }
+        };
+      }
+      if (roleId === 'sceneFrameCard') {
+        return {
+          ok: true,
+          roleId,
+          data: {
+            schema: 'recursion.card.v1',
+            family: 'Scene Frame',
+            role: roleId,
+            snapshotHash: request.snapshotHash,
+            items: [{
+              promptText: 'Keep the current scene grounded in visible evidence.',
+              evidenceRefs: ['message:2'],
+              tokenEstimate: 12
+            }]
+          }
+        };
+      }
+      if (roleId === 'guidanceComposer') {
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.guidanceComposer.v1',
+            snapshotHash: request.snapshotHash,
+            guidanceText: 'Keep the reply grounded in the current scene.',
+            sourceCardIds: [],
+            guardrailCardIds: [],
+            omittedCardIds: [],
+            diagnostics: []
+          }
+        };
+      }
+      throw new Error(`Unexpected durable provider role ${roleId}`);
+    }
+  };
 }
 
 {
@@ -10546,7 +10613,9 @@ for (const scenario of [
 
 {
   const { runtime, calls, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' }
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter: immediateDurableCardRouter(),
+    durablePreprocess: true
   });
   const setup = await runtime.prepareForGeneration({ userMessage: 'Prepare cache before scene reset.' });
   assertEqual(setup.ok, true, 'scene reset setup prepares generation');
@@ -10554,7 +10623,15 @@ for (const scenario of [
   assert(setupView.lastPacket, 'scene reset setup has prompt packet before reset');
   assert(setupView.lastHand.cards.length > 0, 'scene reset setup has hand cards before reset');
   const setupSnapshot = setupView.lastSnapshot;
+  if (!await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey)) {
+    await storage.saveSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey, {
+      cards: setupView.lastHand.cards
+    });
+  }
   assert(await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey), 'scene cache exists before reset');
+  assert(await storage.loadPipelineRun(setupSnapshot.chatKey), 'execution manifest exists before reset');
+  await runtime.requestFreshNextGeneration();
+  assert(await storage.loadQueuedReprocess(setupSnapshot.chatKey), 'queued execution intent exists before reset');
   const result = await runtime.resetSceneCache();
   assertEqual(result.ok, true, 'scene cache reset succeeds');
   assertEqual(result.chatKey, setupSnapshot.chatKey, 'scene cache reset targets current chat');
@@ -10562,6 +10639,18 @@ for (const scenario of [
   assertEqual(result.clear.ok, true, 'scene cache reset clears host prompt');
   assertEqual(calls.clear, 1, 'scene cache reset calls host prompt clear');
   assertEqual(await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey), null, 'scene cache reset deletes current cache');
+  assertEqual(await storage.loadPipelineRun(setupSnapshot.chatKey), null, 'scene cache reset deletes current-chat execution manifest');
+  assertEqual(await storage.loadQueuedReprocess(setupSnapshot.chatKey), null, 'scene cache reset deletes current-chat queued intent');
+  assertEqual(
+    Object.values((await storage.readIndex()).records)
+      .filter((record) => (
+        record.chatKey === setupSnapshot.chatKey
+        && record.kind === 'pipelineArtifact'
+      ))
+      .length,
+    0,
+    'scene cache reset deletes every current-chat execution artifact'
+  );
   const resetView = runtime.view();
   assertEqual(resetView.lastPacket, null, 'scene cache reset clears in-memory prompt packet');
   assertEqual(resetView.lastHand.cards.length, 0, 'scene cache reset clears in-memory hand');

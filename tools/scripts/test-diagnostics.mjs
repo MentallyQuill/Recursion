@@ -1,4 +1,7 @@
-import { buildDiagnosticsPayload } from '../../src/runtime/diagnostics.mjs';
+import {
+  buildDiagnosticsPayload,
+  summarizeExecutionForDiagnostics
+} from '../../src/runtime/diagnostics.mjs';
 import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
 
 const payload = buildDiagnosticsPayload({
@@ -112,6 +115,46 @@ assertEqual(payload.runtime.preparedGeneration.hand.cardCount, 1, 'prepared gene
 assert(!serialized.includes('prepared packet transcript leak'), 'prepared generation diagnostics omit packet text');
 assert(!serialized.includes('prepared card prompt leak'), 'prepared generation diagnostics omit card prompts');
 assert(!serialized.includes('prepared basis transcript leak'), 'prepared generation diagnostics omit source text');
+
+const executionSummary = summarizeExecutionForDiagnostics({
+  operationId: 'operation-safe-id',
+  phase: 'postprocess',
+  state: 'paused',
+  pauseReason: 'user-stop',
+  staleChangedFields: ['sourceRevisionHash'],
+  stageRecords: {
+    'postprocess.unified.rewrite': {
+      stageId: 'postprocess.unified.rewrite',
+      state: 'failed',
+      startedAt: '2026-07-04T00:00:00.000Z',
+      updatedAt: '2026-07-04T00:00:12.000Z',
+      attempts: { total: 2 },
+      failure: {
+        failureClass: 'provider',
+        message: 'CANARY_DRAFT_BODY'
+      },
+      summary: {
+        guidance: 'CANARY_GUIDANCE_BODY'
+      },
+      checkpoint: {
+        outputHash: 'artifact-safe-hash',
+        artifactRef: {
+          artifactBytes: 321,
+          body: 'CANARY_PACKET_BODY'
+        }
+      }
+    }
+  }
+});
+const serializedExecution = JSON.stringify(executionSummary);
+assertEqual(executionSummary.operationId, 'operation-safe-id', 'execution diagnostics keep operation id');
+assertEqual(executionSummary.operationPhase, 'postprocess', 'execution diagnostics keep operation phase');
+assertEqual(executionSummary.operationState, 'paused', 'execution diagnostics keep operation state');
+assertEqual(executionSummary.stages[0].attemptCount, 2, 'execution diagnostics keep attempt count');
+assertEqual(executionSummary.stages[0].elapsedMs, 12000, 'execution diagnostics derive bounded elapsed time');
+assertEqual(executionSummary.stages[0].artifactBytes, 321, 'execution diagnostics keep artifact byte count');
+assert(serializedExecution.includes('operation-paused:user-stop'), 'execution diagnostics emit stable pause code');
+assert(!serializedExecution.includes('CANARY_'), 'execution diagnostics omit all artifact bodies');
 
 const excerptPayload = buildDiagnosticsPayload({
   view: { lastPacket: { promptText: 'visible excerpt' } },

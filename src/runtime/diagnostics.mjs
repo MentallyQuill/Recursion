@@ -2,6 +2,23 @@ import { asArray, compact, hashJson, nowIso, redact, truncate } from '../core.mj
 import { summarizePreparedGenerationArtifact } from './prepared-generation.mjs';
 
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
+const RESUME_BODY_KEY_PATTERN = /(arbiter|card|reference|packet|hand|guidance|draft|prose|prompt|response|artifact).*(body|text|payload|content)|^(body|text|payload|content)$/i;
+const EXECUTION_DIAGNOSTIC_CODE_SET = new Set([
+  'operation-paused:user-stop',
+  'operation-paused:chat-changed',
+  'operation-stale:source-changed',
+  'stage-attempt-exhausted',
+  'stage-checkpoint-reused',
+  'stage-checkpoint-invalidated',
+  'stage-reprocess-queued',
+  'stage-reprocess-canceled',
+  'stage-reprocess-consumed',
+  'stage-reprocess-inapplicable',
+  'resume-checkpoint-restored',
+  'resume-artifact-missing',
+  'resume-commit-already-applied',
+  'fused-fallback-segmented'
+]);
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -17,15 +34,130 @@ function numberOr(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
-function scrubSecretText(value, limit = 500) {
+function scrubSecretText(value, limit = 500, { includeResumeBodies = false } = {}) {
   if (typeof value === 'string') return truncate(value.replace(SECRET_TEXT_PATTERN, '[redacted]'), limit);
   if (!value || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.map((entry) => scrubSecretText(entry, limit));
-  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, scrubSecretText(entry, limit)]));
+  if (Array.isArray(value)) {
+    return value.map((entry) => scrubSecretText(entry, limit, { includeResumeBodies }));
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
+    key,
+    !includeResumeBodies && RESUME_BODY_KEY_PATTERN.test(key)
+      ? '[redacted]'
+      : scrubSecretText(entry, limit, { includeResumeBodies })
+  ]));
 }
 
-function safeDiagnosticValue(value, limit = 500) {
-  return scrubSecretText(redact(value, { maxString: limit }), limit);
+function safeDiagnosticValue(value, limit = 500, options = {}) {
+  return scrubSecretText(redact(value, { maxString: limit }), limit, options);
+}
+
+function boundedInteger(value, maximum = Number.MAX_SAFE_INTEGER) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.min(maximum, Math.max(0, Math.floor(number)));
+}
+
+function elapsedMilliseconds(startedAt, updatedAt) {
+  const start = Date.parse(String(startedAt || ''));
+  const end = Date.parse(String(updatedAt || ''));
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 0;
+  return boundedInteger(end - start, 31 * 24 * 60 * 60 * 1000);
+}
+
+function executionDiagnosticCodes(manifest, stages) {
+  const source = asObject(manifest);
+  const codes = [
+    ...asArray(source.diagnosticCodes),
+    ...stages.flatMap((stage) => asArray(stage.diagnosticCodes))
+  ];
+  const pauseReason = safeText(source.pauseReason, 120);
+  if (source.state === 'paused' && ['user', 'user-stop'].includes(pauseReason)) {
+    codes.push('operation-paused:user-stop');
+  }
+  if (source.state === 'paused' && pauseReason === 'chat-changed') {
+    codes.push('operation-paused:chat-changed');
+  }
+  const staleFields = asArray(source.staleFields || source.staleChangedFields);
+  if (
+    source.state === 'stale'
+    && (
+      pauseReason === 'source-changed'
+      || staleFields.some((field) => /source|message|swipe/i.test(String(field)))
+    )
+  ) {
+    codes.push('operation-stale:source-changed');
+  }
+  if (stages.some((stage) => (
+    stage.stageState === 'failed'
+    && stage.attemptCount > 0
+    && stage.attemptCount >= stage.attemptLimit
+  ))) {
+    codes.push('stage-attempt-exhausted');
+  }
+  if (asArray(source.queuedStageIds).length > 0) codes.push('stage-reprocess-queued');
+  return [...new Set(codes)]
+    .filter((code) => EXECUTION_DIAGNOSTIC_CODE_SET.has(code));
+}
+
+function summarizeExecutionStage(record) {
+  const source = asObject(record);
+  const checkpoint = asObject(source.checkpoint);
+  const artifactRef = asObject(checkpoint.artifactRef);
+  const diagnosticCodes = asArray(source.diagnosticCodes || source.summary?.diagnosticCodes)
+    .filter((code) => EXECUTION_DIAGNOSTIC_CODE_SET.has(code));
+  return {
+    stageId: safeText(source.stageId, 180),
+    stageState: safeText(source.state, 40),
+    attemptCount: boundedInteger(source.attempts?.total, 100000),
+    attemptLimit: boundedInteger(source.attempts?.limit, 100000),
+    elapsedMs: elapsedMilliseconds(source.startedAt, source.updatedAt),
+    failureClass: safeText(source.failure?.failureClass, 80),
+    artifactHash: safeText(checkpoint.outputHash || artifactRef.hash, 180),
+    artifactBytes: boundedInteger(
+      artifactRef.artifactBytes ?? artifactRef.bytes,
+      1024 * 1024 * 1024
+    ),
+    diagnosticCodes
+  };
+}
+
+export function summarizeExecutionForDiagnostics(manifest) {
+  const source = asObject(manifest);
+  if (!source.operationId) return null;
+  const stages = Object.values(asObject(source.stageRecords))
+    .map(summarizeExecutionStage)
+    .filter((stage) => stage.stageId);
+  return {
+    operationId: safeText(source.operationId, 180),
+    operationPhase: safeText(source.phase, 80),
+    operationState: safeText(source.state, 40),
+    diagnosticCodes: executionDiagnosticCodes(source, stages),
+    stages: stages.map(({ attemptLimit: _attemptLimit, diagnosticCodes: _codes, ...stage }) => stage),
+    staleFields: asArray(source.staleFields || source.staleChangedFields)
+      .slice(0, 24)
+      .map((field) => safeText(field, 120))
+      .filter(Boolean)
+  };
+}
+
+function mapActivityEntry(entry) {
+  const source = asObject(entry);
+  if (Object.keys(source).length === 0) return null;
+  return safeDiagnosticValue({
+    operationId: safeText(source.operationId || source.runId, 180),
+    stageId: safeText(source.stageId || source.logicalStage, 180),
+    phase: safeText(source.phase, 80),
+    state: safeText(source.state || source.outcome, 40),
+    severity: safeText(source.severity, 40),
+    label: safeText(source.label, 240),
+    attemptCount: boundedInteger(source.attemptCount ?? source.detail?.attemptCount, 100000),
+    elapsedMs: boundedInteger(source.elapsedMs ?? source.detail?.elapsedMs, 31 * 24 * 60 * 60 * 1000),
+    failureClass: safeText(source.failureClass || source.detail?.failureClass, 80),
+    code: EXECUTION_DIAGNOSTIC_CODE_SET.has(source.code || source.detail?.code)
+      ? source.code || source.detail?.code
+      : ''
+  });
 }
 
 function mapPacketDiagnostics(diagnostics) {
@@ -218,9 +350,10 @@ export function buildDiagnosticsPayload({
     runtime: {
       activeRunId: runtime.activeRunId || null,
       hostGenerationActive: Boolean(runtime.hostGenerationActive),
-      activity: runtime.activity || null,
-      activityHistory: asArray(runtime.activityHistory).slice(-20),
+      activity: mapActivityEntry(runtime.activity),
+      activityHistory: asArray(runtime.activityHistory).slice(-20).map(mapActivityEntry).filter(Boolean),
       freshNextGeneration: runtime.freshNextGeneration || null,
+      execution: summarizeExecutionForDiagnostics(runtime.execution),
       cacheDecision: mapCacheDecision(runtime.lastCacheDecision),
       preparedGeneration: runtime.lastPreparedGeneration
         ? safeDiagnosticValue(summarizePreparedGenerationArtifact(runtime.lastPreparedGeneration), 500)
@@ -242,7 +375,11 @@ export function buildDiagnosticsPayload({
       lastPacket: runtime.lastPacket || null,
       lastHand: runtime.lastHand || null,
       lastPlan: runtime.lastPlan || null
-    }, 900) : null
+    }, 900, { includeResumeBodies: true }) : null
   };
-  return safeDiagnosticValue(payload, includeExcerpts ? 900 : 500);
+  return safeDiagnosticValue(
+    payload,
+    includeExcerpts ? 900 : 500,
+    { includeResumeBodies: includeExcerpts }
+  );
 }

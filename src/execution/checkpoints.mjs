@@ -56,6 +56,14 @@ function nonNegativeInteger(value, fallback = 0) {
   return Number.isInteger(value) && value >= 0 ? value : fallback;
 }
 
+function unsafeSummaryKey(value) {
+  const key = cleanText(value).replace(/[^a-zA-Z0-9]+/g, '').toLowerCase();
+  if (!key) return false;
+  const protectedMetadataSuffix = /(id|ids|hash|count|length|status|class|mode|reason|code|codes|bytes)$/;
+  if (protectedMetadataSuffix.test(key)) return false;
+  return /(body|prompt|response|text|guidance|draft|prose|packet|hand|card|reference|arbiter|artifact)/.test(key);
+}
+
 function normalizeHashMap(value = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return Object.fromEntries(
@@ -83,6 +91,7 @@ function normalizeStageSummary(value, depth = 0) {
     Object.keys(value)
       .sort()
       .slice(0, 40)
+      .filter((key) => !unsafeSummaryKey(key))
       .map((key) => [key.slice(0, 80), normalizeStageSummary(value[key], depth + 1)])
       .filter(([, entry]) => entry !== null)
   );
@@ -110,7 +119,10 @@ function normalizeArtifactRef(value = {}) {
     kind,
     key,
     hash,
-    ...(artifactId ? { artifactId } : {})
+    ...(artifactId ? { artifactId } : {}),
+    ...(Number.isInteger(value.artifactBytes ?? value.bytes) && (value.artifactBytes ?? value.bytes) >= 0
+      ? { artifactBytes: value.artifactBytes ?? value.bytes }
+      : {})
   };
 }
 

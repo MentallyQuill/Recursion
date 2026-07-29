@@ -371,7 +371,6 @@ function registerHostEvents(nextRuntime, currentHost = host) {
               reason: 'post-process-disabled'
             }));
         }
-        let shouldWarmRapid = false;
         return Promise.resolve(nextRuntime.postProcessFinalTargetReady?.(details))
           .then((target) => {
             if (target?.ready !== true) {
@@ -415,16 +414,12 @@ function registerHostEvents(nextRuntime, currentHost = host) {
                         reason: 'assistant-message-landed'
                       }
                     );
-                    shouldWarmRapid = result?.reason !== 'canceled';
                     await generationEnded();
                   } finally {
                     await unlockPostProcessControls(currentHost);
                   }
                   lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
-                  if (!shouldWarmRapid) {
-                    return { ok: true, skipped: true, reason: 'post-process-warm-suppressed' };
-                  }
-                  return invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' });
+                  return { ok: true, reason: 'post-process-settled' };
                 });
                 lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
                 return {
@@ -440,8 +435,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
           .then(() => ({ ok: true, skipped: true, reason: 'assistant-message-unchanged' }));
       }
       lastAssistantIdentity = nextAssistantIdentity;
-      return generationEnded()
-        .then(() => invokeRuntimeCleanup('warmRapidScene', 'Rapid warm failed.', { reason: 'assistant-message-landed' }));
+      return generationEnded();
     });
   }
 }

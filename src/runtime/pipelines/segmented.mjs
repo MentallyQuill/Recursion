@@ -19,7 +19,7 @@ function normalizeDiagnostics(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
 
-export async function runStandardCardPipeline({
+export async function runSegmentedCardPipeline({
   plan,
   snapshot,
   settings,

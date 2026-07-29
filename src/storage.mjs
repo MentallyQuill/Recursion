@@ -26,7 +26,6 @@ const INDEX_KINDS = new Set([
   'queuedReprocess'
 ]);
 const DEFAULT_JOURNAL_EVENT = 'activity.stage_changed';
-const RAPID_WARM_STATUSES = new Set(['queued', 'warming', 'ready', 'stale', 'failed']);
 const UNSAFE_JOURNAL_TEXT_PATTERN = /\b(raw[-_\s]*prompt|rawPrompt|raw[-_\s]*response|rawResponse|provider[-_\s]*prompt|providerPrompt|provider[-_\s]*response|providerResponse|hidden[-_\s]*reasoning|hiddenReasoning|reasoning[-_\s]*(?:content|details)|reasoningContent|reasoningDetails|private[-_\s]*story[-_\s]*plan|privateStoryPlan|private[-_\s]*plan|privatePlan|session[-_\s]*id|sessionId|session[-_\s]*key\s*[:=]|sessionKey\s*[:=]|session[-_\s]*token|credentials?|password\s*[:=]|token\s*[:=]|api[-_\s]*key\s*[:=]|apiKey\s*[:=]|authorization\s*[:=]|set-cookie\s*[:=]|cookie\s*[:=]|bearer\s+[A-Za-z0-9._-]+|sk-[A-Za-z0-9_-]+)/i;
 const OBJECT_COERCION_TEXT_PATTERN = /\[object Object\]|object-Object/i;
 const PATH_LIKE_TEXT_PATTERN = /(^|[\s"'`=:(\[])(?:[A-Za-z]:[\\/]|\\\\|\/\/|\.{1,2}[\\/]|\/[A-Za-z0-9_.-]+(?:[\\/][A-Za-z0-9_.-]+)+|[A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.\\/-]*|[A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.\\/-]*\.(?:jsonl?|mjs|js|css|md|txt|png|jpe?g|webp|db|sqlite)\b)/i;
@@ -75,7 +74,6 @@ const JOURNAL_EVENTS = new Set([
   'prompt.install_failed',
   'prompt.install_skipped',
   'prompt.cleared',
-  'rapid.warm_missed',
   'provider.call.started',
   'provider.call.completed',
   'provider.call.failed',
@@ -421,51 +419,6 @@ function normalizeVariantKey(value) {
   return safeMetadataText(value, 180, '');
 }
 
-function normalizeRapidWarmArtifact(source = {}) {
-  const value = source && typeof source === 'object' && !Array.isArray(source) ? source : {};
-  const status = RAPID_WARM_STATUSES.has(value.status) ? value.status : '';
-  const warmArtifactId = safeMetadataText(value.warmArtifactId || '', 160, '');
-  if (!status && !warmArtifactId) return null;
-  const guidanceSource = value.guidance && typeof value.guidance === 'object' && !Array.isArray(value.guidance) ? value.guidance : {};
-  return {
-    pipelineVersion: Math.max(1, Math.floor(Number(value.pipelineVersion) || 1)),
-    status: status || 'stale',
-    warmArtifactId,
-    baseSourceRevisionHash: safeMetadataText(value.baseSourceRevisionHash || '', 180, ''),
-    baseSnapshotHash: safeMetadataText(value.baseSnapshotHash || '', 180, ''),
-    selectedCardIds: safeMetadataList(value.selectedCardIds, 180, 32),
-    cardIds: safeMetadataList(value.cardIds, 180, 32),
-    guidance: {
-      schema: safeMetadataText(guidanceSource.schema || '', 120, ''),
-      status: safeMetadataText(guidanceSource.status || '', 80, ''),
-      text: safeMetadataText(guidanceSource.text || '', 6000, ''),
-      sourceCardIds: safeMetadataList(guidanceSource.sourceCardIds, 180, 32),
-      guardrailCardIds: safeMetadataList(guidanceSource.guardrailCardIds, 180, 32),
-      omittedCardIds: Array.isArray(guidanceSource.omittedCardIds)
-        ? guidanceSource.omittedCardIds.map((entry) => {
-          const omission = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {};
-          const id = safeMetadataText(omission.id || omission.cardId || '', 180, '');
-          const reason = safeMetadataText(omission.reason || '', 120, '');
-          return id ? { id, reason } : null;
-        }).filter(Boolean).slice(0, 32)
-        : [],
-      diagnostics: safeMetadataList(guidanceSource.diagnostics, 120, 24)
-    },
-    storyForm: normalizeStoryForm(value.storyForm || UNKNOWN_STORY_FORM),
-    settingsHash: safeMetadataText(value.settingsHash || '', 180, ''),
-    providerContractHash: safeMetadataText(value.providerContractHash || '', 180, ''),
-    cardCatalogHash: safeMetadataText(value.cardCatalogHash || '', 180, ''),
-    promptContractHash: safeMetadataText(value.promptContractHash || '', 180, ''),
-    startedAt: safeMetadataText(value.startedAt || '', 80, ''),
-    builtAt: safeMetadataText(value.builtAt || '', 80, ''),
-    failedAt: safeMetadataText(value.failedAt || '', 80, ''),
-    failureReasonCode: safeMetadataText(value.failureReasonCode || '', 80, ''),
-    failureReasonLabel: safeMetadataText(value.failureReasonLabel || '', 240, ''),
-    runId: safeMetadataText(value.runId || '', 120, ''),
-    diagnostics: safeMetadataList(value.diagnostics, 120, 24)
-  };
-}
-
 function normalizeSceneCacheVariant(key, value = {}) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   const sourceRevisionHash = normalizeVariantKey(source.sourceRevisionHash || key);
@@ -480,8 +433,6 @@ function normalizeSceneCacheVariant(key, value = {}) {
     latestHand: normalizeLatestHand(source.latestHand),
     updatedAt: timestampValue(source.updatedAt)
   };
-  const rapid = normalizeRapidWarmArtifact(source.rapid);
-  if (rapid) variant.rapid = rapid;
   if (!variant.source.sourceRevisionHash) variant.source.sourceRevisionHash = sourceRevisionHash;
   return variant;
 }

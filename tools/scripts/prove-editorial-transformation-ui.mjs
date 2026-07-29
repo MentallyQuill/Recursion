@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 import { assertVisualBaseline } from './lib/visual-regression.mjs';
 import { createSillyTavernHttpSession, validateSoakUserHandle } from './lib/sillytavern-live-harness.mjs';
 
-const pipelines = ['standard', 'rapid', 'fused'];
+const pipelines = ['segmented', 'fused'];
 const modes = ['off', 'repair', 'recompose', 'redirect'];
 const viewports = [{ name: 'desktop', width: 1440, height: 900 }, { name: 'compact', width: 390, height: 844 }];
 const outDir = resolve('artifacts', 'editorial-ui');

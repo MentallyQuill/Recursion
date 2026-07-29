@@ -735,8 +735,7 @@ function baseDiagnostics({
   behaviorPolicy = null,
   guidance,
   storyForm = UNKNOWN_STORY_FORM,
-  pipelineMode = 'standard',
-  rapidPath = '',
+  pipelineMode = 'segmented',
   planDiagnostics = []
 }) {
   const normalizedStoryForm = normalizeStoryForm(storyForm);
@@ -759,7 +758,6 @@ function baseDiagnostics({
     sectionHashes: null,
     footprint,
     pipelineMode,
-    rapidPath,
     planDiagnostics: uniqueStrings(planDiagnostics).slice(0, 24),
     storyFormTense: normalizedStoryForm.tense,
     storyFormPov: normalizedStoryForm.pov,
@@ -798,8 +796,7 @@ function buildPacket({
   planDiagnostics,
   composedAt,
   storyForm = UNKNOWN_STORY_FORM,
-  pipelineMode = 'standard',
-  rapidPath = ''
+  pipelineMode = 'segmented'
 }) {
   const sourceSnapshotHash = snapshotHash(snapshot);
   const normalizedStoryForm = normalizeStoryForm(storyForm);
@@ -843,7 +840,6 @@ function buildPacket({
       guidance,
       storyForm: normalizedStoryForm,
       pipelineMode,
-      rapidPath,
       planDiagnostics
     }),
     composedAt
@@ -861,8 +857,7 @@ export async function composePromptPacket({
   runId = makeId('prompt-run'),
   precomposedGuidance = null,
   storyForm = UNKNOWN_STORY_FORM,
-  pipelineMode = 'standard',
-  rapidPath = '',
+  pipelineMode = 'segmented',
   planDiagnostics = []
 } = {}) {
   const policy = behaviorPolicyFrom(settings, behaviorPolicy);
@@ -918,8 +913,7 @@ export async function composePromptPacket({
     planDiagnostics,
     composedAt,
     storyForm: normalizedStoryForm,
-    pipelineMode,
-    rapidPath
+    pipelineMode
   });
 
   validatePromptPacket(packet);

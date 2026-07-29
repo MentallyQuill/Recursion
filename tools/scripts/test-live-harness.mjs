@@ -45,7 +45,6 @@ assert(swipeReuseProofSource.includes("fail('stale-extension'"), 'swipe proof fa
 assert(swipeReuseProofSource.includes('safeSnapshotSummary'), 'synthetic swipe evidence summarizes snapshots without transcript rows');
 assert(!swipeReuseProofSource.includes('firstSnapshot: firstView.lastSnapshot'), 'synthetic swipe evidence does not export a trusted snapshot verbatim');
 assertEqual(liveEditorialStageTimeoutMs('settings', 180000), 15000, 'settings transition has a short fail-fast deadline');
-assertEqual(liveEditorialStageTimeoutMs('warm', 180000), 540000, 'Rapid warm allows its sequential provider deadlines');
 assertEqual(liveEditorialStageTimeoutMs('prepare', 180000), 180000, 'preparation uses one configured live timeout');
 assertEqual(liveEditorialStageTimeoutMs('enhance', 180000), 540000, 'Enhancement allows three sequential provider deadlines');
 assertEqual(liveEditorialStageTimeoutMs('judge', 180000), 180000, 'independent judge uses one configured live timeout');
@@ -937,6 +936,12 @@ async function createSillyTavernSmokeFixtureServer({
     'src/cards.mjs',
     'src/context-contract.mjs',
     'src/core.mjs',
+    'src/execution/attempt-policy.mjs',
+    'src/execution/checkpoints.mjs',
+    'src/execution/provenance.mjs',
+    'src/execution/queued-reprocess.mjs',
+    'src/execution/scheduler.mjs',
+    'src/execution/stage-registry.mjs',
     'src/enhancement-context.mjs',
     'src/enhancement-metrics.mjs',
     'src/failures.mjs',
@@ -950,15 +955,13 @@ async function createSillyTavernSmokeFixtureServer({
     'src/providers.mjs',
     'src/providers/provider-response-normalizer.mjs',
     'src/providers/structured-output-parser.mjs',
-    'src/rapid-pipeline.mjs',
-    'src/rapid-warm-state.mjs',
     'src/reasoning-policy.mjs',
     'src/retention-policy.mjs',
     'src/runtime/diagnostics.mjs',
     'src/runtime/prepared-generation.mjs',
     'src/runtime/pipelines/fused.mjs',
-    'src/runtime/pipelines/rapid.mjs',
-    'src/runtime/pipelines/standard.mjs',
+    'src/runtime/pipelines/segmented.mjs',
+    'src/runtime/preprocess-graph.mjs',
     'src/runtime/prompt-install.mjs',
     'src/runtime/run-state.mjs',
     'src/runtime.mjs',

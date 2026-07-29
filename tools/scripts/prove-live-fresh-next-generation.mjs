@@ -61,7 +61,7 @@ async function forceStandardAuto(page, timeoutMs) {
     await runtime.updateSettings({
       enabled: true,
       mode: 'auto',
-      pipelineMode: 'standard',
+      pipelineMode: 'segmented',
       reasonerUse: 'off',
       minCards: 1,
       maxCards: 2
@@ -71,7 +71,7 @@ async function forceStandardAuto(page, timeoutMs) {
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
     return view.settings?.enabled !== false
       && view.settings?.mode === 'auto'
-      && view.settings?.pipelineMode === 'standard';
+      && view.settings?.pipelineMode === 'segmented';
   }, null, { timeout: timeoutMs });
 }
 

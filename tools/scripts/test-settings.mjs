@@ -52,12 +52,13 @@ const normalized = normalizeSettings({
 assertEqual(normalizeSettings({ mode: 'manual' }).mode, 'manual', 'manual mode is valid');
 assertEqual(normalizeSettings({ mode: 'removed-mode' }).mode, 'auto', 'removed mode normalizes to auto');
 assertEqual(normalizeSettings({ mode: 'observe' }).mode, 'auto', 'invalid mode normalizes to auto');
-assertEqual(normalizeSettings({}).pipelineMode, 'standard', 'pipeline mode defaults to Standard');
-assertEqual(normalizeSettings({ pipelineMode: 'rapid' }).pipelineMode, 'rapid', 'Rapid pipeline mode is accepted');
+assertEqual(normalizeSettings({}).pipelineMode, 'segmented', 'pipeline mode defaults to Segmented');
+assertEqual(normalizeSettings({ pipelineMode: 'rapid' }).pipelineMode, 'segmented', 'removed Rapid pipeline reaches the generic fallback');
 assertEqual(normalizeSettings({ pipelineMode: 'fused' }).pipelineMode, 'fused', 'Fused pipeline mode is accepted');
 assertEqual(normalizeSettings({ pipelineMode: 'FUSED' }).pipelineMode, 'fused', 'Fused pipeline mode normalizes case-insensitively');
-assertEqual(normalizeSettings({ pipelineMode: 'standard' }).pipelineMode, 'standard', 'Standard pipeline mode is accepted');
-assertEqual(normalizeSettings({ pipelineMode: 'fast' }).pipelineMode, 'standard', 'invalid pipeline mode normalizes to Standard');
+assertEqual(normalizeSettings({ pipelineMode: 'segmented' }).pipelineMode, 'segmented', 'Segmented pipeline mode is accepted');
+assertEqual(normalizeSettings({ pipelineMode: 'standard' }).pipelineMode, 'segmented', 'removed Standard pipeline reaches the generic fallback');
+assertEqual(normalizeSettings({ pipelineMode: 'fast' }).pipelineMode, 'segmented', 'invalid pipeline mode normalizes to Segmented');
 assertEqual(normalizeSettings({}).modelAttemptsPerStep, 2, 'model attempts default to two');
 assertEqual(normalizeSettings({ modelAttemptsPerStep: 0 }).modelAttemptsPerStep, 1, 'model attempts clamp low');
 assertEqual(normalizeSettings({ modelAttemptsPerStep: 1 }).modelAttemptsPerStep, 1, 'one model attempt is accepted');
@@ -104,7 +105,7 @@ assert(!('cardDecks' in ignoredOldContracts), 'old cardDecks settings are ignore
 assert(!('cardScope' in ignoredOldContracts), 'legacy card scope is ignored');
 assertDeepEqual(ignoredOldContracts.postProcess, DEFAULT_RECURSION_SETTINGS.postProcess, 'legacy enhancement targets and modes do not enable post-process');
 assertDeepEqual(ignoredOldContracts.preProcessDecks, DEFAULT_RECURSION_SETTINGS.preProcessDecks, 'old cardDecks do not migrate into pre-process decks');
-assertEqual(normalizeSettings({ mode: 'manual', pipelineMode: 'rapid' }).mode, 'manual', 'Rapid does not replace Auto/Manual mode');
+assertEqual(normalizeSettings({ mode: 'manual', pipelineMode: 'segmented' }).mode, 'manual', 'Segmented does not replace Auto/Manual mode');
 assertEqual(normalizeSettings({ mode: 'manual', pipelineMode: 'fused' }).mode, 'manual', 'Fused does not replace Auto/Manual mode');
 assertEqual(normalized.enabled, false, 'power toggle disabled state preserved');
 assertEqual(normalizeSettings({ focus: 'constraints' }).focus, 'constraints', 'constraints focus is accepted');
@@ -280,6 +281,14 @@ const secrets = createSessionSecretStore();
 const store = createSettingsStore({ root, secretStore: secrets });
 assertEqual(store.get().ui.tooltipsEnabled, true, 'fresh settings store enables tooltip hover help');
 assertEqual(root.recursion.ui.tooltipsEnabled, true, 'fresh settings root persists tooltip hover help enabled');
+const invalidPipelineRoot = { recursion: { pipelineMode: 'rapid' } };
+const invalidPipelineStore = createSettingsStore({
+  root: invalidPipelineRoot,
+  save: () => {}
+});
+assertEqual(invalidPipelineStore.get().pipelineMode, 'segmented', 'invalid persisted pipeline loads through the generic fallback');
+invalidPipelineStore.update({ mode: 'manual' });
+assertEqual(invalidPipelineRoot.recursion.pipelineMode, 'segmented', 'next settings save writes only the canonical pipeline value');
 store.update({ mode: 'auto' });
 const firstProviderUpdate = store.updateProviderConfig('utility', {
   source: 'openai-compatible',

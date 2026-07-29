@@ -320,43 +320,6 @@ assertEqual(
   'Scene deck standing by.',
   'auto idle view with cards exposes scene deck standby text with punctuation'
 );
-assertEqual(
-  createRecursionViewModel({
-    settings: { mode: 'auto', enabled: true, pipelineMode: 'rapid' },
-    activity: { phase: 'rapidWarmReady', severity: 'success', label: 'Rapid deck ready.' },
-    lastHand: { cards: [{ id: 'rapid-card' }] }
-  }).standbyStatusText,
-  'Rapid deck ready.',
-  'rapid warm success exposes rapid standby text with punctuation'
-);
-const rapidWarmingViewModel = createRecursionViewModel({
-  settings: { mode: 'auto', enabled: true, pipelineMode: 'rapid' },
-  activity: { phase: 'idle' },
-  rapidWarm: { runId: 'rapid-ui-warming', status: 'warming', phase: 'rapidWarming' },
-  lastHand: { cards: [] }
-});
-assertEqual(rapidWarmingViewModel.currentStepText, 'Rapid warming scene deck...', 'rapid warm object exposes warming status in the compact bar');
-assertEqual(rapidWarmingViewModel.progressRun.steps.some((step) => step.id === 'rapid-warming-scene-deck'), true, 'rapid warm object appears in the progress menu');
-assertEqual(
-  createRecursionViewModel({
-    settings: { mode: 'auto', enabled: true, pipelineMode: 'rapid' },
-    activity: { phase: 'idle' },
-    rapidWarm: { runId: 'rapid-ui-ready', status: 'ready', phase: 'rapidWarmReady' },
-    lastHand: { cards: [] }
-  }).standbyStatusText,
-  'Rapid deck ready.',
-  'rapid warm ready status persists while idle'
-);
-assertEqual(
-  createRecursionViewModel({
-    settings: { mode: 'auto', enabled: true, pipelineMode: 'standard' },
-    activity: { phase: 'idle' },
-    rapidWarm: { runId: 'rapid-ui-standard', status: 'ready', phase: 'rapidWarmReady' },
-    lastHand: { cards: [] }
-  }).standbyStatusText,
-  'Ready for Recursion.',
-  'rapid warm status does not override Standard pipeline status'
-);
 const clearingBriefModel = createRecursionViewModel({
   settings: { mode: 'auto', enabled: true },
   lastBrief: { status: 'clearing', reason: 'generation-started' },
@@ -2048,7 +2011,7 @@ try {
         { id: 'cardEvidence', section: 'cardEvidence', promptKey: 'recursion.cardEvidence', title: 'Recursion Card Evidence', placement: 'in_prompt', depth: 4, role: 'system', maxChars: 30000, sourceIds: ['card-a'] },
         { id: 'guardrails', section: 'guardrails', promptKey: 'recursion.guardrails', title: 'Recursion Guardrails', placement: 'in_prompt', depth: 1, role: 'system', maxChars: 900, sourceIds: [] }
       ],
-      diagnostics: { runId: 'run-ui', composerLane: 'guidance', reasonerStatus: 'skipped', guidanceStatus: 'used', pipelineMode: 'rapid', rapidPath: 'warm-v2', sectionBudgets: { guidance: 1800, cardEvidence: 30000, guardrails: 900 } },
+      diagnostics: { runId: 'run-ui', composerLane: 'guidance', reasonerStatus: 'skipped', guidanceStatus: 'used', pipelineMode: 'segmented', sectionBudgets: { guidance: 1800, cardEvidence: 30000, guardrails: 900 } },
       composedAt: '2026-07-01T00:00:00.000Z'
     }
   };
@@ -2388,23 +2351,22 @@ try {
     'compact bar places Post-process Cards immediately after Pre-process Cards and before Tense & PoV'
   );
   assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('svg'), 'pipeline button renders an inline SVG icon');
-  assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('[data-recursion-pipeline-standard]'), 'Standard pipeline button uses the standard pipeline icon');
-  assertEqual(root.querySelectorAll('[data-recursion-pipeline-choice-icon]').length, 3, 'pipeline selector renders icons only for Standard, Rapid, and Fused');
-  assertEqual(root.querySelectorAll('[data-recursion-pipeline-choice-tip]').length, 3, 'pipeline selector renders tips only for Standard, Rapid, and Fused');
-  assert(root.querySelector('[data-recursion-pipeline-choice-standard]').querySelector('[data-recursion-pipeline-standard]'), 'Standard pipeline row uses the standard pipeline icon');
-  assert(root.querySelector('[data-recursion-pipeline-choice-rapid]').querySelector('[data-recursion-pipeline-rapid]'), 'Rapid pipeline row uses the rapid pipeline icon');
+  assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('[data-recursion-pipeline-segmented]'), 'Segmented pipeline button uses the segmented pipeline icon');
+  assertEqual(root.querySelectorAll('[data-recursion-pipeline-choice-icon]').length, 2, 'pipeline selector renders icons only for Segmented and Fused');
+  assertEqual(root.querySelectorAll('[data-recursion-pipeline-choice-tip]').length, 2, 'pipeline selector renders tips only for Segmented and Fused');
+  assert(root.querySelector('[data-recursion-pipeline-choice-segmented]').querySelector('[data-recursion-pipeline-segmented]'), 'Segmented pipeline row uses the segmented pipeline icon');
   assert(root.querySelector('[data-recursion-pipeline-choice-fused]').querySelector('[data-recursion-pipeline-fused]'), 'Fused pipeline row uses the fused pipeline icon');
   assertDeepEqual(
     root.querySelectorAll('[data-recursion-pipeline-choice]').map((choice) => choice.dataset.recursionPipelineChoice),
-    ['standard', 'rapid', 'fused'],
-    'pipeline selector uses the Standard/Rapid/Fused order'
+    ['segmented', 'fused'],
+    'pipeline selector uses the Segmented/Fused order'
   );
   assertEqual(
     root.querySelector('[data-recursion-pipeline-button]').getAttribute('aria-label'),
-    'Pipeline: Standard Pipeline',
+    'Pipeline: Segmented',
     'pipeline button exposes the current pipeline label'
   );
-  assertEqual(root.querySelector('[data-recursion-pipeline-button]').getAttribute('title'), 'Pipeline: Standard Pipeline', 'pipeline button exposes compact hover tip');
+  assertEqual(root.querySelector('[data-recursion-pipeline-button]').getAttribute('title'), 'Pipeline: Segmented', 'pipeline button exposes compact hover tip');
   assert(root.querySelector('[data-recursion-mode-icon]').querySelector('svg'), 'mode button renders the reference inline SVG icon');
   assert(root.querySelector('[data-recursion-mode-icon]').querySelector('[data-recursion-mode-arrow-fan]'), 'Auto mode button uses the divergent three-arrow mode icon');
   assertEqual(root.querySelector('[data-recursion-mode-icon]').querySelectorAll('[data-recursion-mode-arrow]').length, 3, 'Auto mode icon keeps three equal-weight arrows');
@@ -2486,7 +2448,7 @@ try {
   assertEqual(
     root.querySelector('[data-recursion-mode-icon]').querySelector('svg'),
     stableAutoModeSvg,
-    'mode refresh preserves the current icon node so rapid pointer clicks are not lost to DOM replacement'
+    'mode refresh preserves the current icon node so pointer clicks are not lost to DOM replacement'
   );
   assertEqual(
     root.querySelector('[data-recursion-mode-choice-auto]').getAttribute('title'),
@@ -2502,7 +2464,7 @@ try {
     'mode selector marks the current mode'
   );
   assert(
-    root.querySelector('[data-recursion-pipeline-choice-standard]').className.includes('is-selected'),
+    root.querySelector('[data-recursion-pipeline-choice-segmented]').className.includes('is-selected'),
     'pipeline selector marks the current pipeline'
   );
   assertEqual(
@@ -2511,7 +2473,7 @@ try {
     'mode selector exposes the current mode to assistive tech'
   );
   assertEqual(
-    root.querySelector('[data-recursion-pipeline-choice-standard]').getAttribute('aria-current'),
+    root.querySelector('[data-recursion-pipeline-choice-segmented]').getAttribute('aria-current'),
     'true',
     'pipeline selector exposes the current pipeline to assistive tech'
   );
@@ -2612,25 +2574,14 @@ try {
   assertEqual(root.querySelector('[data-recursion-pipeline-menu]').hidden, false, 'pipeline button opens pipeline selector');
   assertEqual(root.querySelector('[data-recursion-pipeline-button]').getAttribute('aria-expanded'), 'true', 'pipeline button reflects open menu');
   assertEqual(root.querySelector('[data-recursion-pipeline-menu]').style.left, '38px', 'pipeline menu follows reference 6px inset from pipeline cluster');
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-pipeline-choice-standard]')).includes('Standard'), 'Standard row has visible short name');
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-pipeline-choice-rapid]')).includes('Rapid'), 'Rapid row has visible short name');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-pipeline-choice-segmented]')).includes('Segmented'), 'Segmented row has visible short name');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-pipeline-choice-fused]')).includes('Fused'), 'Fused row has visible short name');
-  root.querySelector('[data-recursion-pipeline-choice-rapid]').querySelector('[data-recursion-pipeline-choice-name]').click();
-  assertDeepEqual(settingsUpdates.at(-1), { pipelineMode: 'rapid' }, 'pipeline menu switches Standard to Rapid from nested row content clicks');
-  assertEqual(root.querySelector('[data-recursion-pipeline-button]').getAttribute('aria-expanded'), 'false', 'pipeline button reflects closed menu after selection');
-  ui.update();
-  assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('[data-recursion-pipeline-rapid]'), 'Rapid pipeline button uses the rapid pipeline icon after selection');
-  assert(
-    root.querySelector('[data-recursion-pipeline-button]').getAttribute('title').includes('Rapid Pipeline'),
-    'Rapid pipeline tooltip explains current pipeline'
-  );
-  root.querySelector('[data-recursion-pipeline-button]').click();
   root.querySelector('[data-recursion-pipeline-choice-fused]').querySelector('[data-recursion-pipeline-choice-tip]').click();
   assertDeepEqual(settingsUpdates.at(-1), { pipelineMode: 'fused' }, 'pipeline menu switches to Fused from nested row content clicks');
   view = { ...view, settings: { ...view.settings, pipelineMode: 'fused' } };
   ui.update();
   assert(root.querySelector('[data-recursion-pipeline-icon]').querySelector('[data-recursion-pipeline-fused]'), 'Fused pipeline button uses the fused pipeline icon after selection');
-  assert(root.querySelector('[data-recursion-pipeline-button]').getAttribute('title').includes('Fused Pipeline'), 'Fused pipeline tooltip explains current pipeline');
+  assert(root.querySelector('[data-recursion-pipeline-button]').getAttribute('title').includes('Fused'), 'Fused pipeline tooltip explains current pipeline');
 
   root.querySelector('[data-recursion-post-process-cards-button]').setBoundingClientRect({ left: 118, top: 3, width: 24, height: 24, right: 142, bottom: 27 });
   root.querySelector('[data-recursion-post-process-cards-button]').click();
@@ -4158,7 +4109,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, true, 'idle view hides stop generation button');
   assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').hidden, false, 'idle view shows fresh-next generation button in command slot');
   assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-label'), 'Force next generation fresh', 'fresh-next button exposes accessible copy');
-  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('title'), 'Force the next send or swipe to rebuild fresh cards and prompt guidance without using cached cards, Rapid warm, or same-turn packet reuse.', 'fresh-next button exposes hover tip copy');
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('title'), 'Force the next send or swipe to rebuild fresh cards and prompt guidance without using cached cards or same-turn packet reuse.', 'fresh-next button exposes hover tip copy');
   assert(root.querySelector('[data-recursion-fresh-next-generation-icon]'), 'fresh-next button renders the Regenerate icon');
   assertEqual(root.querySelector('[data-recursion-fresh-next-generation-icon]').children.length, 0, 'fresh-next icon uses the regenerate.svg asset mask instead of inline SVG');
   assertEqual(fakeDocument.textTree(root.querySelector('[data-recursion-fresh-next-generation]')).includes('Regenerate'), false, 'fresh-next button is icon-only when idle');

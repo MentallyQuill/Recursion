@@ -77,7 +77,7 @@ export function validateLiveEditorialRuntime(runtime = {}) {
 export function liveEditorialStageTimeoutMs(stage, timeoutMs = 120000) {
   const configured = Math.max(10000, Number(timeoutMs) || 120000);
   if (stage === 'settings') return 15000;
-  if (stage === 'warm' || stage === 'enhance') return configured * 3;
+  if (stage === 'enhance') return configured * 3;
   return configured;
 }
 
@@ -379,17 +379,11 @@ async function executeScenarioInPage(input) {
   await runStage('settings', () => runtime.updateSettings({
     enabled: true,
     mode: 'auto',
-    pipelineMode: String(scenario?.pipelineMode || 'standard'),
+    pipelineMode: String(scenario?.pipelineMode || 'segmented'),
     reasoningLevel: scenario?.forceUtilityEnhancement === true ? 'low' : 'medium',
     reasonerUse: 'always',
     enhancements: { mode: enhancementMode, applyMode: 'as-swipe', contextMessages: 13 }
   }));
-  if (String(scenario?.pipelineMode || '').toLowerCase() === 'rapid') {
-    const warm = await runStage('warm', () => runtime.warmRapidScene({ reason: `live-${enhancementMode}-warm-${scenario.id}` }));
-    if (warm?.ok !== true || warm?.rapid?.status !== 'ready') {
-      throw new Error(`live-rapid-warm-failed:${warm?.rapid?.failureReasonCode || warm?.reason || 'not-ready'}`);
-    }
-  }
   if (document.querySelector('[data-recursion-status-popover]')?.hidden !== false) {
     document.querySelector('[data-recursion-status-trigger]')?.click();
   }
@@ -565,7 +559,7 @@ async function createBrowserExecutor({ baseUrl, user, password, timeoutMs, artif
       await installLiveEnhancementRunOracle(page);
       const artifacts = await page.evaluate(executeScenarioInPage, {
         scenario: { ...scenario, forceUtilityEnhancement },
-        stageTimeouts: Object.fromEntries(['settings', 'warm', 'prepare', 'enhance', 'judge']
+        stageTimeouts: Object.fromEntries(['settings', 'prepare', 'enhance', 'judge']
           .map((stage) => [stage, liveEditorialStageTimeoutMs(stage, timeoutMs)]))
       });
         if (artifacts?.environmentFailure) throw new Error(artifacts.environmentFailure);

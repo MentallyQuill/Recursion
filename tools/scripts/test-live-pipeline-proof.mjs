@@ -32,13 +32,13 @@ assertDeepEqual(
 assertDeepEqual(
   module.parseArgs([
     '--live',
-    '--pipelines', 'standard,rapid,fused',
+    '--pipelines', 'segmented,fused',
     '--placements', 'in_prompt,in_chat',
     '--depth', '4'
   ]),
   {
     live: true,
-    pipelines: ['standard', 'rapid', 'fused'],
+    pipelines: ['segmented', 'fused'],
     placements: ['in_prompt', 'in_chat'],
     depth: 4,
     role: 'system'
@@ -77,11 +77,7 @@ assertEqual(
   false,
   'In Chat evidence rejects In Prompt position and incorrect depth'
 );
-assertEqual(
-  scriptText.includes("proofMessageFor('rapid warm primer'"),
-  false,
-  'Rapid proof must not send a Rapid foreground turn before the warm deck exists'
-);
+assertEqual(scriptText.includes('warmRapid'), false, 'live pipeline proof does not depend on removed background warming');
 
 {
   const calls = [];
@@ -90,9 +86,9 @@ assertEqual(
       calls.push('pipeline-click');
     }
   };
-  const rapidChoice = {
+  const segmentedChoice = {
     async click() {
-      calls.push('rapid-choice-click');
+      calls.push('segmented-choice-click');
     }
   };
   const page = {
@@ -126,7 +122,7 @@ assertEqual(
     },
     locator(selector) {
       if (selector === '[data-recursion-pipeline-button]') return { first: () => pipelineButton };
-      if (selector.includes('data-recursion-pipeline-choice="rapid"')) return { first: () => rapidChoice };
+      if (selector.includes('data-recursion-pipeline-choice="segmented"')) return { first: () => segmentedChoice };
       throw new Error(`Unexpected locator: ${selector}`);
     },
     async waitForFunction() {
@@ -134,7 +130,7 @@ assertEqual(
     }
   };
 
-  await module.selectPipeline(page, 'rapid', 1000);
+  await module.selectPipeline(page, 'segmented', 1000);
 
   assertEqual(calls[0], 'evaluate-close-viewer', 'selectPipeline closes an open viewer before clicking Pipeline');
   assertEqual(calls[1], 'viewer-close', 'open viewer close method is invoked before Pipeline click');

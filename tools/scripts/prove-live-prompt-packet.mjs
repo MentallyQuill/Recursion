@@ -6,14 +6,14 @@ import {
 } from './lib/sillytavern-live-harness.mjs';
 
 const DEFAULT_TIMEOUT_MS = 180000;
-const PIPELINES = new Set(['standard', 'rapid', 'fused']);
+const PIPELINES = new Set(['segmented', 'fused']);
 const EXPECTED_STORY_FORM = Object.freeze({
   tense: 'past',
   pov: 'third-person-limited'
 });
 
 function parseArgs(argv = []) {
-  const args = { live: false, pipeline: 'standard', providerProfile: '' };
+  const args = { live: false, pipeline: 'segmented', providerProfile: '' };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--live') args.live = true;
@@ -45,7 +45,7 @@ function passwordForUser(user, env) {
 
 function assertPreflight(args, env) {
   if (!args.live) fail('dry-run', 'Pass --live to mutate a dedicated SillyTavern user.');
-  if (!PIPELINES.has(args.pipeline)) fail('invalid-pipeline', 'Use --pipeline standard, rapid, or fused.', { pipeline: args.pipeline });
+  if (!PIPELINES.has(args.pipeline)) fail('invalid-pipeline', 'Use --pipeline segmented or fused.', { pipeline: args.pipeline });
   if (!env.SILLYTAVERN_BASE_URL) fail('missing-base-url', 'SILLYTAVERN_BASE_URL is required.');
   const user = String(env.RECURSION_SILLYTAVERN_USER || '').trim();
   const userResult = validateSoakUserHandle(user);
@@ -549,31 +549,6 @@ function readProofStateScript() {
   };
 }
 
-async function warmRapidDeck(page, timeoutMs) {
-  await page.evaluate(() => {
-    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
-    const seed = String(globalThis.__recursionStoryFormProofMarker || '');
-    if (!Array.isArray(context.chat) || !context.chat.some((message) => message?.is_user === false && String(message?.mes || '').includes(seed))) {
-      throw new Error('story form proof seed unavailable for Rapid warm');
-    }
-    const eventSource = context.eventSource || globalThis.eventSource;
-    const payload = { source: 'recursion-prompt-packet-proof-rapid-warm' };
-    if (typeof eventSource?.emit === 'function') eventSource.emit('generation_ended', payload);
-    else if (typeof eventSource?.trigger === 'function') eventSource.trigger('generation_ended', payload);
-    else if (typeof eventSource?.dispatchEvent === 'function') eventSource.dispatchEvent(new CustomEvent('generation_ended', { detail: payload }));
-    else throw new Error('generation_ended event source unavailable');
-  });
-  await page.waitForFunction(() => {
-    const text = [
-      String(document.querySelector('[data-recursion-current-step]')?.textContent || ''),
-      String(document.querySelector('[data-recursion-ribbon-label]')?.textContent || ''),
-      String(document.querySelector('#recursion-root')?.textContent || '')
-    ].join(' ');
-    if (/Rapid deck stale\./i.test(text)) throw new Error('Rapid deck stale.');
-    return /Rapid deck ready\./i.test(text);
-  }, null, { timeout: timeoutMs });
-}
-
 async function emitGenerationStopped(page, timeoutMs) {
   await page.evaluate(() => {
     const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
@@ -593,7 +568,7 @@ async function emitGenerationStopped(page, timeoutMs) {
   }, null, { timeout: timeoutMs });
 }
 
-function assertPacketState(state, { afterStop = false, pipeline = 'standard' } = {}) {
+function assertPacketState(state, { afterStop = false, pipeline = 'segmented' } = {}) {
   const requiredKeys = ['recursion.guidance', 'recursion.cardEvidence', 'recursion.guardrails'];
   for (const key of requiredKeys) {
     if (!state.installedKeys.includes(key)) fail('prompt-key-missing', `Missing installed prompt key ${key}.`, { state });
@@ -602,16 +577,8 @@ function assertPacketState(state, { afterStop = false, pipeline = 'standard' } =
     fail('prompt-packet-metadata-missing', 'Prompt packet metadata was not visible.', { state });
   }
   const diagnostics = state.packet?.diagnostics || {};
-  if (pipeline === 'rapid') {
-    if (diagnostics.pipelineMode !== 'rapid' || diagnostics.rapidPath !== 'warm-v2') {
-      fail('rapid-warm-v2-missing', 'Rapid packet did not expose warm-v2 diagnostics.', { diagnostics, state });
-    }
-  } else if (pipeline === 'fused') {
-    if (diagnostics.pipelineMode !== 'fused') {
-      fail('fused-pipeline-diagnostics-missing', 'Fused packet did not expose Fused diagnostics.', { diagnostics, state });
-    }
-  } else if (diagnostics.pipelineMode && diagnostics.pipelineMode !== 'standard') {
-    fail('standard-pipeline-diagnostics-mismatch', 'Standard packet diagnostics did not report standard pipeline.', { diagnostics, state });
+  if (diagnostics.pipelineMode !== pipeline) {
+    fail(`${pipeline}-pipeline-diagnostics-mismatch`, 'Prompt packet diagnostics did not report the selected pipeline.', { diagnostics, state });
   }
   if (!/Private Recursion guidance for the next assistant message\./.test(state.guidance)) {
     fail('guidance-framing-missing', 'Guidance block did not include private response framing.', { guidance: state.guidance });
@@ -646,41 +613,34 @@ function assertPacketState(state, { afterStop = false, pipeline = 'standard' } =
     fail('guardrail-output-boundary-missing', 'Guardrails did not keep Recursion internals out of output.', { guardrails: state.guardrails });
   }
   const serialized = `${state.guidance}\n${state.cardEvidence}\n${state.guardrails}`;
-  if (/Scene brief:|Turn brief:|conditionedSceneBrief|rapidFastStartPack/.test(serialized)) {
-    fail('legacy-brief-text-leaked', 'Legacy brief or fast-start text leaked into prompt blocks.', { serialized });
+  if (/Scene brief:|Turn brief:|conditionedSceneBrief/.test(serialized)) {
+    fail('legacy-brief-text-leaked', 'Legacy brief text leaked into prompt blocks.', { serialized });
   }
   if (/recursion\.utilityArbiter\.v1|recursion\.card\.v1|recursion\.cardBundle\.v1|Story form contract for card promptText:|Output contract:/.test(serialized)) {
     fail('internal-provider-prompt-leaked', 'Internal provider prompt text leaked into installed prompt blocks.', { serialized });
   }
   const requests = Array.isArray(state.providerRequests) ? state.providerRequests : [];
-  if (pipeline === 'rapid') {
-    const rapid = requests.find((request) => request.role === 'rapidTurnDelta');
-    if (rapid && (!rapid.hasStoryFormJson || !rapid.hasStoryFormInstruction)) {
-      fail('rapid-story-form-request-missing', 'Rapid foreground request did not include expected story-form instruction.', { requests });
+  const arbiter = requests.find((request) => request.role === 'utilityArbiter');
+  if (!arbiter?.hasStoryFormSchema || !arbiter?.hasStoryFormJson || !arbiter?.hasArbiterStoryPriority) {
+    fail('arbiter-story-form-request-missing', 'Arbiter provider request did not include story-form detection contract.', { requests });
+  }
+  if (pipeline === 'fused') {
+    const fusedBundle = requests.find((request) => request.role === 'fusedCardBundle');
+    if (!fusedBundle?.hasCardStoryBlock || !fusedBundle?.hasTargetTense || !fusedBundle?.hasTargetPov) {
+      fail('fused-card-bundle-story-form-request-missing', 'Fused card bundle request did not include expected story-form block.', { requests, diagnostics });
+    }
+    if (requests.some((request) => request.role === 'card')) {
+      fail('fused-individual-card-request-observed', 'Fused proof made individual card requests instead of one bundle request.', { requests, diagnostics });
     }
   } else {
-    const arbiter = requests.find((request) => request.role === 'utilityArbiter');
-    if (!arbiter?.hasStoryFormSchema || !arbiter?.hasStoryFormJson || !arbiter?.hasArbiterStoryPriority) {
-      fail('arbiter-story-form-request-missing', 'Arbiter provider request did not include story-form detection contract.', { requests });
+    const card = requests.find((request) => request.role === 'card');
+    if (!card?.hasCardStoryBlock || !card?.hasTargetTense || !card?.hasTargetPov) {
+      fail('card-story-form-request-missing', 'Card provider request did not include expected story-form block.', { requests });
     }
-    if (pipeline === 'fused') {
-      const fusedBundle = requests.find((request) => request.role === 'fusedCardBundle');
-      if (!fusedBundle?.hasCardStoryBlock || !fusedBundle?.hasTargetTense || !fusedBundle?.hasTargetPov) {
-        fail('fused-card-bundle-story-form-request-missing', 'Fused card bundle request did not include expected story-form block.', { requests, diagnostics });
-      }
-      if (requests.some((request) => request.role === 'card')) {
-        fail('fused-individual-card-request-observed', 'Fused proof made individual card requests instead of one bundle request.', { requests, diagnostics });
-      }
-    } else {
-      const card = requests.find((request) => request.role === 'card');
-      if (!card?.hasCardStoryBlock || !card?.hasTargetTense || !card?.hasTargetPov) {
-        fail('card-story-form-request-missing', 'Card provider request did not include expected story-form block.', { requests });
-      }
-    }
-    const guidance = requests.find((request) => request.role === 'guidanceComposer' || request.role === 'reasonerComposer');
-    if (!guidance?.hasStoryFormJson || !guidance?.hasStoryFormInstruction) {
-      fail('guidance-story-form-request-missing', 'Guidance composer request did not include expected story-form instruction.', { requests });
-    }
+  }
+  const guidance = requests.find((request) => request.role === 'guidanceComposer' || request.role === 'reasonerComposer');
+  if (!guidance?.hasStoryFormJson || !guidance?.hasStoryFormInstruction) {
+    fail('guidance-story-form-request-missing', 'Guidance composer request did not include expected story-form instruction.', { requests });
   }
   if (afterStop) {
     for (const key of requiredKeys) {
@@ -720,7 +680,6 @@ export async function runLivePromptPacketProof({ argv = process.argv.slice(2), e
     await forcePipelineSetting(page, args.pipeline, timeoutMs);
     const providerProfileResult = await forceProviderProfile(page, providerProfile, timeoutMs);
     await seedStoryFormScene(page, timeoutMs);
-    if (args.pipeline === 'rapid') await warmRapidDeck(page, timeoutMs);
     const message = `Recursion ${args.pipeline} prompt packet proof ${Date.now().toString(36)}: keep the archive door scene coherent.`;
     const previousPacketId = await page.evaluate(() => {
       const packetText = String(document.querySelector('[data-recursion-prompt-packet]')?.textContent || '').trim();

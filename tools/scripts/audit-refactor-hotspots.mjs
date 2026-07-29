@@ -21,8 +21,19 @@ const runtime = read('src/runtime.mjs');
 assert(runtime.includes("from './runtime/run-state.mjs'"), 'runtime uses extracted run-state module');
 assert(runtime.includes("from './runtime/diagnostics.mjs'"), 'runtime uses explicit diagnostics builder');
 assert(runtime.includes("from './runtime/prompt-install.mjs'"), 'runtime uses extracted prompt install module');
-assert(runtime.includes("from './runtime/pipelines/standard.mjs'"), 'runtime uses extracted Standard pipeline');
+assert(runtime.includes("from './runtime/pipelines/segmented.mjs'"), 'runtime uses extracted Segmented pipeline');
 assert(runtime.includes("from './runtime/pipelines/fused.mjs'"), 'runtime uses extracted Fused pipeline');
-assert(runtime.includes("from './runtime/pipelines/rapid.mjs'"), 'runtime uses extracted Rapid pipeline');
+assert(runtime.includes("from './execution/scheduler.mjs'") || read('src/execution/scheduler.mjs').includes('createExecutionScheduler'), 'scheduler module owns resumable execution');
+assert(runtime.includes("from './execution/checkpoints.mjs'") || read('src/execution/checkpoints.mjs').includes('createPipelineRun'), 'checkpoint module owns durable run contracts');
+
+for (const forbidden of [
+  'activeRapidWarmRun',
+  'warmRapidScene',
+  'rapidWarm',
+  "pipelineMode === 'rapid'",
+  "pipelineMode: 'rapid'"
+]) {
+  assert(!runtime.includes(forbidden), `runtime excludes retired identifier ${forbidden}`);
+}
 
 console.log('[pass] refactor hotspot audit');

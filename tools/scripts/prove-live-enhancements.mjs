@@ -26,10 +26,10 @@ const baseScenario = loadScenarioPack('core')
 if (!baseScenario) throw new Error('Core Redirect proof scenario redirect-turn-deferral is missing.');
 
 const selectedParts = selectedCase.toLowerCase().split('-').filter(Boolean);
-const pipelineModes = selectedCase ? [selectedParts[0]] : ['standard', 'rapid', 'fused'];
-const validModes = new Set(['standard', 'rapid', 'fused']);
+const pipelineModes = selectedCase ? [selectedParts[0]] : ['segmented', 'fused'];
+const validModes = new Set(['segmented', 'fused']);
 if (pipelineModes.some((mode) => !validModes.has(mode))) {
-  throw new Error(`RECURSION_ENHANCEMENT_PROOF_CASE must select standard, rapid, or fused; got ${selectedCase}.`);
+  throw new Error(`RECURSION_ENHANCEMENT_PROOF_CASE must select segmented or fused; got ${selectedCase}.`);
 }
 
 const selectedEnhancementMode = selectedParts.find((part) => ['repair', 'redirect'].includes(part)) || '';

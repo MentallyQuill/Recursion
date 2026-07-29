@@ -420,7 +420,7 @@ if (lifecycleFailures.length) {
       })
     };
   };
-  globalThis.extension_settings = { recursion: { pipelineMode: 'rapid', mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = { recursion: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' } };
   globalThis.SillyTavern = { getContext: () => fake.context };
 
   await globalThis.recursionOnDelete();
@@ -436,7 +436,7 @@ if (lifecycleFailures.length) {
     cleanupWrites.every((entry) => entry.text !== ''),
     'latest assistant swipe retry does not clear existing Recursion prompt lanes'
   );
-  assertEqual(prompts.length, 0, 'latest assistant swipe retry does not warm Rapid');
+  assertEqual(prompts.length, 0, 'latest assistant swipe retry does not start background Pre-process work');
   await globalThis.recursionOnDelete();
   if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
   else globalThis.SillyTavern = previousGlobals.SillyTavern;
@@ -466,7 +466,7 @@ if (lifecycleFailures.length) {
       })
     };
   };
-  globalThis.extension_settings = { recursion: { pipelineMode: 'standard', mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = { recursion: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' } };
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 
@@ -925,7 +925,7 @@ if (false) {
   globalThis.__recursionLiveHarness = true;
   globalThis.extension_settings = legacyEnhancementSettingsRoot({
     mode: 'auto',
-    pipelineMode: 'standard',
+    pipelineMode: 'segmented',
     reasonerUse: 'off',
     enhancements: { target: 'prose', applyMode: 'as-swipe', contextMessages: 3 }
   });
@@ -1032,7 +1032,7 @@ if (false) {
   globalThis.__recursionLiveHarness = true;
   globalThis.extension_settings = legacyEnhancementSettingsRoot({
     mode: 'auto',
-    pipelineMode: 'standard',
+    pipelineMode: 'segmented',
     reasonerUse: 'off',
     enhancements: { target: 'on', applyMode: 'replace', contextMessages: 3 }
   });
@@ -1124,7 +1124,7 @@ if (false) {
   const eventSource = createFakeEventSource();
   const prompts = [];
   const context = {
-    chatId: 'rapid-assistant-landed-chat',
+    chatId: 'assistant-landed-chat',
     chat: [
       { mesid: 0, is_user: false, mes: 'Previous assistant message.' },
       { mesid: 1, is_user: true, mes: 'User asks for the next beat.' }
@@ -1146,33 +1146,30 @@ if (false) {
           action: 'refresh-cards',
           sceneStatus: 'same-scene',
           cardJobs: [],
-          reasonerDecision: { mode: 'skip', reason: 'rapid warm smoke', signals: [] },
+          reasonerDecision: { mode: 'skip', reason: 'assistant landed smoke', signals: [] },
           budgets: { targetBriefTokens: 500, maxCards: 6 },
-          diagnostics: ['rapid-warm-smoke']
+          diagnostics: ['assistant-landed-smoke']
         })
       };
     }
   };
-  globalThis.extension_settings = { recursion: { pipelineMode: 'rapid', mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = { recursion: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' } };
   globalThis.SillyTavern = { getContext: () => context };
 
   await globalThis.recursionOnDelete();
-  assertEqual(await globalThis.recursionOnActivate(), true, 'rapid assistant-landed setup activates');
+  assertEqual(await globalThis.recursionOnActivate(), true, 'assistant-landed setup activates');
   assertEqual(eventSource.listenerCount('generation_ended'), 1, 'bootstrap subscribes to assistant-landed generation ended event');
   await eventSource.emit('generation_ended', { mesid: 1 });
-  assertEqual(prompts.length, 0, 'assistant-landed event without a new assistant message does not warm Rapid');
-  context.chatId = 'rapid-assistant-landed-other-chat';
+  assertEqual(prompts.length, 0, 'assistant-landed event without a new assistant message starts no Pre-process work');
+  context.chatId = 'assistant-landed-other-chat';
   context.chat = [{ mesid: 0, is_user: false, mes: 'Existing assistant in switched chat.' }];
   await eventSource.emit('chat_changed');
   await eventSource.emit('generation_ended', { mesid: 0 });
-  assertEqual(prompts.length, 0, 'assistant-landed event after chat change without a new assistant message does not warm Rapid');
+  assertEqual(prompts.length, 0, 'assistant-landed event after chat change without a new assistant message starts no Pre-process work');
   context.chat.push({ mesid: 1, is_user: true, mes: 'User asks in the switched chat.' });
   context.chat.push({ mesid: 2, is_user: false, mes: 'New assistant message landed.' });
   await eventSource.emit('generation_ended', { mesid: 2 });
-  await waitUntil(
-    () => prompts.some((prompt) => prompt.includes('Return a Recursion Utility Arbiter plan')),
-    'assistant landing schedules Rapid warm'
-  );
+  assertEqual(prompts.length, 0, 'assistant landing does not schedule retired background pipeline work');
   await globalThis.recursionOnDelete();
   assertEqual(eventSource.listenerCount('generation_ended'), 0, 'teardown unsubscribes assistant-landed generation ended event');
   if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
@@ -1585,11 +1582,6 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
     runCalls += 1;
     return { ok: true, committed: true };
   };
-  let warmCalls = 0;
-  activeRuntime.warmRapidScene = async () => {
-    warmCalls += 1;
-    return { ok: true };
-  };
   fake.context.chat.push({
     mesid: 2,
     is_user: false,
@@ -1633,7 +1625,6 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
     fake.controlEvents.indexOf('hide-swipes') < fake.controlEvents.indexOf('unlock'),
     `${cancellation} cancellation waits for native lock settlement before unlocking`
   );
-  assertEqual(warmCalls, 0, `${cancellation} cancellation during control lock suppresses Rapid warming`);
 
   await globalThis.recursionOnDelete();
   delete globalThis.__recursionLiveHarness;
@@ -1713,12 +1704,6 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
     writerSettled = true;
     return { ok: true, committed: true };
   };
-  let warmCalls = 0;
-  activeRuntime.warmRapidScene = async () => {
-    warmCalls += 1;
-    fake.controlEvents.push('warm');
-    return { ok: true };
-  };
 
   const sourceText = 'The final response arrived once.';
   fake.context.chat.push({
@@ -1746,30 +1731,22 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
   assertEqual(finalizationSkips, 1, 'duplicate terminal event skips as finalization already in progress');
   assertEqual(runCalls, 0, 'duplicate terminal event cannot bypass the delayed control lock');
   assertEqual(fake.controlEvents.filter((event) => event === 'unlock').length, 0, 'duplicate terminal event cannot unlock controls early');
-  assertEqual(warmCalls, 0, 'duplicate terminal event cannot warm Rapid early');
 
   releaseLock();
   await waitUntil(() => runCalls === 1, 'claimed finalization did not start one Post-process writer after lock');
   assertEqual(writerStartedAfterTerminalReturn, true, 'Post-process writer starts only after the native generation-ended dispatch returns');
   assertEqual(writerSettled, false, 'Post-process writer remains pending behind the writer gate');
   assertEqual(fake.controlEvents.filter((event) => event === 'unlock').length, 0, 'controls stay locked while the Post-process writer is pending');
-  assertEqual(warmCalls, 0, 'Rapid warming waits for the Post-process writer to settle');
   releaseWriter();
   await Promise.all([firstEnd, duplicateEnd]);
   await waitUntil(
     () => writerSettled
-      && fake.controlEvents.filter((event) => event === 'unlock').length === 1
-      && warmCalls === 1,
+      && fake.controlEvents.filter((event) => event === 'unlock').length === 1,
     'deferred Post-process finalization did not settle after the writer completed'
   );
   assertEqual(writerSettled, true, 'the one claimed Post-process writer settles');
   assertEqual(runCalls, 1, 'duplicate terminal events start exactly one Post-process writer');
   assertEqual(fake.controlEvents.filter((event) => event === 'unlock').length, 1, 'the claimed finalization unlocks controls exactly once');
-  assertEqual(warmCalls, 1, 'Rapid warms exactly once after the writer settles');
-  assert(
-    fake.controlEvents.indexOf('unlock') < fake.controlEvents.indexOf('warm'),
-    'final unlock precedes the one post-settlement Rapid warm'
-  );
 
   await globalThis.recursionOnDelete();
   delete globalThis.__recursionLiveHarness;

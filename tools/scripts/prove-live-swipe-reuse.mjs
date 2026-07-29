@@ -152,25 +152,6 @@ function proofScript() {
                 }
               };
             }
-            if (roleId === 'rapidTurnDelta') {
-              return {
-                ok: true,
-                data: {
-                  schema: 'recursion.rapidTurnDelta.v2',
-                  snapshotHash: request.snapshotHash,
-                  baseSourceRevisionHash: request.baseSourceRevisionHash,
-                  turnSourceRevisionHash: request.turnSourceRevisionHash,
-                  selectedCardIds: [],
-                  turnGuidanceText: 'SERVED_BROWSER_SWIPE_RAPID reuse this packet.',
-                  guardrailCardIds: [],
-                  packetInstructions: [],
-                  backgroundRefreshRequests: [],
-                  mandatoryMissingCards: [],
-                  escalateToStandard: false,
-                  diagnostics: ['served-browser-swipe-rapid']
-                }
-              };
-            }
             throw new Error(`unexpected role ${roleId}`);
           }
         }
@@ -238,25 +219,19 @@ function proofScript() {
       };
     }
 
-    const servedStandard = await proveServedRuntimePipeline('standard');
-    const servedRapid = await proveServedRuntimePipeline('rapid');
+    const servedSegmented = await proveServedRuntimePipeline('segmented');
     const servedFused = await proveServedRuntimePipeline('fused');
     return {
-      ok: servedStandard.reused
-        && servedRapid.reused
+      ok: servedSegmented.reused
         && servedFused.reused
-        && servedStandard.swipePayloadEndedOnUser
-        && servedRapid.swipePayloadEndedOnUser
+        && servedSegmented.swipePayloadEndedOnUser
         && servedFused.swipePayloadEndedOnUser
-        && servedStandard.providerCallsSecond === 0
-        && servedRapid.providerCallsSecond === 0
+        && servedSegmented.providerCallsSecond === 0
         && servedFused.providerCallsSecond === 0
-        && servedStandard.packetIdStable
-        && servedRapid.packetIdStable
+        && servedSegmented.packetIdStable
         && servedFused.packetIdStable,
       mode: 'served-runtime-playwright',
-      standard: servedStandard,
-      rapid: servedRapid,
+      segmented: servedSegmented,
       fused: servedFused
     };
   };
@@ -598,10 +573,10 @@ async function main() {
     await page.goto(env.SILLYTAVERN_BASE_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await page.waitForSelector('#recursion-root', { timeout: timeoutMs });
     await page.waitForFunction(() => Boolean(globalThis.__recursionLiveHarnessRuntime), null, { timeout: timeoutMs });
-    const pipelineModes = String(env.RECURSION_LIVE_SWIPE_PIPELINES || 'standard,rapid,fused')
+    const pipelineModes = String(env.RECURSION_LIVE_SWIPE_PIPELINES || 'segmented,fused')
       .split(',')
       .map((entry) => entry.trim().toLowerCase())
-      .filter((entry) => ['standard', 'rapid', 'fused'].includes(entry));
+      .filter((entry) => ['segmented', 'fused'].includes(entry));
     if (pipelineModes.length === 0) fail('missing-pipelines', 'No valid swipe proof pipelines were configured.');
     const proof = synthetic
       ? await page.evaluate(proofScript())

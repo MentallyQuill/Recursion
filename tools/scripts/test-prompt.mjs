@@ -321,7 +321,7 @@ const precomposedPacket = await composePromptPacket({
     }
   }
 });
-assert(precomposedPacket.sections.guidance.includes('PRECOMPOSED_GUIDANCE_MARKER'), 'precomposed guidance can build Rapid packet without provider call');
+assert(precomposedPacket.sections.guidance.includes('PRECOMPOSED_GUIDANCE_MARKER'), 'precomposed guidance can build a packet without another provider call');
 assertEqual(precomposedPacket.diagnostics.guidanceStatus, 'used', 'precomposed guidance records used status');
 
 assertThrows(

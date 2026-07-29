@@ -128,16 +128,10 @@ const STORY_FORM_LABELS = Object.freeze({
 });
 const PIPELINE_MENU_OPTIONS = Object.freeze([
   {
-    value: 'standard',
-    label: 'Standard',
-    title: 'Standard Pipeline',
-    tip: 'Runs the full foreground Arbiter, card, compose, and install pipeline.'
-  },
-  {
-    value: 'rapid',
-    label: 'Rapid',
-    title: 'Rapid Pipeline',
-    tip: 'Uses provider-warmed card evidence and guidance plus a foreground turn delta.'
+    value: 'segmented',
+    label: 'Segmented',
+    title: 'Segmented',
+    tip: 'Generates each requested card through its own simple model call.'
   },
   {
     value: 'fused',
@@ -285,7 +279,7 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   providerTest: 'Send a small structured test call through this lane to verify routing, credentials, and JSON output before using it in chat.',
   providerClearKey: 'Remove the in-memory session key for this lane. Saved endpoint, model, and profile settings stay unchanged.'
 });
-const FRESH_NEXT_GENERATION_TOOLTIP = 'Force the next send or swipe to rebuild fresh cards and prompt guidance without using cached cards, Rapid warm, or same-turn packet reuse.';
+const FRESH_NEXT_GENERATION_TOOLTIP = 'Force the next send or swipe to rebuild fresh cards and prompt guidance without using cached cards or same-turn packet reuse.';
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -375,10 +369,9 @@ function modeLabel(value) {
 }
 
 function normalizePipelineMode(value) {
-  const mode = cleanText(value, 'standard').toLowerCase();
-  if (mode === 'rapid') return 'rapid';
+  const mode = cleanText(value, 'segmented').toLowerCase();
   if (mode === 'fused') return 'fused';
-  return 'standard';
+  return 'segmented';
 }
 
 function normalizeLastBriefStatus(value, hasCards = false, hasPacket = false) {
@@ -389,9 +382,8 @@ function normalizeLastBriefStatus(value, hasCards = false, hasPacket = false) {
 
 function pipelineLabel(value) {
   const mode = normalizePipelineMode(value);
-  if (mode === 'rapid') return 'Rapid Pipeline';
-  if (mode === 'fused') return 'Fused Pipeline';
-  return 'Standard Pipeline';
+  if (mode === 'fused') return 'Fused';
+  return 'Segmented';
 }
 
 function normalizeMode(value) {
@@ -417,13 +409,7 @@ function pipelineIconSvg(kind) {
       el('path', { attrs: { d: 'M3 8.5 8.5 11.1 14 8.5M3 11 8.5 13.6 14 11M3 6v5M14 6v5M8.5 8.6v5', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.45', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } })
     ]);
   }
-  if (kind === 'rapid') {
-    return el('svg', { attrs: { width: '17', height: '17', viewBox: '0 0 17 17', 'aria-hidden': 'true', 'data-recursion-pipeline-rapid': '' } }, [
-      el('path', { attrs: { d: 'M2.8 5.1 7.5 3.2 14.4 8.5 7.5 13.8 2.8 11.9 7.1 8.5 2.8 5.1Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linejoin': 'round' } }),
-      el('path', { attrs: { d: 'M4.2 6.5 7.7 5.1M4.2 10.5 7.7 11.9', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: '.65' } })
-    ]);
-  }
-  return el('svg', { attrs: { width: '17', height: '17', viewBox: '0 0 17 17', 'aria-hidden': 'true', 'data-recursion-pipeline-standard': '' } }, [
+  return el('svg', { attrs: { width: '17', height: '17', viewBox: '0 0 17 17', 'aria-hidden': 'true', 'data-recursion-pipeline-segmented': '' } }, [
     el('path', { attrs: { d: 'M8.5 2.3 14 4.8 8.5 7.3 3 4.8 8.5 2.3Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linejoin': 'round' } }),
     el('path', { attrs: { d: 'M8.5 5.8 14 8.3 8.5 10.8 3 8.3 8.5 5.8Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linejoin': 'round' } }),
     el('path', { attrs: { d: 'M8.5 9.3 14 11.8 8.5 14.3 3 11.8 8.5 9.3Z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25', 'stroke-linejoin': 'round' } })
@@ -3902,9 +3888,9 @@ function buildRoot() {
       el('button', {
         className: 'recursion-pipeline-button',
         attrs: { type: 'button', 'aria-label': 'Pipeline', 'aria-expanded': 'false' },
-        dataset: { recursionPipelineButton: '', recursionPipelineKind: 'standard' }
+        dataset: { recursionPipelineButton: '', recursionPipelineKind: 'segmented' }
       }, [
-        el('span', { className: 'recursion-pipeline-icon', attrs: { 'aria-hidden': 'true' }, dataset: { recursionPipelineIcon: '' } }, [pipelineIconSvg('standard')])
+        el('span', { className: 'recursion-pipeline-icon', attrs: { 'aria-hidden': 'true' }, dataset: { recursionPipelineIcon: '' } }, [pipelineIconSvg('segmented')])
       ]),
       el('div', { className: 'recursion-pipeline-menu', attrs: { 'aria-label': 'Recursion pipeline selector' }, dataset: { recursionPipelineMenu: '' } },
         PIPELINE_MENU_OPTIONS.map(pipelineMenuChoice))

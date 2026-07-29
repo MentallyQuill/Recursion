@@ -1,7 +1,6 @@
 export function createRuntimeRunState() {
   let activeRunId = null;
   let activeRunController = null;
-  let activeRapidWarmRun = null;
   let activeAttempt = null;
   let hostGenerationActive = false;
   const activeRuntimeMutations = new Set();
@@ -14,7 +13,6 @@ export function createRuntimeRunState() {
       return {
         activeRunId,
         activeRunController,
-        activeRapidWarmRun,
         activeAttempt,
         hostGenerationActive,
         activeRuntimeMutations: activeRuntimeMutations.size,
@@ -84,17 +82,6 @@ export function createRuntimeRunState() {
     },
     clearPromptMutation(id = activePromptMutationId) {
       if (!id || activePromptMutationId === id) activePromptMutationId = null;
-    },
-    setRapidWarmRun(run) {
-      activeRapidWarmRun = run || null;
-    },
-    mutateRapidWarmRun(mutator) {
-      if (!activeRapidWarmRun || typeof mutator !== 'function') return activeRapidWarmRun;
-      mutator(activeRapidWarmRun);
-      return activeRapidWarmRun;
-    },
-    clearRapidWarmRun(runId = activeRapidWarmRun?.runId) {
-      if (!runId || activeRapidWarmRun?.runId === runId) activeRapidWarmRun = null;
     },
     setLatestAssistantSwipeRetry(retry) {
       pendingLatestAssistantSwipeRetry = retry || null;

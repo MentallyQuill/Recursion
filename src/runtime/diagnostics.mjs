@@ -221,7 +221,6 @@ export function buildDiagnosticsPayload({
       activity: runtime.activity || null,
       activityHistory: asArray(runtime.activityHistory).slice(-20),
       freshNextGeneration: runtime.freshNextGeneration || null,
-      rapidWarm: runtime.rapidWarm || null,
       cacheDecision: mapCacheDecision(runtime.lastCacheDecision),
       preparedGeneration: runtime.lastPreparedGeneration
         ? safeDiagnosticValue(summarizePreparedGenerationArtifact(runtime.lastPreparedGeneration), 500)

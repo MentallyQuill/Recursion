@@ -77,7 +77,7 @@ const guidancePrompts = [];
 const { runtime, installedBlocks, storage } = createRuntimeHarness({
   settings: {
     mode: 'auto',
-    pipelineMode: 'standard',
+    pipelineMode: 'segmented',
     reasoningLevel: 'medium',
     reasonerUse: 'off',
     promptFootprint: 'normal',

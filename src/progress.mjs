@@ -23,7 +23,7 @@ const EDITORIAL_ROLE_IDS = new Set([
   'editorialTransformer',
   'editorialVerifier'
 ]);
-const VALID_CHILD_SOURCES = new Set(['generated', 'included', 'cache', 'fallback', 'provider', 'local', 'fused-repair']);
+const VALID_CHILD_SOURCES = new Set(['generated', 'included', 'cache', 'fallback', 'provider', 'local']);
 const MODEL_CALL_ROLE_IDS = new Set([
   'sceneFrameCard',
   'activeCastCard',
@@ -56,13 +56,6 @@ const STEP_ORDER = [
   'checking-scene-shift',
   'planning-card-pass',
   'checking-scene-cache',
-  'rapid-warming-scene-deck',
-  'rapid-warm-waiting',
-  'rapid-selecting-turn-delta',
-  'rapid-warm-miss-standard',
-  'rapid-deck-ready',
-  'rapid-deck-stale',
-  'rapid-warm-failed',
   'reusing-scene-deck',
   'provider-test',
   'generation-review',
@@ -90,13 +83,6 @@ const STEP_DEFINITIONS = Object.freeze({
   'checking-scene-shift': { label: 'Checking scene shift', providerLane: 'utility' },
   'planning-card-pass': { label: 'Planning card pass', providerLane: 'utility' },
   'checking-scene-cache': { label: 'Checking scene cache', providerLane: 'utility' },
-  'rapid-warming-scene-deck': { label: 'Rapid warming scene deck', providerLane: 'utility' },
-  'rapid-warm-waiting': { label: 'Waiting for Rapid deck', providerLane: 'utility' },
-  'rapid-selecting-turn-delta': { label: 'Rapid selecting turn delta', providerLane: 'utility' },
-  'rapid-warm-miss-standard': { label: 'Rapid warm miss; Standard', providerLane: 'utility' },
-  'rapid-deck-ready': { label: 'Rapid deck ready', providerLane: 'utility' },
-  'rapid-deck-stale': { label: 'Rapid deck stale', providerLane: 'utility' },
-  'rapid-warm-failed': { label: 'Rapid warm', providerLane: 'utility' },
   'reusing-scene-deck': { label: 'Reusing scene deck', providerLane: 'utility' },
   'provider-test': { label: 'Provider test', providerLane: 'utility' },
   'generation-review': { label: 'Generation review', currentLabel: 'Reviewing generated response', providerLane: 'utility' },
@@ -125,13 +111,6 @@ const PHASE_STEP_IDS = Object.freeze({
   sceneChecking: 'checking-scene-shift',
   arbiterPlanning: 'planning-card-pass',
   cacheReusing: 'reusing-scene-deck',
-  rapidWarming: 'rapid-warming-scene-deck',
-  rapidWarmWaiting: 'rapid-warm-waiting',
-  rapidDeltaRunning: 'rapid-selecting-turn-delta',
-  rapidWarmMissStandard: 'rapid-warm-miss-standard',
-  rapidWarmReady: 'rapid-deck-ready',
-  rapidWarmStale: 'rapid-deck-stale',
-  rapidWarmFailed: 'rapid-warm-failed',
   cardBatchRunning: 'utility-card-batch',
   fusedCardBundleRunning: 'fused-card-bundle',
   cardValidating: 'validating-cards',
@@ -170,10 +149,9 @@ function cleanText(value, fallback = '') {
 }
 
 function normalizePipelineMode(value) {
-  const mode = cleanText(value, 'standard').toLowerCase();
-  if (mode === 'rapid') return 'rapid';
+  const mode = cleanText(value, 'segmented').toLowerCase();
   if (mode === 'fused') return 'fused';
-  return 'standard';
+  return 'segmented';
 }
 
 function truncateText(value, limit = 120) {
@@ -1027,98 +1005,6 @@ function appendPendingChildSteps(map, view, orderStart = 0) {
   }
 }
 
-function rapidWarmStatusStep(rapidWarm, order = 0) {
-  const source = asObject(rapidWarm);
-  const status = cleanText(source.status, 'idle').toLowerCase();
-  const reason = safeReasonText(source.reasonLabel || source.failureReasonLabel || source.reason);
-  const phase = cleanText(source.phase);
-  if (status === 'warming') {
-    return normalizeStep({
-      id: 'rapid-warming-scene-deck',
-      label: STEP_DEFINITIONS['rapid-warming-scene-deck'].label,
-      providerLane: 'utility',
-      state: 'running',
-      reason,
-      sourcePhase: phase || 'rapidWarming',
-      order
-    }, order);
-  }
-  if (status === 'waiting') {
-    return normalizeStep({
-      id: 'rapid-warm-waiting',
-      label: STEP_DEFINITIONS['rapid-warm-waiting'].label,
-      providerLane: 'utility',
-      state: 'running',
-      reason,
-      sourcePhase: phase || 'rapidWarmWaiting',
-      order
-    }, order);
-  }
-  if (status === 'ready') {
-    return normalizeStep({
-      id: 'rapid-deck-ready',
-      label: STEP_DEFINITIONS['rapid-deck-ready'].label,
-      providerLane: 'utility',
-      state: 'done',
-      reason,
-      sourcePhase: phase || 'rapidWarmReady',
-      order
-    }, order);
-  }
-  if (status === 'stale') {
-    return normalizeStep({
-      id: 'rapid-deck-stale',
-      label: STEP_DEFINITIONS['rapid-deck-stale'].label,
-      providerLane: 'utility',
-      state: 'warning',
-      reason,
-      sourcePhase: phase || 'rapidWarmStale',
-      order
-    }, order);
-  }
-  if (status === 'missed') {
-    return normalizeStep({
-      id: 'rapid-warm-miss-standard',
-      label: STEP_DEFINITIONS['rapid-warm-miss-standard'].label,
-      providerLane: 'utility',
-      state: 'warning',
-      reason,
-      sourcePhase: phase || 'rapidWarmMissStandard',
-      order
-    }, order);
-  }
-  if (status === 'failed') {
-    return normalizeStep({
-      id: 'rapid-warm-failed',
-      label: STEP_DEFINITIONS['rapid-warm-failed'].label,
-      providerLane: 'utility',
-      state: 'failed',
-      reason,
-      sourcePhase: phase || 'rapidWarmFailed',
-      order
-    }, order);
-  }
-  if (status === 'queued') {
-    return normalizeStep({
-      id: 'rapid-warming-scene-deck',
-      label: STEP_DEFINITIONS['rapid-warming-scene-deck'].label,
-      providerLane: 'utility',
-      state: 'pending',
-      reason,
-      sourcePhase: phase || 'rapidWarming',
-      order
-    }, order);
-  }
-  return null;
-}
-
-function appendRapidWarmStatusStep(map, view, order = 0) {
-  const source = asObject(view);
-  if (normalizePipelineMode(source.settings?.pipelineMode) !== 'rapid') return;
-  const step = rapidWarmStatusStep(source.rapidWarm, order);
-  if (step) upsertStep(map, step);
-}
-
 function normalizeExplicitProgress(progressRun) {
   const source = asObject(progressRun);
   const steps = Array.isArray(source.steps)
@@ -1237,7 +1123,6 @@ function deriveProgressRun(view) {
       }, step.order));
     }
   }
-  appendRapidWarmStatusStep(steps, source, order++);
   const beforePlanSteps = [...steps.values()];
   const hasEnhancementStep = [...ENHANCEMENT_STEP_IDS].some((id) => steps.has(id));
   const hasPostProcessStep = [...steps.keys()].some((id) => id.startsWith('post-process-'));

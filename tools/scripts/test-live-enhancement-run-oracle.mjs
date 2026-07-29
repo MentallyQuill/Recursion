@@ -532,7 +532,7 @@ assert(
   repairAuditWithoutVerifierCall.failures.includes('provider-role-missing-editorialverifier'),
   'strict live enhancement oracle requires a matched verifier call when Repair card-audit progress is current'
 );
-const healthyWithUnrelatedWarmCalls = evaluate({
+const healthyWithUnrelatedProviderCalls = evaluate({
   transitions: [
     { label: 'Editorial diagnosis', state: 'running' },
     { label: 'Editorial diagnosis', state: 'done' },
@@ -544,29 +544,29 @@ const healthyWithUnrelatedWarmCalls = evaluate({
   journalDelta: [
     ...healthyRepairProviderJournal,
     {
-      id: 'rapid-warm-started',
-      runId: 'rapid-warm-1',
+      id: 'other-run-started',
+      runId: 'other-run-1',
       severity: 'info',
       event: 'provider.call.started',
       details: { roleId: 'utilityArbiter' },
-      hashes: { requestHash: 'request-warm' }
+      hashes: { requestHash: 'request-other-started' }
     },
     {
-      id: 'rapid-delta-failed',
-      runId: 'rapid-turn-1',
+      id: 'other-run-failed',
+      runId: 'other-run-2',
       severity: 'error',
       event: 'provider.call.failed',
       details: {
-        roleId: 'rapidTurnDelta',
-        failure: { message: 'Unrelated background warm-state call failed.' }
+        roleId: 'sceneFrameCard',
+        failure: { message: 'Unrelated provider call failed.' }
       },
-      hashes: { requestHash: 'request-rapid-delta' }
+      hashes: { requestHash: 'request-other-failed' }
     }
   ],
   ...mutationInput
 });
 assertEqual(
-  healthyWithUnrelatedWarmCalls.ok,
+  healthyWithUnrelatedProviderCalls.ok,
   true,
   'strict live enhancement oracle ignores unrelated background provider calls in the same observation window'
 );
@@ -719,13 +719,7 @@ assert(
   /catch \(error\) \{\s*await browser\.close\(\)\.catch/.test(effectivenessSource),
   'live Redirect proof closes Chromium when browser setup or provider preflight fails'
 );
-const rapidWarmCall = "runtime.warmRapidScene({ reason: `live-${enhancementMode}-warm-${scenario.id}` })";
-assert(effectivenessSource.includes(rapidWarmCall), 'live Enhancement proof explicitly primes Rapid background warm');
-assert(
-  effectivenessSource.indexOf(rapidWarmCall)
-    < effectivenessSource.indexOf("runtime.prepareForGeneration({ userMessage: pendingUserMessage })"),
-  'live Redirect proof awaits Rapid background warm before the strict foreground preparation'
-);
+assert(!effectivenessSource.includes('warmRapidScene'), 'live Enhancement proof does not depend on removed background warming');
 const preparationCallIndex = effectivenessSource.indexOf("runtime.prepareForGeneration({ userMessage: pendingUserMessage })");
 const preparationPopoverIndex = effectivenessSource.indexOf('live-progress-popover-not-rendered');
 assert(

@@ -10,7 +10,7 @@ import { DEFAULT_RETENTION_SETTINGS, normalizeRetentionSettings } from './retent
 import { STORY_FORM_OVERRIDE_OPTIONS } from './story-form.mjs';
 
 const MODES = new Set(['auto', 'manual']);
-const PIPELINE_MODES = new Set(['standard', 'rapid', 'fused']);
+const PIPELINE_MODES = new Set(['segmented', 'fused']);
 const POST_PROCESS_APPLY_MODES = new Set(['as-swipe', 'replace']);
 const POST_PROCESS_REWRITE_FLOWS = new Set(['unified', 'progressive']);
 const STRENGTHS = new Set(['light', 'balanced', 'strong']);
@@ -39,7 +39,7 @@ function deepFreeze(value) {
 export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   enabled: true,
   mode: 'auto',
-  pipelineMode: 'standard',
+  pipelineMode: 'segmented',
   preProcessDecks: {
     version: PRE_PROCESS_DECK_SETTINGS_VERSION,
     activeDeckId: DEFAULT_PRE_PROCESS_DECK_ID,

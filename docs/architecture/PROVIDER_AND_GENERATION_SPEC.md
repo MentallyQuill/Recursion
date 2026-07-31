@@ -357,6 +357,8 @@ The Arbiter should return every auto decision it can in the initial call. Recurs
 
 The Arbiter also owns story-form detection when the user has not forced a story form. It should infer the current tense and point of view from the latest visible assistant narration first, using the pending user message only when no assistant narration exists. This keeps card generation and prompt composition aligned with the host model's established output form. If the operator selects a Tense & PoV override, runtime bypasses Arbiter inference for the effective story form and uses a high-confidence `User override` story-form object instead.
 
+After runtime applies scope and card-budget limits, `refresh-cards` requires at least one executable card job. An empty refresh is a retryable semantic validation failure and receives the normal Arbiter correction request. A valid action with zero card jobs skips both Fused and Segmented card-provider stages and continues through downstream packet preparation. Provider-unavailable errors are reserved for an unavailable provider boundary; an absent card request is not provider unavailability.
+
 Required output shape:
 
 ```json

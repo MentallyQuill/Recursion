@@ -163,6 +163,8 @@ Plan action controls runtime cost and cache churn.
 
 `compose-brief` means compose a V3 packet from the current hand after any requested cache/card work. Local fallback also uses this action when the Arbiter is unavailable and safe fallback cards can be built from the snapshot.
 
+After runtime scope and card-budget enforcement, `refresh-cards` requires at least one executable card job. An empty refresh is a retryable Arbiter validation failure and uses the existing correction attempt window. A valid zero-card plan schedules no Fused or Segmented card provider stage; it proceeds directly through deck, hand, guidance, packet, and installation.
+
 Action choice should be automatic by default. User controls should stay high level, such as the power toggle, Auto/Manual, refresh, Strength, Focus, Reasoning Level, provider setup, Prompt Footprint, and advanced final-packet injection placement.
 
 Queued reprocessing does not bypass the Arbiter. The next generation still takes a fresh snapshot and runs the semantic plan; the queued stage and all graph descendants are then invalidated while unaffected compatible checkpoints remain eligible.

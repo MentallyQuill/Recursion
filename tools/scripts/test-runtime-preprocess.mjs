@@ -695,6 +695,68 @@ function immediateProvider(calls = []) {
 
 {
   const providerCalls = [];
+  const provider = {
+    async generate(roleId, request = {}) {
+      providerCalls.push(roleId);
+      if (roleId === 'utilityArbiter') return arbiterResponse(request, []);
+      if (roleId === 'guidanceComposer') return guidanceResponse(request);
+      throw new Error(`unexpected provider role ${roleId}`);
+    }
+  };
+  const { runtime, storage } = createHarness({
+    provider,
+    settings: { pipelineMode: 'fused' }
+  });
+
+  const result = await runtime.prepareForGeneration({
+    userMessage: 'I ask what she remembers.',
+    hostGeneration: true
+  });
+
+  assertEqual(result.ok, true, 'legitimate zero-card Fused plan completes');
+  assertEqual(providerCalls.join(','), 'utilityArbiter,guidanceComposer', 'zero-card plan skips Fused provider work');
+  const manifest = await storage.loadPipelineRun('chat-preprocess');
+  assertEqual(
+    Object.hasOwn(manifest.stageRecords, 'preprocess.cards.fused'),
+    false,
+    'zero-card plan records no Fused card stage'
+  );
+  assertEqual(manifest.stageRecords['preprocess.install'].state, 'completed', 'zero-card plan completes installation');
+}
+
+{
+  const providerCalls = [];
+  const provider = {
+    async generate(roleId, request = {}) {
+      providerCalls.push(roleId);
+      if (roleId === 'utilityArbiter') return arbiterResponse(request, []);
+      if (roleId === 'guidanceComposer') return guidanceResponse(request);
+      throw new Error(`unexpected provider role ${roleId}`);
+    }
+  };
+  const { runtime, storage } = createHarness({
+    provider,
+    settings: { pipelineMode: 'segmented' }
+  });
+
+  const result = await runtime.prepareForGeneration({
+    userMessage: 'I ask what she remembers.',
+    hostGeneration: true
+  });
+
+  assertEqual(result.ok, true, 'legitimate zero-card Segmented plan completes');
+  assertEqual(providerCalls.join(','), 'utilityArbiter,guidanceComposer', 'zero-card plan skips Segmented provider work');
+  const manifest = await storage.loadPipelineRun('chat-preprocess');
+  assertEqual(
+    Object.keys(manifest.stageRecords).some((stageId) => stageId.startsWith('preprocess.cards.segmented.')),
+    false,
+    'zero-card plan records no Segmented card stage'
+  );
+  assertEqual(manifest.stageRecords['preprocess.install'].state, 'completed', 'zero-card Segmented plan completes installation');
+}
+
+{
+  const providerCalls = [];
   const requestedCards = [
     { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Preserve current beat.' },
     { family: 'Active Cast', role: 'activeCastCard', reason: 'Preserve who is present.' }

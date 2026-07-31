@@ -7322,6 +7322,14 @@ export function createRecursionRuntime({
   function durableCardStageSet(context, plan, {
     segmentedFallback = false
   } = {}) {
+    const cardJobs = Array.isArray(plan?.cardJobs) ? plan.cardJobs : [];
+    if (cardJobs.length === 0) {
+      return {
+        stages: [],
+        resultStageIds: [],
+        segmentedFallback: false
+      };
+    }
     if (context.settings.pipelineMode !== 'fused') {
       const stages = durableSegmentedStages(context, plan);
       return {

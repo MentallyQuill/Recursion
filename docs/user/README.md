@@ -1,6 +1,6 @@
 # User Guides
 
-These guides cover the current Recursion V1 pre-alpha operator surface. Recursion is a current-scene prompt compiler for SillyTavern, not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing product.
+These guides cover the current Recursion V1 alpha operator surface. Recursion is a current-scene prompt compiler for SillyTavern, not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing product.
 
 ## Start Here
 

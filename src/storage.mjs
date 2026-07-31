@@ -9,7 +9,7 @@ import {
   normalizeQueuedReprocess
 } from './execution/queued-reprocess.mjs';
 
-const RECURSION_VERSION = '0.1.0-pre-alpha.5';
+const RECURSION_VERSION = '0.2.0-alpha.1';
 const MAX_JOURNAL_ENTRIES = 500;
 const DEFAULT_MAX_SCENE_CACHES_PER_CHAT = 3;
 const DEFAULT_MAX_SCENE_CACHES_TOTAL = 24;

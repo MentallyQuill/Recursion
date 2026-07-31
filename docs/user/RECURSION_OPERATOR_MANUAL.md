@@ -1,6 +1,6 @@
 # Recursion Operator Manual
 
-Recursion is a pre-alpha SillyTavern extension that compiles current-scene prompt guidance for the next roleplay generation. It observes the active chat, maintains a short-lived scene deck, selects a turn hand, and installs an inspectable prompt packet when Auto or Manual mode is active. Segmented generates requested card families through a series of narrow model stages; Fused asks a stronger model for one multi-card bundle and uses Segmented repair or fallback when validation requires it.
+Recursion is an alpha SillyTavern extension that compiles current-scene prompt guidance for the next roleplay generation. It observes the active chat, maintains a short-lived scene deck, selects a turn hand, and installs an inspectable prompt packet when Auto or Manual mode is active. Segmented generates requested card families through a series of narrow model stages; Fused asks a stronger model for one multi-card bundle and uses Segmented repair or fallback when validation requires it.
 
 Recursion is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, character database, or card-editing product. It does not own durable canon. It improves the next response by preserving selected scene evidence and adding provider-authored direction for the scene in front of the user.
 

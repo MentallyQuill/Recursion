@@ -1,9 +1,10 @@
 # Recursion Release Notes
 
-Release notes capture the current pre-alpha scope, Pre-process/Post-process recovery contracts, verification posture, live-smoke guardrails, and known documentation/render gaps for each named Recursion checkpoint. Older Editorial/Enhancement notes are historical records, not the current runtime contract.
+Release notes capture the current alpha scope, Pre-process/Post-process recovery contracts, verification posture, live-smoke guardrails, and known documentation/render gaps for each named Recursion checkpoint. Older pre-alpha and Editorial/Enhancement notes are historical records, not the current runtime contract.
 
 ## Releases
 
+- [0.2.0-alpha.1](0.2.0-alpha.1.md)
 - [0.1.0-pre-alpha.6](0.1.0-pre-alpha.6.md)
 - [Post-alpha.1 Feature Highlights](post-alpha.1-feature-highlights.md)
 - [0.1.0-pre-alpha.5](0.1.0-pre-alpha.5.md)

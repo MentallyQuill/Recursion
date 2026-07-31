@@ -1,8 +1,8 @@
 {
   "name": "recursion",
-  "version": "0.1.0-pre-alpha.6",
+  "version": "0.2.0-alpha.1",
   "private": true,
-  "description": "Recursion pre-alpha SillyTavern extension.",
+  "description": "Recursion alpha SillyTavern extension.",
   "type": "module",
   "license": "MIT",
   "scripts": {

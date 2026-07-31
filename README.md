@@ -183,7 +183,7 @@ For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_
 
 - [Documentation Index](docs/DOCUMENTATION_INDEX.md) - Canonical map for user, technical, design, testing, release, and planning docs.
 - [Post-process Cards Runtime](docs/architecture/POST_PROCESS_CARDS_RUNTIME.md) - Current operation boundary, writer ownership, flows, retries, persistence, and privacy.
-- [Release Notes](docs/release/README.md) - Current pre-alpha checkpoints, verification, and known constraints.
+- [Release Notes](docs/release/README.md) - Current alpha checkpoints, verification, and known constraints.
 - [First Run Workflow](docs/user/FIRST_RUN_WORKFLOW.md) - First-session path from installation through Manual, Auto, inspection, and cleanup.
 - [Operator Manual](docs/user/RECURSION_OPERATOR_MANUAL.md) - Complete guide for UI surfaces, modes, settings, operation, diagnostics, storage, mobile behavior, and smoke checks.
 - [Provider Setup](docs/user/PROVIDER_SETUP.md) - Utility and Reasoner setup, provider tests, fallback behavior, and safe verification.

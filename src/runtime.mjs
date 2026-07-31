@@ -6690,6 +6690,17 @@ export function createRecursionRuntime({
       runPolicyForEffectivePlan(context.settings, plan),
       prioritySelectionForSettings(context.settings).forcedFamilies
     ).plan;
+    if (planAction(plan) === 'refresh-cards' && plan.cardJobs.length === 0) {
+      return {
+        ok: false,
+        error: {
+          code: 'RECURSION_ARBITER_EMPTY_REFRESH',
+          category: 'validation',
+          retryable: true,
+          message: 'refresh-cards requires at least one executable card job.'
+        }
+      };
+    }
     return { ok: true, value: plan };
   }
 

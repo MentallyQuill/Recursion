@@ -623,6 +623,78 @@ function immediateProvider(calls = []) {
 
 {
   const providerCalls = [];
+  let arbiterAttempts = 0;
+  const provider = {
+    async generate(roleId, request = {}) {
+      providerCalls.push({ roleId, request });
+      if (roleId === 'utilityArbiter') {
+        arbiterAttempts += 1;
+        if (arbiterAttempts === 1) {
+          return {
+            ...arbiterResponse(request, []),
+            data: {
+              ...arbiterResponse(request, []).data,
+              action: 'refresh-cards'
+            }
+          };
+        }
+        return {
+          ...arbiterResponse(request),
+          data: {
+            ...arbiterResponse(request).data,
+            action: 'refresh-cards'
+          }
+        };
+      }
+      if (roleId === 'fusedCardBundle') {
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.cardBundle.v1',
+            snapshotHash: request.snapshotHash,
+            items: [{
+              schema: 'recursion.card.v1',
+              family: 'Scene Frame',
+              role: 'sceneFrameCard',
+              promptText: 'Keep Mara beside the sealed archive.',
+              evidenceRefs: ['message:2'],
+              tokenEstimate: 12
+            }]
+          }
+        };
+      }
+      if (roleId === 'guidanceComposer') return guidanceResponse(request);
+      throw new Error(`unexpected provider role ${roleId}`);
+    }
+  };
+  const { runtime, storage } = createHarness({
+    provider,
+    settings: { pipelineMode: 'fused', modelAttemptsPerStep: 2 }
+  });
+
+  const result = await runtime.prepareForGeneration({
+    userMessage: 'I ask what she remembers.',
+    hostGeneration: true
+  });
+
+  assertEqual(result.ok, true, 'corrected empty refresh plan completes');
+  assertEqual(arbiterAttempts, 2, 'empty refresh plan consumes the Arbiter correction attempt');
+  assert(
+    providerCalls[1].request.prompt.includes('refresh-cards requires at least one executable card job'),
+    'correction request explains the semantic invariant'
+  );
+  assertEqual(
+    providerCalls.filter((entry) => entry.roleId === 'fusedCardBundle').length,
+    1,
+    'corrected plan creates one Fused bundle call'
+  );
+  const manifest = await storage.loadPipelineRun('chat-preprocess');
+  assertEqual(manifest.stageRecords['preprocess.arbiter'].attempts.total, 2, 'Arbiter records both attempts');
+  assertEqual(manifest.stageRecords['preprocess.cards.fused'].state, 'completed', 'corrected Fused stage completes');
+}
+
+{
+  const providerCalls = [];
   const requestedCards = [
     { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Preserve current beat.' },
     { family: 'Active Cast', role: 'activeCastCard', reason: 'Preserve who is present.' }

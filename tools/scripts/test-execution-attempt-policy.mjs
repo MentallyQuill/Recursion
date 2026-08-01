@@ -43,6 +43,31 @@ assert(
   'attempt summaries exclude raw prompts and model responses'
 );
 
+const actionableValidation = await runModelStageAttempts({
+  attemptsPerStep: 1,
+  request: { prompt: 'Validate one Active Cast card.' },
+  async invoke() {
+    return { ok: false };
+  },
+  validate() {
+    return {
+      ok: false,
+      error: {
+        code: 'RECURSION_PROVIDER_SCHEMA_MISMATCH',
+        category: 'provider-output',
+        message: 'Active Cast provider output did not match recursion.card.v1.',
+        retryable: true,
+        suggestedAction: 'Retry Active Cast.'
+      }
+    };
+  }
+});
+assertEqual(actionableValidation.ok, false, 'actionable validation failure exhausts its attempt window');
+assertEqual(actionableValidation.failure.code, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'validation failure preserves its stable code');
+assertEqual(actionableValidation.failure.category, 'provider-output', 'validation failure preserves its category');
+assertEqual(actionableValidation.failure.message, 'Active Cast provider output did not match recursion.card.v1.', 'validation failure preserves its actionable message');
+assertEqual(actionableValidation.failure.suggestedAction, 'Retry Active Cast.', 'validation failure preserves its suggested action');
+
 let transportCalls = 0;
 const transportResult = await runModelStageAttempts({
   attemptsPerStep: 2,

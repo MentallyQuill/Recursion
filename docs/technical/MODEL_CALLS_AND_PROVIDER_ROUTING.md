@@ -121,7 +121,9 @@ The structured parser may recover common provider formatting damage: markdown fe
 
 Every generation-role request carries `responseSchema` and `machineJson: true` into the host adapter. Requests with a frozen snapshot also carry `snapshotHash`. Host adapters may use that metadata to request structured JSON support, but the metadata is advisory until the router validates the visible response body.
 
-Validation failures do not become successful model calls. Prompt composition consumes accepted structured data only. Success diagnostics may include compact repair metadata such as `structuredOutputRepaired`, `structuredOutputRecovery`, `semanticNormalization`, and `visibleContentLength`; raw malformed response text and hidden reasoning stay out of journals, activity details, and reports. Generation Review may apply already-validated bounded patches after unresolved card-outcome coverage only as explicit `partial-failed`, never as a successful review.
+Segmented `recursion.card.v1` requests carry a complete dynamic machine schema rather than the generic schema fallback. The schema constrains the frozen `snapshotHash`, request-owned `role` and `family`, and exactly one item with required `promptText` and `evidenceRefs`. A parsed `{ envelope, items }` response is normalized only when those frozen identities exist and no returned identity conflicts; this narrow recovery is recorded as `semanticNormalization: "nested-card-envelope"`.
+
+Validation failures do not become successful model calls. Prompt composition consumes accepted structured data only. Success diagnostics may include compact repair metadata such as `structuredOutputRepaired`, `structuredOutputRecovery`, `semanticNormalization`, and `visibleContentLength`; failures may include safe role/schema names, provider source/model, top-level field names, and bounded value-free response structure. Raw malformed response text, provider field values, card text, prompts, transcript text, secrets, and hidden reasoning stay out of journals, activity details, and reports. Generation Review may apply already-validated bounded patches after unresolved card-outcome coverage only as explicit `partial-failed`, never as a successful review.
 
 `guidanceComposer` has two validation layers. Provider-call journal success means the transport and schema parser returned a response. Prompt packet diagnostics then record whether that guidance passed Recursion validation. A `guidanceComposer success` entry followed by `guidanceStatus: fallback-raw-only` means the model call completed but the guidance payload was rejected by schema, snapshot, source-id, hidden-reasoning, or empty-text validation.
 
@@ -149,6 +151,8 @@ The advanced `Attempts per step` setting controls the total automatic model atte
 
 The attempt window belongs to the durable stage, not an individual browser callback. Stop pauses the operation and aborts the current call while preserving accepted checkpoints. Resume continues the earliest incomplete stage. Retry Stage discards that stage's failed or partial output and gives it a fresh configured attempt window. Reprocess from Here is queued for the next generation and invalidates the selected stage plus its dependents; it never races the active run.
 
+For a rejected Segmented card, each remaining automatic attempt appends the prior stable failure code and safe validation message to the correction request. The correction repeats the canonical `recursion.card.v1` envelope requirement without changing role, family, snapshot, source context, or sibling stages. Accepted sibling checkpoints are not repeated.
+
 Recursion never automatically retries SillyTavern's primary story generation. It can retry only its own Pre-process and Post-process model stages. A provider may still charge for a response that never reaches Recursion, so automatic recovery cannot guarantee cost recovery.
 
 Fallback behavior:
@@ -156,7 +160,7 @@ Fallback behavior:
 - Utility provider unavailable or transport-failed reuses a valid checkpoint or scene cache entry when safe; otherwise runtime pauses or fails the affected operation without discarding unrelated accepted work.
 - Invalid Utility Arbiter schema or missing/mismatched Arbiter `snapshotHash` can use a conservative local fallback plan because a provider result existed but failed structured validation.
 - Fused bundle validation reports accepted, invalid, rejected, omitted, and missing requested families. When at least one requested item is trustworthy, runtime repairs only damaged or missing siblings through individual Segmented card calls for the same pending user message. Wrong snapshot, provider failure with no recoverable item fragments, or zero trustworthy items triggers full Segmented card fallback.
-- Card call failure omits failed cards and keeps valid siblings.
+- Card call failure omits failed cards and keeps valid siblings. A completed fail-soft run with an exhausted card stage is `Needs attention`, not `Ready`; the failed row retains its stable code, precise reason, and suggested action while downstream prompt installation may still complete.
 - Reasoner failure falls back to Utility guidance plus raw selected Card Evidence.
 - Provider test completion records compact hash-bound health without changing provider configuration.
 - Host generation unavailability makes the lane unhealthy without blocking normal chat generation.

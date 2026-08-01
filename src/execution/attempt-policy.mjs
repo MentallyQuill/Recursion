@@ -1,4 +1,4 @@
-import { providerFailure } from '../failures.mjs';
+import { failureFrom, providerFailure } from '../failures.mjs';
 
 const ATTEMPT_MIN = 1;
 const ATTEMPT_MAX = 5;
@@ -36,12 +36,20 @@ export function classifyModelFailure(error, { kind = 'transport', signal = null 
     });
   }
   if (kind === 'validation') {
-    return Object.freeze({
-      kind: 'validation',
-      code: safeCode(error?.code, 'RECURSION_MODEL_OUTPUT_INVALID'),
+    const failure = failureFrom(error, {
+      code: 'RECURSION_MODEL_OUTPUT_INVALID',
+      stage: 'model-attempt',
       category: 'validation',
       message: 'The model response did not pass validation.',
       retryable: true
+    });
+    return Object.freeze({
+      kind: 'validation',
+      code: failure.code,
+      category: failure.category,
+      message: failure.message,
+      retryable: failure.retryable,
+      ...(failure.suggestedAction ? { suggestedAction: failure.suggestedAction } : {})
     });
   }
   const failure = providerFailure(error, { stage: 'model-attempt' });

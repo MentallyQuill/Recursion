@@ -9,6 +9,7 @@ import {
   cardsFromProviderResult,
   limitCardJobsForHandBudget,
   normalizeCard,
+  providerCardRejectReason,
   selectHand
 } from './cards.mjs';
 import {
@@ -6809,15 +6810,57 @@ export function createRecursionRuntime({
         ) {
           return { ok: true, value: result };
         }
-        const cards = cardsFromProviderResult(result, {
+        const family = safeText(selectedCard?.family || request?.metadata?.family || 'Card', 120);
+        if (result?.ok !== true) {
+          const error = asObject(result?.error);
+          const code = safeText(error.code || 'RECURSION_CARD_PROVIDER_FAILED', 120);
+          const category = safeText(
+            result?.diagnostics?.failure?.category || error.category || 'provider-output',
+            80
+          );
+          const providerSuggestedAction = safeText(
+            result?.diagnostics?.failure?.suggestedAction || error.suggestedAction || '',
+            180
+          );
+          const expectedSchema = safeText(error.expectedSchema || 'recursion.card.v1', 120);
+          const actualSchema = safeText(error.actualSchema || '', 120);
+          const responseFields = Array.isArray(error.responseFields)
+            ? error.responseFields.map((field) => safeText(field, 80)).filter(Boolean).slice(0, 24)
+            : [];
+          const schemaMismatch = code === 'RECURSION_PROVIDER_SCHEMA_MISMATCH';
+          const details = schemaMismatch
+            ? [
+                `${family} provider output did not match ${expectedSchema}.`,
+                actualSchema && actualSchema !== '(missing)' ? `Returned schema: ${actualSchema}.` : 'Top-level schema was missing.',
+                responseFields.length ? `Returned fields: ${responseFields.join(', ')}.` : ''
+              ].filter(Boolean).join(' ')
+            : `${family} card provider failed (${code}): ${safeText(error.message || 'The provider response was not usable.', 240)}`;
+          return {
+            ok: false,
+            error: {
+              code,
+              category,
+              retryable: category === 'provider-output' || error.retryable === true,
+              message: details,
+              suggestedAction: providerSuggestedAction || (
+                category === 'provider-output'
+                  ? `Retry ${family}. If it repeats, use a model with reliable JSON Schema output.`
+                  : `Retry ${family}.`
+              )
+            }
+          };
+        }
+        const providerCardContext = {
           ...cardSourceContext(context.snapshot),
           expectedSnapshotHash: request?.snapshotHash,
           expectedRole: request?.metadata?.role,
           expectedFamily: request?.metadata?.family,
           sourceCardIds: request?.metadata?.sourceCardIds || [],
           sourceCards: request?.metadata?.sourceCards || []
-        });
+        };
+        const cards = cardsFromProviderResult(result, providerCardContext);
         const card = cards[0];
+        const rejection = card ? '' : providerCardRejectReason(result, providerCardContext);
         return card
           ? { ok: true, value: sanitizeGeneratedCard(card) }
           : {
@@ -6826,12 +6869,24 @@ export function createRecursionRuntime({
                 code: 'RECURSION_CARD_INVALID',
                 category: 'validation',
                 retryable: true,
-                message: `${safeText(selectedCard?.family || 'Card', 120)} response was invalid.`
+                message: `${family} card failed semantic validation (${safeText(rejection || 'unknown', 120)}).`,
+                suggestedAction: `Retry ${family}. If it repeats, inspect the card validation reason.`
               }
             };
       }
     }).map((stage) => ({
       ...stage,
+      buildCorrectionRequest({ request, error, attempt }) {
+        return {
+          ...request,
+          prompt: [
+            request?.prompt || '',
+            'Correction required.',
+            `Attempt ${attempt} was rejected [${safeText(error?.code || 'RECURSION_CARD_INVALID', 120)}]: ${safeText(error?.message || 'Card response was invalid.', 300)}`,
+            'Return one corrected JSON object only using schema "recursion.card.v1" with the requested role, family, snapshotHash, and exactly one items entry.'
+          ].filter(Boolean).join('\n\n')
+        };
+      },
       summarizeArtifact: stage.summarize
     }));
   }

@@ -650,7 +650,7 @@ function itemMatchesProviderCatalog(item, catalog) {
   }
 }
 
-function providerCardRejectReason(result, context = {}) {
+export function providerCardRejectReason(result, context = {}) {
   if (!result?.ok) return 'provider-failed';
   const data = asObject(result.data);
   if (data.schema !== CARD_RESPONSE_SCHEMA) return 'schema-mismatch';

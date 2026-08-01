@@ -254,7 +254,13 @@ export function normalizeStageRecord(value) {
       ? {
           code: cleanText(value.failure.code),
           failureClass: cleanText(value.failure.failureClass),
-          retryable: value.failure.retryable === true
+          retryable: value.failure.retryable === true,
+          ...(cleanText(value.failure.message).trim()
+            ? { message: cleanText(value.failure.message).trim().slice(0, 300) }
+            : {}),
+          ...(cleanText(value.failure.suggestedAction).trim()
+            ? { suggestedAction: cleanText(value.failure.suggestedAction).trim().slice(0, 180) }
+            : {})
         }
       : null,
     attempts: normalizeAttempts(attempts),

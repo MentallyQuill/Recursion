@@ -48,10 +48,14 @@ function asValidationResult(result, artifact) {
 
 function failureRecord(failure, fallbackCode = 'RECURSION_STAGE_FAILED') {
   const source = isObject(failure) ? failure : {};
+  const message = String(source.message || '').trim().slice(0, 300);
+  const suggestedAction = String(source.suggestedAction || '').trim().slice(0, 180);
   return {
     code: String(source.code || fallbackCode).slice(0, 120),
     failureClass: String(source.category || source.kind || 'internal').slice(0, 80),
-    retryable: source.retryable === true
+    retryable: source.retryable === true,
+    ...(message ? { message } : {}),
+    ...(suggestedAction ? { suggestedAction } : {})
   };
 }
 

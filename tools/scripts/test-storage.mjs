@@ -476,7 +476,12 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
 
 
 {
-  const adapter = createMemoryStorageAdapter();
+  const backingAdapter = createMemoryStorageAdapter();
+  const adapter = {
+    readJson: (...args) => backingAdapter.readJson(...args),
+    writeJson: (...args) => backingAdapter.writeJson(...args),
+    deleteJson: (...args) => backingAdapter.deleteJson(...args)
+  };
   const repo = createStorageRepository({ storage: adapter });
   const retiredKey = 'recursion-scene-Turn-Storage-Chat-Retired-Scene.v1.json';
   const retiredRunKey = 'recursion-pipeline-run-Turn-Storage-Chat.v1.json';
@@ -503,6 +508,40 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
     packet: { packetId: 'packet-a', prompt: 'display-only packet' },
     hand: { cards: [{ id: 'card-a', promptText: 'display-only card' }] },
     committedAt: '2026-08-01T12:00:00.000Z'
+  });
+  const indexed = await adapter.readJson(SYSTEM_INDEX_KEY);
+  await adapter.writeJson(SYSTEM_INDEX_KEY, {
+    ...indexed,
+    records: {
+      ...indexed.records,
+      [retiredKey]: {
+        key: retiredKey,
+        kind: 'sceneCache',
+        chatKey: 'Turn-Storage-Chat',
+        updatedAt: '2026-08-01T12:00:00.000Z'
+      },
+      [retiredRunKey]: {
+        key: retiredRunKey,
+        kind: 'pipelineRun',
+        chatKey: 'Turn-Storage-Chat',
+        operationId: 'operation-old',
+        updatedAt: '2026-08-01T12:00:00.000Z'
+      },
+      [retiredArtifactKey]: {
+        key: retiredArtifactKey,
+        kind: 'pipelineArtifact',
+        chatKey: 'Turn-Storage-Chat',
+        operationId: 'operation-old',
+        artifactId: 'preprocess.packet.stage-old',
+        updatedAt: '2026-08-01T12:00:00.000Z'
+      },
+      [retiredQueueKey]: {
+        key: retiredQueueKey,
+        kind: 'queuedReprocess',
+        chatKey: 'Turn-Storage-Chat',
+        updatedAt: '2026-08-01T12:00:00.000Z'
+      }
+    }
   });
   const retired = await repo.pruneRetiredGeneratedRecords();
   assertEqual(retired.ok, true, 'retired generated cleanup succeeds');

@@ -687,6 +687,17 @@ function normalizeStorageKeyList(value) {
   return Array.isArray(value) ? value.filter((key) => typeof key === 'string') : null;
 }
 
+function retiredGeneratedKeysFromRawIndex(value) {
+  if (!isStorageObject(value) || !isStorageObject(value.records)) return [];
+  const keys = new Set();
+  for (const [fallbackKey, record] of Object.entries(value.records)) {
+    for (const candidate of [fallbackKey, isStorageObject(record) ? record.key : null]) {
+      if (typeof candidate === 'string' && retiredGeneratedKey(candidate)) keys.add(candidate);
+    }
+  }
+  return [...keys];
+}
+
 async function discoverStorageKeys(storage) {
   if (typeof storage.listJsonKeys === 'function') {
     return normalizeStorageKeyList(await storage.listJsonKeys());
@@ -1413,10 +1424,13 @@ export function createStorageRepository({
   }
 
   async function pruneRetiredGeneratedRecords() {
+    const rawIndex = await storage.readJson(SYSTEM_INDEX_KEY);
+    const indexedRetiredKeys = retiredGeneratedKeysFromRawIndex(rawIndex);
     const repair = await repairIndex();
     const index = normalizeIndex(await storage.readJson(SYSTEM_INDEX_KEY));
     const discoveredKeys = await discoverStorageKeys(storage);
     const retiredKeys = new Set([
+      ...indexedRetiredKeys,
       ...Object.values(index.records)
         .filter((record) => record.kind === 'sceneCache')
         .map((record) => record.key),

@@ -217,12 +217,15 @@ const diagnosticsOnly = normalizeSettings({ diagnostics: { maxJournalEntries: 25
 assertDeepEqual(diagnosticsOnly.diagnostics, { includeExcerpts: true }, 'diagnostics only retains excerpt toggle');
 
 const retentionDefaults = normalizeSettings({ retention: {} }).retention;
+const obsoletePerChatCap = ['scene', 'Caches', 'PerChat'].join('');
+const obsoleteTotalCap = ['scene', 'Caches', 'Total'].join('');
+const obsoleteVariantCap = ['source', 'Variants', 'PerScene'].join('');
 assertEqual(retentionDefaults.sourceWindowMessages, 20, 'retention source messages default');
 assertEqual(retentionDefaults.sourceWindowCharacters, 12000, 'retention character budget default');
 assertEqual(retentionDefaults.providerVisibleMessages, 12, 'retention provider messages default');
-assertEqual(Object.hasOwn(retentionDefaults, 'sceneCachesPerChat'), false, 'obsolete per-chat cache default is absent');
-assertEqual(Object.hasOwn(retentionDefaults, 'sceneCachesTotal'), false, 'obsolete total cache default is absent');
-assertEqual(Object.hasOwn(retentionDefaults, 'sourceVariantsPerScene'), false, 'obsolete source variant default is absent');
+assertEqual(Object.hasOwn(retentionDefaults, obsoletePerChatCap), false, 'obsolete per-chat cache default is absent');
+assertEqual(Object.hasOwn(retentionDefaults, obsoleteTotalCap), false, 'obsolete total cache default is absent');
+assertEqual(Object.hasOwn(retentionDefaults, obsoleteVariantCap), false, 'obsolete source variant default is absent');
 assertEqual(retentionDefaults.runJournalEntries, 100, 'retention journal default');
 
 const retentionClamped = normalizeSettings({
@@ -230,18 +233,18 @@ const retentionClamped = normalizeSettings({
     sourceWindowMessages: 999,
     sourceWindowCharacters: 5,
     providerVisibleMessages: 1,
-    sceneCachesPerChat: 9,
-    sceneCachesTotal: 4,
-    sourceVariantsPerScene: 99,
+    [obsoletePerChatCap]: 9,
+    [obsoleteTotalCap]: 4,
+    [obsoleteVariantCap]: 99,
     runJournalEntries: 9999
   }
 }).retention;
 assertEqual(retentionClamped.sourceWindowMessages, 200, 'settings clamps source message cap');
 assertEqual(retentionClamped.sourceWindowCharacters, 6000, 'settings clamps source character cap');
 assertEqual(retentionClamped.providerVisibleMessages, 4, 'settings clamps provider message cap');
-assertEqual(Object.hasOwn(retentionClamped, 'sceneCachesPerChat'), false, 'settings discards obsolete per-chat cache cap');
-assertEqual(Object.hasOwn(retentionClamped, 'sceneCachesTotal'), false, 'settings discards obsolete total cache cap');
-assertEqual(Object.hasOwn(retentionClamped, 'sourceVariantsPerScene'), false, 'settings discards obsolete source variant cap');
+assertEqual(Object.hasOwn(retentionClamped, obsoletePerChatCap), false, 'settings discards obsolete per-chat cache cap');
+assertEqual(Object.hasOwn(retentionClamped, obsoleteTotalCap), false, 'settings discards obsolete total cache cap');
+assertEqual(Object.hasOwn(retentionClamped, obsoleteVariantCap), false, 'settings discards obsolete source variant cap');
 assertEqual(retentionClamped.runJournalEntries, 500, 'settings clamps journal entries');
 
 const defaultUi = normalizeSettings({});

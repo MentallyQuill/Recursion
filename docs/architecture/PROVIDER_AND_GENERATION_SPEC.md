@@ -140,7 +140,7 @@ Provider core is host-neutral. Host connection-profile discovery is supplied by 
 
 Connection profile discovery must stay scoped to provider/connection-profile seams. It must not traverse SillyTavern character, character-card, persona, avatar, group, or Recursion card containers while searching for profiles. The Providers pane should reuse one detected profile list while rendering Utility and Reasoner controls instead of asking the host repeatedly during a single render. The Profile control is a filterable combobox: typed text filters the local detected list, and persisted provider settings change only after the user chooses a detected profile entry.
 
-Model discovery is read-only. It may use the currently typed session key, but it must not save settings, persist secrets, write diagnostics, clear prompts, or invalidate scene cache. Fetch failures are compact UI status, not runtime generation failures.
+Model discovery is read-only. It may use the currently typed session key, but it must not save settings, persist secrets, write diagnostics, clear prompts, or invalidate active-turn work. Fetch failures are compact UI status, not runtime generation failures.
 
 The Providers settings pane shows a compact route summary derived from Reasoning Level. Recursion does not expose Directive-style deep per-role routing controls in V1; Reasoning Level remains the operator-facing route control, and runtime owns the detailed role-to-lane policy.
 
@@ -149,7 +149,7 @@ Machine JSON calls carry the expected response schema as provider request metada
 Host current-model calls pass normalized `reasoningIntent`, `reasoningCategory`, and nested `reasoning` metadata to raw host adapters when a caller provides reasoning intent. Host connection-profile calls pass both Recursion's normalized `parameters.reasoning = { intent, category, exclude: true }` metadata and SillyTavern's native `reasoning_effort` plus `include_reasoning: false` fields. The native fields are required for Connection Manager's OpenRouter backend to apply the requested effort instead of silently using a `:thinking` model's default reasoning budget. Recursion never stores or exposes hidden reasoning content.
 
 Utility always has a settings object. If its capability is `unconfigured` or `unhealthy`,
-Recursion degrades to cached/local behavior and does not block normal
+Recursion degrades to validated exact-turn or local behavior and does not block normal
 SillyTavern generation.
 
 Reasoner is optional. Medium, High, and Ultra keep their selected UI level when
@@ -178,9 +178,9 @@ OpenAI-compatible API keys are session-only secrets.
 The implementation must not persist API keys in:
 
 - extension settings;
-- scene cache;
-- card cache;
-- prompt plan cache;
+- pipeline manifests or artifacts;
+- prepared packets or card records;
+- queued next-swipe intents;
 - prompt packets;
 - model-call journal entries;
 - diagnostics exports;
@@ -196,20 +196,20 @@ Generation roles describe why a model call exists. They are not the same thing a
 
 | Role | Default lane | Purpose | Failure behavior |
 | --- | --- | --- | --- |
-| `utilityArbiter` | Utility, configured Ready or Untested Reasoner at High/Ultra | Decide whether Recursion should skip, reuse cache, refresh cards, compose a packet, infer story tense/POV, and optionally invoke Reasoner | Unavailable lane reuses valid cache or skips injection; invalid schema or missing/mismatched `snapshotHash` uses conservative local fallback |
+| `utilityArbiter` | Utility, configured Ready or Untested Reasoner at High/Ultra | Plan fresh turn card work, decide whether to skip or compose, infer story tense/POV, and optionally invoke Reasoner | Unavailable lane uses a validated exact-turn packet only when deterministic classification already permits it, otherwise skips injection; invalid schema or missing/mismatched `snapshotHash` uses conservative local fallback |
 | `sceneFrameCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Produce compact current-scene frame data | Omit card with diagnostic |
 | `activeCastCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Capture who is present, visible state, and current conversational or physical role | Omit card with diagnostic |
 | `characterMotivationCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Capture observable or safely inferred motives, pressures, hesitations, and goals | Omit card with diagnostic |
 | `dialogueRelationshipCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture current conversational tension, relationship texture, promises, conflicts, and voice constraints | Omit card with diagnostic |
 | `socialSubtextCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture scene-observable implied social meaning such as humor, veiled pressure, invitation, boundaries, status, and face | Omit card with diagnostic |
-| `sceneConstraintsCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Identify hard scene constraints, contradiction traps, timing, access, and plausibility risks for the next generation | Omit card with diagnostic |
+| `sceneConstraintsCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Identify hard scene constraints, contradiction traps, timing, access, and plausibility risks for native generation | Omit card with diagnostic |
 | `knowledgeSecretsCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Capture concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries | Omit card with diagnostic |
 | `clocksConsequencesCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Capture deadlines, countdowns, delayed consequences, and escalation triggers | Omit card with diagnostic |
 | `environmentAffordancesCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances | Omit card with diagnostic |
 | `possessionsItemsCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them | Omit card with diagnostic |
 | `openThreadsCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture immediate unresolved pressures and promises visible in play | Omit card with diagnostic |
 | `fusedCardBundle` | Utility by default, Reasoner when Fused routing selects it | Generate every requested card family together in one structured foreground bundle | Validate every sibling independently; if zero useful cards survive, run the Segmented per-card stages. |
-| `guidanceComposer` | Utility | Write provider-authored direction for using selected raw cards in the next generation | Fall back to raw-card-only packet when invalid or unavailable |
+| `guidanceComposer` | Utility | Write provider-authored direction for using selected raw cards in native generation | Fall back to raw-card-only packet when invalid or unavailable |
 | `cardAuthoringAssist` | Utility | Rewrite a user draft or intent into a compact high-value Recursion card suggestion | Keep the user draft as local fallback and expose provider-fallback diagnostics |
 | `postProcessGuidanceUtility` | Utility at Low/Medium only | Analyze where and how the frozen ordered Post-process cards apply; return concise structured guidance, never revised story prose | May use the remaining configured stage attempts on Utility; exhaustion fails the operation/category without Reasoner fallback |
 | `postProcessGuidanceReasoner` | Reasoner at High/Ultra only | Analyze where and how the frozen ordered Post-process cards apply; return concise structured guidance, never revised story prose | May use the remaining configured stage attempts on Reasoner; exhaustion fails the operation/category without Utility fallback |
@@ -348,7 +348,7 @@ Inputs:
 - snapshot hash;
 - current chat/message fingerprint;
 - current settings hash;
-- known scene cache metadata;
+- exact turn key and compatible checkpoint metadata;
 - available card types and token budgets;
 - behavior influence policy for Strength, Focus, and Prompt Footprint;
 - Reasoner on/off state and health summary.
@@ -411,7 +411,7 @@ and records a compact capability reason.
 
 ## Batched Card Calls
 
-Utility card calls should run from one snapshot. The batch boundary is part of the correctness contract: all card jobs in a run must see the same chat state, settings hash, scene cache metadata, and prompt budget.
+Utility card calls should run from one snapshot. The batch boundary is part of the correctness contract: all card jobs in a run must see the same chat state, turn key, settings hash, and prompt budget.
 
 The preferred execution shape is:
 
@@ -454,19 +454,20 @@ A Segmented response shaped as `{ "envelope": { ... }, "items": [ ... ] }` may b
 
 Manual forced selection does not create a new provider schema. Runtime still sends one request per selected or Arbiter-requested family and expects the same `recursion.card.v1` envelope with one prompt-facing item for that family. If Manual selected a family that the Arbiter omitted, runtime synthesizes the missing `cardJob` after scope filtering with `forcedBy: "manual-selection"`; the provider is not asked to generate multiple families in one response.
 
-## Cached Card Freshness
+## Turn Artifact Freshness
 
-Scene cache entries may be shown to the Utility Arbiter as compact metadata so it can decide whether to reuse, stow, discard, or regenerate cards. Runtime must not treat that Arbiter visibility as permission to inject cached cards.
+The Utility Arbiter does not decide whether prior generated work crosses a turn boundary. Runtime classifies that deterministically before dispatch. A new user message always receives fresh Arbiter and card work; there is no expiry clock or semantic-scene judgment.
 
-Before any cached card can enter the deck/hand for prompt composition, runtime must verify source freshness against the current normalized snapshot:
+Before any stored card enters the deck or hand, runtime verifies:
 
-- source chat id matches the current chat when present;
-- source message range is valid, visible, and not ahead of the current turn;
-- at least one parseable `message:N` evidence ref exists, and all `message:N` evidence refs still point at visible messages inside that source range;
-- expiry metadata has not passed;
-- stored source fingerprint matches the current source-window fingerprint.
+- the chat and exact turn key match;
+- the bounded message range is still visible and its source hash matches;
+- selected-swipe, character/group, settings, provider, pipeline, deck, prompt, and stage contracts match;
+- every dependency and artifact hash validates;
+- at least one parseable `message:N` evidence ref exists and remains inside the frozen source range;
+- no matching Reprocess or Full Rebuild intent invalidates the artifact.
 
-Cards that fail this check are stale cache artifacts. They may be counted in visible cache-inspection metadata, but their `promptText`, summaries, and evidence must not become prompt-facing. Routine cache inspection is not a warning by itself. If the Arbiter requests `reuse-cache` and no cached cards pass freshness, runtime should fail soft as cache unavailable instead of injecting stale guidance.
+A failed check makes the checkpoint stale. Its prompt text, summary, and evidence cannot become prompt-facing. Unchanged-swipe reuse is allowed only when the completed packet and every required binding validate; otherwise runtime safely rebuilds.
 
 ## Reasoner Composer Call
 

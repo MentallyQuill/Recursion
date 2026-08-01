@@ -6,15 +6,15 @@
 
 Recursion is a SillyTavern extension that helps a roleplay model notice what matters before it writes.
 
-It reads the active chat, reasons over the immediate scene, builds a compact deck of scene cards, and selects the cards that matter for the next reply. The result is an inspectable prompt packet with guidance, card evidence, and guardrails for the current moment: pressure, intent, constraints, consequences, hidden boundaries, environmental affordances, and unresolved threads.
+It reads a bounded band of the active chat, reasons over the current turn, builds a compact disposable turn deck, and selects the cards that matter for the reply. The result is an inspectable prompt packet with guidance, card evidence, and guardrails for the current moment: pressure, intent, constraints, consequences, hidden boundaries, environmental affordances, and unresolved threads.
 
 Recursion is a scene reasoning layer for the reply in front of you.
 
 ## How It Works
 
-Recursion starts with a broad scene deck, selects a compact turn hand, and injects only the guidance and evidence that matter for the next reply. The selection step keeps the prompt focused without turning the deck into durable memory.
+Recursion builds a turn-bound deck, selects a compact hand, and injects only the guidance and evidence that matter for the reply. The selection step keeps the prompt focused without turning generated work into durable memory.
 
-![Dynamic card selection from the full scene deck to the injected guidance packet](assets/documentation/renders/recursion-dynamic-card-selection.png)
+![Dynamic card selection from the turn deck to the injected guidance packet](assets/documentation/renders/recursion-dynamic-card-selection.png)
 
 Before SillyTavern generates, Recursion's Pre-process Cards prepare the focused guidance packet. After the host response lands, optional Post-process Cards can revise it through the host's native quiet-generation path.
 
@@ -103,7 +103,7 @@ Stepped Thinking gives a character a private pre-generation pass. It is useful w
 
 Recursion works at the scene level, building a card deck across the live situation, choosing the most relevant cards for this turn, and turning that into prompt evidence the next reply can use. Recursion addresses the problem of scene awareness: missed constraints, unresolved threads, hidden knowledge, social pressure, consequences, items, environment, and continuity that should affect the reply right now.
 
-To that effect, it's a structured scene-reasoning and prompt-packet tool. It doesn't delve into character thoughts like Stepped Thinking, but instead acts as a dedicated thinking layer to ask: *What needs to be tracked and expanded upon to make the next generation feel like a rich continuation of the scene?*
+To that effect, it's a structured scene-reasoning and prompt-packet tool. It doesn't delve into character thoughts like Stepped Thinking, but instead acts as a dedicated thinking layer to ask: *What needs to be tracked and expanded upon so the reply feels like a rich continuation of the scene?*
 
 ## Pipelines
 
@@ -116,7 +116,7 @@ Pipeline controls decide how Recursion schedules scene work. Auto and Manual dec
 
 ## Resumable Execution
 
-Recursion checkpoints successful stages instead of treating the whole Pre-process and Post-process chain as one disposable request. A late failure or manual stop preserves completed work for Resume or Retry. A completed or stale eligible row can also be queued for dependency-aware Reprocess on the next generation; the full-fresh control similarly shows `Queued` until the next send or swipe consumes it once.
+Recursion checkpoints successful stages instead of treating the whole Pre-process and Post-process chain as one disposable request. A late failure or manual Stop preserves completed work for native-host Resume or Retry. An eligible row can queue dependency-aware `Reprocess from here on the next swipe`; the idle Full Rebuild control similarly queues exactly one matching swipe. Clicking either action starts no provider or host work, and a new user message always starts a fresh turn instead of inheriting the intent.
 
 Progress rows stay text-light and expose at most one contextual icon: Stop while the owned stage is running, Resume for a paused frontier, Retry for the blocking failed stage, Reprocess for reusable completed work, or cancel when reprocessing is queued. Each action has a concise tooltip and accessible label.
 
@@ -191,14 +191,14 @@ For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_
 - [Technical Manuals](docs/technical/README.md) - Runtime, card, prompt, provider, storage, diagnostics, and host integration manuals.
 - [Recursion Cost Research](docs/technical/RECURSION_COST_RESEARCH.md) - Provider call counts, token-budget ranges, example estimates, and cost-tuning levers.
 - [Testing Strategy](docs/testing/TESTING_STRATEGY.md) - Deterministic gates, Playwright readiness, guarded live smoke, artifacts, and documentation render checks.
-- [Cache Use And Reuse Spec](docs/architecture/CACHE_USE_AND_REUSE_SPEC.md) - Exact-source cache, swipe reuse, invalidation, and fresh-next-generation rules.
+- [Cache Use And Reuse Spec](docs/architecture/CACHE_USE_AND_REUSE_SPEC.md) - Exact-turn checkpoints, unchanged-swipe reuse, invalidation, and unconditional fresh work for new user turns.
 - [Post-process Cards Design](docs/superpowers/specs/2026-07-18-recursion-post-process-cards-design.md) - Current product and data contract for Post-process decks and host rewriting.
 
 ## Security And Privacy
 
-Recursion treats provider secrets and raw model I/O as sensitive. OpenAI-compatible direct keys are session-only and do not persist to settings, scene cache, prompt packets, run journals, diagnostics, browser local storage, SillyTavern file storage, or test artifacts.
+Recursion treats provider secrets and raw model I/O as sensitive. OpenAI-compatible direct keys are session-only and do not persist to settings, turn artifacts, prompt packets, run journals, diagnostics, browser local storage, SillyTavern file storage, or test artifacts.
 
-Normal diagnostics use hashes, compact statuses, bounded metadata, and sanitized activity instead of raw prompts, raw provider responses, hidden reasoning, or full transcript text. Resume-only prompts, cards, guidance, packets, and drafts live in isolated artifact records; manifests contain only checkpoint metadata. Successful Post-process settlement removes intermediate guidance and drafts, stale/abandoned retention removes unusable artifacts, and Reset Scene Cache immediately clears all current-chat execution state.
+Normal diagnostics use hashes, compact statuses, bounded metadata, and sanitized activity instead of raw prompts, raw provider responses, hidden reasoning, or full transcript text. Resume-only prompts, cards, guidance, packets, and drafts live in isolated artifact records; manifests contain only checkpoint metadata. Successful Post-process settlement removes intermediate guidance and drafts, stale or abandoned work loses unusable artifacts, and Reset Turn Cache clears Recursion-generated work for the active turn without changing SillyTavern messages.
 
 ## License
 

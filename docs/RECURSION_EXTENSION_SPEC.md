@@ -1,110 +1,91 @@
 # Recursion Extension Spec
 
-This is the top-level design and implementation contract for Recursion, a SillyTavern extension that improves roleplay writing quality by compiling a compact, current-scene reasoning packet for the next generation.
-
-Recursion's core design is:
+This is the top-level V1 contract for Recursion, a SillyTavern extension that compiles bounded, turn-local reasoning into an inspectable prompt packet for native host generation.
 
 ```text
-Utility Arbiter -> Scene Deck -> Turn Hand -> Optional Reasoner Composer -> Prompt Packet -> SillyTavern Injection
+Utility Arbiter -> Turn Deck -> Turn Hand -> Optional Reasoner Composer -> Prompt Packet -> SillyTavern Injection
 ```
 
-The extension should be mostly automatic. It should improve prose, dialogue, emotional texture, and scene adhesion by expanding the immediate implications of the active scene. It must not become a continuity extension, memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing product.
+Recursion is mostly automatic. It improves prose, dialogue, emotional texture, and scene adhesion by expanding the immediate implications of the active turn. It is not a continuity extension, memory manager, lore database, summary engine, vector-recall layer, campaign save system, or detached story generator.
 
 ## Document Map
 
-Start here, then follow the focused specs:
+- [Product Scope](design/RECURSION_PRODUCT_SCOPE.md)
+- [Card System](design/CARD_SYSTEM_SPEC.md)
+- [Behavior Settings](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md)
+- [Runtime Architecture](architecture/RUNTIME_ARCHITECTURE.md)
+- [Cache Use And Reuse](architecture/CACHE_USE_AND_REUSE_SPEC.md)
+- [Provider And Generation](architecture/PROVIDER_AND_GENERATION_SPEC.md)
+- [Prompt Composition](architecture/PROMPT_COMPOSITION_SPEC.md)
+- [Storage And Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md)
+- [UI Spec](design/UI_SPEC.md)
+- [Testing Strategy](testing/TESTING_STRATEGY.md)
 
-- [Product Scope](design/RECURSION_PRODUCT_SCOPE.md): product promise, V1 scope, non-goals, success criteria.
-- [Card System Spec](design/CARD_SYSTEM_SPEC.md): scene-local cards, card families, lifecycle, Utility Arbiter responsibilities, turn hand.
-- [Behavior Settings Policy Spec](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md): Strength, Min/Max Cards, Focus, and Prompt Footprint backend effects.
-- [Runtime Architecture](architecture/RUNTIME_ARCHITECTURE.md): host boundary, Segmented/Fused stage graphs, durable checkpoints, Auto Control Plan, failure behavior, implementation slices.
-- [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md): Utility and Reasoner lanes, source routing, machine-JSON schema metadata, structured calls, validation, session-only secrets, model-call journal.
-- [Prompt Composition Spec](architecture/PROMPT_COMPOSITION_SPEC.md): prompt packet contract, Utility/Reasoner composition, injection lanes, footprint profiles, omissions.
-- [Storage and Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md): settings, logical JSON records, scene cache, run journal, activity events, redaction, invalidation.
-- [UI Spec](design/UI_SPEC.md): Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief dropdown, full viewer, high-level settings, SillyTavern-native graphite visual system.
-- [Technical Manuals](technical/README.md): release-facing technical overview, runtime turn sequence, card deck and hand, prompt packet and injection, provider routing, storage/diagnostics, and host integration.
-- [Testing Strategy](testing/TESTING_STRATEGY.md): fast contract suite, Playwright readiness, focused live SillyTavern smoke, dedicated soak users, and pass/fail semantics.
-- [SillyTavern Playwright Harness](testing/SILLYTAVERN_PLAYWRIGHT_HARNESS.md): target harness scripts, environment variables, live preflight, selector rules, and redaction requirements.
-- [Live Smoke Test Plan](testing/LIVE_SMOKE_TEST_PLAN.md): Recursion Bar, Hero Pixel Array progress menu, power toggle, Auto, Manual, provider, prompt cleanup, fallback, and responsive UI smoke scenarios.
-- [Artifact Contract](testing/ARTIFACT_CONTRACT.md): report, live-log, screenshot, prompt metadata, storage probe, and redaction contract.
-- [Implementation Plan](testing/IMPLEMENTATION_PLAN.md): staged build order and verification gates.
-
-The older [Turn Context Compiler seed note](design/RECURSION_TURN_CONTEXT_COMPILER.md) is retained only as historical context and is superseded by this spec set.
+The older [Turn Context Compiler seed note](design/RECURSION_TURN_CONTEXT_COMPILER.md) is historical context only.
 
 ## Locked V1 Decisions
 
-Current V1 decisions:
-
-- Use the recommended SillyTavern injection path: adapter-owned prompt entries installed as close as practical to generation start, with clear metadata so stale Recursion packets can be replaced or cleared.
-- Ship the full fixed V1 card catalog described in [Card System Spec](design/CARD_SYSTEM_SPEC.md).
-- Build provider settings, provider contracts, and structured call contracts before the card loop depends on them.
-- The first working loop must support both Utility Composer and Reasoner Composer, with Utility Composer as the default and fail-soft path.
-- Pipeline selection is separate from Auto/Manual. Segmented is the default and generates each requested card through an independent simple call; Fused asks for one structured card bundle, validates siblings independently, and falls back to Segmented only when it yields zero useful cards.
-- Support all three provider sources for both lanes where the host permits it: current host model, host connection profile, and OpenAI-compatible endpoint.
-- Machine-readable Recursion provider jobs carry the expected response schema, request structured output where the host supports it, and still validate visible JSON before runtime trusts the result.
-- Advanced users can control where the conditioned final prompt packet is injected by setting placement, role, and depth; defaults use the recommended concrete `in_prompt`, `system`, depth `1` plan.
-- Use durable checkpoints, bounded per-stage model-attempt windows, aborts, fallbacks, structured validation, and sanitized model-call diagnostics without importing Directive's campaign architecture. Recursion sets no default generation timeout.
-- Do not store raw provider prompts or raw provider responses by default.
-- Recursion lives in its own chat-attached top bar. It should sit as the lowest bar in the top-bar stack when the host layout makes that possible.
-- Invisible model calls, cache updates, prompt installs, and fallback actions must be visible through the Hero Pixel Array progress menu and current-step status instead of popup spam.
-- Automated live SillyTavern tests must reject `default-user` and use dedicated users such as `recursion-soak-a`, `recursion-soak-b`, and `recursion-soak-c`.
+- SillyTavern owns chat state, native generation, visible story output, and native Stop/Start behavior.
+- Recursion installs and clears only its own prompt lanes.
+- Every Pre-process operation is bound to one exact turn key derived from the current bounded source band and relevant runtime contracts.
+- A new user message always creates a new turn key and runs fresh Arbiter/card work. There is no semantic lease or time-to-live heuristic.
+- An unchanged swipe of the same turn may reinstall a validated completed packet with zero Recursion model calls.
+- An edit, delete, selected-swipe change inside the bounded source band, character/group change, settings change, provider change, or contract change rejects incompatible reuse.
+- `Reprocess from here on the next swipe` and Full Rebuild are turn-bound, one-shot, next-swipe-only actions. Clicking either starts no provider or host work.
+- Stop has one runtime owner. Resume requests the matching native SillyTavern action and never executes provider work on a detached path.
+- Post-process work is bound to the exact assistant response identity, including the selected swipe and response content.
+- Durable V2 manifests contain checkpoint metadata; isolated artifacts contain the minimum bodies needed for Resume and validated reuse.
+- Last Brief is display-only state and never authorizes reuse.
+- Generated work from prior turns is disposable and pruned automatically. Users configure journal retention only.
+- Direct-provider API keys remain session-only and never enter durable records or diagnostics.
+- Automated live tests use dedicated soak users; intentional acceptance testing may verify the exact reported `default-user` chats.
 
 ## Product Boundary
 
-Recursion owns a narrow short-lived reasoning-context loop:
+Recursion owns:
 
-- observe the active chat and current generation context;
-- ask the Utility Arbiter what current-scene work matters;
-- maintain a cached scene deck of disposable cards;
-- select a compact turn hand;
-- optionally use a Reasoner Composer to fuse complex hands;
-- compose and install a prompt packet;
-- show the last hand, prompt packet, and diagnostics in a mostly read-only UI.
+- reading a bounded snapshot of the active chat;
+- deriving an exact turn identity;
+- planning and generating fixed-catalog card work;
+- selecting a compact turn hand;
+- composing, validating, installing, and clearing a prompt packet;
+- optional identity-bound Post-process rewriting;
+- durable resumability, bounded diagnostics, and an operational UI.
 
-Recursion does not own:
+Recursion does not own durable canon, transcript history, World Info, Memory Books, character databases, campaign branches, or primary story generation.
 
-- continuity-extension duties;
-- durable canon;
-- long-term memory;
-- transcript summarization;
-- vector recall;
-- World Info or Memory Books;
-- character databases;
-- campaign saves or branches;
-- user-authored card catalogs;
-- hidden internal-thought storage.
+## Turn Identity And Classification
+
+The turn key includes the chat key, latest user message identity and content hash, bounded visible source-band hash, selected swipe identity when relevant, character/group identity, and all settings/provider/pipeline/deck/prompt/stage contracts that can change output.
+
+Before any provider call, runtime classifies the request:
+
+- **New turn:** a new user message or different turn key. Build fresh work unconditionally.
+- **Unchanged swipe:** the same turn key with a validated completed packet. Reinstall it and let SillyTavern roll another response.
+- **Changed source:** an edit, delete, or relevant swipe/source change. Reject incompatible work and rebuild.
+- **Queued next-swipe action:** consume the matching one-shot Reprocess or Full Rebuild intent, then execute the requested invalidation scope.
+- **Paused operation:** request native host generation; continue only when the interceptor re-enters with the matching source.
+
+No clock, inferred scene boundary, or semantic similarity decides whether generated work survives.
 
 ## Core Runtime Flow
 
-1. The SillyTavern host adapter captures a stable turn snapshot.
-2. Runtime derives the behavior influence policy for Strength, Min/Max Cards, Focus, and Prompt Footprint.
-3. Runtime creates or restores a source-bound operation manifest and selects Segmented or Fused from normalized settings.
-4. The Utility Arbiter receives the snapshot, current scene-cache metadata, fixed V1 card catalog, provider status, behavior influence policy, and prompt budget context.
-5. Runtime validates the Arbiter plan, enforces schema and budget caps, applies current behavior and card-scope policy, then runs the requested card graph from one frozen snapshot.
-6. Segmented runs independent per-card stages. Fused runs one bundle stage with per-card validation outcomes and zero-useful-card Segmented fallback.
-7. Successful stages commit isolated artifacts and metadata-only checkpoints before their dependents may run. Resume reuses only source-, settings-, provider-, version-, input-, dependency-, and artifact-hash-compatible checkpoints.
-8. Utility `guidanceComposer` builds the guidance layer, Reasoner Composer assists when policy and lane readiness select it, and both pipelines preserve full selected raw card evidence in the normal prompt-install contract.
-9. Runtime validates the packet and installs it through Recursion-owned SillyTavern prompt keys.
-10. The UI and storage layers receive sanitized diagnostics and latest-hand metadata.
+1. The host adapter freezes the bounded source snapshot and generation kind.
+2. Runtime computes the turn key and classifies the invocation.
+3. Valid unchanged-swipe reuse reinstalls the prepared packet without model work; all other accepted paths create or resume a V2 operation.
+4. The Utility Arbiter plans the required card families from the frozen snapshot.
+5. Segmented runs independently checkpointed card stages; Fused validates one multi-card bundle and repairs or falls back through Segmented as required.
+6. Runtime validates card evidence, builds the turn deck, and selects the bounded hand.
+7. Utility or policy-selected Reasoner composition produces guidance while preserving selected raw card evidence.
+8. Runtime validates and installs the packet through Recursion-owned host prompt keys.
+9. SillyTavern performs primary generation.
+10. Optional Post-process work freezes the landed assistant response identity, generates a guarded rewrite, and commits once through the host.
 
-If any optional step fails, Recursion should degrade gracefully. Normal SillyTavern generation should continue.
+Optional failures fail soft. A failed Recursion preparation must not strand the host send path.
 
-## Auto Decisions
+## Card Catalog And Prompt Packet
 
-The Utility Arbiter is the semantic decision point. It decides meaning-heavy questions such as:
-
-- whether the current scene is the same scene, a soft shift, a hard shift, or unknown;
-- whether to skip, reuse cache, refresh cards, or compose a packet;
-- which card families are already represented, missing, stale, or no longer relevant;
-- which cards belong in the next turn hand;
-- which cards deserve more emphasis or detail;
-- whether the Reasoner Composer is worth using this turn.
-
-Runtime code is deterministic for safety, not semantic judgment. It validates schemas, caps token budgets, enforces source/fingerprint checks, rejects unsafe fields, handles provider failures, and prevents stale results from mutating the current prompt state.
-
-## V1 Card Catalog
-
-V1 uses a fixed internal catalog:
+V1 provides a fixed internal catalog:
 
 - Scene Frame
 - Active Cast
@@ -117,63 +98,17 @@ V1 uses a fixed internal catalog:
 - Items
 - Open Threads
 
-The catalog is visible through the Cards surface, where users can focus or whitelist fixed families and sub-items. Recursion also supports local operator-authored cards inside duplicated custom decks; those decks are configuration and authoring state, not durable memory or a prompt-injection checklist. The Arbiter receives the fixed catalog, active deck, and current scope and decides which cards need to exist for the current scene within Auto or Manual rules.
+Cards expand current implications rather than merely restating facts. Operator-authored cards inside custom decks are configuration, not durable memory.
 
-Cards must expand current scene implications rather than simply restate remembered facts. For example, a location card should not merely say that a character is near a library, and it should not dump broad library lore. It should derive what that location means for the next beat: nearby routes, visibility, plausible interruptions, social exposure, usable details, and what is outside the current scene's relevance.
+The installed packet contains:
 
-Character Motivation cards replace raw internal-thought dumps. They may express visible motivation, likely pressure, or behavior-facing guidance, but private diagnostic notes must never be injected.
+- **Guidance:** provider-authored direction for using the selected evidence;
+- **Card Evidence:** validated selected-card `promptText`;
+- **Guardrails:** compact constraints against contradiction, hidden-thought leakage, spoilers, and rewriting the user's message.
 
-## Prompt Packet
+Prompt footprint remains bounded and inspectable. Advanced injection placement, role, and depth apply to the composed packet, not individual cards.
 
-The model-facing artifact is a prompt packet made from provider-authored guidance plus selected raw card evidence, not the full scene deck.
-
-The packet has three primary sections:
-
-- Guidance: provider-authored direction for using the selected evidence in the next generation.
-- Card Evidence: full raw selected-card `promptText`, grouped as evidence.
-- Guardrails: compact constraints that prevent contradictions, hidden-thought leakage, spoilers, or user-message rewriting.
-
-Prompt footprint can be compact, normal, or rich. Even rich packets must stay bounded, current-scene oriented, and inspectable.
-
-Advanced Injection settings can override the conditioned final packet's SillyTavern placement, role, and depth for model or preset compatibility. They apply after Utility or Reasoner composition and do not create per-card injection controls.
-
-## UI Shape
-
-The primary UI is a Recursion Bar attached to the chat surface:
-
-```text
-RECURSION | Power | Pipeline | Mode | Cards | Hero Pixel Array + current step        Reasoning Level | Last Brief v | Options ...
-```
-
-It replaces the earlier shelf/drawer idea. The bar is thin, stable, mostly observational, and paired with:
-
-- a Hero Pixel Array progress menu for live status, model-call progress, cache writes, prompt installation, and fallback visibility;
-- an icon-only Pipeline menu for Segmented and Fused;
-- an icon-only Cards scope menu that Auto treats as focus and Manual treats as a strict whitelist;
-- an options/settings menu opened from the ellipsis;
-- a Last Brief dropdown opened from the dropdown arrow;
-- a full viewer for deck/activity/prompt/settings/provider inspection;
-- provider settings for Utility and Reasoner lanes;
-- Advanced Injection settings for final prompt placement, role, and depth;
-- a small set of broad behavior controls.
-
-Users should not need to edit cards, tune individual card weights, or maintain relevance rules.
-
-## Storage Shape
-
-Storage is cache-oriented:
-
-- `extension_settings.recursion`: compact control plane and provider settings without secrets.
-- `recursion-system-index.v1.json`: rebuildable index of Recursion records.
-- `recursion-scene-{chatKey}-{sceneKey}.v1.json`: bounded scene deck and latest hand metadata.
-- `recursion-run-journal-{chatKey}.v1.json`: bounded sanitized diagnostics.
-- `recursion-pipeline-run-{chatKey}.v1.json`: one metadata-only current operation manifest.
-- `recursion-pipeline-artifact-{chatKey}-{operationId}-{artifactId}-v1.json`: isolated resumable stage bodies.
-- `recursion-queued-reprocess-{chatKey}.v1.json`: one-shot full-fresh or dependency-aware stage intent.
-
-Cards are cache artifacts, not memories. Records can be invalidated aggressively on chat changes, hard scene shifts, source edits/deletes, provider/settings changes, or schema/catalog changes.
-
-## Resumable Execution Contract
+## Durable Execution
 
 ```json
 {
@@ -182,51 +117,56 @@ Cards are cache artifacts, not memories. Records can be invalidated aggressively
 }
 ```
 
-`Attempts per step` is the total automatic attempt window for each model stage, from one through five. Local storage, validation, composition, and host-mutation stages do not consume it. Slow calls are not retried merely for being slow: there is no default latency deadline, and an attempt continues until it succeeds, fails, or is stopped. Recursion never automatically retries SillyTavern's primary story generation.
+Model stages receive one through five total automatic attempts. Local validation, persistence, composition, and host mutation do not consume attempts. Recursion sets no default model-call timeout and never automatically retries SillyTavern's primary generation.
 
-Stop pauses the active operation after aborting its frontier call and preserves committed checkpoints. Resume continues from the saved frontier. Retry is available only for the blocking failed stage and reruns its descendants. Reprocess queues an eligible completed/cached stage and all dependents for the next generation. Full fresh is also one-shot and `Queued`; neither queued action starts work immediately.
+Accepted stages commit integrity-bound isolated artifacts before the V2 manifest advances. Resume and reuse require matching source, turn, settings, provider, pipeline, stage, dependency, and artifact hashes.
 
-Checkpoints are cache, not authority over changed source material. A message, swipe, character/group identity, settings, provider, prompt version, stage version, dependency hash, or artifact integrity change makes incompatible work stale. Reset Scene Cache clears the current chat's scene cache, manifest, isolated artifacts, queued intent, and installed prompt state immediately.
+Stop pauses the graph, aborts active Recursion calls, requests native host Stop, clears prompt lanes, and waits for Post-process settlement. Resume requests the stored native Send, Swipe, or Regenerate action and does zero direct provider work. Retry resets only the blocking failed stage and its descendants.
 
-## Provider Shape
+Reprocess invalidates one eligible stage and its dependency closure on the next matching swipe. Full Rebuild bypasses all reusable Pre-process checkpoints on the next matching swipe. A new user message, source-band edit, or turn mismatch cancels either queued intent.
 
-Recursion has two provider lanes:
+`Reset Turn Cache` removes Recursion-generated work for the active turn, its queued intent, prepared packet, and owned prompt state without changing SillyTavern messages.
 
-- Utility: default, fast, cheap, structured, batch-friendly.
-- Reasoner: optional composer/synthesis lane for complex, crowded, conflicted, or subtle scenes.
+## Storage Shape
 
-Provider sources:
+- `extension_settings.recursion`: persisted controls and provider configuration without secrets.
+- `recursion-system-index.v1.json`: rebuildable index and V2-authority marker.
+- `recursion-pipeline-run-{chatKey}.v2.json`: current metadata-only operation manifest.
+- `recursion-pipeline-artifact-{chatKey}-{operationId}-{artifactId}.v2.json`: isolated resumable artifact.
+- `recursion-queued-reprocess-{chatKey}.v2.json`: one-shot next-swipe intent.
+- `recursion-run-journal-{chatKey}.v1.json`: bounded sanitized diagnostics.
 
-- current host model;
-- host connection profile;
-- OpenAI-compatible endpoint.
+V1 generated-record formats are retired input. On V2 activation, Recursion deletes retired generated records instead of migrating them into authority. Prior-turn artifacts are pruned as soon as they stop protecting the active operation or exact same-turn reuse path.
 
-Host connection profile calls request machine JSON without host preset/instruct wrapping when the SillyTavern service supports it. OpenAI-compatible calls use direct chat-completions JSON-object requests and read-only `/models` discovery. All lanes validate role-specific schemas before returning `ok: true`.
+## UI Contract
 
-API keys for direct endpoints are session-only. They must not persist to settings, scene cache, prompt packet, run journal, diagnostics, reports, or artifacts.
+The compact Recursion Bar exposes Power, Pipeline, Mode, card scope, Hero Pixel Array progress, current status, Reasoning Level, Last Brief, and Options. It remains SillyTavern-native and operational.
 
-## Implementation Strategy
+Progress rows expose at most one contextual action:
 
-The implementation should proceed in vertical slices:
+- `Stop and pause this operation`
+- `Resume from saved checkpoint`
+- `Retry this stage`
+- `Reprocess from here on the next swipe`
+- `Cancel queued reprocess`
 
-1. Contracts and skeleton runtime.
-2. Storage and settings.
-3. Provider lanes and structured calls.
-4. Utility Arbiter and card deck.
-5. Batched card generation.
-6. Prompt composition and injection.
-7. Recursion Bar, Hero Pixel Array progress menu, and viewer.
-8. SillyTavern integration smoke.
+When idle, the shared action slot exposes `Rebuild all Recursion work on the next swipe`; its queued label is `Full rebuild on next swipe: Queued`.
 
-Each slice should preserve the product boundary: current-scene prompt compilation, fail-soft behavior, no durable memory ownership, no card micromanagement, and no campaign-save architecture.
+Advanced Storage Retention exposes Journal Entries only. Diagnostics exposes `Reset Turn Cache`, whose tooltip is `Delete Recursion's generated work for the active turn without changing SillyTavern messages.`
+
+## Provider And Privacy Contract
+
+Utility is required; Reasoner is optional and policy-selected. Each lane can use the current host model, a host connection profile, or an OpenAI-compatible endpoint. All machine jobs validate their visible structured output before runtime trusts it.
+
+Raw provider prompts, raw responses, hidden reasoning, transcript bodies, and direct-provider secrets are excluded from normal journals, diagnostics, and proof reports. Diagnostic proof uses hashes, bounded statuses, mutation counts, and lifecycle counters.
 
 ## Current Source Of Truth
 
-When docs conflict, prefer this order:
+When current documents conflict, prefer:
 
-1. This top-level extension spec.
-2. The focused spec for the relevant subsystem.
-3. The implementation plan.
-4. Historical seed notes.
+1. this top-level extension spec;
+2. the focused subsystem spec;
+3. current implementation and executable contract tests;
+4. historical notes only for context.
 
-Because Recursion is pre-alpha, incompatible early docs or prototypes should be updated in place to the current contract instead of preserving legacy behavior.
+Recursion is pre-alpha. Update contracts in place; do not add compatibility shims for retired generated-state models.

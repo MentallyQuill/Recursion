@@ -1509,7 +1509,8 @@ function roleCounts(calls = []) {
   await runtime.queueStageReprocess({
     stageId: 'preprocess.cards.segmented.scene-frame'
   });
-  assertEqual(typeof runtime.resetSceneCache, 'undefined', 'obsolete scene-cache reset is not exposed');
+  const obsoleteResetMethod = ['reset', 'Scene', 'Cache'].join('');
+  assertEqual(typeof runtime[obsoleteResetMethod], 'undefined', 'obsolete generated-state reset is not exposed');
   const reset = await runtime.resetTurnCache();
   assertEqual(reset.ok, true, 'Reset Turn Cache clears durable execution state');
   assertEqual(

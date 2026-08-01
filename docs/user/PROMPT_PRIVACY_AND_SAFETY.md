@@ -73,8 +73,8 @@ Recursion may store bounded cache and diagnostics:
 
 - compact settings without secrets;
 - provider preferences without API keys;
-- scene cache metadata;
-- current-scene card summaries and refs;
+- exact-turn manifest metadata;
+- current-turn card summaries and refs;
 - latest hand metadata;
 - bounded run journal events;
 - prompt packet hashes and omission reasons;
@@ -160,7 +160,7 @@ A safe diagnostic artifact can include:
 - settings without secrets;
 - provider source and model labels without keys;
 - system index summary;
-- selected scene cache metadata;
+- selected exact-turn checkpoint metadata;
 - recent sanitized journal events;
 - prompt packet hashes and selected card refs;
 - omission and fallback reasons.

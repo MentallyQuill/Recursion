@@ -382,4 +382,4 @@ Cut from V1:
 - multi-packet experiments competing for the same generation;
 - legacy compatibility layers for early pre-alpha packet shapes.
 
-Pre-alpha status allows Recursion to update prompt packet schemas, card fields, and storage records in place when the V1 contract improves. The invariant to preserve is product behavior: a current-scene, inspectable packet that preserves selected evidence, adds provider-authored guidance, and installs only when it helps the next generation.
+Pre-alpha status allows Recursion to update prompt packet schemas, card fields, and storage records in place when the V1 contract improves. The invariant to preserve is product behavior: a current-turn, inspectable packet that preserves selected evidence, adds provider-authored guidance, and installs only when it helps native generation.

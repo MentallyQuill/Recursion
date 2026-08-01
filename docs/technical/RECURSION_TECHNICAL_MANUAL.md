@@ -1,6 +1,6 @@
 # Recursion Technical Manual
 
-Recursion is a SillyTavern extension that compiles compact, current-scene reasoning guidance for the next generation. It observes the active chat, runs Utility-led structured work, maintains a disposable scene deck, selects a turn hand, composes an inspectable prompt packet, and installs Recursion-owned prompt entries only when the mode allows injection.
+Recursion is a SillyTavern extension that compiles compact, current-turn reasoning guidance for native host generation. It observes a bounded band of the active chat, runs Utility-led structured work, builds a disposable turn deck, selects a turn hand, composes an inspectable prompt packet, and installs Recursion-owned prompt entries only when the mode allows injection.
 
 ## Product Boundary
 
@@ -29,7 +29,7 @@ flowchart TD
     Reasoner --> Packet
     Packet --> Inject["SillyTavern prompt injection"]
     Inject --> Activity["Hero Pixel Array progress and viewer"]
-    Activity --> Storage["Checkpoints, scene cache, and journal"]
+    Activity --> Storage["V2 checkpoints, artifacts, and journal"]
 ```
 
 The runtime spine is implemented across `src/runtime.mjs`, `src/execution-contracts.mjs`, `src/execution-scheduler.mjs`, `src/settings-policy.mjs`, `src/cards.mjs`, `src/card-scope.mjs`, `src/progress.mjs`, `src/prompt.mjs`, `src/providers.mjs`, `src/storage.mjs`, `src/activity.mjs`, and `src/hosts/sillytavern/host.mjs`.
@@ -55,7 +55,7 @@ Fused is designed for stronger reasoning models such as recent DeepSeek, GLM, Mi
 
 Every Pre-process and Post-process run is represented as a durable stage graph. Accepted stage outputs are stored as hash-addressed artifacts before the manifest advances. Recursion sets no default generation timeout: a model call may wait indefinitely until it returns, fails, or the user stops it. `Attempts per step` supplies a bounded one-to-five total attempt window for model stages only, with a default of two. SillyTavern's primary story generation is never automatically retried by Recursion.
 
-Stop aborts the active call and pauses the operation without discarding accepted checkpoints. Resume continues the earliest incomplete stage. Retry Stage discards the current stage output and resets only that stage's attempt window. Reprocess from Here is a next-generation queued intent that invalidates the selected stage and dependent stages when consumed. Queue a full fresh generation bypasses all reusable Pre-process work for the next send or swipe.
+Stop aborts the active call, requests native host Stop, and pauses the operation without discarding accepted checkpoints. Resume requests the matching native host action and continues only when the interceptor returns. Retry Stage discards the current stage output and resets only that stage's attempt window. Reprocess from here on the next swipe invalidates the selected stage and dependent stages when consumed. Full Rebuild bypasses all reusable Pre-process work for one matching swipe.
 
 ## Component Ownership
 
@@ -73,7 +73,7 @@ Stop aborts the active call and pauses the operation without discarding accepted
 | Cards | `src/cards.mjs` | Fixed V1 catalog, card normalization, provider-result conversion, lifecycle application, and hand selection. |
 | Card scope | `src/card-scope.mjs` | Fixed family/sub-item scope catalog, Auto focus payloads, Manual whitelist enforcement helpers, and safe scope summaries. |
 | Prompt | `src/prompt.mjs` | Guidance, card evidence, guardrail sections, budgets, omissions, Reasoner merge, validation, and prompt block conversion. |
-| Storage | `src/storage.mjs` | Logical execution manifest/artifact, queued-intent, scene-cache, and run-journal records; key safety; redaction; repair; and bounded retention. |
+| Storage | `src/storage.mjs` | V2 execution manifests and artifacts, queued next-swipe intents, run journals, key safety, redaction, repair, and bounded retention. |
 | Runtime | `src/runtime.mjs` | Power toggle, Auto/Manual orchestration, Segmented/Fused execution, snapshot use, Utility Arbiter plan handling, card-scope enforcement, cache updates, prompt install/clear flow, settings/provider actions, and view model data. |
 | UI | `src/ui.mjs` | Recursion Bar, Hero Pixel Array progress menu, options/settings, Last Brief, Full Viewer, settings, and provider controls. |
 | SillyTavern host | `src/hosts/sillytavern/host.mjs` | Snapshot capture, prompt install/clear, provider bridge, settings store, and user-file storage adapter selection. |
@@ -98,7 +98,7 @@ Recursion has two provider lanes:
 | Utility | Required default lane for Arbiter planning, card work, provider tests, guidance composition, and fail-soft guidance support. |
 | Reasoner | Optional composer lane for rich, crowded, conflicted, or subtle hands. Utility remains the fallback. |
 
-Each lane can use the current host model, a host connection profile when the host supports it, or an OpenAI-compatible endpoint. Direct endpoint API keys live only in the session secret store and are never persisted. OpenAI-compatible model discovery is read-only against `/models`; it may use the session key but does not save secrets, write journals, clear prompts, or invalidate scene cache.
+Each lane can use the current host model, a host connection profile when the host supports it, or an OpenAI-compatible endpoint. Direct endpoint API keys live only in the session secret store and are never persisted. OpenAI-compatible model discovery is read-only against `/models`; it may use the session key but does not save secrets, write journals, clear prompts, or invalidate active-turn work.
 
 Reasoning Level is the operator-facing lane-depth control. Low is Utility-only, Medium uses configured Ready or Untested Reasoner for guidance composition, High adds that Reasoner lane for Arbiter and priority card families, and Ultra is Reasoner-heavy. Untested is caution-only and remains routable. Unconfigured or unhealthy Reasoner routes fall back to Utility without blocking normal chat generation. Post-process guidance stays on the selected lane for its operation and fails soft when that lane is unavailable or its routed call fails.
 
@@ -108,7 +108,7 @@ The fixed V1 card catalog is Scene Frame, Active Cast, Character Motivation, Rel
 
 Cards are disposable scene-local cache artifacts. The scene deck stores active, stowed, stale, and discarded records for one scene. The turn hand is rebuilt for each composition event from active cards under max-card and token caps. A valid card can stay in the deck without entering the hand.
 
-Scene caches are source-revision aware. Runtime hashes the visible message source, including active SillyTavern swipe metadata, and stores up to four source variants inside a scene cache. Cached cards are reusable only from the exact active source variant when variants exist, so swiping from A to B cannot leak B cards when the user swipes back to A.
+Every Pre-process operation is source-revision aware. Runtime hashes the exact bounded visible source, including latest user identity and relevant selected-swipe metadata, into a turn key. A new user message always builds fresh work. An unchanged swipe may reinstall the completed packet without model calls only when every turn, settings, provider, pipeline, dependency, and artifact binding still matches. An edit or selected-swipe change inside the bounded band rejects incompatible reuse.
 
 Cards expand scene implications rather than preserve facts for their own sake. For example, a location card should derive routes, sightlines, plausible interruptions, usable local details, and relevance boundaries from the active location instead of restating the place name or dumping broad setting lore.
 
@@ -120,7 +120,7 @@ The model-facing artifact is the prompt packet, not the raw scene deck. V3 packe
 
 | Section | Use |
 | --- | --- |
-| Guidance | Provider-authored direction for using selected evidence in the next generation. |
+| Guidance | Provider-authored direction for using selected evidence in native generation. |
 | Card Evidence | Full raw selected card `promptText`, grouped as evidence and preserved without local semantic summarization. |
 | Guardrails | Compact constraints that protect scene plausibility, player intent, privacy, and scope. |
 
@@ -149,7 +149,7 @@ Execution manifests contain stage metadata and artifact references, never artifa
 
 Diagnostics are bounded and sanitized. Normal records may include hashes, ids, card families, operation/stage states, attempt numbers, token estimates, provider lane labels, durations, artifact byte counts, lifecycle codes, and compact errors. They must not include API keys, raw provider prompts, raw provider responses, artifact bodies, full transcripts, hidden reasoning, private story plans, or unbounded local paths. Explicit diagnostic excerpts remain opt-in and bounded.
 
-Context Windows and Storage Retention are local Recursion tuning controls. Source Freshness Messages and Source Freshness Text Budget bound the visible source window by walking backward from the latest visible chat message; Provider Analysis Messages bounds provider-safe snapshots; Scene Caches / Chat and Scene Caches Total prune only unprotected Recursion scene-cache files; Swipe Variants / Scene bounds active-source variants; Journal Entries bounds sanitized run journals. These caps do not delete, hide, summarize, or rewrite SillyTavern chat history.
+Context Windows and Storage Retention are local Recursion tuning controls. Source Freshness Messages and Source Freshness Text Budget bound the visible source window by walking backward from the latest visible chat message; Provider Analysis Messages bounds provider-safe snapshots; Journal Entries bounds sanitized run journals. Generated prior-turn work is pruned automatically. These controls do not delete, hide, summarize, or rewrite SillyTavern chat history.
 
 ```mermaid
 flowchart LR
@@ -169,9 +169,9 @@ Additional host integrations are reserved behind the adapter boundary and are no
 
 ## UI Observability
 
-The Recursion Bar shows the wordmark, power toggle, icon-only mode, Cards scope button, Hero Pixel Array, current-step text, Reasoning Level chain, Last Brief dropdown arrow, and options entry. The progress menu shows user-safe stages such as reading the turn, planning card work, generating cards, selecting the hand, installing prompt entries, storage warnings, and ready or fallback states. Each stage row owns one fixed 24px contextual action slot: Stop while active; Resume while paused; Retry Stage after a retryable failure; Clear Cache on a reusable completed/cached stage; or Reprocess from Here on an eligible completed/stale stage. The action is direct—there is no expansion row or confirmation flap—and the selected operation uses the cyan action state. Mobile truncates stage text before shrinking this control. Hover tooltips and accessible labels carry the explanatory wording.
+The Recursion Bar shows the wordmark, power toggle, icon-only mode, Cards scope button, Hero Pixel Array, current-step text, Reasoning Level chain, Last Brief dropdown arrow, and options entry. The progress menu shows user-safe stages such as reading the turn, planning card work, generating cards, selecting the hand, installing prompt entries, storage warnings, and ready or fallback states. Each stage row owns one fixed 24px contextual action slot: Stop while active; Resume while paused; Retry Stage after a retryable failure; Reprocess from here on the next swipe for eligible completed/stale work; or Cancel queued reprocess. The action is direct—there is no expansion row or confirmation flap—and the selected operation uses the cyan action state. Mobile truncates stage text before shrinking this control. Hover tooltips and accessible labels carry the explanatory wording.
 
-The idle Regenerate slot queues a one-shot full-fresh generation. Its accessible labels are `Queue a full fresh generation` and, while active, `Full fresh generation: Queued`. The click starts no model or host work. The next send or swipe consumes the intent once and bypasses reusable Pre-process artifacts.
+The idle shared action slot queues a one-shot Full Rebuild. Its accessible labels are `Rebuild all Recursion work on the next swipe` and, while active, `Full rebuild on next swipe: Queued`. The click starts no model or host work. The next matching swipe consumes the intent once and bypasses reusable Pre-process artifacts. A new user message cancels it.
 
 The Last Brief and Full Viewer are observatories, while the Cards surface is the bounded deck editor. Together they expose deck configuration, authored cards, generated scene evidence, selected hand contents, and omissions without turning the card system into a user-managed memory product.
 
@@ -208,7 +208,7 @@ Live smoke is opt-in and must use dedicated `recursion-soak-*` users. Automated 
 The current runtime preserves these related boundaries:
 
 - Card Deck configuration is persistent operator state; the scene deck and turn hand remain disposable runtime artifacts. `off`, `active`, and `priority` cards become runtime scope only when they are runnable and belong to the active deck.
-- Checkpoint, scene-cache, and swipe reuse are exact-source optimizations. An artifact, cached hand, or prior swipe may be reused only when source identity, packet contract, pipeline provenance, and invalidation checks match. A queued full-fresh generation bypasses those reuse paths once for the next send or swipe.
+- Checkpoint and unchanged-swipe reuse are exact-turn optimizations. An artifact, hand, or prepared packet may be reused only when turn identity, packet contract, pipeline provenance, dependencies, and artifact-integrity checks match. A queued Full Rebuild bypasses those paths once for the next matching swipe; a new user message always runs fresh work.
 - Post-process is a post-generation revision pipeline, not a generic rewrite. Guidance synthesis and native host rewriting bind to one frozen source and one ordered Post-process deck; failure reasons remain visible and host generation remains safe.
 - Post-process `As Swipe` certification is mutation-strict: live proof requires exactly one new selected Recursion-owned swipe with a source-bound marker, healthy terminal Post-process settlement, current-run progress/provider evidence, and matching before/after text hashes. Progressive partial output may settle only as a swipe; Replace requires a complete successful result.
 

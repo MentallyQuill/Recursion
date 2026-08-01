@@ -888,7 +888,7 @@ Provider setup lives in the Providers tab. Detailed activity and prompt inspecti
 
 The Last Brief dropdown is the lightweight trust surface. It opens from the dedicated dropdown-arrow button on the right side of the Recursion Bar. It does not open from the ellipsis options button.
 
-The displayed packet and cards remain available for unhurried review after Post-processing settles, including when it appends a swipe or replaces the selected response. They remain visible until the user starts the next send, swipe generation, or regenerate action. Navigating to an already existing swipe does not clear the panel because no next prompt packet is being prepared. Once a new host generation is accepted, the old rows may transition to `Preparing next prompt packet`; the next successful installation replaces them with the new committed Last Brief.
+The displayed packet and cards remain available for unhurried review after Post-processing settles, including when it appends a swipe or replaces the selected response. They remain visible until the user starts another native generation action. Navigating to an already existing swipe does not clear the panel because no prompt packet is being prepared. Once a new host generation is accepted, the old rows may transition to `Preparing prompt packet`; the next successful installation replaces them with the new committed Last Brief.
 
 The dropdown uses the full width of the Recursion Bar so card text has room to breathe. It should remain visually attached to the bar and use SillyTavern-native popup styling: dark surface, hairline border, subtle elevation, compact rows, and restrained hover/focus states.
 

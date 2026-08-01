@@ -1,271 +1,109 @@
-# Cache Use And Reuse Spec
+# Turn Work, Checkpoints, And Reuse
 
-## Purpose
+This is the current V1 authority for generated-work reuse in Recursion.
 
-This is the current cache and resumable-execution contract for Recursion. Cache improves cost and continuity only when the stored work still proves that it belongs to the active chat state. It is disposable evidence, not story memory.
+## Core Rule
 
-Recursion has four distinct reuse layers:
+Recursion never guesses how long a narrative scene lasts. Generated cards, guidance, hands, packets, and stage artifacts belong to one exact turn key. There is no semantic scene lease, time-to-live controller, or cross-turn generated-work authority.
 
-1. scene-card cache and bounded source variants;
-2. volatile Prepared Generation Artifact for exact same-turn prompt reinstall;
-3. durable stage checkpoints and isolated resume artifacts;
-4. idempotent Post-process commit receipts.
+A turn key binds:
 
-The old background warm pipeline is retired. Unknown pre-alpha pipeline settings fall through normal enum validation to Segmented, and old warm fields are ignored when scene caches normalize.
+- chat identity;
+- latest user message identity;
+- bounded visible source band and its content hashes;
+- selected assistant swipe identity where relevant;
+- active character and group identity;
+- normalized settings, provider route, pipeline, card configuration, and prompt contracts.
 
-## Scene-Card Cache
+The bounded source band follows the configured source-window message and character limits. Editing text inside that band changes the turn key. Editing text outside it does not.
 
-`recursion-scene-{chatKey}-{sceneKey}.v1.json` stores a bounded current-scene deck and safe latest-hand metadata. It may be deleted and rebuilt at any time.
+## Generation Classification
 
-A scene cache is eligible only when all relevant contracts match:
+Every intercepted host generation is classified before provider work:
 
-- chat and scene identity;
-- active bounded source revision;
-- selected swipe and visible-message hashes;
-- character and group identity;
-- settings and active deck revision;
-- provider and prompt contract versions;
-- card catalog and packet versions;
-- each card's evidence/source validation.
+| Host action | Reuse contract |
+| --- | --- |
+| New user message | New turn. Revoke prior generation authority and run a new Arbiter. Repeated text with a new message id is still new. |
+| Unchanged latest-assistant swipe | Same turn. Reinstall the validated packet with zero Recursion model calls. |
+| Swipe after an edit inside the source band | Reject reuse, cancel matching queued intent, and rebuild. |
+| Compatible paused Send, Swipe, or Regenerate | Continue saved work only after native SillyTavern generation re-enters the interceptor. |
+| Missing or corrupt required artifact | Reject reuse and recompute rather than trusting incomplete state. |
 
-Source variants support swipe A/B/A without treating inactive swipe text as current. Each scene retains a bounded `variantOrder`; runtime selects only the exact active revision.
+Historical Last Brief data is display-only. It has no generation-facing read API and cannot authorize prompt reuse.
 
-Purple means validated cache reuse. Source mismatch or ordinary stale state is a neutral rebuild, not a warning. Invalid or unreadable storage becomes a sanitized warning only when it prevents safe use.
+## Durable Execution
 
-## Prepared Generation Artifact
+The V2 manifest contains metadata-only stage records. Each completed stage checkpoint binds its input hash, output hash, dependency hashes, provenance, attempt window, and isolated artifact reference. Resume is valid only when all bindings still match.
 
-`lastPreparedGeneration` is in-memory exact-packet reuse for a same-turn swipe or reinstall. It includes the committed packet and hand plus a strict basis:
+Pre-process stages are:
 
-- source revision and source-window contract hashes;
-- visible message hashes and selected swipe;
-- character/group identity;
-- settings, deck, provider, prompt, and packet-input hashes;
-- artifact integrity hash.
+1. source snapshot;
+2. Utility Arbiter;
+3. Segmented card stages or one Fused bundle;
+4. turn deck;
+5. turn hand;
+6. provider guidance;
+7. prompt packet;
+8. host prompt installation.
 
-It has no wall-clock expiry. Reuse is a hit only when every required identity and contract still matches. A source mutation, reset, disable, teardown, or incompatible setting/provider change clears or rejects it.
+Post-process uses a separate operation bound to the completed assistant response identity. Every swipe body has a distinct response identity. A rewrite for one response body is never reused for another.
 
-Primary SillyTavern story generation is not cached or automatically retried by Recursion.
+## Same-Turn Swipe Reuse
 
-## Durable Stage Checkpoints
+An unchanged swipe may reuse a completed Pre-process operation only when:
 
-Every Pre-process run is a dependency graph:
+- turn key and source-band hash match;
+- the stored operation completed successfully;
+- the packet, hand, and install checkpoints exist and validate;
+- provider, settings, pipeline, prompt, deck, and card contracts match;
+- no matching Reprocess or Full Rebuild intent requires recomputation.
 
-```text
-Snapshot
-  -> Utility Arbiter
-  -> Segmented card stages OR Fused card bundle
-  -> Deck
-  -> Hand
-  -> Guidance
-  -> Prompt Packet
-  -> Prompt Install
-```
+Reuse reinstalls the same validated packet, records checkpoint reuse, performs zero Recursion model calls, and leaves native SillyTavern generation in control of the story response.
 
-Post-process uses either one Unified guidance/rewrite pair or ordered Progressive category guidance/rewrite pairs, followed by one host commit.
+## Reprocess On Next Swipe
 
-A checkpoint contains metadata only:
+`Reprocess from here on the next swipe` queues one stage and its dependents. Clicking it starts no provider work and no host generation. The intent binds to the current chat, phase, and turn key.
 
-- operation and stage ids;
-- stage version and state;
-- input and output hashes;
-- dependency output hashes;
-- source/settings/provider/pipeline/prompt provenance;
-- attempt counters and timestamps;
-- logical artifact reference, hash, and byte count.
+The next matching swipe consumes it once. Unaffected compatible checkpoints remain reusable. A new user turn, changed source band, chat change, or explicit cancellation deletes the intent instead of carrying it forward.
 
-The snapshot, Arbiter JSON, cards, hand, packet, guidance, drafts, and commit receipt live only in isolated `recursion-pipeline-artifact-*` records. Manifests, activity, run journals, diagnostics, and chat markers must not copy those bodies.
+The queued row action becomes `Cancel queued reprocess`.
 
-### Reuse decision
+## Full Rebuild On Next Swipe
 
-A completed checkpoint is reusable only when:
+`Rebuild all Recursion work on the next swipe` queues a one-shot Full Rebuild for the active turn. Its selected state is `Full rebuild on next swipe: Queued`.
 
-1. the stage id and version match;
-2. the stage input fingerprint matches;
-3. every declared dependency checkpoint hash matches;
-4. run provenance matches the current source, settings, provider, pipeline, and prompt versions;
-5. the referenced artifact exists and its SHA-256 matches both reference and output hash;
-6. the stage validator accepts the artifact again.
+The click itself starts no work. The next matching swipe consumes the intent once and bypasses every Pre-process checkpoint for that operation. A normal new user message starts its own new turn and cancels the queued swipe intent.
 
-Any failure invalidates that stage and its descendants. Unrelated compatible checkpoints remain reusable.
+Full Rebuild differs from Reset Turn Cache:
 
-### Artifact commit ordering
-
-The scheduler writes and verifies an artifact before it commits the checkpoint manifest. A body without a checkpoint is not reusable. Running and paused current operations temporarily protect same-operation artifacts so repair cannot race a just-written artifact before its manifest update.
-
-## Pipeline Cache Behavior
-
-### Segmented
-
-Segmented gives each requested card an independent model stage. A valid cached card/checkpoint skips only its own provider work. Sibling stages can still run or fail independently.
-
-Segmented is the default and is suited to smaller, simpler, or locally hosted models that benefit from narrow requests.
-
-### Fused
-
-Fused makes one structured bundle call after the Arbiter. Each requested card becomes a validation outcome under the executable Fused parent. Valid siblings may be accepted even if other siblings fail.
-
-If zero useful cards survive, Recursion records `fused-fallback-segmented` and runs the Segmented card stages. The Fused validation children are informational and never own Stop, Resume, Retry, or Reprocess.
-
-## Attempts And Waiting
-
-The canonical settings are:
-
-```json
-{
-  "pipelineMode": "segmented",
-  "modelAttemptsPerStep": 2
-}
-```
-
-`Attempts per step` is the total automatic model-call window for each model stage, including the first call. Values are one through five. A transport failure may repeat the request; a validation failure may use a correction request. Local, storage, packet, validation, prompt-install, and commit stages do not consume this window.
-
-Recursion sets no default generation timeout. A call can remain pending indefinitely until its provider returns, fails, or the user stops it. Slow work is not retried merely for being slow. Provider-owned deadlines can still surface as provider failures.
+- Full Rebuild is queued and affects one matching swipe.
+- Reset Turn Cache immediately deletes Recursion-generated work and queued intents for the active turn, then clears Recursion prompt lanes.
+- Neither action changes SillyTavern messages.
 
 ## Stop, Resume, And Retry
 
-Stop aborts the active Recursion model call and pauses the operation. Every already committed checkpoint remains. A call that may have been charged by the provider but never returned cannot be reconstructed or refunded.
+Stop has one owner. The compact-bar Stop and contextual row Stop call the same runtime action. It pauses the durable graph, aborts active provider and Post-process work, requests native host Stop, clears Recursion prompt lanes, and records one bounded cleanup result.
 
-Resume validates provenance and continues from the earliest pending frontier. A reload converts an in-flight `running` stage back to pending and restores the operation as paused; it never assumes the interrupted call succeeded.
+Public Resume does not run provider work directly. It validates the paused operation, requests the matching native SillyTavern Send, Swipe, or Regenerate action, and leaves the manifest paused until the host interceptor returns. The interceptor then continues the earliest compatible frontier exactly once.
 
-Retry is available only on the blocking failed executable stage. It opens a new attempt window for that stage, clears its failure, invalidates its descendants, and preserves unrelated valid checkpoints.
+Retry is available only for the blocking failed stage. It resets that stage and descendants while preserving compatible accepted ancestors.
 
-## Queued Reprocess
+## Invalidation And Pruning
 
-Reprocess is deferred to the next generation so the user does not need to catch a short-lived active row.
+Source, turn, character/group, settings, provider, pipeline, prompt version, stage version, dependency hash, or artifact-integrity drift makes incompatible work stale. A stale operation cannot Resume, install a prompt, or commit Post-process output.
 
-Selecting a completed/cached eligible row stores a chat-scoped intent:
+Retired pre-V2 generated records are recognized only by a private deletion matcher. They are pruned and cannot be loaded as generation input. Prior-turn execution artifacts are also pruned automatically after their authority ends, subject to the bounded diagnostics and recovery rules in the storage specification.
 
-```json
-{
-  "schema": "recursion.queued-reprocess.v1",
-  "mode": "stage",
-  "stageIds": ["preprocess.cards.segmented.character"]
-}
-```
+## Required Tests
 
-The intent includes the selected executable owner and its dependents. On the next matching phase, runtime binds it to the new graph, invalidates those checkpoints, preserves compatible ancestors and unrelated siblings, and consumes each queued stage as it starts. A second click cancels the selected queued stage. Inapplicable stage ids are rejected with `stage-reprocess-inapplicable`.
+The repository gates prove:
 
-Pre-process and Post-process stage ids can coexist in one intent. Starting Pre-process must not discard a Post-process intent that belongs to the later phase.
-
-## Full Fresh
-
-Full fresh is also queued for the next send or swipe:
-
-```json
-{
-  "schema": "recursion.queued-reprocess.v1",
-  "mode": "full-fresh",
-  "stageIds": []
-}
-```
-
-The button's idle accessible label is `Queue a full fresh generation`; its selected state is `Full fresh generation: Queued`. Clicking again cancels it.
-
-Full fresh starts no provider or host work by itself. The next generation consumes it once, bypasses the Prepared Generation Artifact and reusable scene/stage cache for that operation, then returns future generations to normal Segmented or Fused behavior.
-
-Full fresh differs from Reset Scene Cache:
-
-- full fresh is one-shot and preserves stored cache records for later validated use;
-- Reset Scene Cache immediately deletes all current-chat scene and execution cache state.
-
-## Stale Operations
-
-Source, selected swipe, character/group, settings, provider, pipeline, prompt version, stage version, dependency, or artifact-integrity drift makes incompatible work stale. A stale run cannot Resume or commit late output.
-
-The earliest meaningful executable row may offer queued Reprocess. Starting a fresh compatible operation supersedes the stale work. Stale artifact bodies are removed during repair/retention, while bounded metadata may remain long enough to explain why reuse was refused.
-
-## Post-process Reuse And Commit
-
-Post-process freezes the completed response, bounded evidence, active deck, settings, and source identity before work.
-
-Unified checkpoints source, guidance, rewrite, and host commit. Progressive checkpoints each category guidance/rewrite pair, carrying the last valid draft forward.
-
-The host commit stage uses a stable commit id, final artifact hash, source identity, and Recursion marker. Resume first checks whether that mutation is already present. `resume-commit-already-applied` completes without appending a duplicate swipe or replacing twice.
-
-After successful commit:
-
-- delete source-snapshot and guidance artifacts;
-- delete earlier Progressive drafts;
-- retain the final accepted draft and commit receipt;
-- keep only hashes, counts, outcomes, and stable codes in marker/diagnostics.
-
-## Retention And Repair
-
-`repairIndex()` rebuilds the index from valid Recursion records and removes pipeline artifacts not owned by the authoritative current manifest or referenced by a reusable terminal checkpoint. It preserves unreadable records instead of guessing.
-
-Ordinary retention:
-
-- protects the active scene;
-- protects all artifacts for a running or paused current operation;
-- preserves reusable completed Pre-process checkpoints;
-- removes intermediate successful Post-process artifacts;
-- removes stale artifact bodies;
-- removes abandoned manifests and artifacts;
-- bounds scene caches, source variants, and journals.
-
-Old warm fields are neither migrated nor interpreted. Normal record normalization drops them, and bounded cache retention eventually removes their containing retired variants.
-
-## Reset Scene Cache
-
-For the current chat, Reset Scene Cache immediately:
-
-1. abandons active execution;
-2. deletes the scene cache;
-3. deletes the execution manifest;
-4. deletes all operation artifacts;
-5. deletes queued Reprocess/full-fresh intent;
-6. clears in-memory packet, hand, plan, and execution state;
-7. clears installed Recursion prompt lanes.
-
-It never deletes or rewrites SillyTavern messages.
-
-## Progress And Actions
-
-Cached rows remain purple; completed generated rows remain green. Only the contextual action button is cyan.
-
-| State | Eligible owner action |
-| --- | --- |
-| running frontier | Stop |
-| paused frontier | Resume |
-| blocking failed | Retry |
-| completed/cached | Reprocess |
-| queued | Cancel queued reprocess |
-| stale | Reprocess on earliest meaningful owner |
-| pending/blocked/skipped | none |
-
-Every row reserves one 24px action slot and renders at most one icon button. Actions are direct and do not depend on expanding a row. Tooltips and ARIA labels are concise and exact. Narrow layouts truncate reason/meta before shrinking the action target.
-
-## Diagnostics
-
-Execution diagnostics are allowlist-only:
-
-- operation id, phase, and state;
-- stage id and state;
-- attempt count;
-- elapsed milliseconds;
-- failure class;
-- artifact hash and byte count;
-- stale field names;
-- stable bounded lifecycle codes.
-
-Forbidden everywhere outside dedicated artifact reads: raw prompt/model bodies, Arbiter JSON, card/reference bodies, packet/hand bodies, Post-process guidance, progressive drafts, and final prose copied only for resume.
-
-## Acceptance
-
-Deterministic coverage must prove:
-
-- exact scene and Prepared Generation Artifact hits;
-- Segmented sibling checkpoint reuse;
-- Fused zero-useful-card fallback;
-- Stop preserves committed work;
-- reload restores as paused;
-- Resume skips valid ancestors;
-- Retry reruns the blocking stage and descendants only;
-- queued Reprocess binds and consumes once;
-- full fresh consumes once;
-- source/settings/provider drift makes work stale;
-- missing/hash-invalid artifacts are rejected;
-- terminal Post-process purge and idempotent commit;
-- repair removes orphans;
-- Reset Scene Cache clears all current-chat execution state;
-- canary bodies appear only in dedicated artifact storage.
+- repeated text with a new message id creates a new turn;
+- edits inside the source band reject reuse while edits outside it do not;
+- unchanged swipes reinstall a stable packet with zero Recursion model calls;
+- corrupt artifacts recompute safely;
+- Reprocess and Full Rebuild are one-shot, next-swipe-only, and turn-bound;
+- new turns cancel queued swipe intents;
+- Stop is idempotent and Resume is native-host-owned;
+- Post-process response identities do not cross swipe bodies;
+- retired generated records are deleted and never exposed through a generation-facing repository API.

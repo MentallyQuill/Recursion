@@ -9,12 +9,11 @@ This manual is the current execution-order authority for Recursion V1. It covers
 | Power | Off aborts Recursion work, clears owned prompt keys, and prevents new preparation. |
 | Auto / Manual | Auto lets the Arbiter choose from the runnable catalog. Manual restricts work to the operator-selected runnable families and sub-items. |
 | Segmented / Fused | Segmented generates requested card families in separate narrow calls. Fused requests one bundle, validates every sibling, repairs useful partial bundles with Segmented calls, and uses full Segmented fallback only after zero useful cards. |
-| Stop | Aborts the active Recursion call and pauses the operation while preserving accepted checkpoints. It does not automatically restart or retry SillyTavern's primary story generation. |
-| Resume | Continues a paused operation from its earliest incomplete stage with its remaining attempt state. |
+| Stop | Pauses the operation, aborts active Recursion work, requests native host Stop, clears owned prompts, and preserves accepted checkpoints. |
+| Resume | Requests the matching native SillyTavern action and continues only after the host interceptor returns. |
 | Retry Stage | Discards the failed stage's partial output and gives that stage a fresh configured attempt window. Accepted upstream checkpoints remain reusable. |
-| Reprocess from Here | Queues a next-generation invalidation for the chosen stage and its dependents. It does not interrupt or race the active run. |
-| Clear Cache | Removes reusable output owned by the selected completed/cached stage. |
-| Regenerate | Queues one full-fresh next generation. The click starts no provider or host work; the next send or swipe consumes the intent once. |
+| Reprocess from here | Queues a next-swipe invalidation for the chosen stage and its dependents. It does not interrupt or race the active run. |
+| Full Rebuild | Queues one fresh Pre-process pass for the next matching swipe. The click starts no provider or host work. |
 
 Pipeline choice is separate from Auto/Manual. Post-process is separate from both. Pre-process prepares guidance before host generation. Post-process begins only after a completed assistant response lands and cannot block the original host generation.
 
@@ -26,7 +25,7 @@ Each operation has one durable manifest with:
 - ordered stage ids and dependency edges;
 - stage state, attempt number, elapsed time, failure class, and artifact references;
 - lifecycle codes for stop, resume, retry, invalidation, completion, stale, and abandonment;
-- a queued intent reference when one will affect the next generation.
+- a queued intent reference when one will affect the next matching swipe.
 
 Artifact bodies live in separate hash-addressed records. The manifest never embeds source text, prompts, model output, draft prose, or commit payloads.
 
@@ -113,16 +112,17 @@ Unrequested, duplicate, wrong-source, or invalid siblings are rejected individua
 
 Stop is operation-scoped:
 
-1. Runtime marks stop requested and aborts the active model call where supported.
-2. A late result fails the current-operation guard and cannot update artifacts, cache, prompt keys, or host text.
-3. Accepted upstream artifacts remain referenced.
-4. The active stage settles paused. The progress row exposes Resume; a known retryable failure exposes Retry Stage.
+1. Runtime assigns one Stop owner and memoizes the cleanup.
+2. It pauses the V2 graph, aborts active provider and Post-process work, and requests native host Stop once.
+3. A late result fails the current-operation guard and cannot update artifacts, prompt keys, or host text.
+4. Runtime waits for settlement, clears owned prompt lanes once, and leaves accepted upstream artifacts referenced.
+5. The active stage settles paused. The progress row exposes Resume; a known retryable failure exposes Retry Stage.
 
-Resume preserves the stage's attempt history. If the stopped call had already been dispatched, it consumed an attempt. Retry Stage explicitly resets only that stage to the configured total attempt window and removes its partial artifact.
+Resume preserves the stage's attempt history. It requests the stored native Send, Swipe, or Regenerate action and makes no provider call directly. The graph continues only when the matching host interceptor returns. If the stopped call had already been dispatched, it consumed an attempt. Retry Stage explicitly resets only that stage to the configured total attempt window and removes its partial artifact.
 
-Reprocess from Here remains available on eligible completed or stale rows after the fleeting active state is gone. Clicking it queues a next-generation dependency invalidation. The row shows the cyan queued state and accessible label `Reprocess from here: Queued`. It does not require row expansion, a secondary menu, or a confirmation flap.
+`Reprocess from here on the next swipe` remains available on eligible completed or stale rows after the fleeting active state is gone. Clicking it queues a turn-bound dependency invalidation and starts nothing. The queued row action becomes `Cancel queued reprocess`. The next matching swipe consumes it once; a new user message or source mismatch cancels it.
 
-The idle Regenerate action follows the same queued model at operation scope. Its accessible labels are `Queue a full fresh generation` and `Full fresh generation: Queued`. A second click cancels the queued intent. The previous Last Brief remains visible until the next operation starts.
+The idle Full Rebuild action follows the same queued model at operation scope. Its accessible labels are `Rebuild all Recursion work on the next swipe` and `Full rebuild on next swipe: Queued`. A second click cancels the queued intent. The previous Last Brief remains visible until another native generation starts.
 
 ## Post-process Sequence
 
@@ -189,8 +189,8 @@ Each progress row reserves one fixed 24px action slot:
 | Active model stage | Stop |
 | Paused stage | Resume |
 | Retryable failed stage | Retry Stage |
-| Completed or cached reusable stage | Clear Cache |
-| Eligible completed or stale stage | Reprocess from Here |
+| Eligible completed or stale stage | Reprocess from here on the next swipe |
+| Queued stage | Cancel queued reprocess |
 | Ineligible or untouched stage | No action |
 
 Only one action appears. The control is icon-first, cyan when selected or queued, and explained through a hover tooltip plus accessible label. Mobile truncates the stage label before shrinking the action target.
@@ -209,7 +209,7 @@ Repair removes orphaned, superseded, or malformed artifacts without deleting in-
 
 Normal diagnostics may expose operation/stage ids and states, attempts, elapsed time, failure class, hashes, byte counts, stale fields, and bounded lifecycle codes. They do not expose artifact bodies, prompts, provider responses, transcript text, draft prose, hidden reasoning, or secrets. Explicit diagnostic excerpts are opt-in and bounded.
 
-Reset removes scene cache, execution manifests, execution artifacts, queued intents, prepared-generation state, in-memory packet/hand/plan state, journals, and Recursion-owned prompt keys.
+Reset Turn Cache removes generated work for the active turn, queued intent, prepared-generation state, in-memory packet/hand/plan state, and Recursion-owned prompt keys without changing SillyTavern messages. Clear Run Journal is a separate action.
 
 ## Failure Outcomes
 

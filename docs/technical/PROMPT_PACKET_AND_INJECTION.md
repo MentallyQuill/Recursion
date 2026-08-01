@@ -8,7 +8,7 @@ Recursion injects provider-authored guidance plus the full raw selected-card evi
 
 | Section | Prompt key | Placement | Purpose |
 | --- | --- | --- | --- |
-| Guidance | `recursion.guidance` | `in_prompt`, depth 1 | Provider-authored direction for how the selected evidence should shape the next generation. |
+| Guidance | `recursion.guidance` | `in_prompt`, depth 1 | Provider-authored direction for how selected evidence should shape native generation. |
 | Card Evidence | `recursion.cardEvidence` | `in_prompt`, depth 1 | Full raw `promptText` from selected cards, grouped as evidence and preserved without semantic summarization. |
 | Guardrails | `recursion.guardrails` | `in_prompt`, depth 1 | Compact global constraints for player intent, privacy, scope, and raw-evidence handling. |
 
@@ -48,7 +48,7 @@ Cards are normalized before composition. Unsafe evidence refs, unsupported famil
 
 ## Utility Composition
 
-Utility guidance composition is the default path. It calls `guidanceComposer` with the selected raw cards, omitted candidates, behavior policy, and current source metadata. The provider writes guidance about how the next generation should use the evidence; runtime validates schema, source ids, hidden-reasoning language, and length before trusting it.
+Utility guidance composition is the default path. It calls `guidanceComposer` with the selected raw cards, omitted candidates, behavior policy, and current source metadata. The provider writes guidance about how native generation should use the evidence; runtime validates schema, source ids, hidden-reasoning language, and length before trusting it.
 
 The composer includes the normalized story form in the provider request and in fallback guidance. When tense and POV are known, including a forced Tense & PoV override, the guidance section names the target form directly. When either field is unknown, it tells the host model to match the active chat's established story form instead of introducing a new form from card evidence. Prompt Packet metadata records the effective story form so operators can distinguish Arbiter-detected form, heuristic fallback, and user override behavior from ordinary guidance text.
 

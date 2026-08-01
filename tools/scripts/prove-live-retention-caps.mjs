@@ -13,9 +13,6 @@ const RETENTION_SELECTORS = Object.freeze({
   sourceWindowMessages: '[data-recursion-setting-source-window-messages]',
   sourceWindowCharacters: '[data-recursion-setting-source-window-characters]',
   providerVisibleMessages: '[data-recursion-setting-provider-visible-messages]',
-  sceneCachesPerChat: '[data-recursion-setting-scene-caches-per-chat]',
-  sceneCachesTotal: '[data-recursion-setting-scene-caches-total]',
-  sourceVariantsPerScene: '[data-recursion-setting-source-variants-per-scene]',
   runJournalEntries: '[data-recursion-setting-run-journal-entries]'
 });
 
@@ -99,9 +96,6 @@ function retentionStateScript() {
       sourceWindowMessages: '[data-recursion-setting-source-window-messages]',
       sourceWindowCharacters: '[data-recursion-setting-source-window-characters]',
       providerVisibleMessages: '[data-recursion-setting-provider-visible-messages]',
-      sceneCachesPerChat: '[data-recursion-setting-scene-caches-per-chat]',
-      sceneCachesTotal: '[data-recursion-setting-scene-caches-total]',
-      sourceVariantsPerScene: '[data-recursion-setting-source-variants-per-scene]',
       runJournalEntries: '[data-recursion-setting-run-journal-entries]'
     }).map(([key, selector]) => [key, Number(document.querySelector(selector)?.value)]));
     return {
@@ -232,9 +226,6 @@ async function main() {
       sourceWindowMessages: 12,
       sourceWindowCharacters: 6000,
       providerVisibleMessages: 4,
-      sceneCachesPerChat: 1,
-      sceneCachesTotal: 4,
-      sourceVariantsPerScene: 1,
       runJournalEntries: 10
     };
     phase('apply-message-cap-settings');

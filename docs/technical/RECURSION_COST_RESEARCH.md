@@ -71,7 +71,7 @@ Segmented is the reference foreground path and the default. It favors smaller or
 | Reasoner Composer | 0 or 1 | Configured Ready or Untested Reasoner when Medium+ policy selects it. |
 | Post-process | 0 or 1 Unified guidance stage plus native host rewrite; Progressive repeats by category | Guidance stays on Utility or the selected configured Ready or Untested Reasoner lane; native host quiet generation writes the response. |
 
-Accepted checkpoints and scene-cache reuse can reduce or remove downstream calls. A stopped or failed operation resumes from its earliest incomplete stage rather than paying again for every accepted upstream stage.
+Accepted checkpoints and exact-turn unchanged-swipe reuse can reduce or remove downstream calls. A stopped or failed operation resumes from its earliest incomplete stage rather than paying again for every accepted upstream stage.
 
 ### Fused
 
@@ -90,7 +90,7 @@ Fused is usually cheaper than Segmented when the model returns trustworthy multi
 
 ## Token Budget Ranges
 
-These are planning ranges from the current call shapes and bounded prompt windows. Real usage depends on provider-visible message length, selected card count, checkpoint and scene-cache reuse, footprint, host context, provider hidden reasoning, model attempts, and output length.
+These are planning ranges from the current call shapes and bounded prompt windows. Real usage depends on provider-visible message length, selected card count, valid checkpoint or unchanged-swipe reuse, footprint, host context, provider hidden reasoning, model attempts, and output length.
 
 ### Recursion Background Input Tokens
 

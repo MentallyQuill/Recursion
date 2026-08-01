@@ -1,5 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
+import {
+  LIFECYCLE_PROOF_SECTIONS,
+  validateLifecycleProof
+} from './lib/lifecycle-proof-contract.mjs';
 
 const module = await import('./prove-live-pipelines.mjs');
 const scriptText = readFileSync(new URL('./prove-live-pipelines.mjs', import.meta.url), 'utf8');
@@ -78,6 +82,33 @@ assertEqual(
   'In Chat evidence rejects In Prompt position and incorrect depth'
 );
 assertEqual(scriptText.includes('warmRapid'), false, 'live pipeline proof does not depend on removed background warming');
+
+const validLifecycleProof = {
+  newTurn: { arbiterCalls: 1, turnKeyChanged: true },
+  unchangedSwipe: { recursionModelCalls: 0, packetReinstalled: true },
+  editedBandSwipe: { reuseRejected: true, queuedIntentCanceled: true },
+  reprocessSwipe: { selectedStageCalls: 1, intentConsumed: true },
+  fullFreshSwipe: { arbiterCalls: 1, requestedCardCalls: 1 },
+  stop: { hostStopCalls: 1, promptClears: 1, state: 'paused' },
+  resume: { hostStartCalls: 1, detachedProviderCalls: 0 },
+  postProcess: { responseIdentityChanged: true, priorRewriteReused: false }
+};
+assertDeepEqual(
+  LIFECYCLE_PROOF_SECTIONS,
+  ['newTurn', 'unchangedSwipe', 'editedBandSwipe', 'reprocessSwipe', 'fullFreshSwipe', 'stop', 'resume', 'postProcess'],
+  'lifecycle proof exposes every required section in report order'
+);
+assertEqual(validateLifecycleProof(validLifecycleProof).ok, true, 'complete lifecycle proof validates');
+assertEqual(
+  validateLifecycleProof({ ...validLifecycleProof, resume: { hostStartCalls: 1, detachedProviderCalls: 1 } }).ok,
+  false,
+  'lifecycle proof rejects detached Resume provider work'
+);
+assertEqual(
+  validateLifecycleProof({ ...validLifecycleProof, editedBandSwipe: undefined }).errors.includes('editedBandSwipe:missing'),
+  true,
+  'lifecycle proof rejects a missing edited-band section'
+);
 
 {
   const calls = [];

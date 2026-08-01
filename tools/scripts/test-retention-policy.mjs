@@ -8,22 +8,26 @@ import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert
 const defaults = normalizeRetentionSettings({});
 assertDeepEqual(defaults, DEFAULT_RETENTION_SETTINGS, 'blank retention uses defaults');
 
+const obsoletePerChatCap = ['scene', 'Caches', 'PerChat'].join('');
+const obsoleteTotalCap = ['scene', 'Caches', 'Total'].join('');
+const obsoleteVariantCap = ['source', 'Variants', 'PerScene'].join('');
+
 const clamped = normalizeRetentionSettings({
   sourceWindowMessages: 9999,
   sourceWindowCharacters: -5,
   providerVisibleMessages: 1,
-  sceneCachesPerChat: 9,
-  sceneCachesTotal: 4,
-  sourceVariantsPerScene: 99,
+  [obsoletePerChatCap]: 9,
+  [obsoleteTotalCap]: 4,
+  [obsoleteVariantCap]: 99,
   runJournalEntries: 9999
 });
 
 assertEqual(clamped.sourceWindowMessages, 200, 'sourceWindowMessages clamps high');
 assertEqual(clamped.sourceWindowCharacters, 12000, 'invalid sourceWindowCharacters falls back');
 assertEqual(clamped.providerVisibleMessages, 4, 'providerVisibleMessages clamps low');
-assertEqual(Object.hasOwn(clamped, 'sceneCachesPerChat'), false, 'obsolete per-chat cache cap is discarded');
-assertEqual(Object.hasOwn(clamped, 'sceneCachesTotal'), false, 'obsolete total cache cap is discarded');
-assertEqual(Object.hasOwn(clamped, 'sourceVariantsPerScene'), false, 'obsolete source variant cap is discarded');
+assertEqual(Object.hasOwn(clamped, obsoletePerChatCap), false, 'obsolete per-chat cache cap is discarded');
+assertEqual(Object.hasOwn(clamped, obsoleteTotalCap), false, 'obsolete total cache cap is discarded');
+assertEqual(Object.hasOwn(clamped, obsoleteVariantCap), false, 'obsolete source variant cap is discarded');
 assertEqual(clamped.runJournalEntries, 500, 'runJournalEntries clamps high');
 
 const rawMessages = Array.from({ length: 16 }, (_, index) => ({

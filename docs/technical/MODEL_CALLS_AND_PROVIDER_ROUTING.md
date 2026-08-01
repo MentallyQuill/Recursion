@@ -49,7 +49,7 @@ The provider control plane is shared with the settings UI:
 - provider status resolves the selected source, selected profile label, and model label before a test call runs;
 - OpenAI-compatible model discovery uses the configured base URL normalized to `/models`, sends a GET with the session bearer key, and accepts OpenAI-style `data[]` plus simpler `models[]` payloads.
 
-Model discovery is not a generation call. It does not mutate settings, clear prompts, invalidate scene cache, write journals, or persist the session key. The Providers pane may show the discovered model list and copy a selected id into the model input, but saving remains a separate operator action.
+Model discovery is not a generation call. It does not mutate settings, clear prompts, invalidate active-turn work, write journals, or persist the session key. The Providers pane may show the discovered model list and copy a selected id into the model input, but saving remains a separate operator action.
 
 Recursion exposes route visibility as a compact Reasoning Level summary rather than Directive-style per-role routing controls. Detailed role-to-lane policy stays in runtime so the V1 settings pane remains small.
 
@@ -149,7 +149,7 @@ Recursion sets no default generation timeout. A slow local or remote model may r
 
 The advanced `Attempts per step` setting controls the total automatic model attempts for each model stage. Its range is one through five and its default is two. Local validation, persistence, cache reads, host commits, and other non-model stages do not consume attempts. An attempt is consumed when Recursion dispatches a model call. A known transport, provider, or structured-output failure may use another attempt only while the operation is current, its abort signal has not fired, and the stage has attempts remaining. Slow-but-pending calls are not retried.
 
-The attempt window belongs to the durable stage, not an individual browser callback. Stop pauses the operation and aborts the current call while preserving accepted checkpoints. Resume continues the earliest incomplete stage. Retry Stage discards that stage's failed or partial output and gives it a fresh configured attempt window. Reprocess from Here is queued for the next generation and invalidates the selected stage plus its dependents; it never races the active run.
+The attempt window belongs to the durable stage, not an individual browser callback. Stop pauses the operation and aborts the current call while preserving accepted checkpoints. Resume requests the matching native host action and continues the earliest incomplete stage only when the interceptor returns. Retry Stage discards that stage's failed or partial output and gives it a fresh configured attempt window. Reprocess from here on the next swipe invalidates the selected stage plus its dependents when the matching swipe consumes it; it never races the active run.
 
 For a rejected Segmented card, each remaining automatic attempt appends the prior stable failure code and safe validation message to the correction request. The correction repeats the canonical `recursion.card.v1` envelope requirement without changing role, family, snapshot, source context, or sibling stages. Accepted sibling checkpoints are not repeated.
 
@@ -157,7 +157,7 @@ Recursion never automatically retries SillyTavern's primary story generation. It
 
 Fallback behavior:
 
-- Utility provider unavailable or transport-failed reuses a valid checkpoint or scene cache entry when safe; otherwise runtime pauses or fails the affected operation without discarding unrelated accepted work.
+- Utility provider unavailable or transport-failed may reuse a fully validated exact-turn checkpoint when eligible; otherwise runtime pauses or fails the affected operation without discarding unrelated accepted work.
 - Invalid Utility Arbiter schema or missing/mismatched Arbiter `snapshotHash` can use a conservative local fallback plan because a provider result existed but failed structured validation.
 - Fused bundle validation reports accepted, invalid, rejected, omitted, and missing requested families. When at least one requested item is trustworthy, runtime repairs only damaged or missing siblings through individual Segmented card calls for the same pending user message. Wrong snapshot, provider failure with no recoverable item fragments, or zero trustworthy items triggers full Segmented card fallback.
 - Card call failure omits failed cards and keeps valid siblings. A completed fail-soft run with an exhausted card stage is `Needs attention`, not `Ready`; the failed row retains its stable code, precise reason, and suggested action while downstream prompt installation may still complete.

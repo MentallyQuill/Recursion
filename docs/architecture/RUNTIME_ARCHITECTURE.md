@@ -1,395 +1,118 @@
 # Runtime Architecture
 
-Recursion is a mostly automatic runtime layer for compiling current-scene reasoning context into an inspectable prompt packet for the next SillyTavern generation. It observes the active chat, uses the Utility Arbiter to decide what scene implications are worth expanding, updates a bounded scene card cache, selects a turn hand, preserves selected raw card evidence, optionally runs Guidance or Reasoner composition, installs prompt guidance, and records diagnostics.
+This is the current V1 runtime authority for Recursion.
 
-Recursion should stay host-adapter based. SillyTavern is the first host, but runtime internals should remain host-neutral where that keeps the model, cache, and prompt-planning logic clean.
+## Boundary
 
-Related specs:
+Recursion is a SillyTavern extension. SillyTavern owns chat state, message identity, native generation, prompt assembly, and visible story output. Recursion owns bounded source reading, structured planning, cards, guidance, prompt-packet installation, optional Post-process operations, and its own storage and diagnostics.
 
-- Product scope: [RECURSION_PRODUCT_SCOPE.md](../design/RECURSION_PRODUCT_SCOPE.md)
-- Card system: [CARD_SYSTEM_SPEC.md](../design/CARD_SYSTEM_SPEC.md)
-- Behavior settings policy: [BEHAVIOR_SETTINGS_POLICY_SPEC.md](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md)
-- Provider and generation: [PROVIDER_AND_GENERATION_SPEC.md](PROVIDER_AND_GENERATION_SPEC.md)
-- Prompt composition: [PROMPT_COMPOSITION_SPEC.md](PROMPT_COMPOSITION_SPEC.md)
-- Storage and diagnostics: [STORAGE_AND_DIAGNOSTICS.md](STORAGE_AND_DIAGNOSTICS.md)
-- Implementation plan: [IMPLEMENTATION_PLAN.md](../testing/IMPLEMENTATION_PLAN.md)
+Recursion never generates a detached primary story response. Stop and Resume use native SillyTavern generation seams.
 
-## System Boundary
+## Main Components
 
-Recursion owns the short-lived runtime loop that improves the next model response. It does not own continuity-extension duties, durable story truth, campaign saves, transcript branching, player state, long-term memory, vector recall, World Info, or Summaryception-style history compression.
+- Host Adapter: snapshots chat, installs and clears Recursion prompt lanes, reads message and swipe identity, and requests native generation start/stop.
+- Turn Identity: hashes the exact bounded source band, latest user identity, selected swipe, character/group identity, and runtime contracts.
+- Utility Arbiter: returns the structured plan and requested card jobs.
+- Segmented Pipeline: runs requested card roles as independently checkpointed model stages.
+- Fused Pipeline: runs one structured multi-card bundle, with bounded validation and Segmented fallback.
+- Turn Deck And Hand: validate generated card evidence and select the bounded set for this turn.
+- Guidance And Packet Composer: produces provider guidance, raw card evidence, guardrails, and the host injection plan.
+- Execution Scheduler: persists V2 manifests, checkpoints, attempts, pauses, retries, and dependency-aware reprocessing.
+- Post-process Runtime: binds optional rewrites to one completed assistant response identity and commits through guarded host mutations.
 
-The runtime boundary is:
+## Turn Identity
 
-- Inbound: host chat state, current user message, generation lifecycle events, extension settings, provider availability, and stored Recursion cache metadata.
-- Internal: turn snapshots, Utility Arbiter decisions, card job scheduling, scene cache maintenance, turn hand selection, prompt packet composition, and diagnostics.
-- Outbound: prompt injection instructions, inspector/status data, bounded diagnostics, and storage writes for settings/cache metadata.
+Turn identity is computed before provider work. It includes:
 
-Pre-alpha status allows Recursion to replace internal schemas and cache layouts in place when the V1 shape improves. It should still keep explicit contracts between host adapters, runtime orchestration, provider calls, storage, and prompt injection so changes do not spread through the whole extension.
+- chat key;
+- latest user message id and content hash;
+- bounded visible source-band hash;
+- selected swipe identity when applicable;
+- character and group hashes;
+- settings, provider, pipeline, deck, card, prompt, and stage contracts.
 
-Recursion should not import Directive's campaign save engine, accepted-state model, state-delta journal, or branch mechanics. The useful lesson from Directive is runtime discipline: structured calls, clean provider lanes, prompt packet install/clear behavior, bounded diagnostics, and fail-soft orchestration.
+The source band honors configured message and character bounds. Repeated user text with a new message id produces a new key. Changes inside the band change the key; changes outside it do not.
 
-## Component Map
+## Pre-process Flow
 
 ```mermaid
-flowchart TD
-    Host["Host Adapter\nSillyTavern first"] --> Snapshot["Turn Snapshot"]
-    Snapshot --> Arbiter["Utility Arbiter"]
-    Arbiter --> Plan["Auto Control Plan"]
-    Plan --> Jobs["Card Jobs\ncreate refresh stow discard select"]
-    Jobs --> Cache["Scene Card Cache"]
-    Cache --> Hand["Turn Hand"]
-    Hand --> Composer["Composer / Reasoner\noptional"]
-    Composer --> Packet["Prompt Packet"]
-    Hand --> Packet
-    Packet --> Inject["Host Prompt Injection"]
-    Inject --> Diag["Diagnostics"]
-    Diag --> Activity["Activity Reporter\nbar progress viewer"]
-    Arbiter --> Diag
-    Jobs --> Diag
-    Cache --> Store["Storage"]
-    Diag --> Store
+flowchart LR
+  Host["Native SillyTavern generation"] --> Identity["Classify exact turn"]
+  Identity --> Snapshot["Read bounded source"]
+  Snapshot --> Arbiter["Planning card pass"]
+  Arbiter --> Cards["Segmented cards or Fused bundle"]
+  Cards --> Deck["Build turn deck"]
+  Deck --> Hand["Select turn hand"]
+  Hand --> Guidance["Compose guidance"]
+  Guidance --> Packet["Compose prompt packet"]
+  Packet --> Install["Install Recursion prompt"]
+  Install --> Host
 ```
 
-Primary components:
+Every node is a V2 stage. Model stages have bounded attempt windows. Local and host stages are checkpointed where their outputs authorize later work. A blocking failure pauses the graph; continue-policy failures produce bounded fallback evidence.
 
-- Host Adapter: translates host-specific chat, generation, prompt, storage, and UI events into Recursion interfaces.
-- Runtime Coordinator: owns extension mode, lifecycle hooks, turn processing locks, cancellation, and sequencing.
-- Snapshot Builder: captures a stable observe-time view of the active chat and pending turn.
-- Utility Arbiter: returns an Auto Control Plan for action, scene status, prompt footprint, card jobs, Reasoner decision, and budgets.
-- Card Job Runner: executes the plan by creating, refreshing, stowing, discarding, and selecting scene cards according to Arbiter decisions.
-- Scene Cache: stores bounded, per-chat and per-scene card state plus fingerprints and prompt-plan metadata.
-- Execution Manifest: one chat-scoped metadata record for operation state, provenance, stage frontier, attempt counts, checkpoint hashes, and queued stage ids.
-- Execution Artifact Repository: isolated prompt/card/guidance/draft bodies referenced by checkpoints, never copied into manifests or journals.
-- Execution Scheduler: runs dependency-ready stages, checkpoints successful output before dependents start, and restores compatible work after pause or reload.
-- Hand Selector: selects the small card set that should influence the next generation.
-- Composer: deterministic prompt assembly and optional model-mediated synthesis.
-- Reasoner: optional deeper synthesis lane that is never required for generation to continue.
-- Prompt Injector: installs, updates, and clears host prompt entries through the adapter.
-- Prompt Install Helper: normalizes host prompt writes and clear attempts into sanitized runtime diagnostics.
-- Diagnostics Recorder: records structured, sanitized runtime events for the status and inspector surfaces.
-- Activity Reporter: aggregates runtime, provider, storage, and prompt events into concise user-visible phases for the Recursion Bar, Hero Pixel Array progress menu, and Full Viewer.
+## Generation Classification
 
-## Turn Pipelines
+- New user turn: revoke prior authority, cancel queued swipe intents, create a new operation, and run a new Arbiter.
+- Same-turn unchanged swipe: validate the completed manifest and packet, reinstall it with zero Recursion model calls, and continue native story generation.
+- Edited-band swipe: reject reuse, cancel queued intent, and rebuild.
+- Compatible paused operation: continue only after native host generation re-enters the interceptor.
+- Incompatible or corrupt operation: mark stale or revoke, then recompute safely.
 
-Every Pre-process operation uses the same durable graph:
+No semantic scene boundary or elapsed-time heuristic participates in classification.
 
-1. Capture the frozen turn snapshot, including the pending user message.
-2. Run the Utility Arbiter.
-3. Execute either Segmented or Fused card work.
-4. Update the deck.
-5. Select the turn hand.
-6. Compose optional guidance.
-7. Build the prompt packet.
-8. Install through the SillyTavern prompt adapter.
+## Segmented And Fused
 
-The scheduler commits each successful stage artifact and its metadata checkpoint before a dependent stage starts. Model stages receive the user-configured total attempt window; local and host stages do not consume it. Calls have no default latency deadline. A user Stop aborts the frontier call and pauses the operation while retaining committed work.
+Segmented gives every requested card family its own provider, validation, attempt, and checkpoint boundary. Independent card stages may share a scheduler wave.
 
-The Segmented pipeline is the reference path for smaller, simpler, and locally hosted models. It gives each requested card an independent model stage. Independent cards may run in one concurrency wave, but each keeps its own checkpoint and validation boundary. A failed optional card can settle under its declared continue policy; a blocking stage pauses the graph for explicit Retry.
+Fused sends all requested families through one structured card-bundle call. Each returned sibling validates independently. A partially useful bundle may continue with accepted siblings and targeted repair; zero useful output falls back to Segmented. Pipeline choice changes future work and does not start generation by itself.
 
-The Fused pipeline shares snapshot and Arbiter planning, then sends one `fusedCardBundle` request containing all requested families. Runtime validates the bundle snapshot and each sibling as a normal card. Accepted and rejected siblings remain visible as non-executable validation outcomes. If zero useful cards survive, the Fused stage executes the Segmented fallback stages and records `fused-fallback-segmented`. Otherwise the trusted bundle continues through the shared deck/hand/guidance/packet/install graph.
+## Guidance And Prompt Installation
 
-Power and mode controls change how much of the pipeline runs:
+Provider guidance is helpful but raw validated card evidence remains source of truth. If guidance is unavailable or invalid, packet composition falls back to raw evidence rather than inventing instructions.
 
-- Power off: remove or avoid installing Recursion prompt entries. Runtime may keep minimal UI/provider status, but it should not inspect or influence active generations.
-- Auto: run the full automatic pipeline and install prompt packets when the Auto Control Plan says a pass is useful. Card scope acts as focus and preference; critical unselected families may still be requested when needed for coherence or safety.
-- Manual: use selected card scope as a strict whitelist and force selected card-family coverage. Runtime may reuse valid selected-family cache cards, but if the Arbiter omits a selected family, runtime synthesizes a one-family card job before generation. The final hand selects forced Manual families first and floors the selected-card budget to the selected-family count.
+Prompt installation rechecks the current host source before and after mutation. A stale operation cannot commit its packet. The prepared artifact becomes active only after the host reports installation success. Install failure is fail-soft for native story generation but is recorded explicitly and never promoted to a reusable success.
 
-Pipeline controls change when work happens:
+## Stop, Resume, And Retry
 
-- Segmented: run independent simple per-card stages after foreground Arbiter planning.
-- Fused: generate all requested cards through one structured bundle stage, with per-card outcomes and zero-useful-card Segmented fallback.
+`runtime.stopGeneration()` owns one memoized cleanup. It pauses the current V2 operation, aborts provider work, cancels Post-process, requests native host Stop, waits for settlement, clears Recursion prompt lanes, and journals the result once.
 
-Pipeline is selected from the compact bar dropdown immediately left of Mode. It is not duplicated in Settings.
+Public `runtime.resumeOperation()` validates a paused host-owned operation and requests the stored native generation type from SillyTavern. It performs zero provider calls directly and does not mark the manifest running before the host accepts the start. When the host interceptor returns, the private continuation resumes the earliest compatible frontier.
 
-### Post-process runtime
+`retryStage()` is valid only for the blocking failed stage. It resets that stage and all descendants while retaining compatible ancestors.
 
-Post-process Cards are an independent after-generation deck. When enabled, the runtime freezes the completed assistant response, bounded visible evidence, the Pre-process packet, the active Post-process deck, and operation settings. It synthesizes structured guidance on one sticky Utility or configured Ready or Untested Reasoner lane, then delegates prose writing to SillyTavern native quiet generation. Unified performs one rewrite for all enabled categories; Progressive rewrites in deck order and carries the latest valid draft forward. As Swipe appends a selected swipe, while Replace updates the selected response only after complete success. A failed or stale operation never commits a mutation; Progressive partial output can settle only as a swipe.
+## Reprocess And Full Rebuild
 
-The older Generation Review/Editorial/Enhancement branches are retired. Their historical specifications remain indexed for archaeology, but `docs/architecture/POST_PROCESS_CARDS_RUNTIME.md` is the current authority.
+Completed and reusable stages expose `Reprocess from here on the next swipe`. The click queues a turn-bound intent and starts nothing. The next matching swipe invalidates the selected root and descendants, consumes the intent once, and reuses unaffected compatible ancestors.
 
-Full fresh is a one-shot queued override from the Recursion Bar command slot. The bar calls `runtime.requestFreshNextGeneration({ source: 'bar' })`, runtime persists a `full-fresh` intent and leaves Last Brief on the previous completed packet; no provider work, prompt installation, prompt clearing, Last Brief clearing, or host generation starts on click. The next `prepareForGeneration({ hostGeneration: true })` consumes the intent once, clears Last Brief with reason `user-fresh-next-generation`, bypasses reusable checkpoints and the volatile Prepared Generation Artifact, invalidates the current scene cache for that run, and prevents cached cards from entering the prompt-eligible hand. Pipeline selection is also deferred; changing Segmented/Fused does not start generation.
+The idle command slot exposes `Rebuild all Recursion work on the next swipe`. Its pressed label is `Full rebuild on next swipe: Queued`. The next matching swipe bypasses all Pre-process checkpoints once. New user turns cancel this intent and always start independently.
 
-`lastPreparedGeneration` is the sole volatile owner of the installed packet and
-hand. Runtime builds a candidate locally and commits it only after the host
-confirms installation and the final host-snapshot barrier still matches. Exact
-same-snapshot retries and latest-assistant swipes share one integrity, basis,
-and packet-input validator. Hits perform no provider or storage work and have
-no wall-clock expiry. Source/chat mutation, reset, disable, and teardown clear
-the artifact; settings, deck, provider, and contract drift produce a safe miss
-until a later successful installation replaces it.
+## Post-process
 
-Last Brief has a committed inspection lifecycle distinct from volatile packet-reuse state. `MESSAGE_SWIPED`, `MESSAGE_UPDATED`, Enhancement-owned Replace/As Swipe mutations, and other navigation or persistence events may update source or reuse bookkeeping, but they must not clear the committed `lastBriefPacket` or `lastBriefHand`. Only an accepted host generation in `prepareForGeneration()` consumes the visible brief during ordinary turn flow. The interceptor's explicit `generationType: 'swipe'` is authoritative for swipe generation; a low-level `MESSAGE_SWIPED` event alone is not.
+Post-process captures the completed assistant message id, swipe id, text hash, active character/group identity, and originating Pre-process turn key. That response identity owns the operation.
 
-The Runtime Coordinator should serialize work per chat/generation attempt. A newer turn snapshot supersedes older pending work. If a late provider result arrives after the active snapshot changed, the result is discarded or recorded as stale and must not overwrite the current prompt packet.
+Unified creates one guidance artifact and one host rewrite. Progressive processes enabled categories in deck order and carries the latest accepted draft forward. As Swipe appends and selects one guarded swipe; Replace mutates the active response only after complete success.
 
-The injection point should be as close as practical to host generation start, after the snapshot and prompt packet are valid. If Recursion cannot complete optional work before generation, it should reuse a valid cache-backed packet or continue without injection rather than block the host indefinitely.
+Stop preserves the original response and accepted checkpoints. Resume uses the same scheduler and idempotent host-commit receipt. A changed response body gets a new response identity and cannot reuse another swipe's rewrite.
 
-## Auto Control Plan
+## Settings And Host Events
 
-The Utility Arbiter returns an Auto Control Plan. Runtime code treats this as advice that must pass schema validation and safety limits before use.
+Settings or provider changes pause incompatible work immediately, clear prepared authority, and clear Recursion prompt lanes. Power Off additionally disables future preparation. Host chat change, message edit, deletion, or older-source mutation pauses active work and clears volatile prompt state. Latest-assistant swipe generation follows the turn-classification rules above.
 
-Primary control fields:
+Empty assistant placeholders are excluded from pending-user discovery. The latest visible user message remains part of the turn key and provider source even when SillyTavern inserts an empty assistant placeholder before interception.
 
-- `action`: one of `skip`, `reuse-cache`, `refresh-cards`, or `compose-brief`. The literal `compose-brief` enum is the V1 Arbiter action name; in the current packet contract it means compose a V3 packet with Guidance, Card Evidence, and Guardrails.
-- `sceneStatus`: one of `same-scene`, `soft-shift`, `hard-shift`, or `unknown`.
-- `promptFootprint`: `compact`, `normal`, or `rich` size class for the next prompt packet.
-- `cardJobs`: bounded Utility card requests using the fixed V1 catalog.
-- `reasonerDecision`: `skip` or `use`, with compact trigger reasons and signals.
-- `budgets`: runtime-limited target guidance tokens and maximum selected cards.
+## UI State
 
-The plan may also include card lifecycle suggestions and diagnostics labels. It must not include hidden plot plans, chain-of-thought, durable canon updates, arbitrary provider endpoints, or host-specific prompt instructions that bypass the Prompt Composer.
+The compact bar shows Stop only while Recursion or native host generation is active. Otherwise the same slot shows Full Rebuild. Progress rows expose at most one contextual action: Stop, Resume, Retry, Reprocess, or cancel queued reprocess.
 
-Runtime enforcement:
+Canonical Pre-process row vocabulary is `Reading current turn`, `Planning card pass`, `Building turn deck`, `Selecting turn hand`, `Reasoner guidance`, `Composing prompt packet`, and `Installing Recursion prompt`.
 
-- Invalid plans fall back to local `compose-brief` packet composition, cache reuse, or `skip`, depending on mode and cache state.
-- Token and card count caps are enforced after the Arbiter returns.
-- Runtime derives the behavior policy from Strength, Min/Max Cards, Focus, and Prompt Footprint, sends policy lines to the Arbiter, and applies mechanical shaping before cards are selected.
-- Min Cards caps Low's card count, Max Cards raises/caps Ultra's card count, and Medium/High use the floor average. In Manual mode, Max Cards is also the selected-family cap in the Cards dropdown.
-- `promptFootprint` is sanitized to `compact`, `normal`, or `rich`, then resolved through the user's stored Prompt Footprint policy. Compact may expand only for safety or hard scene-constraint evidence, Normal may use Rich only for high-risk evidence, and Rich may still choose smaller effective packets for simple turns. The effective footprint applies only to this run and never mutates stored settings.
-- Strength changes cache/hand pressure and composer assertiveness inside the selected card budget. Focus changes soft family ordering for the hand and diagnostics, but it is not a hard whitelist.
-- Manual forced reconciliation records compact diagnostics such as `manual-forced-card:<family>` and `manual-forced-cache:<family>` so Arbiter omissions are diagnosable without storing provider payloads.
-- Provider lane choices are resolved through the provider spec, not trusted as raw endpoints.
-- Reasoner triggers are advisory. If Reasoner is off, unavailable, too slow, or over budget, generation continues through the deterministic or Utility guidance path.
+Last Brief remains inspectable after completion but does not authorize reuse.
 
-## Plan Actions
+## Privacy And Diagnostics
 
-Plan action controls runtime cost and cache churn.
+Runtime activity, journals, manifests, and reports use safe ids, hashes, counts, states, attempt data, and stable diagnostic codes. Raw prompts, provider output, hidden reasoning, chat bodies, API keys, bearer tokens, cookies, and stack traces are excluded.
 
-`skip` means no new provider or prompt work for this turn. Runtime clears or avoids installing Recursion prompt entries for the generation.
+## Acceptance
 
-`reuse-cache` means use the existing scene cache and lifecycle selection when the cache is current enough for the next turn. It avoids new card generation and fails soft if no reusable hand is available.
-
-`refresh-cards` means execute the Arbiter's card jobs against the current snapshot, merge accepted cards into the scene cache, apply lifecycle decisions, then select a fresh hand.
-
-`compose-brief` means compose a V3 packet from the current hand after any requested cache/card work. Local fallback also uses this action when the Arbiter is unavailable and safe fallback cards can be built from the snapshot.
-
-After runtime scope and card-budget enforcement, `refresh-cards` requires at least one executable card job. An empty refresh is a retryable Arbiter validation failure and uses the existing correction attempt window. A valid zero-card plan schedules no Fused or Segmented card provider stage; it proceeds directly through deck, hand, guidance, packet, and installation.
-
-Action choice should be automatic by default. User controls should stay high level, such as the power toggle, Auto/Manual, refresh, Strength, Focus, Reasoning Level, provider setup, Prompt Footprint, and advanced final-packet injection placement.
-
-Queued reprocessing does not bypass the Arbiter. The next generation still takes a fresh snapshot and runs the semantic plan; the queued stage and all graph descendants are then invalidated while unaffected compatible checkpoints remain eligible.
-
-## Scene Shift Handling
-
-Scene status is the Arbiter's view of how much the active scene changed:
-
-- `same-scene`: continue using the existing scene cache when the hand still matches the visible moment.
-- `soft-shift`: keep the scene lineage but refresh affected cards. Examples include a new immediate objective, changed emotional posture, or a character entering the scene.
-- `hard-shift`: begin a new scene cache segment and avoid carrying stale scene-frame cards forward. Examples include a location jump, time jump, cast reset, or clear narrative break.
-- `unknown`: use conservative behavior when the Arbiter cannot classify the shift. Prefer a bounded validation pass, lower prompt footprint, and visible diagnostics rather than aggressive cache reuse or hard deletion.
-
-Hard shifts should not erase useful diagnostics or previous bounded cache history, but they should prevent stale cards from entering the next turn hand. Soft shifts should preserve scene constraints and open threads only when they still apply to the visible scene.
-
-When local heuristics and model judgment disagree, runtime safety wins. The runtime may ask the Utility Arbiter for a scene validation pass, but it should not install contradictory scene guidance while scene status is unresolved.
-
-## Failure Modes
-
-Recursion must be fail-soft. Provider, schema, storage, and injection failures should not corrupt prompt state or prevent normal SillyTavern generation.
-
-Expected failure behavior:
-
-- Utility provider unavailable: skip new Arbiter work, reuse a valid packet if safe, or clear Recursion injection and continue.
-- Arbiter schema invalid or `snapshotHash` missing/mismatched: reject the plan, record diagnostics, and fall back to a conservative local action.
-- Card job failure: keep the last valid cache segment, omit failed cards from the hand, and record omission reasons.
-- Fused bundle invalid or zero-useful: record compact bundle diagnostics and run the Segmented individual-card stages for the same turn.
-- Model stage attempts exhausted: pause at the blocking failure and expose Retry without discarding prior checkpoints.
-- User Stop: abort the frontier call, persist the paused frontier, and expose Resume.
-- Source/provenance change: mark incompatible work stale and refuse late artifact or host commits.
-- Missing or hash-invalid resume artifact: reject the checkpoint, report `resume-artifact-missing`, and re-enter from the earliest invalid stage.
-- Reasoner failure: continue with Utility guidance plus raw selected Card Evidence.
-- Prompt composition over budget: trim by lane priority and record budget omissions.
-- Injection failure: clear or leave untouched according to host adapter safety rules, then record the failed install attempt.
-- Storage failure or host-storage memory fallback: keep in-memory runtime state for the current turn if possible, show a storage warning, disable persistence-dependent reuse, and continue generation.
-- Stale async result: record as stale and do not apply it to cache or prompt injection.
-
-No failure path should write partial prompt packets that mix old and new scene identities. Prompt packet installation should be atomic from Recursion's perspective: either the adapter confirms the current packet metadata, or runtime treats the install as failed.
-
-## Activity Reporting
-
-Recursion must make invisible work visible without turning the UI into a log console. The Runtime Coordinator should expose one Activity Reporter interface that receives normalized events from the Arbiter, card jobs, provider router, cache repository, composer, prompt injector, and storage layer.
-
-Recommended event shape:
-
-```ts
-type RecursionActivityEvent = {
-  runId: string;
-  phase: string;
-  mode: "foreground" | "background" | "review";
-  severity: "info" | "success" | "warning" | "error";
-  label: string;
-  detail?: string;
-  chips?: string[];
-  providerLane?: "utility" | "reasoner";
-  composerLane?: "utility" | "guidance" | "reasoner" | "local";
-  cardCounts?: {
-    requested?: number;
-    accepted?: number;
-    omitted?: number;
-    selected?: number;
-  };
-  fallbackReason?: string;
-};
-```
-
-The Activity Reporter is not a persistence boundary by itself. It is a user-facing aggregation boundary:
-
-- many internal events become one visible stage;
-- foreground, background, and review activity render differently;
-- stale run ids cannot update the current progress surface after a newer run starts;
-- slow work reveals after a short delay, while quick no-op work may only update the bar chip;
-- success settles briefly, while warning and error states persist until dismissed or superseded;
-- activity text is friendly and bounded, while detailed sanitized records belong in the run journal.
-
-Core activity phases should cover:
-
-- snapshot capture and scene-shift review;
-- Utility Arbiter planning;
-- cache reuse, scene refresh, and card batch execution;
-- hand selection;
-- Utility and Reasoner composition;
-- prompt packet build, install, skip, and clear;
-- storage save, repair, and prune stages;
-- retry, fallback, stale-result discard, and provider issue states.
-
-Activity text must not expose raw provider prompts, raw provider responses, full transcript text, hidden reasoning, private story plans, physical file paths, or unbounded error text.
-
-## Runtime State
-
-Runtime state should be minimal, bounded, and inspectable.
-
-In memory:
-
-- active power state and mode: Auto or Manual;
-- active host and chat identifiers;
-- current turn snapshot id and message fingerprint;
-- scene fingerprint and scene status;
-- active Auto Control Plan;
-- active execution manifest, frontier, and queued reprocess intent;
-- pending run lock and cancellation marker;
-- provider health and resolved lane status;
-- last prompt packet metadata;
-- last diagnostics summary.
-
-Persisted:
-
-- extension settings;
-- provider settings without session-only secrets;
-- bounded scene card cache;
-- current chat-scoped execution manifest and isolated checkpoint artifacts;
-- one queued full-fresh or dependency-aware reprocess intent;
-- prompt plan/cache metadata;
-- last successful prompt packet metadata;
-- bounded diagnostics/run journal.
-
-Runtime state should not store hidden chain-of-thought, direct endpoint API keys, durable story canon, branch history, or campaign state deltas. If state is expensive to validate or no longer matches the active chat fingerprint, the runtime should prefer refreshing it over building compatibility layers.
-
-## Host Adapter Responsibilities
-
-The host adapter hides SillyTavern-specific APIs behind stable Recursion interfaces.
-
-Responsibilities:
-
-- Observe active chat identity, messages, current character/group context, and generation lifecycle events.
-- Build host-neutral turn snapshots with stable message ids or fingerprints.
-- Read host prompt environment only as needed to avoid conflicts and understand available insertion points.
-- Install, update, and clear Recursion prompt packets with metadata that lets the runtime detect stale entries.
-- Expose host generation/provider options needed by Utility and Reasoner lanes.
-- Provide storage primitives for settings, cache, and diagnostics through Recursion's logical keys.
-- Report UI events such as mode changes, manual refresh, inspector open, and settings updates.
-- Surface adapter errors as diagnostics without throwing host-specific failures through the runtime.
-
-The SillyTavern adapter may use host-specific prompt APIs, extension settings, and event hooks. The rest of Recursion should depend on adapter contracts rather than importing SillyTavern globals directly.
-
-## Settings, Provider, And Mode Mutations
-
-Runtime settings changes are prompt-safety operations, not plain preference writes. `runtime.updateSettings(patch)` applies the normalized settings immediately, supersedes active work, best-effort soft-invalidates the last successful scene cache with reason `settings-changed` when the patch has meaningful keys, then awaits a Recursion prompt clear through the host adapter before resolving.
-
-The operation result shape is:
-
-```ts
-{
-  ok: boolean;
-  settings: RecursionSettings;
-  clear: PromptClearResult | null;
-}
-```
-
-When power is toggled off, the progress surface must show prompt-clearing work and then settle to either `Recursion disabled. Prompt cleared.` or a sanitized prompt-clear warning. A clear failure does not roll back the disabled setting, but the operation returns `ok: false` and the UI keeps the warning visible. This makes power-off a real emergency brake while still exposing host prompt cleanup failures.
-
-Provider setting and session-key mutations follow the same prompt-safety rule. `runtime.updateProviderConfig(lane, fieldScopedPatch, { expectedRevision })` and `runtime.clearProviderKey(lane)` apply the provider change transactionally, supersede active work, best-effort soft-invalidates the last successful scene cache, then await host prompt clear before resolving. Provider updates use reason `provider-changed`; session-key clears use `provider-key-cleared`.
-
-```ts
-{
-  ok: boolean;
-  provider: ProviderSettings;
-  clear: PromptClearResult;
-}
-```
-
-Clear failure, missing host clear API, missing scene cache, or invalidation storage failure does not roll back the provider change. Prompt-clear failures return `ok: false`, include the sanitized prompt-clear result, and leave the existing prompt-clear warning visible. Invalidation failures are fail-soft and do not change the mutation result contract.
-
-`runtime.refreshScene()` is a first-class refresh operation. It waits for prior mutations, captures the current host snapshot without adding synthetic chat text, best-effort soft-invalidates that snapshot's scene cache with reason `user-refresh`, then runs the normal preparation loop so the Utility Arbiter can review the stale cache before the new active cache is saved.
-
-`runtime.requestFreshNextGeneration()` is different from refresh and reset. It queues the next host generation to run fresh, uses reason `user-fresh-next-generation`, bypasses prompt/cache/checkpoint reuse once when consumed, and then returns future generations to the selected Segmented or Fused pipeline. It never invokes SillyTavern native generation itself; the host send or swipe remains the generation trigger. `runtime.clearFreshNextGeneration()` cancels the queued token before consumption.
-
-## Diagnostics Events
-
-Diagnostics should explain what Recursion did without storing sensitive provider payloads or hidden reasoning.
-
-Core event types:
-
-- `runtime.mode_changed`: Auto or Manual changed.
-- `runtime.enabled_changed`: power toggle changed.
-- `turn.snapshot_captured`: chat id, snapshot id, message fingerprint, and size metadata.
-- `arbiter.plan_requested`: provider lane, snapshot id, and cache fingerprint.
-- `arbiter.plan_received`: action, scene status, prompt footprint, card job count, Reasoner decision, and budgets.
-- `arbiter.plan_rejected`: schema or safety reason.
-- `scene.shift_detected`: previous and next scene fingerprints plus scene status.
-- `card.job_started`: card role, requested action, and target cache segment.
-- `card.job_completed`: created, refreshed, stowed, discarded, selected, and omitted counts.
-- `hand.selected`: card ids, lanes, token estimate, and omission counts.
-- `composer.completed`: composer lane, token estimate, and Reasoner decision signals.
-- `prompt.packet_built`: packet id, footprint, lanes, and token estimate.
-- `prompt.install_succeeded`: packet id, host insertion metadata, and snapshot id.
-- `prompt.install_failed`: packet id and sanitized adapter error.
-- `cache.invalidated`: scene key, reason, optional run id, and redacted details for a soft scene-cache invalidation.
-- `activity.stage_changed`: phase, mode, severity, visible label, and compact chips.
-- `activity.settled`: outcome, visible summary, and fallback path when present.
-- `provider.failed`: lane, job type, sanitized error class, and fallback path.
-- `runtime.stale_result_discarded`: job id and superseded snapshot id.
-- `storage.write_failed`: logical key and sanitized error class.
-
-Diagnostics should support the UI's Status and Inspector surfaces, automated tests, and bug reports. They should be capped, sanitized, and safe to persist.
-
-## V1 Implementation Slices
-
-V1 should be built in small vertical slices that preserve the end-to-end loop.
-
-1. Host adapter skeleton and modes
-   - Implement SillyTavern lifecycle hooks, power state, Auto/Manual mode state, snapshot capture, activity event contract, and no-op prompt clear/install methods.
-
-2. Snapshot and diagnostics foundation
-   - Add stable snapshot ids, message fingerprints, bounded diagnostics events, and inspector-ready last-run summaries.
-
-3. Provider lanes and Utility Arbiter contract
-   - Implement Utility provider routing, structured Auto Control Plan schema validation, provider failure fallback, and sanitized call diagnostics.
-
-4. Scene cache and card job runner
-   - Add bounded scene card cache, card create/refresh/stow/discard/select jobs, cache invalidation, and action enforcement.
-
-5. Turn hand selection
-   - Select compact hand candidates by settings focus, scene relevance, token caps, and omission rules.
-
-6. Prompt composition and injection
-   - Build prompt packets from the turn hand, enforce footprint budgets, install through the SillyTavern adapter, clear stale packet metadata, and report prompt-ready/install/fallback activity.
-
-7. Optional Composer/Reasoner lane
-   - Add Reasoner trigger handling, provider-failure fallback, and deterministic composer fallback. Do not impose a Recursion default generation timeout.
-
-8. Storage hardening
-   - Persist settings, cache metadata, metadata-only execution manifests, isolated stage artifacts, queued intents, and bounded diagnostics using logical keys and privacy-safe records.
-
-9. UI integration and smoke validation
-   - Connect the Recursion Bar, Hero Pixel Array progress menu, status, provider health, mode controls, and inspector diagnostics. Validate power-off, Auto, Manual, provider failure, scene refresh, storage activity, prompt install, and stale-result behavior.
-
-Each slice should keep generation usable if it fails. The first complete proof is not perfect card intelligence; it is a reliable loop from observe -> Arbiter -> card jobs/cache -> hand -> prompt packet -> host injection -> diagnostics.
+Repository and installed-host proofs must separately show new-turn Arbiter work, zero-call unchanged-swipe reuse, edited-band rejection, one-shot Reprocess and Full Rebuild, unified Stop, native Resume with no detached provider call, response-bound Post-process, prompt mutation counts, and installed-copy parity.

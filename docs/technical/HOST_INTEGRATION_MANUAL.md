@@ -40,7 +40,7 @@ Enable and activate call bootstrap. Disable and delete dispose the runtime, clea
 
 When SillyTavern exposes `eventSource` plus `event_types.CHAT_CHANGED`, the entrypoint subscribes during bootstrap and removes the listener during teardown. The handler calls `runtime.handleChatChanged()` and remains fail-soft: cleanup errors are logged, but host navigation must continue.
 
-Chat-change cleanup clears volatile Recursion state, clears Recursion-owned prompt keys, and best-effort marks incompatible scene-cache and execution stages stale with reason `chat-changed`. Durable paused manifests and required artifacts remain scoped to their original chat and cannot resume against the newly selected chat. The handler does not run provider calls or compile a packet for the new chat.
+Chat-change cleanup clears volatile Recursion state and owned prompt keys, pauses active work before stale results can commit, and marks incompatible execution stages stale with reason `chat-changed`. Durable paused manifests and required artifacts remain scoped to their original chat and cannot resume against the newly selected chat. The handler does not run provider calls or compile a packet for the new chat.
 
 The entrypoint also subscribes to source mutation events when available: `MESSAGE_DELETED`, `MESSAGE_UPDATED`, and `MESSAGE_SWIPED`. The SillyTavern adapter normalizes message event ids, swipe/delete/edit flags, latest-assistant identity, and object-shaped event text before bootstrap chooses the runtime handler. Delete/update handlers and older-message swipe handlers call `runtime.handleSourceChanged()` so source changes do not leave an old Recursion prompt installed. A `MESSAGE_SWIPED` event for the latest visible assistant message is treated as a same-turn swipe retry and may reuse only an independently validated prepared-generation checkpoint for the matching pre-assistant source basis. Cleanup records only compact event metadata such as event name and message id.
 
@@ -117,7 +117,7 @@ The native chat-generation adapter exposes `generation.start(details)` for host-
 
 ## UI Mount
 
-The UI mounts a chat-attached Recursion root near the `#chat` element when possible, otherwise into a stable parent. It renders the Recursion Bar, the Hero Pixel Array progress menu with one contextual 24px stage-action slot, options/settings menu, Last Brief dropdown, settings panel, and Full Viewer. The UI updates from `runtime.view()` on a short interval and uses sanitized view data. Stop, Resume, Retry Stage, Clear Cache, and Reprocess from Here appear only when the row state permits them.
+The UI mounts a chat-attached Recursion root near the `#chat` element when possible, otherwise into a stable parent. It renders the Recursion Bar, the Hero Pixel Array progress menu with one contextual 24px stage-action slot, options/settings menu, Last Brief dropdown, settings panel, and Full Viewer. The UI updates from `runtime.view()` on a short interval and uses sanitized view data. Stop, Resume, Retry Stage, Reprocess from here on the next swipe, and Cancel queued reprocess appear only when the row state permits them.
 
 ## Fake And Contract Tests
 

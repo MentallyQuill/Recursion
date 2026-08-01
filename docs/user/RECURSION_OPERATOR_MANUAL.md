@@ -64,7 +64,7 @@ The Tense & PoV control sits in the compact left-side control cluster after Post
 
 The command slot changes by state. While a Recursion stage is active, Stop aborts its current call and pauses the operation while preserving accepted checkpoints. While SillyTavern's host generation is active, Stop follows the native host stop seam, clears Recursion-owned prompt lanes, and prevents a pending Post-process pass from beginning. Recursion never automatically retries the primary story generation. This control is not the power toggle; use power when you want Recursion off for future sends.
 
-When Recursion is idle, the same slot shows the Regenerate icon. Use it when Last Brief or Prompt Packet looks stale and you want the next send or swipe to rebuild all Pre-process work without deleting chat data. Its accessible label is `Queue a full fresh generation`; after one click it becomes `Full fresh generation: Queued`. The click does not start provider work or SillyTavern generation. Last Brief keeps showing the previous completed packet until the next send or swipe consumes the intent once. Clicking again before consumption cancels it.
+When Recursion is idle, the same slot shows the Full Rebuild icon. Use it when you want the next swipe of the active turn to rebuild all Pre-process work without deleting chat data. Its accessible label is `Rebuild all Recursion work on the next swipe`; after one click it becomes `Full rebuild on next swipe: Queued`. The click does not start provider work or SillyTavern generation. Last Brief keeps showing the previous completed packet until the matching swipe consumes the intent once. Clicking again before consumption cancels it. Sending a new user message cancels the intent and starts a fresh turn.
 
 ### Hero Pixel Array Progress Menu
 
@@ -73,9 +73,9 @@ The Hero Pixel Array and current-step text are the trust surface for invisible w
 Expected stages include:
 
 - `Reading current turn...`
-- `Checking scene shift...`
+- `Classifying current turn...`
 - `Planning card pass...`
-- `Generating scene cards...`
+- `Generating turn cards...`
 - `Generating fused card bundle...`
 - `Selecting turn hand...`
 - `Composing prompt packet with Utility...`
@@ -89,8 +89,8 @@ The progress menu must not show raw prompts, raw provider responses, stack trace
 
 Every stage row reserves one 24px contextual action slot. The row shows at most
 one direct action: Stop while active, Resume while paused, Retry Stage after a
-retryable failure, Clear Cache for reusable completed work, or Reprocess from
-Here for an eligible completed or stale stage. There is no row-expansion
+retryable failure, Reprocess from here on the next swipe for eligible completed
+or stale work, or Cancel queued reprocess. There is no row-expansion
 requirement, secondary menu, or confirmation flap. The selected action uses the
 cyan state; mobile truncates row text before shrinking the action. Tooltips and
 accessible labels carry the explanatory wording.
@@ -116,7 +116,7 @@ Main controls:
 
 - Play: a Behavior section containing Strength, Min Cards, Max Cards, Prompt Footprint, and Focus.
 - Providers: collapsible Utility and Reasoner provider setup, test controls, and session key controls.
-- Advanced: collapsible Injection, UI, Context Windows, Storage Retention, and Diagnostics sections covering final prompt injection placement/role/depth, progress row limits, Recursion-owned evidence and analysis windows, cache and journal caps, safe excerpts, Reset Scene Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point. Reset Defaults at the bottom restores Play and Advanced settings after confirmation while preserving providers, session-only provider keys, custom decks and scope, compact-bar settings, and viewer visibility.
+- Advanced: collapsible Injection, Execution, UI, Context Windows, Storage Retention, and Diagnostics sections covering final prompt injection placement/role/depth, attempt windows, progress row limits, Recursion-owned evidence and analysis windows, Journal Entries, safe excerpts, Reset Turn Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point. Reset Defaults at the bottom restores Play and Advanced settings after confirmation while preserving providers, session-only provider keys, custom decks and scope, compact-bar settings, and viewer visibility.
 
 The dropdown arrow opens Last Brief. The ellipsis opens options. The Hero Pixel Array or current-step status opens progress.
 
@@ -287,10 +287,10 @@ Operator settings should stay broad. Pipeline, Mode, and Reasoning Level live in
 - Advanced / UI: progress row limits.
 - Advanced / Execution: Attempts per step, from one through five total model attempts per stage, default two. Recursion has no default generation timeout.
 - Advanced / Context Windows: Post-process Evidence Messages, Source Freshness Messages, Source Freshness Text Budget, and Provider Analysis Messages. Post-process Evidence Messages defaults to `13` and ranges from `0..35`.
-- Advanced / Storage Retention: Scene Caches / Chat, Scene Caches Total, Swipe Variants / Scene, and Journal Entries.
-- Advanced / Diagnostics: safe excerpts, Reset Scene Cache, Clear Run Journal, and Export Diagnostics.
+- Advanced / Storage Retention: Journal Entries only. Prior-turn generated work is pruned automatically.
+- Advanced / Diagnostics: safe excerpts, Reset Turn Cache, Clear Run Journal, and Export Diagnostics.
 
-Use Reprocess from Here when one stage and its dependents need rebuilding. Use Regenerate to queue a full-fresh next generation. Reset removes all Recursion-owned scene cache, execution state and artifacts, queued intents, journals, prepared/in-memory state, and prompt keys without touching SillyTavern chat history.
+Use Reprocess from here on the next swipe when one stage and its dependents need rebuilding. Use Full Rebuild to queue a fresh Pre-process pass for one matching swipe. Reset Turn Cache deletes generated work for the active turn, its queued intent, prepared/in-memory state, and prompt keys without touching SillyTavern chat history.
 
 Behavior controls have distinct jobs. Prompt Footprint controls the size and detail of the final composed prompt packet. Min Cards controls Low's selected-card pressure, Max Cards controls Manual selected-family count and Ultra's selected-card pressure, and Medium/High use the Min/Max average. Max Cards also helps avoid unnecessary card model calls: if the Arbiter asks for more card jobs than the effective hand can use, Recursion trims those jobs before generation and records a compact diagnostic. Strength controls intervention pressure inside that budget. Focus changes soft card-family priority without becoming a hard whitelist. The backend contract is defined in [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md).
 
@@ -306,9 +306,9 @@ flowchart LR
 
 Default injection settings use Recursion's recommended concrete plan: `In Prompt`, `System`, depth `1`. Injection settings apply only to the composed final prompt packet after Utility or Reasoner composition. Users should not need to manage per-turn action, card families, relevance rules, or card-level prompt depths turn by turn.
 
-Context-window caps are local Recursion tuning controls. Lower Source Freshness Messages or Source Freshness Text Budget if a very long chat makes Recursion feel slow. Storage Retention caps control disposable Recursion-owned caches and journals; raise them when debugging. These caps do not prune SillyTavern chat history.
+Context-window caps are local Recursion tuning controls. Lower Source Freshness Messages or Source Freshness Text Budget if a very long chat makes Recursion feel slow. Storage Retention controls only the bounded diagnostic journal. Generated work belongs to one exact turn and prior-turn artifacts are pruned automatically. None of these controls prune SillyTavern chat history.
 
-![Advanced Context Windows and Storage Retention controls for source windows, provider analysis, scene caches, source variants, and run journals](../../assets/documentation/renders/recursion-operator-retention-settings.png)
+![Advanced Context Windows and Storage Retention controls for source windows, provider analysis, and the run journal](../../assets/documentation/renders/recursion-operator-retention-settings.png)
 
 ## Provider Controls
 
@@ -378,11 +378,11 @@ Recursion should degrade itself, not the chat.
 
 Expected behavior:
 
-- Utility unavailable: skip new work, reuse valid cache when safe, or avoid injection.
+- Utility unavailable: skip new work, use a validated exact-turn packet when eligible, or avoid injection.
 - Utility invalid output: reject unsafe structured output and use conservative fallback.
 - Fused partial bundle: keep accepted siblings and repair only damaged siblings through Segmented stages.
 - Fused bundle with no useful cards: use the full Segmented card path.
-- Bar Regenerate: queue one full-fresh next generation without starting provider or host work; the next send or swipe consumes it once and bypasses reusable Pre-process work for that run.
+- Full Rebuild: queue one fresh Pre-process pass without starting provider or host work; the next matching swipe consumes it once and bypasses reusable work for that turn.
 - Card failure: omit failed cards and keep valid siblings.
 - Reasoner unconfigured, unhealthy, or missing credentials: compose ordinary Pre-process work with Utility when policy allows; fail High/Ultra Post-process guidance soft without crossing lanes. A configured Untested lane remains routable with caution status.
 - Recursion Stop: abort the current call, preserve accepted checkpoints, pause the operation, and expose Resume or Retry Stage.
@@ -399,7 +399,7 @@ The Prompt Packet is the complete model-facing Recursion artifact for one genera
 
 Main sections:
 
-- Guidance: provider-authored direction for using the selected evidence in the next generation.
+- Guidance: provider-authored direction for using selected evidence in native generation.
 - Card Evidence: full raw selected-card text preserved as evidence.
 - Guardrails: compact constraints that prevent contradictions, hidden-thought leakage, spoilers, or user-message rewriting.
 
@@ -420,25 +420,25 @@ Diagnostics are for explaining recent behavior. Normal diagnostics may include:
 - source message id ranges and hashes;
 - prompt packet hashes;
 - omission and fallback reasons;
-- cache hit, stale, and prune events;
+- exact-turn reuse, stale, and prune events;
 - artifact hashes and byte counts, but never artifact bodies.
 
 Normal diagnostics must not include API keys, authorization headers, cookies, raw provider prompts, raw provider responses, full transcript text, hidden reasoning, private notes, or unbounded excerpts.
 
 ## Storage Ownership
 
-Recursion storage is cache- and checkpoint-oriented. The runtime owns scene cache, durable execution manifests and artifacts, queued intents, run journal, prompt metadata, redaction, repair, pruning, and prompt-lane cleanup. Current operator controls are:
+Recursion storage is turn- and checkpoint-oriented. The runtime owns durable V2 execution manifests and artifacts, queued next-swipe intents, the run journal, prompt metadata, redaction, repair, pruning, and prompt-lane cleanup. Current operator controls are:
 
 - power-toggle cleanup;
 - Clear Session Key for OpenAI-compatible provider lanes;
-- Retention caps for Recursion-owned source windows, scene caches, source variants, and run journals;
+- Context-window bounds and Journal Entries retention;
 - diagnostics excerpt settings;
-- contextual Clear Cache, queued Reprocess from Here, Reset, Clear Run Journal, and Export Diagnostics;
+- queued Reprocess from here, Reset Turn Cache, Clear Run Journal, and Export Diagnostics;
 - extension disable when Recursion should be fully inactive.
 
 Completed Pre-process operations retain only referenced reusable checkpoints. Completed Post-process operations retain only the final accepted rewrite and host-commit receipt. Stale operations keep bounded metadata but no artifact bodies; abandoned runs are fully pruned.
 
-These controls must touch only Recursion-owned settings, scene caches, execution state, journals, prompt lanes, and diagnostics. They must not delete SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or other extension records.
+These controls must touch only Recursion-owned settings, active-turn execution state, journals, prompt lanes, and diagnostics. They must not delete SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or other extension records.
 
 ## Mobile Behavior
 
@@ -461,8 +461,8 @@ Use this checklist for a practical browser pass:
 3. Open the Hero Pixel Array progress menu, Last Brief dropdown, Settings, and Full Viewer.
 4. Visit Play, Providers, Advanced, Prompt Packet, and Viewer sections.
 5. Configure and test Utility when provider work is intended.
-6. Confirm the Regenerate icon appears while idle; click it and confirm its accessible state is `Full fresh generation: Queued`, Stop remains hidden, and Last Brief keeps showing the previous packet.
-7. Send or swipe once and confirm the queued intent is consumed and normal generation progress appears.
+6. Confirm the Full Rebuild icon appears while idle; click it and confirm its accessible state is `Full rebuild on next swipe: Queued`, Stop remains hidden, and Last Brief keeps showing the previous packet.
+7. Swipe once and confirm the queued intent is consumed and normal generation progress appears.
 8. Turn power off and confirm prompt lanes are absent or cleared.
 9. Set Auto and confirm Recursion is ready to compile.
 10. Set Manual and confirm it applies as a distinct mode.
@@ -472,12 +472,12 @@ Use this checklist for a practical browser pass:
 14. Run a safe Fused Auto pass only when provider and live mutation are intended.
 15. Confirm Activity reaches ready, targeted Segmented repair, full Segmented fallback, or a clear failure.
 16. During a Recursion model stage, confirm the row shows only Stop; after pausing, confirm it shows only Resume or Retry Stage.
-17. On an eligible completed row, queue Reprocess from Here and confirm the row reports Queued without starting work.
+17. On an eligible completed row, queue Reprocess from here on the next swipe and confirm the row reports Queued without starting work.
 18. Inspect Last Brief and the final Prompt Packet text.
 19. Turn power off and confirm cleanup.
 20. Clear session keys before screenshots or exports that might show provider setup.
 
-Automated live evidence must use dedicated `recursion-soak-*` users and must reject `default-user` before mutation. See [Live Smoke Test Plan](../testing/LIVE_SMOKE_TEST_PLAN.md).
+Automated soak evidence uses dedicated `recursion-soak-*` users. An explicitly authorized acceptance pass may use the reported `default-user` chats after a production-only sync and must avoid recording raw chat text. See [Live Smoke Test Plan](../testing/LIVE_SMOKE_TEST_PLAN.md).
 
 ## Related Docs
 

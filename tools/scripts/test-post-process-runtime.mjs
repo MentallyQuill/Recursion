@@ -1159,7 +1159,11 @@ test('27. Queued Post-process stage binds to and is consumed by the eligible ope
     storage: createMemoryStorageAdapter()
   });
   await storage.saveQueuedReprocess('post-process-queued-chat', {
-    schema: 'recursion.queued-reprocess.v1',
+    schema: 'recursion.queuedReprocess.v2',
+    chatKey: 'post-process-queued-chat',
+    phase: 'postprocess',
+    turnKeyHash: 'turn-post-process-queued',
+    queuedAt: '2026-08-01T12:00:00.000Z',
     mode: 'stage',
     stageIds: ['postprocess.unified.guidance']
   });
@@ -1219,7 +1223,7 @@ test('27. Queued Post-process stage binds to and is consumed by the eligible ope
   const result = await runtime.runPostProcessForLatestAssistant();
   assertEqual(result.committed, true, 'queued Post-process operation commits');
   assertEqual(
-    await storage.loadQueuedReprocess('post-process-queued-chat'),
+    await storage.loadQueuedReprocess('post-process-queued-chat', 'postprocess'),
     null,
     'queued Post-process stage is consumed when it begins'
   );

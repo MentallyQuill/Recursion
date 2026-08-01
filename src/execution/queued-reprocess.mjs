@@ -1,6 +1,7 @@
 import { compareRunProvenance } from './provenance.mjs';
 
-export const QUEUED_REPROCESS_SCHEMA = 'recursion.queued-reprocess.v1';
+export const QUEUED_REPROCESS_SCHEMA = 'recursion.queuedReprocess.v2';
+export const QUEUED_REPROCESS_ENVELOPE_SCHEMA = 'recursion.queuedReprocessEnvelope.v2';
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -12,6 +13,29 @@ function cleanStageIds(value) {
       .map((stageId) => typeof stageId === 'string' ? stageId.trim() : '')
       .filter(Boolean)
   )];
+}
+
+function cleanRequiredString(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function intentBinding(value) {
+  const chatKey = cleanRequiredString(value.chatKey);
+  const phase = cleanRequiredString(value.phase);
+  const turnKeyHash = cleanRequiredString(value.turnKeyHash);
+  const queuedAt = cleanRequiredString(value.queuedAt);
+  if (!chatKey || !['preprocess', 'postprocess'].includes(phase) || !turnKeyHash || !queuedAt) {
+    return null;
+  }
+  return { chatKey, phase, turnKeyHash, queuedAt };
+}
+
+function sameBinding(left, right) {
+  return Boolean(left && right)
+    && left.chatKey === right.chatKey
+    && left.phase === right.phase
+    && left.turnKeyHash === right.turnKeyHash
+    && left.queuedAt === right.queuedAt;
 }
 
 function orderedStageIds(graph, stageIds) {
@@ -31,17 +55,13 @@ function selectedRoots(graph, stageIds) {
 
 export function normalizeQueuedReprocess(value) {
   if (!isObject(value)) return null;
-  if (value.schema !== undefined && value.schema !== QUEUED_REPROCESS_SCHEMA) return null;
-  if (value.mode === 'canceled') {
-    return {
-      schema: QUEUED_REPROCESS_SCHEMA,
-      mode: 'canceled',
-      stageIds: []
-    };
-  }
+  if (value.schema !== QUEUED_REPROCESS_SCHEMA) return null;
+  const binding = intentBinding(value);
+  if (!binding) return null;
   if (value.mode === 'full-fresh') {
     return {
       schema: QUEUED_REPROCESS_SCHEMA,
+      ...binding,
       mode: 'full-fresh',
       stageIds: []
     };
@@ -50,18 +70,40 @@ export function normalizeQueuedReprocess(value) {
   if (stageIds.length === 0) return null;
   return {
     schema: QUEUED_REPROCESS_SCHEMA,
+    ...binding,
     mode: 'stage',
     stageIds
+  };
+}
+
+export function normalizeQueuedReprocessEnvelope(value) {
+  if (!isObject(value) || value.schema !== QUEUED_REPROCESS_ENVELOPE_SCHEMA) return null;
+  const chatKey = cleanRequiredString(value.chatKey);
+  if (!chatKey) return null;
+  const preprocess = value.preprocess === null || value.preprocess === undefined
+    ? null
+    : normalizeQueuedReprocess(value.preprocess);
+  const postprocess = value.postprocess === null || value.postprocess === undefined
+    ? null
+    : normalizeQueuedReprocess(value.postprocess);
+  if ((value.preprocess && !preprocess) || (value.postprocess && !postprocess)) return null;
+  if (preprocess && (preprocess.chatKey !== chatKey || preprocess.phase !== 'preprocess')) return null;
+  if (postprocess && (postprocess.chatKey !== chatKey || postprocess.phase !== 'postprocess')) return null;
+  return {
+    schema: QUEUED_REPROCESS_ENVELOPE_SCHEMA,
+    chatKey,
+    preprocess,
+    postprocess
   };
 }
 
 export function mergeQueuedReprocess(current, next, graph) {
   const left = normalizeQueuedReprocess(current);
   const right = normalizeQueuedReprocess(next);
-  if (right?.mode === 'canceled') return right;
+  if (!right || (left && !sameBinding(left, right))) return null;
   if (left?.mode === 'full-fresh' || right?.mode === 'full-fresh') {
     return {
-      schema: QUEUED_REPROCESS_SCHEMA,
+      ...(left || right),
       mode: 'full-fresh',
       stageIds: []
     };
@@ -72,7 +114,7 @@ export function mergeQueuedReprocess(current, next, graph) {
   ].filter((stageId) => graph.hasStage(stageId)));
   return stageIds.length > 0
     ? {
-        schema: QUEUED_REPROCESS_SCHEMA,
+        ...(left || right),
         mode: 'stage',
         stageIds
       }
@@ -120,8 +162,18 @@ export function bindQueuedReprocess({
     ...manifest,
     queuedStageIds: []
   };
-  if (!normalized || normalized.mode === 'canceled') {
-    return { manifest: baseManifest, intent: null, notices: [] };
+  if (!normalized) {
+    return { manifest: baseManifest, intent: null, notices: [], reason: 'intent-invalid' };
+  }
+
+  if (normalized.chatKey !== manifest?.chatKey) {
+    return { manifest: baseManifest, intent: normalized, notices: [], reason: 'chat-key-mismatch' };
+  }
+  if (normalized.phase !== manifest?.phase) {
+    return { manifest: baseManifest, intent: normalized, notices: [], reason: 'phase-mismatch' };
+  }
+  if (normalized.turnKeyHash !== manifest?.turnKeyHash) {
+    return { manifest: baseManifest, intent: normalized, notices: [], reason: 'turn-key-mismatch' };
   }
 
   const candidateIds = normalized.mode === 'full-fresh'
@@ -141,7 +193,7 @@ export function bindQueuedReprocess({
       }]
     : [];
   if (queuedStageIds.length === 0) {
-    return { manifest: baseManifest, intent: null, notices };
+    return { manifest: baseManifest, intent: null, notices, reason: 'stage-inapplicable' };
   }
 
   const manifestProvenance = isObject(manifest?.provenance) ? manifest.provenance : provenance;
@@ -155,7 +207,8 @@ export function bindQueuedReprocess({
         staleChangedFields: provenanceStatus.changedFields
       },
       intent: normalized,
-      notices
+      notices,
+      reason: 'provenance-changed'
     };
   }
 
@@ -167,13 +220,14 @@ export function bindQueuedReprocess({
     intent: normalized.mode === 'stage'
       ? { ...normalized, stageIds: queuedStageIds }
       : normalized,
-    notices
+    notices,
+    reason: 'bound'
   };
 }
 
 export function consumeQueuedStageStart({ intent, stageId } = {}) {
   const normalized = normalizeQueuedReprocess(intent);
-  if (!normalized || normalized.mode === 'canceled') {
+  if (!normalized) {
     return { consumed: false, intent: null };
   }
   if (normalized.mode === 'full-fresh') {

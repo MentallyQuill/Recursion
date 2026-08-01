@@ -112,7 +112,11 @@ await repository.savePipelineArtifact('Chat One', 'Run One', 'preprocess.arbiter
 });
 await repository.savePipelineRun('Chat One', manifest);
 await repository.saveQueuedReprocess('Chat One', {
-  schema: 'recursion.queued-reprocess.v1',
+  schema: 'recursion.queuedReprocess.v2',
+  chatKey: 'Chat One',
+  phase: 'preprocess',
+  turnKeyHash: 'turn-a',
+  queuedAt: '2026-08-01T12:00:00.000Z',
   mode: 'stage',
   stageIds: ['preprocess.arbiter']
 });
@@ -177,7 +181,11 @@ const failingManifest = createPipelineRun({
 await failingRepository.savePipelineArtifact('Failure Chat', 'Run Failure', 'arbiter', { value: 'artifact' });
 await failingRepository.savePipelineRun('Failure Chat', failingManifest);
 await failingRepository.saveQueuedReprocess('Failure Chat', {
-  schema: 'recursion.queued-reprocess.v1',
+  schema: 'recursion.queuedReprocess.v2',
+  chatKey: 'Failure Chat',
+  phase: 'preprocess',
+  turnKeyHash: 'turn-failure',
+  queuedAt: '2026-08-01T12:00:00.000Z',
   mode: 'stage',
   stageIds: ['preprocess.arbiter']
 });

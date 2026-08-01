@@ -6082,8 +6082,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const view = currentView();
     const pending = asObject(view.freshNextGeneration).pending === true;
     const action = pending
-      ? runtime?.clearFreshNextGeneration?.({ source: 'bar' })
-      : runtime?.requestFreshNextGeneration?.({ source: 'bar' });
+      ? runtime?.clearQueuedFullFreshSwipe?.({ source: 'bar' })
+      : runtime?.queueFullFreshSwipe?.({ source: 'bar' });
     update();
     runAction(action, () => update());
   });
@@ -7551,7 +7551,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       setTooltip(stopGenerationButton, model.tooltipsEnabled, 'Stop generation');
     }
     if (freshNextGenerationButton) {
-      const supported = typeof runtime?.requestFreshNextGeneration === 'function' && typeof runtime?.clearFreshNextGeneration === 'function';
+      const supported = typeof runtime?.queueFullFreshSwipe === 'function' && typeof runtime?.clearQueuedFullFreshSwipe === 'function';
       const visible = supported && model.freshNextGenerationVisible;
       const pending = model.freshNextGenerationPending === true;
       freshNextGenerationButton.hidden = !visible;

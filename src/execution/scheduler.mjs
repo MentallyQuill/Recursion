@@ -328,13 +328,16 @@ export function createExecutionScheduler({
     if (!runtime.queuedStageIds.has(stageId)) return;
     runtime.queuedStageIds.delete(stageId);
     if (typeof repository.loadQueuedReprocess !== 'function') return;
-    const intent = await repository.loadQueuedReprocess(runtime.manifest.chatKey);
+    const intent = await repository.loadQueuedReprocess(
+      runtime.manifest.chatKey,
+      runtime.manifest.phase
+    );
     const consumed = consumeQueuedStageStart({ intent, stageId });
     if (!consumed.consumed) return;
     if (consumed.intent && typeof repository.saveQueuedReprocess === 'function') {
       await repository.saveQueuedReprocess(runtime.manifest.chatKey, consumed.intent);
     } else if (typeof repository.clearQueuedReprocess === 'function') {
-      await repository.clearQueuedReprocess(runtime.manifest.chatKey);
+      await repository.clearQueuedReprocess(runtime.manifest.chatKey, runtime.manifest.phase);
     }
   }
 
@@ -388,6 +391,7 @@ export function createExecutionScheduler({
 
   async function executeStage(runtime, stage) {
     const executionToken = createId('stage');
+    const queuedIntentConsumed = runtime.queuedStageIds.has(stage.id);
     const controller = new AbortController();
     runtime.controllers.set(stage.id, controller);
     let dependencyArtifacts = {};
@@ -427,6 +431,9 @@ export function createExecutionScheduler({
           checkpoint: null,
           summary: null,
           failure: null,
+          diagnosticCodes: queuedIntentConsumed
+            ? [...new Set([...(record.diagnosticCodes || []), 'stage-reprocess-consumed'])]
+            : record.diagnosticCodes || [],
           attempts: openedAttempts,
           executionToken,
           startedAt: now(),

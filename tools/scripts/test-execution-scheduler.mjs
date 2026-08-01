@@ -76,15 +76,19 @@ function createRepository({
       artifactWrites.push({ chatKey, operationId, artifactId, artifact: body, hash });
       return { kind: 'logical-storage', key, hash };
     },
-    async loadQueuedReprocess(chatKey) {
-      return clone(queued.get(chatKey) || null);
+    async loadQueuedReprocess(chatKey, phase = 'preprocess') {
+      return clone(queued.get(`${chatKey}|${phase}`) || null);
     },
     async saveQueuedReprocess(chatKey, intent) {
-      queued.set(chatKey, clone(intent));
+      queued.set(`${chatKey}|${intent.phase}`, clone(intent));
       return clone(intent);
     },
-    async clearQueuedReprocess(chatKey) {
-      queued.delete(chatKey);
+    async clearQueuedReprocess(chatKey, phase = null) {
+      if (phase) queued.delete(`${chatKey}|${phase}`);
+      else {
+        queued.delete(`${chatKey}|preprocess`);
+        queued.delete(`${chatKey}|postprocess`);
+      }
       return { ok: true };
     }
   };
@@ -114,11 +118,25 @@ function manifest({
     operationId,
     chatKey,
     phase: 'preprocess',
+    turnKeyHash: `turn:${chatKey}`,
+    sourceBandHash: `band:${chatKey}`,
     pipelineMode: 'segmented',
     sourceIdentity: runProvenance.sourceIdentity,
     provenance: { ...runProvenance, chatKey },
     createdAt: '2026-07-29T12:00:00.000Z'
   });
+}
+
+function queuedIntent(stageIds) {
+  return {
+    schema: 'recursion.queuedReprocess.v2',
+    chatKey: 'chat-a',
+    phase: 'preprocess',
+    turnKeyHash: 'turn:chat-a',
+    queuedAt: '2026-08-01T12:00:00.000Z',
+    mode: 'stage',
+    stageIds
+  };
 }
 
 function stage(id, dependencies, run, {
@@ -654,11 +672,7 @@ function createIds() {
     ...manifest({ operationId: 'queued-before-start' }),
     queuedStageIds: ['selected-child']
   };
-  await repository.saveQueuedReprocess('chat-a', {
-    schema: 'recursion.queued-reprocess.v1',
-    mode: 'stage',
-    stageIds: ['selected-child']
-  });
+  await repository.saveQueuedReprocess('chat-a', queuedIntent(['selected-child']));
   const scheduler = createExecutionScheduler({
     repository,
     now: createClock(),
@@ -688,11 +702,7 @@ function createIds() {
     ...manifest({ operationId: 'queued-stage-start' }),
     queuedStageIds: ['selected-root']
   };
-  await repository.saveQueuedReprocess('chat-a', {
-    schema: 'recursion.queued-reprocess.v1',
-    mode: 'stage',
-    stageIds: ['selected-root']
-  });
+  await repository.saveQueuedReprocess('chat-a', queuedIntent(['selected-root']));
   const scheduler = createExecutionScheduler({
     repository,
     now: createClock(),
@@ -744,11 +754,7 @@ function createIds() {
     pauseReason: 'reprocess',
     queuedStageIds: ['selected-root']
   });
-  await repository.saveQueuedReprocess('chat-a', {
-    schema: 'recursion.queued-reprocess.v1',
-    mode: 'stage',
-    stageIds: ['selected-root']
-  });
+  await repository.saveQueuedReprocess('chat-a', queuedIntent(['selected-root']));
   failSelectedRerun = true;
   await scheduler.resume({
     operationId: 'selected-rerun',
@@ -758,6 +764,10 @@ function createIds() {
   });
   const failed = await repository.loadPipelineRun('chat-a');
   assertEqual(failed.stageRecords['selected-root'].state, 'failed', 'selected rerun failure remains visible');
+  assert(
+    failed.stageRecords['selected-root'].diagnosticCodes.includes('stage-reprocess-consumed'),
+    'selected stage records the bounded intent-consumption code when it starts'
+  );
   assertEqual(failed.stageRecords['selected-root'].checkpoint, null, 'failed selected stage cannot fall back to its old checkpoint');
   assertEqual(repository.artifacts.size, oldArtifactCount, 'old artifact body remains stored until retention cleanup');
   assertEqual(await repository.loadQueuedReprocess('chat-a'), null, 'selected stage start consumes intent even when the rerun fails');

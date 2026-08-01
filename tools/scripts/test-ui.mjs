@@ -2148,7 +2148,7 @@ try {
         stopGenerationCalls += 1;
         return { ok: true, details };
       },
-      requestFreshNextGeneration: (details = {}) => {
+      queueFullFreshSwipe: (details = {}) => {
         freshNextGenerationCalls += 1;
         freshNextGenerationDetails.push(details);
         view = {
@@ -2162,7 +2162,7 @@ try {
         };
         return { ok: true, freshNextGeneration: view.freshNextGeneration };
       },
-      clearFreshNextGeneration: (details = {}) => {
+      clearQueuedFullFreshSwipe: (details = {}) => {
         clearFreshNextGenerationCalls += 1;
         clearFreshNextGenerationDetails.push(details);
         view = {
@@ -2188,7 +2188,11 @@ try {
         view = {
           ...view,
           queuedReprocess: {
-            schema: 'recursion.queued-reprocess.v1',
+            schema: 'recursion.queuedReprocess.v2',
+            chatKey: 'chat-ui',
+            phase: details.stageId.startsWith('postprocess.') ? 'postprocess' : 'preprocess',
+            turnKeyHash: 'turn-ui',
+            queuedAt: '2026-08-01T12:00:00.000Z',
             mode: 'stage',
             stageIds: [details.stageId]
           }

@@ -37,6 +37,16 @@ const payload = buildDiagnosticsPayload({
   view: {
     activeRunId: 'run-1',
     hostGenerationActive: true,
+    queuedReprocess: {
+      schema: 'recursion.queuedReprocess.v2',
+      chatKey: 'chat-safe',
+      phase: 'preprocess',
+      turnKeyHash: 'turn-safe-hash',
+      queuedAt: '2026-08-01T12:00:00.000Z',
+      mode: 'stage',
+      stageIds: ['preprocess.arbiter'],
+      artifactBody: 'CANARY_QUEUED_ARTIFACT_BODY'
+    },
     turnScope: {
       turnKeyHash: 'turn-safe-hash',
       sourceBandHash: 'band-safe-hash',
@@ -48,6 +58,7 @@ const payload = buildDiagnosticsPayload({
       operationId: 'operation-safe-id',
       reuseCount: 1,
       invalidationCount: 0,
+      diagnosticCodes: ['queued-reprocess-canceled-edited-band'],
       sourceBand: [{ textHash: 'CANARY_SOURCE_TEXT_HASH', text: 'CANARY_SOURCE_TEXT' }]
     },
     activity: { label: 'Working' },
@@ -138,7 +149,12 @@ assertEqual(payload.runtime.turnScope.turnKeyHash, 'turn-safe-hash', 'turn diagn
 assertEqual(payload.runtime.turnScope.sourceBandMessageCount, 9, 'turn diagnostics keep the bounded source count');
 assertEqual(payload.runtime.turnScope.generationClassification, 'same-turn-swipe', 'turn diagnostics keep the generation classification');
 assert(payload.runtime.turnScope.diagnosticCodes.includes('same-turn-swipe'), 'turn diagnostics emit the stable swipe classification code');
+assert(payload.runtime.turnScope.diagnosticCodes.includes('queued-reprocess-canceled-edited-band'), 'turn diagnostics keep the bounded queue-cancel reason');
+assertEqual(payload.runtime.queuedReprocess.turnKeyHash, 'turn-safe-hash', 'queued diagnostics keep the bound turn hash');
+assertEqual(payload.runtime.queuedReprocess.stageIds[0], 'preprocess.arbiter', 'queued diagnostics keep bounded stage ids');
+assert(payload.runtime.queuedReprocess.diagnosticCodes.includes('stage-reprocess-queued'), 'queued diagnostics emit a stable queue code');
 assert(!serialized.includes('CANARY_SOURCE_TEXT'), 'turn diagnostics never export the source-band array or text hashes');
+assert(!serialized.includes('CANARY_QUEUED_ARTIFACT_BODY'), 'queued diagnostics omit artifact bodies');
 
 const executionSummary = summarizeExecutionForDiagnostics({
   operationId: 'operation-safe-id',

@@ -3499,13 +3499,17 @@ function createTrackedStorageRepository() {
   const callsAfterFirst = providerCalls;
   const firstPacketId = runtime.view().lastBrief?.packetId;
   const firstHandId = runtime.view().lastBrief?.handId;
-  const queued = await runtime.requestFreshNextGeneration({ source: 'bar' });
+  const queued = await runtime.queueFullFreshSwipe({ source: 'bar' });
   assertEqual(queued.ok, true, 'fresh next generation queues successfully');
   assertEqual(runtime.view().freshNextGeneration?.pending, true, 'fresh next generation is visible as pending');
   assertEqual(runtime.view().lastBrief?.status, 'ready', 'fresh next generation keeps Last Brief ready until send or swipe');
   assertEqual(runtime.view().lastBrief?.packetId, firstPacketId, 'queued fresh next generation keeps the previous packet visible');
   assertEqual(runtime.view().lastBrief?.handId, firstHandId, 'queued fresh next generation keeps the previous hand visible');
-  const second = await runtime.prepareForGeneration({ userMessage, hostGeneration: true });
+  const second = await runtime.prepareForGeneration({
+    userMessage: null,
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
   assertEqual(second.ok, true, 'fresh next same-turn run succeeds');
   assertEqual(second.reused, undefined, 'fresh next same-turn run does not report packet reuse');
   assert(providerCalls > callsAfterFirst, 'fresh next same-turn run calls providers again');
@@ -3530,12 +3534,12 @@ function createTrackedStorageRepository() {
     }
   });
   assertEqual(runtimeHasOwnMethod(runtime, 'forceRegenerateNow'), false, 'runtime does not expose immediate forceRegenerateNow');
-  assertEqual(typeof runtime.requestFreshNextGeneration, 'function', 'runtime exposes fresh-next-generation request');
-  assertEqual(typeof runtime.clearFreshNextGeneration, 'function', 'runtime exposes fresh-next-generation clear');
+  assertEqual(typeof runtime.queueFullFreshSwipe, 'function', 'runtime exposes next-swipe full-fresh queue');
+  assertEqual(typeof runtime.clearQueuedFullFreshSwipe, 'function', 'runtime exposes next-swipe full-fresh clear');
 
-  const queued = await runtime.requestFreshNextGeneration({ source: 'bar' });
-  assertEqual(queued.ok, true, 'fresh next generation queues successfully');
-  assertEqual(runtime.view().freshNextGeneration?.pending, true, 'fresh next generation is visible as pending');
+  const queued = await runtime.queueFullFreshSwipe({ source: 'bar' });
+  assertEqual(queued.ok, false, 'full fresh cannot arm before a completed active turn exists');
+  assertEqual(runtime.view().freshNextGeneration?.pending, false, 'unavailable full fresh remains unarmed');
   assertEqual(runtime.view().lastBrief?.status, 'empty', 'fresh next generation does not synthesize Last Brief state before a packet exists');
   assertDeepEqual(hostStartCalls, [], 'queuing fresh next generation does not start host generation');
 }
@@ -3545,12 +3549,13 @@ function createTrackedStorageRepository() {
     settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' }
   });
 
-  await runtime.requestFreshNextGeneration({ source: 'bar' });
+  await runtime.prepareForGeneration({ userMessage: 'Prepare a turn before arming full fresh.' });
+  await runtime.queueFullFreshSwipe({ source: 'bar' });
   assertEqual(runtime.view().freshNextGeneration?.pending, true, 'fresh next generation starts pending');
-  const cleared = await runtime.clearFreshNextGeneration({ source: 'bar' });
+  const cleared = await runtime.clearQueuedFullFreshSwipe({ source: 'bar' });
   assertEqual(cleared.ok, true, 'fresh next generation clear succeeds');
   assertEqual(runtime.view().freshNextGeneration?.pending, false, 'fresh next generation clear removes pending token');
-  assertEqual(runtime.view().lastBrief?.status, 'empty', 'fresh next generation cancel leaves Last Brief state alone');
+  assertEqual(runtime.view().lastBrief?.status, 'ready', 'full-fresh cancellation leaves the completed Last Brief intact');
 }
 
 {
@@ -3644,10 +3649,14 @@ function createTrackedStorageRepository() {
   assertEqual(runtime.view().lastBrief?.status, 'ready', 'latest-assistant swipe marker preserves the visible Last Brief until generation starts');
   assert(runtime.view().lastBriefHand?.cards.length > 0, 'latest-assistant swipe marker preserves retained Last Brief cards');
   assertEqual(runtime.view().lastBriefPacket?.packetId, installed[0].packetId, 'latest-assistant swipe marker preserves the retained Last Brief packet');
-  const queued = await runtime.requestFreshNextGeneration({ source: 'bar' });
+  const queued = await runtime.queueFullFreshSwipe({ source: 'bar' });
   assertEqual(queued.ok, true, 'fresh latest assistant queues after swipe marker');
   assertEqual(runtime.view().lastBrief?.status, 'ready', 'fresh latest assistant arming keeps Last Brief ready before generation');
-  const second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true });
+  const second = await runtime.prepareForGeneration({
+    userMessage: null,
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
   assertEqual(second.ok, true, 'fresh latest assistant run succeeds');
   assertEqual(second.reused, undefined, 'fresh latest assistant does not reuse previous packet');
   assert(providerCalls > callsAfterFirst, 'fresh latest assistant run calls providers again');
@@ -3716,12 +3725,18 @@ function createTrackedStorageRepository() {
       }
     }
   });
-  await runtime.requestFreshNextGeneration({ source: 'bar' });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Fresh cached hand.', hostGeneration: true });
+  const setup = await runtime.prepareForGeneration({ userMessage: 'Fresh cached hand.', hostGeneration: true });
+  assertEqual(setup.ok, true, 'fresh cache exclusion establishes a completed turn');
+  await runtime.queueFullFreshSwipe({ source: 'bar' });
+  const result = await runtime.prepareForGeneration({
+    userMessage: null,
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
   assertEqual(result.ok, true, 'fresh cache exclusion run succeeds');
   assertEqual(result.skipped, undefined, 'fresh cache exclusion does not skip as cache-unavailable');
-  assertEqual(installed.length, 1, 'fresh cache exclusion installs a prompt');
-  assert(!JSON.stringify(installed[0]).includes('FRESH CACHE TEXT MUST NOT INSTALL'), 'fresh cache exclusion does not install cached prompt text');
+  assertEqual(installed.length, 2, 'fresh cache exclusion installs a new swipe prompt');
+  assert(!JSON.stringify(installed[1]).includes('FRESH CACHE TEXT MUST NOT INSTALL'), 'fresh cache exclusion does not install cached prompt text');
   const sceneCacheView = parsePromptJsonSection(arbiterPrompt, 'Scene cache');
   assertEqual(sceneCacheView.cacheState, 'stale', 'fresh cache exclusion marks cache stale for Arbiter evidence');
   assertEqual(sceneCacheView.invalidation?.reason, 'user-fresh-next-generation', 'fresh cache exclusion tells Arbiter why cache is stale');
@@ -10643,7 +10658,7 @@ for (const scenario of [
   }
   assert(await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey), 'scene cache exists before reset');
   assert(await storage.loadPipelineRun(setupSnapshot.chatKey), 'execution manifest exists before reset');
-  await runtime.requestFreshNextGeneration();
+  await runtime.queueFullFreshSwipe();
   assert(await storage.loadQueuedReprocess(setupSnapshot.chatKey), 'queued execution intent exists before reset');
   const result = await runtime.resetSceneCache();
   assertEqual(result.ok, true, 'scene cache reset succeeds');

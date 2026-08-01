@@ -26,7 +26,7 @@ assertEqual(
 );
 assertEqual(
   queuedReprocessKey('Chat One'),
-  'recursion-queued-reprocess-Chat-One.v1.json',
+  'recursion-queued-reprocess-Chat-One.v2.json',
   'queued reprocess key is chat scoped and sanitized'
 );
 
@@ -90,7 +90,11 @@ assert(
 );
 
 const queuedIntent = {
-  schema: 'recursion.queued-reprocess.v1',
+  schema: 'recursion.queuedReprocess.v2',
+  chatKey: 'Chat One',
+  phase: 'preprocess',
+  turnKeyHash: 'turn-one',
+  queuedAt: '2026-08-01T12:00:00.000Z',
   mode: 'stage',
   stageIds: ['preprocess.cards.segmented.character']
 };
@@ -100,9 +104,30 @@ await repository.saveQueuedReprocess('Chat One', {
 });
 
 assertDeepEqual(
-  await repository.loadQueuedReprocess('Chat One'),
+  await repository.loadQueuedReprocess('Chat One', 'preprocess'),
   queuedIntent,
   'queued reprocess intent round trips through a bounded chat-scoped record'
+);
+const postprocessIntent = {
+  ...queuedIntent,
+  phase: 'postprocess',
+  stageIds: ['postprocess.prose']
+};
+await repository.saveQueuedReprocess('Chat One', postprocessIntent);
+assertDeepEqual(
+  await repository.loadQueuedReprocess('Chat One', 'postprocess'),
+  postprocessIntent,
+  'post-process intent persists independently from the pre-process intent'
+);
+assertDeepEqual(
+  (await repository.loadQueuedReprocessEnvelope('Chat One')).preprocess,
+  queuedIntent,
+  'saving the post-process slot preserves the pre-process slot'
+);
+assertEqual(
+  (await storage.readJson(queuedReprocessKey('Chat One'))).schema,
+  'recursion.queuedReprocessEnvelope.v2',
+  'queued intents use the phase-separated V2 envelope'
 );
 assert(
   !JSON.stringify(await storage.readJson(queuedReprocessKey('Chat One')))
@@ -162,20 +187,26 @@ await repairRepository.savePipelineRun('Repair Chat', createPipelineRun({
   createdAt: '2026-07-29T12:00:00.000Z'
 }));
 await repairRepository.saveQueuedReprocess('Repair Chat', {
-  schema: 'recursion.queued-reprocess.v1',
+  schema: 'recursion.queuedReprocess.v2',
+  chatKey: 'Repair Chat',
+  phase: 'preprocess',
+  turnKeyHash: 'turn-repair',
+  queuedAt: '2026-08-01T12:00:00.000Z',
   mode: 'stage',
   stageIds: ['preprocess.arbiter']
 });
 await repairStorage.deleteJson(SYSTEM_INDEX_KEY);
 await repairStorage.writeJson(queuedReprocessKey('Invalid Chat'), {
   recordType: 'recursion.queuedReprocess',
-  schemaVersion: 1,
+  schemaVersion: 2,
+  schema: 'recursion.queuedReprocessEnvelope.v2',
   chatKey: 'Invalid-Chat',
-  intent: {
+  preprocess: {
     mode: 'stage',
     stageIds: ['preprocess.arbiter'],
     artifactBody: 'invalid intent'
   },
+  postprocess: null,
   createdAt: '2026-07-29T12:00:00.000Z',
   updatedAt: '2026-07-29T12:00:00.000Z'
 });
@@ -397,7 +428,11 @@ const failedQueuedStorage = {
 const failedQueuedRepository = createStorageRepository({ storage: failedQueuedStorage });
 await assertRejects(
   () => failedQueuedRepository.saveQueuedReprocess('Queue Failure Chat', {
-    schema: 'recursion.queued-reprocess.v1',
+    schema: 'recursion.queuedReprocess.v2',
+    chatKey: 'Queue Failure Chat',
+    phase: 'preprocess',
+    turnKeyHash: 'turn-failure',
+    queuedAt: '2026-08-01T12:00:00.000Z',
     mode: 'stage',
     stageIds: ['preprocess.arbiter']
   }),

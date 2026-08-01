@@ -5,8 +5,9 @@ import { normalizeRetentionSettings } from './retention-policy.mjs';
 import { stableHash } from './execution/provenance.mjs';
 import { normalizePipelineRun } from './execution/checkpoints.mjs';
 import {
-  QUEUED_REPROCESS_SCHEMA,
-  normalizeQueuedReprocess
+  QUEUED_REPROCESS_ENVELOPE_SCHEMA,
+  normalizeQueuedReprocess,
+  normalizeQueuedReprocessEnvelope
 } from './execution/queued-reprocess.mjs';
 import {
   LAST_BRIEF_SCHEMA,
@@ -28,7 +29,7 @@ const SCENE_CACHE_KEY_PATTERN = /^recursion-scene-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]
 const RUN_JOURNAL_KEY_PATTERN = /^recursion-run-journal-[A-Za-z0-9_.-]+\.v1\.json$/;
 const PIPELINE_RUN_KEY_PATTERN = /^recursion-pipeline-run-[A-Za-z0-9_.-]+\.v2\.json$/;
 const PIPELINE_ARTIFACT_KEY_PATTERN = /^recursion-pipeline-artifact-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v2\.json$/;
-const QUEUED_REPROCESS_KEY_PATTERN = /^recursion-queued-reprocess-[A-Za-z0-9_.-]+\.v1\.json$/;
+const QUEUED_REPROCESS_KEY_PATTERN = /^recursion-queued-reprocess-[A-Za-z0-9_.-]+\.v2\.json$/;
 const LAST_BRIEF_KEY_PATTERN = /^recursion-last-brief-[A-Za-z0-9_.-]+\.v1\.json$/;
 const RETIRED_GENERATED_KEY_PATTERN = /^recursion-scene-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v1\.json$/;
 const INDEX_KINDS = new Set([
@@ -128,7 +129,7 @@ export function pipelineArtifactKey(chatKey, operationId, artifactId) {
 }
 
 export function queuedReprocessKey(chatKey) {
-  return `recursion-queued-reprocess-${safeId(chatKey, 'chat')}.v1.json`;
+  return `recursion-queued-reprocess-${safeId(chatKey, 'chat')}.v2.json`;
 }
 
 function resumeArtifactReferences(manifest) {
@@ -786,7 +787,8 @@ function isStorageObject(value) {
 
 function indexRecordFromStoredRecord(key, value) {
   const kind = indexKindForKey(key);
-  if (!kind || !isStorageObject(value) || value.schemaVersion !== 1) return null;
+  if (!kind || !isStorageObject(value)) return null;
+  if (kind === 'queuedReprocess' ? value.schemaVersion !== 2 : value.schemaVersion !== 1) return null;
   if (kind === 'sceneCache') {
     if (value.recordType !== 'recursion.sceneCache' || !Array.isArray(value.cards)) return null;
     const chatKey = safeIdentifier(value.chatKey, '');
@@ -851,12 +853,12 @@ function indexRecordFromStoredRecord(key, value) {
   if (kind === 'queuedReprocess') {
     if (
       value.recordType !== 'recursion.queuedReprocess'
-      || value.intent?.schema !== QUEUED_REPROCESS_SCHEMA
-      || !normalizeQueuedReprocess(value.intent)
+      || value.schema !== QUEUED_REPROCESS_ENVELOPE_SCHEMA
+      || !normalizeQueuedReprocessEnvelope(value)
     ) {
       return null;
     }
-    const chatKey = safeIdentifier(value.chatKey, '');
+    const chatKey = safeId(value.chatKey, '');
     if (!chatKey) return null;
     return {
       key,
@@ -1559,34 +1561,50 @@ export function createStorageRepository({
     return normalized;
   }
 
-  async function loadQueuedReprocess(chatKey) {
+  async function loadQueuedReprocessEnvelope(chatKey) {
     const key = queuedReprocessKey(chatKey);
     const record = await storage.readJson(key);
     if (
       !isStorageObject(record)
       || record.recordType !== 'recursion.queuedReprocess'
-      || record.schemaVersion !== 1
-      || record.chatKey !== safeId(chatKey, 'chat')
-      || record.intent?.schema !== QUEUED_REPROCESS_SCHEMA
+      || record.schemaVersion !== 2
+      || record.schema !== QUEUED_REPROCESS_ENVELOPE_SCHEMA
+      || record.chatKey !== String(chatKey || '').trim()
     ) {
       return null;
     }
-    return normalizeQueuedReprocess(record.intent);
+    return normalizeQueuedReprocessEnvelope(record);
+  }
+
+  async function loadQueuedReprocess(chatKey, phase = 'preprocess') {
+    const envelope = await loadQueuedReprocessEnvelope(chatKey);
+    return envelope?.[phase === 'postprocess' ? 'postprocess' : 'preprocess'] || null;
   }
 
   async function saveQueuedReprocess(chatKey, intent) {
     const normalized = normalizeQueuedReprocess(intent);
     if (!normalized) throw new TypeError('Queued reprocess intent is invalid.');
+    const normalizedChatKey = String(chatKey || '').trim();
+    if (!normalizedChatKey || normalized.chatKey !== normalizedChatKey) {
+      throw new TypeError('Queued reprocess chat binding does not match the storage key.');
+    }
     const key = queuedReprocessKey(chatKey);
-    const record = baseRecord('recursion.queuedReprocess', {
-      chatKey: safeId(chatKey, 'chat'),
-      intent: normalized
+    const existing = await loadQueuedReprocessEnvelope(chatKey);
+    const envelope = normalizeQueuedReprocessEnvelope({
+      schema: QUEUED_REPROCESS_ENVELOPE_SCHEMA,
+      chatKey: normalizedChatKey,
+      preprocess: normalized.phase === 'preprocess' ? normalized : existing?.preprocess || null,
+      postprocess: normalized.phase === 'postprocess' ? normalized : existing?.postprocess || null
     });
+    const record = {
+      ...baseRecord('recursion.queuedReprocess', envelope),
+      schemaVersion: 2
+    };
     const writeResult = await storage.writeJson(key, record);
     if (storageWriteStatus(writeResult).persisted === false) {
       throw new Error('Queued reprocess write failed.');
     }
-    const persistedIntent = normalizeQueuedReprocess((await storage.readJson(key))?.intent);
+    const persistedIntent = (await loadQueuedReprocessEnvelope(chatKey))?.[normalized.phase] || null;
     if (!persistedIntent || await stableHash(persistedIntent) !== await stableHash(normalized)) {
       throw new Error('Queued reprocess write verification failed.');
     }
@@ -1601,8 +1619,28 @@ export function createStorageRepository({
     return { ok: deleted?.ok !== false, key };
   }
 
-  async function clearQueuedReprocess(chatKey) {
+  async function clearQueuedReprocess(chatKey, phase = null) {
     const key = queuedReprocessKey(chatKey);
+    if (phase === 'preprocess' || phase === 'postprocess') {
+      const existing = await loadQueuedReprocessEnvelope(chatKey);
+      if (!existing) return { ok: true, key };
+      const next = normalizeQueuedReprocessEnvelope({
+        ...existing,
+        [phase]: null
+      });
+      if (next?.preprocess || next?.postprocess) {
+        const record = {
+          ...baseRecord('recursion.queuedReprocess', next),
+          schemaVersion: 2
+        };
+        const writeResult = await storage.writeJson(key, record);
+        if (storageWriteStatus(writeResult).persisted === false) {
+          throw new Error('Queued reprocess clear failed.');
+        }
+        await writeAuxiliaryIndexEntry(key, 'queuedReprocess', safeId(chatKey, 'chat'));
+        return { ok: true, key };
+      }
+    }
     const deleted = await storage.deleteJson(key);
     await removeIndexEntry(key);
     return { ok: deleted?.ok !== false, key };
@@ -1938,6 +1976,7 @@ export function createStorageRepository({
     savePipelineArtifact,
     loadPipelineRun,
     savePipelineRun,
+    loadQueuedReprocessEnvelope,
     loadQueuedReprocess,
     saveQueuedReprocess,
     clearPipelineRun,

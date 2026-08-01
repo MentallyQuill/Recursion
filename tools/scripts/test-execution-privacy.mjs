@@ -102,6 +102,8 @@ const manifest = {
     operationId,
     chatKey,
     phase: 'postprocess',
+    turnKeyHash: 'turn-privacy',
+    sourceBandHash: 'band-privacy',
     pipelineMode: 'segmented',
     sourceIdentity: {
       sourceRevisionHash: 'source-safe-hash',
@@ -118,7 +120,11 @@ const manifest = {
 };
 await repository.savePipelineRun(chatKey, manifest);
 await repository.saveQueuedReprocess(chatKey, {
-  schema: 'recursion.queued-reprocess.v1',
+  schema: 'recursion.queuedReprocess.v2',
+  chatKey,
+  phase: 'postprocess',
+  turnKeyHash: 'turn-privacy',
+  queuedAt: createdAt,
   mode: 'stage',
   stageIds: ['postprocess.unified.rewrite'],
   artifactBody: secrets[4]
@@ -142,7 +148,8 @@ for (const [stageId, secret] of stageFixtures.slice(0, 5)) {
 
 const storedManifest = await repository.loadPipelineRun(chatKey);
 const journal = await repository.loadRunJournal(chatKey);
-const queuedIntent = await repository.loadQueuedReprocess(chatKey);
+const queuedIntent = await repository.loadQueuedReprocess(chatKey, 'postprocess');
+assertEqual(queuedIntent.turnKeyHash, 'turn-privacy', 'queued privacy fixture retains only bounded turn metadata');
 const diagnostics = buildDiagnosticsPayload({
   createdAt,
   view: {

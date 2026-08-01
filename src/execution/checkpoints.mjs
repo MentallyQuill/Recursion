@@ -225,6 +225,7 @@ export function createStageRecord({
     checkpoint: null,
     summary: null,
     failure: null,
+    diagnosticCodes: [],
     attempts: {
       window: 0,
       limit: positiveInteger(attemptsLimit),
@@ -250,6 +251,11 @@ export function normalizeStageRecord(value) {
     state: STAGE_STATES.includes(value.state) ? value.state : 'pending',
     checkpoint: normalizeCheckpoint(value.checkpoint),
     summary: normalizeStageSummary(value.summary),
+    diagnosticCodes: [...new Set(
+      (Array.isArray(value.diagnosticCodes) ? value.diagnosticCodes : [])
+        .map((code) => cleanText(code).slice(0, 120))
+        .filter(Boolean)
+    )].slice(0, 20),
     failure: value.failure && typeof value.failure === 'object'
       ? {
           code: cleanText(value.failure.code),

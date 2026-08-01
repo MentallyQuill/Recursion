@@ -1460,45 +1460,32 @@ export function createPostProcessRuntime({
   async function startDurableOperation(record, operation, currentSettings) {
     const provenance = durableProvenance(operation, currentSettings);
     const graph = durableGraph(operation);
+    const queuedIntent = normalizeQueuedReprocess(
+      await durableRepository.loadQueuedReprocess?.(operation.snapshot.chatKey, 'postprocess')
+    );
     let manifest = createPipelineRun({
       operationId: operation.operationId,
       chatKey: operation.snapshot.chatKey,
       phase: 'postprocess',
       pipelineMode: 'segmented',
       sourceIdentity: provenance.sourceIdentity,
-      provenance
+      provenance,
+      turnKeyHash: queuedIntent?.turnKeyHash || '',
+      sourceBandHash: ''
     });
-    const queuedIntent = normalizeQueuedReprocess(
-      await durableRepository.loadQueuedReprocess?.(manifest.chatKey)
-    );
     if (queuedIntent) {
-      const deferredStageIds = queuedIntent.mode === 'stage'
-        ? queuedIntent.stageIds.filter((stageId) => stageId.startsWith('preprocess.'))
-        : [];
-      const currentIntent = queuedIntent.mode === 'stage'
-        ? {
-            ...queuedIntent,
-            stageIds: queuedIntent.stageIds.filter((stageId) => !deferredStageIds.includes(stageId))
-          }
-        : queuedIntent;
       const binding = bindQueuedReprocess({
-        intent: currentIntent.stageIds?.length === 0 ? null : currentIntent,
+        intent: queuedIntent,
         graph,
         manifest,
         provenance
       });
       manifest = binding.manifest;
-      const retainedStageIds = [
-        ...(binding.intent?.mode === 'stage' ? binding.intent.stageIds : []),
-        ...deferredStageIds
-      ];
-      const retainedIntent = queuedIntent.mode === 'stage' && retainedStageIds.length
-        ? { ...queuedIntent, stageIds: [...new Set(retainedStageIds)] }
-        : binding.intent;
+      const retainedIntent = binding.intent;
       if (retainedIntent) {
         await durableRepository.saveQueuedReprocess?.(manifest.chatKey, retainedIntent);
       } else {
-        await durableRepository.clearQueuedReprocess?.(manifest.chatKey);
+        await durableRepository.clearQueuedReprocess?.(manifest.chatKey, 'postprocess');
       }
       durableExecution?.onQueuedReprocessChanged?.(retainedIntent || null);
     }
@@ -1521,7 +1508,7 @@ export function createPostProcessRuntime({
       context: {}
     });
     durableExecution?.onQueuedReprocessChanged?.(
-      await durableRepository.loadQueuedReprocess?.(manifest.chatKey) || null
+      await durableRepository.loadQueuedReprocess?.(manifest.chatKey, 'postprocess') || null
     );
     return finalizeDurableOperation(record, operation, settled);
   }

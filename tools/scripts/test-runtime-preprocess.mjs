@@ -188,8 +188,8 @@ function roleCounts(calls = []) {
     'retryStage',
     'queueStageReprocess',
     'cancelQueuedStageReprocess',
-    'requestFreshNextGeneration',
-    'clearFreshNextGeneration',
+    'queueFullFreshSwipe',
+    'clearQueuedFullFreshSwipe',
     'getView'
   ]) {
     assert(typeof runtime[method] === 'function', `runtime exposes ${method}`);
@@ -690,7 +690,11 @@ function roleCounts(calls = []) {
   );
 
   await storage.saveQueuedReprocess('chat-preprocess', {
-    schema: 'recursion.queued-reprocess.v1',
+    schema: 'recursion.queuedReprocess.v2',
+    chatKey: 'chat-preprocess',
+    phase: 'preprocess',
+    turnKeyHash: firstManifest.turnKeyHash,
+    queuedAt: '2026-08-01T12:00:00.000Z',
     mode: 'stage',
     stageIds: ['preprocess.cards.segmented.scene-frame']
   });
@@ -777,6 +781,10 @@ function roleCounts(calls = []) {
     'outside-band edit preserves the durable operation'
   );
 
+  await harness.runtime.queueStageReprocess({
+    stageId: 'preprocess.cards.segmented.scene-frame'
+  });
+
   harness.setSnapshot({
     ...bandSnapshot,
     latestMesId: 15,
@@ -801,9 +809,18 @@ function roleCounts(calls = []) {
   );
   assert(editedManifest.operationId !== firstManifest.operationId, 'inside-band edit replaces the prior operation');
   assertEqual(
+    await harness.storage.loadQueuedReprocess('band-chat', 'preprocess'),
+    null,
+    'inside-band edit cancels the prior turn queue instead of consuming it'
+  );
+  assertEqual(
     harness.runtime.getView().turnScope.generationClassification,
     'source-band-edited',
     'inside-band edit exposes the bounded invalidation code'
+  );
+  assert(
+    harness.runtime.getView().turnScope.diagnosticCodes.includes('queued-reprocess-canceled-edited-band'),
+    'inside-band queue cancellation exposes only the bounded reason code'
   );
 }
 
@@ -1262,13 +1279,22 @@ function roleCounts(calls = []) {
 
 {
   const providerCalls = [];
-  const { runtime, storage } = createHarness({
+  const { runtime, storage, setSnapshot } = createHarness({
     provider: immediateProvider(providerCalls)
   });
   await runtime.prepareForGeneration({
     userMessage: 'I ask what she remembers.',
     hostGeneration: true
   });
+  const completedTurnSnapshot = {
+    ...snapshot(),
+    latestMesId: 3,
+    messages: [
+      ...snapshot().messages,
+      { mesid: 3, role: 'assistant', text: 'Mara says the archive remembers every oath.', visible: true }
+    ]
+  };
+  setSnapshot(completedTurnSnapshot);
   const callsBeforeQueue = providerCalls.length;
   const queued = await runtime.queueStageReprocess({
     stageId: 'preprocess.cards.segmented.scene-frame'
@@ -1284,6 +1310,14 @@ function roleCounts(calls = []) {
     (await storage.loadQueuedReprocess('chat-preprocess')).stageIds.join(','),
     'preprocess.cards.segmented.scene-frame',
     'queued card intent is durable'
+  );
+  const boundQueue = await storage.loadQueuedReprocess('chat-preprocess', 'preprocess');
+  assertEqual(boundQueue.schema, 'recursion.queuedReprocess.v2', 'queued card uses the V2 intent contract');
+  assertEqual(boundQueue.phase, 'preprocess', 'queued card remains in the pre-process phase slot');
+  assertEqual(
+    boundQueue.turnKeyHash,
+    (await storage.loadPipelineRun('chat-preprocess')).turnKeyHash,
+    'queued card binds to the completed active turn'
   );
   await runtime.cancelQueuedStageReprocess({
     stageId: 'preprocess.cards.segmented.scene-frame'
@@ -1303,8 +1337,8 @@ function roleCounts(calls = []) {
     stageId: 'preprocess.cards.segmented.scene-frame'
   });
   await runtime.prepareForGeneration({
-    userMessage: 'I ask what she remembers.',
-    hostGeneration: true
+    hostGeneration: true,
+    generationType: 'swipe'
   });
   assertEqual(
     providerCalls.filter((entry) => entry.roleId === 'sceneFrameCard').length,
@@ -1329,36 +1363,68 @@ function roleCounts(calls = []) {
   );
   await runtime.cancelQueuedStageReprocess({ stageId: 'preprocess.arbiter' });
 
+  const completedManifest = await storage.loadPipelineRun('chat-preprocess');
   await storage.saveQueuedReprocess('chat-preprocess', {
-    schema: 'recursion.queued-reprocess.v1',
+    schema: 'recursion.queuedReprocess.v2',
+    chatKey: 'chat-preprocess',
+    phase: 'postprocess',
+    turnKeyHash: completedManifest.turnKeyHash,
+    queuedAt: '2026-08-01T12:00:00.000Z',
     mode: 'stage',
     stageIds: ['postprocess.unified.guidance']
   });
   await runtime.prepareForGeneration({
-    userMessage: 'I ask what she remembers.',
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
+  assert(
+    await storage.loadQueuedReprocess('chat-preprocess', 'postprocess'),
+    'matching native swipe preserves Post-process intent until the replacement response exists'
+  );
+  const nextTurnSnapshot = {
+    ...completedTurnSnapshot,
+    latestMesId: 4,
+    messages: [
+      ...completedTurnSnapshot.messages,
+      { mesid: 4, role: 'user', text: 'I ask who made the first oath.', visible: true }
+    ]
+  };
+  setSnapshot(nextTurnSnapshot);
+  await runtime.prepareForGeneration({
+    userMessage: 'I ask who made the first oath.',
     hostGeneration: true
   });
   assertEqual(
-    await storage.loadQueuedReprocess('chat-preprocess'),
+    await storage.loadQueuedReprocess('chat-preprocess', 'postprocess'),
     null,
     'a normal new turn cancels queued work from the prior turn'
   );
   await storage.clearQueuedReprocess('chat-preprocess');
+
+  const nextTurnWithAssistant = {
+    ...nextTurnSnapshot,
+    latestMesId: 5,
+    messages: [
+      ...nextTurnSnapshot.messages,
+      { mesid: 5, role: 'assistant', text: 'Mara names the first oathkeeper.', visible: true }
+    ]
+  };
+  setSnapshot(nextTurnWithAssistant);
 
   const callsBeforeFresh = {
     arbiter: providerCalls.filter((entry) => entry.roleId === 'utilityArbiter').length,
     card: providerCalls.filter((entry) => entry.roleId === 'sceneFrameCard').length,
     guidance: providerCalls.filter((entry) => entry.roleId === 'guidanceComposer').length
   };
-  await runtime.requestFreshNextGeneration({ source: 'test' });
+  await runtime.queueFullFreshSwipe({ source: 'test' });
   assertEqual(
     runtime.getView().activity.label,
     'Full fresh generation queued.',
     'full fresh uses Queued terminology'
   );
   await runtime.prepareForGeneration({
-    userMessage: 'I ask what she remembers.',
-    hostGeneration: true
+    hostGeneration: true,
+    generationType: 'swipe'
   });
   assertEqual(
     providerCalls.filter((entry) => entry.roleId === 'utilityArbiter').length,

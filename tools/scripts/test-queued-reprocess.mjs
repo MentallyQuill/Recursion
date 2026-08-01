@@ -133,6 +133,8 @@ const manifest = {
     operationId: 'run-reprocess',
     chatKey: 'chat-reprocess',
     phase: 'preprocess',
+    turnKeyHash: 'turn-reprocess',
+    sourceBandHash: 'band-reprocess',
     pipelineMode: 'segmented',
     sourceIdentity: provenance.sourceIdentity,
     provenance,
@@ -161,20 +163,28 @@ const manifest = {
   }
 };
 
+const intentBinding = {
+  schema: 'recursion.queuedReprocess.v2',
+  chatKey: 'chat-reprocess',
+  phase: 'preprocess',
+  turnKeyHash: 'turn-reprocess',
+  queuedAt: '2026-08-01T12:00:00.000Z'
+};
+
 const merged = mergeQueuedReprocess(
-  { stageIds: ['preprocess.cards.segmented.character'] },
-  { stageIds: ['preprocess.arbiter'] },
+  { ...intentBinding, mode: 'stage', stageIds: ['preprocess.cards.segmented.character'] },
+  { ...intentBinding, mode: 'stage', stageIds: ['preprocess.arbiter'] },
   graph
 );
 assertDeepEqual(merged, {
-  schema: 'recursion.queued-reprocess.v1',
+  ...intentBinding,
   mode: 'stage',
   stageIds: ['preprocess.arbiter']
 }, 'queued ancestor subsumes a queued descendant');
 
 const siblingMerge = mergeQueuedReprocess(
-  { stageIds: ['preprocess.cards.segmented.character'] },
-  { stageIds: ['preprocess.cards.segmented.setting'] },
+  { ...intentBinding, mode: 'stage', stageIds: ['preprocess.cards.segmented.character'] },
+  { ...intentBinding, mode: 'stage', stageIds: ['preprocess.cards.segmented.setting'] },
   graph
 );
 assertDeepEqual(
@@ -221,9 +231,15 @@ assertDeepEqual(
 );
 
 const intent = normalizeQueuedReprocess({
+  ...intentBinding,
   stageIds: ['preprocess.cards.segmented.character'],
   mode: 'stage'
 });
+assertEqual(intent.turnKeyHash, 'turn-reprocess', 'queued intent binds to one completed turn');
+assertEqual(normalizeQueuedReprocess({
+  ...intent,
+  schema: 'recursion.queued-reprocess.v1'
+}), null, 'V1 unbound intent is rejected');
 const bound = bindQueuedReprocess({
   intent,
   graph,
@@ -256,9 +272,24 @@ const selectedStart = consumeQueuedStageStart({
 assertEqual(selectedStart.consumed, true, 'selected root start consumes its intent once');
 assertEqual(selectedStart.intent, null, 'last selected root clears the persisted intent');
 
+const mismatchedTurn = bindQueuedReprocess({
+  intent,
+  graph,
+  manifest: { ...manifest, turnKeyHash: 'turn-other' },
+  provenance
+});
+assertEqual(mismatchedTurn.reason, 'turn-key-mismatch', 'intent cannot bind to a different turn');
+assertDeepEqual(mismatchedTurn.manifest.queuedStageIds, [], 'turn mismatch schedules no stage');
+
+assertEqual(mergeQueuedReprocess(
+  intent,
+  { ...intent, phase: 'postprocess', stageIds: ['postprocess.prose'] },
+  graph
+), null, 'intents from different phases never merge');
+
 const inapplicable = bindQueuedReprocess({
   intent: {
-    schema: 'recursion.queued-reprocess.v1',
+    ...intentBinding,
     mode: 'stage',
     stageIds: ['preprocess.removed-stage']
   },
@@ -269,21 +300,10 @@ const inapplicable = bindQueuedReprocess({
 assertEqual(inapplicable.intent, null, 'inapplicable intent is cleared');
 assertDeepEqual(inapplicable.manifest.queuedStageIds, [], 'inapplicable stage is never guessed or remapped');
 assertEqual(inapplicable.notices[0].code, 'stage-reprocess-inapplicable', 'inapplicable intent emits bounded notice');
-
-const canceled = normalizeQueuedReprocess({
-  schema: 'recursion.queued-reprocess.v1',
-  mode: 'canceled',
-  stageIds: ['preprocess.arbiter']
-});
-assertDeepEqual(canceled, {
-  schema: 'recursion.queued-reprocess.v1',
+assertEqual(normalizeQueuedReprocess({
+  ...intentBinding,
   mode: 'canceled',
   stageIds: []
-}, 'canceled intent cannot affect a later operation');
-assertEqual(
-  bindQueuedReprocess({ intent: canceled, graph, manifest, provenance }).intent,
-  null,
-  'canceled intent binds as no action'
-);
+}), null, 'V2 cancellation removes an intent instead of persisting a tombstone');
 
 console.log('Queued reprocess tests passed.');

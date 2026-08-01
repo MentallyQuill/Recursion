@@ -2717,6 +2717,15 @@ export function createRecursionRuntime({
   }
 
   function freshNextGenerationView() {
+    if (durablePreprocess && queuedReprocessView?.mode === 'full-fresh') {
+      return {
+        pending: true,
+        id: '',
+        reason: 'full-fresh',
+        requestedAt: safeText(queuedReprocessView.queuedAt || '', 80),
+        source: 'bar'
+      };
+    }
     const queuedFullFresh = runState.current().queuedFullFresh;
     if (!queuedFullFresh) {
       return {
@@ -2773,7 +2782,7 @@ export function createRecursionRuntime({
     return token;
   }
 
-  async function requestFreshNextGeneration(details = {}) {
+  async function queueFullFreshSwipe(details = {}) {
     const settings = settingsStore.get();
     if (settings.enabled === false) {
       clearPendingFreshNextGeneration();
@@ -2784,8 +2793,16 @@ export function createRecursionRuntime({
     if (durablePreprocess) {
       const snapshot = await readSnapshot();
       const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;
+      const manifest = await storage.loadPipelineRun(chatKey);
+      if (!manifest || manifest.state !== 'completed' || !manifest.turnKeyHash) {
+        return { ok: false, reason: 'completed-turn-unavailable' };
+      }
       const intent = {
         schema: QUEUED_REPROCESS_SCHEMA,
+        chatKey,
+        phase: 'preprocess',
+        turnKeyHash: manifest.turnKeyHash,
+        queuedAt: nowIso(),
         mode: 'full-fresh',
         stageIds: []
       };
@@ -2814,6 +2831,9 @@ export function createRecursionRuntime({
       };
     }
     const source = asObject(details);
+    if (!lastPreparedGeneration || !preparedGenerationIntegrityIsValid(lastPreparedGeneration)) {
+      return { ok: false, reason: 'completed-turn-unavailable' };
+    }
     runState.setQueuedFullFresh({
       id: makeId('fresh-next-generation'),
       reason: 'user-fresh-next-generation',
@@ -2836,12 +2856,12 @@ export function createRecursionRuntime({
     };
   }
 
-  async function clearFreshNextGeneration() {
+  async function clearQueuedFullFreshSwipe() {
     if (durablePreprocess) {
       const snapshot = await readSnapshot();
       const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;
-      const intent = await storage.loadQueuedReprocess(chatKey);
-      if (intent?.mode === 'full-fresh') await storage.clearQueuedReprocess(chatKey);
+      const intent = await storage.loadQueuedReprocess(chatKey, 'preprocess');
+      if (intent?.mode === 'full-fresh') await storage.clearQueuedReprocess(chatKey, 'preprocess');
       queuedReprocessView = intent?.mode === 'full-fresh' ? null : intent;
       settleRuntimeActivity({
         runId: safeText(executionView?.operationId || makeId('queued-reprocess-canceled'), 180),
@@ -2924,7 +2944,8 @@ export function createRecursionRuntime({
     generationClassification = '',
     operationId = '',
     reused = false,
-    invalidated = false
+    invalidated = false,
+    diagnosticCodes = []
   } = {}) {
     const source = asObject(identity);
     const sameIdentity = Boolean(
@@ -2941,7 +2962,11 @@ export function createRecursionRuntime({
       generationClassification: safeText(generationClassification, 80),
       operationId: safeText(operationId, 180),
       reuseCount: (sameIdentity ? Number(lastTurnScope?.reuseCount || 0) : 0) + (reused ? 1 : 0),
-      invalidationCount: Number(lastTurnScope?.invalidationCount || 0) + (invalidated ? 1 : 0)
+      invalidationCount: Number(lastTurnScope?.invalidationCount || 0) + (invalidated ? 1 : 0),
+      diagnosticCodes: [...new Set([
+        ...(sameIdentity ? (lastTurnScope?.diagnosticCodes || []) : []),
+        ...(Array.isArray(diagnosticCodes) ? diagnosticCodes : [])
+      ].map((code) => safeText(code, 120)).filter(Boolean))].slice(0, 20)
     };
     return lastTurnScope;
   }
@@ -7587,60 +7612,27 @@ export function createRecursionRuntime({
       context
     });
     executionView = next;
-    queuedReprocessView = await storage.loadQueuedReprocess(manifest.chatKey);
+    queuedReprocessView = await storage.loadQueuedReprocess(manifest.chatKey, manifest.phase);
     return next;
   }
 
   async function bindDurableQueuedIntent(context, manifest, graph, intentValue = undefined) {
     const intent = intentValue === undefined
-      ? await storage.loadQueuedReprocess(manifest.chatKey)
+      ? await storage.loadQueuedReprocess(manifest.chatKey, manifest.phase)
       : intentValue;
     const normalizedIntent = normalizeQueuedReprocess(intent);
-    const graphPhase = graph.topologicalStageIds.some((stageId) => stageId.startsWith('postprocess.'))
-      ? 'postprocess'
-      : 'preprocess';
-    const deferredStageIds = normalizedIntent?.mode === 'stage'
-      ? normalizedIntent.stageIds.filter((stageId) => {
-          const phase = stageId.split('.')[0];
-          return ['preprocess', 'postprocess'].includes(phase) && phase !== graphPhase;
-        })
-      : [];
-    const currentStageIds = normalizedIntent?.mode === 'stage'
-      ? normalizedIntent.stageIds.filter((stageId) => !deferredStageIds.includes(stageId))
-      : [];
-    const currentIntent = normalizedIntent?.mode === 'stage'
-      ? (
-          currentStageIds.length
-            ? { ...normalizedIntent, stageIds: currentStageIds }
-            : null
-        )
-      : normalizedIntent;
     const binding = bindQueuedReprocess({
-      intent: currentIntent,
+      intent: normalizedIntent,
       graph,
       manifest,
       provenance: context.provenance
     });
-    const boundStageIds = binding.intent?.mode === 'stage'
-      ? binding.intent.stageIds
-      : [];
-    const retainedStageIds = [...new Set([...boundStageIds, ...deferredStageIds])];
-    const retainedIntent = normalizedIntent?.mode === 'stage'
-      ? (
-          retainedStageIds.length
-            ? {
-                schema: QUEUED_REPROCESS_SCHEMA,
-                mode: 'stage',
-                stageIds: retainedStageIds
-              }
-            : null
-        )
-      : binding.intent;
+    const retainedIntent = binding.intent;
     context.fullFresh = normalizedIntent?.mode === 'full-fresh';
     if (retainedIntent) {
       await storage.saveQueuedReprocess(manifest.chatKey, retainedIntent);
     } else if (intent) {
-      await storage.clearQueuedReprocess(manifest.chatKey);
+      await storage.clearQueuedReprocess(manifest.chatKey, manifest.phase);
     }
     queuedReprocessView = retainedIntent;
     if (binding.notices.length > 0) {
@@ -7667,7 +7659,12 @@ export function createRecursionRuntime({
     };
   }
 
-  async function advanceDurablePreprocess(context, manifest, planValue = null) {
+  async function advanceDurablePreprocess(
+    context,
+    manifest,
+    planValue = null,
+    { validateDownstream = false } = {}
+  ) {
     if (!manifest || manifest.state !== 'completed') {
       return durableOperationResult(manifest, planValue);
     }
@@ -7679,7 +7676,7 @@ export function createRecursionRuntime({
     let segmentedFallback = false;
     if (context.settings.pipelineMode === 'fused') {
       const fusedRecord = manifest.stageRecords?.['preprocess.cards.fused'];
-      if (!fusedRecord) {
+      if (!fusedRecord || validateDownstream) {
         manifest = await startDurableGraph(
           context,
           manifest,
@@ -7696,9 +7693,9 @@ export function createRecursionRuntime({
       segmentedFallback = fusedArtifact?.fallback?.mode === 'segmented';
       if (
         segmentedFallback
-        && !durableSegmentedStages(context, plan).every(
+        && (validateDownstream || !durableSegmentedStages(context, plan).every(
           (stage) => manifest.stageRecords?.[stage.id]?.state === 'completed'
-        )
+        ))
       ) {
         manifest = await startDurableGraph(
           context,
@@ -7710,7 +7707,7 @@ export function createRecursionRuntime({
         }
       }
     } else if (
-      !durableSegmentedStages(context, plan).every(
+      validateDownstream || !durableSegmentedStages(context, plan).every(
         (stage) => manifest.stageRecords?.[stage.id]?.state === 'completed'
       )
     ) {
@@ -7724,7 +7721,7 @@ export function createRecursionRuntime({
       }
     }
 
-    if (!manifest.stageRecords?.['preprocess.install']) {
+    if (!manifest.stageRecords?.['preprocess.install'] || validateDownstream) {
       manifest = await startDurableGraph(
         context,
         manifest,
@@ -8057,7 +8054,7 @@ export function createRecursionRuntime({
       return { ok: false, paused: manifest.state === 'paused', execution: manifest };
     }
     const remainingIntent = normalizeQueuedReprocess(
-      await storage.loadQueuedReprocess(chatKey)
+      await storage.loadQueuedReprocess(chatKey, 'preprocess')
     );
     if (remainingIntent) {
       const plan = await loadExecutionArtifact(manifest, 'preprocess.arbiter');
@@ -8152,9 +8149,8 @@ export function createRecursionRuntime({
         storedTurnKeyHash: storedManifest?.turnKeyHash,
         storedOperationState: storedManifest?.state
       });
-      let queuedIntent = normalizeQueuedReprocess(
-        await storage.loadQueuedReprocess(chatKey)
-      );
+      const queuedEnvelope = await storage.loadQueuedReprocessEnvelope?.(chatKey);
+      let queuedIntent = normalizeQueuedReprocess(queuedEnvelope?.preprocess);
       const shouldRevokeStored = Boolean(storedManifest) && (
         classification.kind === 'new-user-turn'
         || classification.kind === 'new-host-generation'
@@ -8165,11 +8161,20 @@ export function createRecursionRuntime({
       const diagnosticClassification = classification.kind === 'edited-band-swipe'
         ? 'source-band-edited'
         : classification.kind;
+      const queuedIntentPresent = Boolean(queuedEnvelope?.preprocess || queuedEnvelope?.postprocess);
+      const queueCancellationCode = shouldRevokeStored && queuedIntentPresent
+        ? (
+            classification.kind === 'edited-band-swipe'
+              ? 'queued-reprocess-canceled-edited-band'
+              : 'queued-reprocess-canceled-new-turn'
+          )
+        : '';
       updateTurnScope(turnIdentity, {
         generationClassification: diagnosticClassification,
         operationId: shouldRevokeStored ? '' : storedManifest?.operationId,
         reused: classification.kind === 'same-turn-swipe' && !shouldRevokeStored,
-        invalidated: shouldRevokeStored
+        invalidated: shouldRevokeStored,
+        diagnosticCodes: queueCancellationCode ? [queueCancellationCode] : []
       });
       if (shouldRevokeStored) {
         const reason = classification.kind === 'edited-band-swipe'
@@ -8306,7 +8311,8 @@ export function createRecursionRuntime({
         return advanceDurablePreprocess(
           activeContext,
           manifest,
-          rerunsBase ? null : plan
+          rerunsBase ? null : plan,
+          { validateDownstream: rerunsBase }
         );
       }
 
@@ -8413,7 +8419,10 @@ export function createRecursionRuntime({
       // while the authoritative host snapshot still contains the assistant row.
       pendingUserMessage = normalizePendingUserMessage('');
     }
-    const freshContext = hostGeneration === true
+    if (hostGeneration === true && !explicitSwipe && runState.current().queuedFullFresh) {
+      clearPendingFreshNextGeneration();
+    }
+    const freshContext = hostGeneration === true && explicitSwipe
       ? consumePendingFreshNextGeneration(runId)
       : null;
     const freshReason = freshContext
@@ -9124,7 +9133,7 @@ export function createRecursionRuntime({
     const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;
     activeExecutionChatKey = chatKey;
     let manifest = await storage.loadPipelineRun(chatKey);
-    queuedReprocessView = await storage.loadQueuedReprocess(chatKey);
+    queuedReprocessView = await storage.loadQueuedReprocess(chatKey, manifest?.phase || 'preprocess');
     if (!manifest) {
       executionView = null;
       return null;
@@ -9378,13 +9387,23 @@ export function createRecursionRuntime({
     return advanceDurablePreprocess(context, result);
   }
 
-  async function queueStageReprocess({ stageId } = {}) {
+  async function queueStageReprocess({ operationId: requestedOperationId, stageId } = {}) {
     const id = safeText(stageId || '', 180);
     const operationId = safeText(executionView?.operationId || '', 180);
+    const requestedId = safeText(requestedOperationId || '', 180);
     const graph = preprocessGraphs.get(operationId)
       || postProcessRuntime.executionGraph?.(operationId)
       || null;
-    if (!id || !graph || !graph.hasStage(id) || !graph.getStage(id).executable) {
+    const turnKeyHash = safeText(executionView?.turnKeyHash || lastTurnScope?.turnKeyHash || '', 180);
+    if (
+      !id
+      || !graph
+      || executionView?.state !== 'completed'
+      || (requestedId && requestedId !== operationId)
+      || !turnKeyHash
+      || !graph.hasStage(id)
+      || !graph.getStage(id).executable
+    ) {
       return {
         ok: false,
         notice: {
@@ -9393,34 +9412,20 @@ export function createRecursionRuntime({
         }
       };
     }
+    const phase = id.startsWith('postprocess.') ? 'postprocess' : 'preprocess';
     const current = normalizeQueuedReprocess(
-      await storage.loadQueuedReprocess(activeExecutionChatKey)
+      await storage.loadQueuedReprocess(activeExecutionChatKey, phase)
     );
-    const graphPhase = id.startsWith('postprocess.') ? 'postprocess' : 'preprocess';
-    const deferredStageIds = current?.mode === 'stage'
-      ? current.stageIds.filter((currentStageId) => (
-          currentStageId.split('.')[0] !== graphPhase
-        ))
-      : [];
-    const currentForGraph = current?.mode === 'stage'
-      ? {
-          ...current,
-          stageIds: current.stageIds.filter((currentStageId) => (
-            currentStageId.split('.')[0] === graphPhase
-          ))
-        }
-      : current;
-    const merged = mergeQueuedReprocess(currentForGraph, {
+    const merged = mergeQueuedReprocess(current, {
       schema: QUEUED_REPROCESS_SCHEMA,
+      chatKey: activeExecutionChatKey,
+      phase,
+      turnKeyHash,
+      queuedAt: current?.queuedAt || nowIso(),
       mode: 'stage',
       stageIds: [id]
     }, graph);
-    const intent = merged?.mode === 'stage'
-      ? {
-          ...merged,
-          stageIds: [...new Set([...merged.stageIds, ...deferredStageIds])]
-        }
-      : merged;
+    const intent = merged;
     if (intent) await storage.saveQueuedReprocess(activeExecutionChatKey, intent);
     queuedReprocessView = intent;
     settleRuntimeActivity({
@@ -9436,8 +9441,9 @@ export function createRecursionRuntime({
 
   async function cancelQueuedStageReprocess({ stageId } = {}) {
     const id = safeText(stageId || '', 180);
+    const phase = id.startsWith('postprocess.') ? 'postprocess' : 'preprocess';
     const current = normalizeQueuedReprocess(
-      await storage.loadQueuedReprocess(activeExecutionChatKey)
+      await storage.loadQueuedReprocess(activeExecutionChatKey, phase)
     );
     if (!current || current.mode !== 'stage') {
       queuedReprocessView = current;
@@ -9446,7 +9452,7 @@ export function createRecursionRuntime({
     const stageIds = current.stageIds.filter((stageIdValue) => stageIdValue !== id);
     const next = stageIds.length ? { ...current, stageIds } : null;
     if (next) await storage.saveQueuedReprocess(activeExecutionChatKey, next);
-    else await storage.clearQueuedReprocess(activeExecutionChatKey);
+    else await storage.clearQueuedReprocess(activeExecutionChatKey, phase);
     queuedReprocessView = next;
     settleRuntimeActivity({
       runId: safeText(executionView?.operationId || makeId('queued-reprocess-canceled'), 180),
@@ -9459,6 +9465,19 @@ export function createRecursionRuntime({
     return { ok: true, queuedReprocess: next };
   }
 
+  async function runPostProcessForLatestAssistant(details = {}) {
+    const result = await postProcessRuntime.runPostProcessForLatestAssistant(details);
+    if (result?.execution) {
+      executionView = result.execution;
+      activeExecutionChatKey = safeText(result.execution.chatKey || activeExecutionChatKey, 180);
+      queuedReprocessView = await storage.loadQueuedReprocess(
+        activeExecutionChatKey,
+        'postprocess'
+      );
+    }
+    return result;
+  }
+
   return {
     storage,
     prepareForGeneration,
@@ -9468,8 +9487,8 @@ export function createRecursionRuntime({
     retryStage,
     queueStageReprocess,
     cancelQueuedStageReprocess,
-    requestFreshNextGeneration,
-    clearFreshNextGeneration,
+    queueFullFreshSwipe,
+    clearQueuedFullFreshSwipe,
     async dispose() {
       if (durablePreprocess) {
         await pauseOperation({ reason: 'runtime-disposed' });
@@ -9495,7 +9514,7 @@ export function createRecursionRuntime({
     postProcessPending: postProcessRuntime.postProcessPending,
     postProcessRunning: postProcessRuntime.postProcessRunning,
     preparePostProcessTrigger: postProcessRuntime.preparePostProcessTrigger,
-    runPostProcessForLatestAssistant: postProcessRuntime.runPostProcessForLatestAssistant,
+    runPostProcessForLatestAssistant,
     cancelPostProcess: postProcessRuntime.cancelPostProcess,
     waitForPostProcessSettlement: postProcessRuntime.waitForPostProcessSettlement,
     postProcessFinalTargetReady: postProcessRuntime.postProcessFinalTargetReady,

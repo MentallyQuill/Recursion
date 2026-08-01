@@ -14,6 +14,8 @@ const EXECUTION_DIAGNOSTIC_CODE_SET = new Set([
   'stage-reprocess-canceled',
   'stage-reprocess-consumed',
   'stage-reprocess-inapplicable',
+  'queued-reprocess-canceled-new-turn',
+  'queued-reprocess-canceled-edited-band',
   'resume-checkpoint-restored',
   'resume-artifact-missing',
   'resume-commit-already-applied',
@@ -353,9 +355,25 @@ function mapTurnScope(value) {
     operationId: safeText(source.operationId, 180),
     reuseCount: boundedInteger(source.reuseCount, 100000),
     invalidationCount: boundedInteger(source.invalidationCount, 100000),
-    diagnosticCodes: TURN_CLASSIFICATION_CODES.has(generationClassification)
-      ? [generationClassification]
-      : []
+    diagnosticCodes: [...new Set([
+      ...(TURN_CLASSIFICATION_CODES.has(generationClassification) ? [generationClassification] : []),
+      ...asArray(source.diagnosticCodes)
+    ])].filter((code) => EXECUTION_DIAGNOSTIC_CODE_SET.has(code))
+  }, 500);
+}
+
+function mapQueuedReprocess(value) {
+  const source = asObject(value);
+  if (!source.turnKeyHash || !source.phase || !source.mode) return null;
+  return safeDiagnosticValue({
+    schema: safeText(source.schema, 80),
+    chatKey: safeText(source.chatKey, 180),
+    phase: safeText(source.phase, 40),
+    turnKeyHash: safeText(source.turnKeyHash, 180),
+    queuedAt: safeText(source.queuedAt, 80),
+    mode: safeText(source.mode, 40),
+    stageIds: asArray(source.stageIds).slice(0, 20).map((stageId) => safeText(stageId, 180)),
+    diagnosticCodes: ['stage-reprocess-queued']
   }, 500);
 }
 
@@ -381,6 +399,7 @@ export function buildDiagnosticsPayload({
       activity: mapActivityEntry(runtime.activity),
       activityHistory: asArray(runtime.activityHistory).slice(-20).map(mapActivityEntry).filter(Boolean),
       freshNextGeneration: runtime.freshNextGeneration || null,
+      queuedReprocess: mapQueuedReprocess(runtime.queuedReprocess),
       turnScope: mapTurnScope(runtime.turnScope),
       execution: summarizeExecutionForDiagnostics(runtime.execution),
       cacheDecision: mapCacheDecision(runtime.lastCacheDecision),

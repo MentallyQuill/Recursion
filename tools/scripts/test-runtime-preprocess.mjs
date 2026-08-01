@@ -710,6 +710,38 @@ function roleCounts(calls = []) {
 }
 
 {
+  const emptySwipeSnapshot = {
+    ...snapshot('chat-empty-swipe-preprocess'),
+    sourceRevisionHash: '',
+    latestMesId: 3,
+    messages: [
+      ...snapshot('chat-empty-swipe-preprocess').messages,
+      {
+        mesid: 3,
+        role: 'assistant',
+        text: '',
+        swipeId: 1,
+        swipeCount: 2,
+        visible: true
+      }
+    ]
+  };
+  const harness = createHarness({
+    currentSnapshot: emptySwipeSnapshot,
+    provider: immediateProvider()
+  });
+  await harness.runtime.handleLatestAssistantSwipeRetry({ messageId: 3 });
+  const result = await harness.runtime.prepareForGeneration({
+    userMessage: null,
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
+  assertEqual(result.recursionPromptInstalled, true, 'fresh swipe installs against SillyTavern empty assistant placeholder');
+  assertEqual(result.install?.installed, true, 'fresh swipe freshness recheck removes the empty assistant placeholder');
+  assertEqual(harness.calls.install, 1, 'fresh empty-placeholder swipe installs its packet exactly once');
+}
+
+{
   const providerCalls = [];
   const harness = createHarness({ provider: immediateProvider(providerCalls) });
   const { runtime, storage, setSnapshot } = harness;

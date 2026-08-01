@@ -5895,7 +5895,7 @@ export function createRecursionRuntime({
     try {
       const observedSnapshot = await readSnapshot();
       const latestAssistant = options.withoutLatestAssistant === true
-        ? latestVisibleAssistantEntry(observedSnapshot)
+        ? latestVisibleAssistantEntry(observedSnapshot, { allowEmpty: true })
         : null;
       const sourceSnapshot = latestAssistant
         ? (snapshotWithoutLatestAssistant(observedSnapshot, latestAssistant) || observedSnapshot)

@@ -1103,14 +1103,26 @@ export function createSillyTavernHost({
       : createMemoryStorageAdapter()
   );
 
-  async function snapshot() {
+  async function snapshot(options = {}) {
     const context = currentContext(contextFactory);
     const chatId = await readChatId(context);
     const chatKey = safeId(chatId, 'chat');
     const entityIdentity = activeEntityIdentity(context);
     const retention = normalizeRetentionSettings(settingsStore.get().retention);
     const rawChat = Array.isArray(context.chat) ? context.chat : [];
-    const bounded = selectBoundedSourceWindow(rawChat, retention);
+    let latestAssistantIndex = -1;
+    if (options?.withoutLatestAssistant === true) {
+      for (let index = rawChat.length - 1; index >= 0; index -= 1) {
+        const normalized = normalizeMessage(rawChat[index], index);
+        if (normalized.visible === false || normalized.isSystem) continue;
+        latestAssistantIndex = normalized.isUser ? -1 : index;
+        break;
+      }
+    }
+    const sourceChat = latestAssistantIndex >= 0
+      ? rawChat.filter((_, index) => index !== latestAssistantIndex)
+      : rawChat;
+    const bounded = selectBoundedSourceWindow(sourceChat, retention);
     let rawSearchIndex = 0;
     const messages = bounded.messages.map((message) => {
       const matchedIndex = rawChat.indexOf(message, rawSearchIndex);
@@ -1118,7 +1130,7 @@ export function createSillyTavernHost({
       rawSearchIndex = rawIndex + 1;
       return normalizeMessage(message, rawIndex);
     });
-    const latestMesId = latestMessageIdFromRawChat(rawChat);
+    const latestMesId = latestMessageIdFromRawChat(sourceChat);
     const sourceRevisionHash = hashJson(sourceRevisionMessages(messages));
     const sceneFingerprint = hashJson({
       chatKey,
@@ -1144,6 +1156,7 @@ export function createSillyTavernHost({
       ...entityIdentity,
       latestMesId,
       messages,
+      latestAssistantExcluded: latestAssistantIndex >= 0,
       ...bounded.metadata
     };
   }

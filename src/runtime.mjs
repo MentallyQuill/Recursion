@@ -485,6 +485,7 @@ function normalizeSnapshot(rawSnapshot = {}) {
   };
   return {
     ...normalized,
+    latestAssistantExcluded: source.latestAssistantExcluded === true,
     sourceRevisionHash: safeText(source.sourceRevisionHash || sourceWindowFingerprint(normalized), 180)
   };
 }
@@ -2437,11 +2438,20 @@ export function createRecursionRuntime({
     return lastPreparedGeneration?.hand || { cards: [], omitted: [] };
   }
 
-  async function readSnapshot() {
+  async function readSnapshot(options = {}) {
     if (typeof host?.snapshot !== 'function') {
       throw new Error('Recursion runtime requires host.snapshot().');
     }
-    return normalizeSnapshot(await host.snapshot());
+    return normalizeSnapshot(await host.snapshot(options));
+  }
+
+  async function readSwipeSourceSnapshot() {
+    const snapshot = await readSnapshot({ withoutLatestAssistant: true });
+    if (snapshot.latestAssistantExcluded === true) return snapshot;
+    const latestAssistant = latestVisibleAssistantEntry(snapshot, { allowEmpty: true });
+    return latestAssistant
+      ? (snapshotWithoutLatestAssistant(snapshot, latestAssistant) || snapshot)
+      : snapshot;
   }
 
   function isActiveRun(runId) {
@@ -5893,13 +5903,9 @@ export function createRecursionRuntime({
 
   async function recheckPromptInstallSnapshot(runId, expectedSnapshot, plan, pendingUserMessage, options = {}) {
     try {
-      const observedSnapshot = await readSnapshot();
-      const latestAssistant = options.withoutLatestAssistant === true
-        ? latestVisibleAssistantEntry(observedSnapshot, { allowEmpty: true })
-        : null;
-      const sourceSnapshot = latestAssistant
-        ? (snapshotWithoutLatestAssistant(observedSnapshot, latestAssistant) || observedSnapshot)
-        : observedSnapshot;
+      const sourceSnapshot = options.withoutLatestAssistant === true
+        ? await readSwipeSourceSnapshot()
+        : await readSnapshot();
       const currentSnapshot = snapshotForPlan(
         snapshotWithPendingUserMessage(sourceSnapshot, pendingUserMessage),
         plan
@@ -6112,6 +6118,7 @@ export function createRecursionRuntime({
 
   function preparedGenerationBasisForAttempt(snapshot, {
     swipe = false,
+    sourceAlreadyExcludesLatestAssistant = false,
     swipeMessageId = null,
     pendingUserMessage = null,
     settings,
@@ -6119,7 +6126,7 @@ export function createRecursionRuntime({
     hand = null,
     turnIdentity = null
   } = {}) {
-    const snapshotBasis = swipe
+    const snapshotBasis = swipe && !sourceAlreadyExcludesLatestAssistant
       ? generationBasisForLatestAssistantSwipe(snapshot, swipeMessageId, settings)
       : generationBasisForSnapshot(
           snapshotWithPendingUserMessage(snapshot, pendingUserMessage),
@@ -6163,9 +6170,12 @@ export function createRecursionRuntime({
       let currentSnapshot;
       let currentBasis;
       try {
-        currentSnapshot = await readSnapshot();
+        currentSnapshot = swipe
+          ? await readSwipeSourceSnapshot()
+          : await readSnapshot();
         currentBasis = preparedGenerationBasisForAttempt(currentSnapshot, {
           swipe,
+          sourceAlreadyExcludesLatestAssistant: swipe,
           swipeMessageId,
           pendingUserMessage,
           settings,
@@ -7912,8 +7922,10 @@ export function createRecursionRuntime({
     generationType = ''
   } = {}) {
     const settings = settingsStore.get();
-    const hostSnapshot = await readSnapshot();
     const nativeGenerationType = normalizeNativeGenerationType(generationType);
+    const hostSnapshot = nativeGenerationType === 'swipe'
+      ? await readSwipeSourceSnapshot()
+      : await readSnapshot();
     let pendingUserMessage = normalizePendingUserMessage(userMessage);
     let explicitSwipeMessageId = null;
     let snapshot = hostSnapshot;

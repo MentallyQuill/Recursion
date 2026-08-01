@@ -53,7 +53,7 @@ function createHarness({
   hostGeneration = {},
   settings = {}
 } = {}) {
-  const calls = { install: 0, clear: 0 };
+  const calls = { install: 0, clear: 0, snapshotOptions: [] };
   let hostSnapshot = clone(currentSnapshot);
   const settingsStore = createSettingsStore({ root: {} });
   settingsStore.update({
@@ -64,7 +64,8 @@ function createHarness({
     ...settings
   });
   const host = {
-    async snapshot() {
+    async snapshot(options = {}) {
+      calls.snapshotOptions.push(clone(options));
       return clone(hostSnapshot);
     },
     prompt: {
@@ -739,6 +740,10 @@ function roleCounts(calls = []) {
   assertEqual(result.recursionPromptInstalled, true, 'fresh swipe installs against SillyTavern empty assistant placeholder');
   assertEqual(result.install?.installed, true, 'fresh swipe freshness recheck removes the empty assistant placeholder');
   assertEqual(harness.calls.install, 1, 'fresh empty-placeholder swipe installs its packet exactly once');
+  assert(
+    harness.calls.snapshotOptions.some((options) => options.withoutLatestAssistant === true),
+    'native swipe requests a host snapshot bounded after latest-assistant exclusion'
+  );
 }
 
 {

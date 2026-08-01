@@ -341,6 +341,7 @@ assertEqual(
   });
   const sparseSwipe = rawWindowHost.normalizeMessageEvent({}, { eventName: 'message_swiped' });
   const rawWindowSnapshot = await rawWindowHost.snapshot();
+  const rawWindowSwipeSource = await rawWindowHost.snapshot({ withoutLatestAssistant: true });
   assertEqual(sparseSwipe.messageId, 29, 'sparse swipe event uses the full raw chat index when SillyTavern omits mesid');
   assertDeepEqual(
     rawWindowSnapshot.messages.map((message) => message.mesid),
@@ -348,6 +349,12 @@ assertEqual(
     'bounded host snapshot preserves full raw chat indices when SillyTavern omits mesid'
   );
   assertEqual(rawWindowSnapshot.messages.at(-1).mesid, sparseSwipe.messageId, 'bounded snapshot and swipe event share one assistant message identity');
+  assertDeepEqual(
+    rawWindowSwipeSource.messages.map((message) => message.mesid),
+    [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28],
+    'swipe source removes the latest assistant before selecting the bounded window'
+  );
+  assertEqual(rawWindowSwipeSource.latestMesId, 28, 'swipe source latest id belongs to the pre-assistant source band');
 }
 
 const swipeContext = {

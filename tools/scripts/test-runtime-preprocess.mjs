@@ -86,8 +86,7 @@ function createHarness({
     settingsStore,
     storage,
     activity: createActivityReporter(),
-    generationRouter: provider,
-    durablePreprocess: true
+    generationRouter: provider
   });
   return {
     runtime,
@@ -635,70 +634,6 @@ function roleCounts(calls = []) {
   await preparing;
 }
 
-{
-  const providerCalls = [];
-  let guidanceCalls = 0;
-  const provider = {
-    async generate(roleId, request = {}) {
-      providerCalls.push({ roleId, request });
-      if (roleId === 'utilityArbiter') return arbiterResponse(request);
-      if (roleId === 'sceneFrameCard') return cardResponse(roleId, request);
-      if (roleId === 'guidanceComposer') {
-        guidanceCalls += 1;
-        if (guidanceCalls <= 2) {
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.guidanceComposer.v1',
-              snapshotHash: 'wrong-snapshot',
-              guidanceText: ''
-            }
-          };
-        }
-        return guidanceResponse(request);
-      }
-      throw new Error(`unexpected provider role ${roleId}`);
-    }
-  };
-  const { runtime, storage } = createHarness({
-    provider,
-    settings: { modelAttemptsPerStep: 2 }
-  });
-  const failed = await runtime.prepareForGeneration({
-    userMessage: 'I ask what she remembers.',
-    hostGeneration: true
-  });
-  assertEqual(failed.paused, true, 'required guidance exhaustion pauses the operation');
-  let manifest = await storage.loadPipelineRun('chat-preprocess');
-  assertEqual(manifest.pauseReason, 'stage-failed:preprocess.guidance', 'guidance is the visible blocking failure');
-  assertEqual(manifest.stageRecords['preprocess.guidance'].attempts.total, 2, 'guidance owns its two-attempt window');
-  const guidanceRequests = providerCalls
-    .filter((call) => call.roleId === 'guidanceComposer')
-    .map((call) => call.request.prompt);
-  assert(
-    guidanceRequests[1] !== guidanceRequests[0],
-    'the second guidance attempt uses an explicit correction request'
-  );
-
-  const retried = await runtime.retryStage({
-    operationId: manifest.operationId,
-    stageId: 'preprocess.guidance'
-  });
-  assertEqual(retried.ok, true, 'Retry opens a fresh guidance attempt window and settles');
-  manifest = await storage.loadPipelineRun('chat-preprocess');
-  assertEqual(manifest.stageRecords['preprocess.guidance'].state, 'completed', 'Retry replaces the failed guidance checkpoint');
-  assertEqual(
-    providerCalls.filter((call) => call.roleId === 'utilityArbiter').length,
-    1,
-    'Retry does not rerun Arbiter'
-  );
-  assertEqual(
-    providerCalls.filter((call) => call.roleId === 'sceneFrameCard').length,
-    1,
-    'Retry does not rerun completed cards'
-  );
-  assertEqual(guidanceCalls, 3, 'Retry targets only required guidance');
-}
 
 {
   const providerCalls = [];
@@ -1546,10 +1481,11 @@ function roleCounts(calls = []) {
     'Full fresh generation queued.',
     'full fresh uses Queued terminology'
   );
-  await runtime.prepareForGeneration({
+  const fullFresh = await runtime.prepareForGeneration({
     hostGeneration: true,
     generationType: 'swipe'
   });
+  assertEqual(fullFresh.install?.installed, true, 'full fresh installs the rebuilt packet against the active swipe source');
   assertEqual(
     providerCalls.filter((entry) => entry.roleId === 'utilityArbiter').length,
     callsBeforeFresh.arbiter + 1,
@@ -1573,19 +1509,20 @@ function roleCounts(calls = []) {
   await runtime.queueStageReprocess({
     stageId: 'preprocess.cards.segmented.scene-frame'
   });
-  const reset = await runtime.resetSceneCache();
-  assertEqual(reset.ok, true, 'Reset Scene Cache clears durable execution state');
+  assertEqual(typeof runtime.resetSceneCache, 'undefined', 'obsolete scene-cache reset is not exposed');
+  const reset = await runtime.resetTurnCache();
+  assertEqual(reset.ok, true, 'Reset Turn Cache clears durable execution state');
   assertEqual(
     await storage.loadPipelineRun('chat-preprocess'),
     null,
-    'Reset Scene Cache removes the current execution manifest'
+    'Reset Turn Cache removes the current execution manifest'
   );
   assertEqual(
     await storage.loadQueuedReprocess('chat-preprocess'),
     null,
-    'Reset Scene Cache removes queued reprocess state'
+    'Reset Turn Cache removes queued reprocess state'
   );
-  assertEqual(runtime.getView().execution, null, 'Reset Scene Cache clears the runtime execution view');
+  assertEqual(runtime.getView().execution, null, 'Reset Turn Cache clears the runtime execution view');
 }
 
 {

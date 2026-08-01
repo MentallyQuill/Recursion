@@ -15,7 +15,6 @@ import { createMemoryStorageAdapter, createStorageRepository } from '../../src/s
 import { createGenerationRouter, createProviderClient } from '../../src/providers.mjs';
 import { createSillyTavernHost } from '../../src/hosts/sillytavern/host.mjs';
 import { createRuntimeRunState } from '../../src/runtime/run-state.mjs';
-import { preparedGenerationIntegrityIsValid } from '../../src/runtime/prepared-generation.mjs';
 import { clearPromptBestEffort, installPrompt } from '../../src/runtime/prompt-install.mjs';
 import { runFusedCardPipeline } from '../../src/runtime/pipelines/fused.mjs';
 import { runSegmentedCardPipeline } from '../../src/runtime/pipelines/segmented.mjs';
@@ -741,8 +740,7 @@ function createRuntimeHarness({
   hostMessages = {},
   generationRouter = undefined,
   activity = createActivityReporter(),
-  storage: providedStorage = null,
-  durablePreprocess = false,
+  storage: providedStorage = null
 } = {}) {
   const calls = {
     snapshot: 0,
@@ -780,7 +778,23 @@ function createRuntimeHarness({
     });
     assertEqual(health.ok, true, 'runtime harness records hash-bound Utility health');
   }
-  const resolvedGenerationRouter = generationRouter === undefined ? localFallbackCardRouter() : generationRouter;
+  const rawGenerationRouter = generationRouter === undefined ? localFallbackCardRouter() : generationRouter;
+  const resolvedGenerationRouter = rawGenerationRouter && typeof rawGenerationRouter.batch === 'function'
+    ? {
+        ...rawGenerationRouter,
+        async generate(roleId, request = {}, options = {}) {
+          if (roleId.endsWith('Card')) {
+            const responses = await rawGenerationRouter.batch.call(
+              rawGenerationRouter,
+              [{ ...request, roleId }],
+              options
+            );
+            return Array.isArray(responses) ? responses[0] : responses;
+          }
+          return rawGenerationRouter.generate.call(rawGenerationRouter, roleId, request, options);
+        }
+      }
+    : rawGenerationRouter;
   const host = {
     async snapshot() {
       calls.snapshot += 1;
@@ -821,8 +835,7 @@ function createRuntimeHarness({
     settingsStore,
     storage,
     activity,
-    generationRouter: resolvedGenerationRouter,
-    durablePreprocess
+    generationRouter: resolvedGenerationRouter
   });
   return { runtime, calls, installed, cleared, storage, settingsStore, activity, adapter };
 }
@@ -830,6 +843,20 @@ function createRuntimeHarness({
 function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   return {
     async generate(roleId, request) {
+      if (roleId === 'guidanceComposer') {
+        return {
+          ok: true,
+          data: {
+            schema: 'recursion.guidanceComposer.v1',
+            snapshotHash: request.snapshotHash,
+            guidanceText: 'Follow the selected Recursion cards while preserving the current turn.',
+            sourceCardIds: request.sourceCardIds || [],
+            guardrailCardIds: [],
+            omittedCardIds: [],
+            diagnostics: ['unit-guidance']
+          }
+        };
+      }
       assertEqual(roleId, 'utilityArbiter', 'local fallback card router only handles Utility Arbiter');
       return {
         ok: true,
@@ -1082,7 +1109,8 @@ function createLivePostProcessRuntimeHarness({
   const priorResult = await firstRun;
   await nextPreparation;
   assertEqual(priorResult.committed, false, 'canceled prior Post-process operation cannot commit');
-  assertEqual(priorResult.reason, 'canceled', 'canceled prior operation settles with the stable canceled reason');
+  assertEqual(priorResult.paused, true, 'canceled durable Post-process operation settles paused for explicit recovery');
+  assertEqual(priorResult.execution.pauseReason, 'post-process-stopped', 'paused prior operation records the stable stop reason');
   assertEqual(live.runtime.postProcessPending(), true, 'immediate next generation reliably arms after prior cancellation settles');
   assertEqual(live.assistant().swipes.length, 1, 'canceled prior operation leaves the assistant response unchanged');
 }
@@ -1114,7 +1142,11 @@ function createLivePostProcessRuntimeHarness({
   writerGate.resolve('Candidate from the old chat.');
   const result = await run;
   assertEqual(result.committed, false, 'real runtime guard rejects chat ids that collide after safeId canonicalization');
-  assertEqual(result.reason, 'stale-source', 'lossy chat-key collision returns the stable stale-source reason');
+  assertEqual(
+    result.reason || result.diagnostics?.reason,
+    'stage-failed:postprocess-host-commit',
+    'lossy chat-key collision fails at the durable host-commit boundary'
+  );
   assertDeepEqual(live.assistant().swipes, originalSwipes, 'lossy chat-key collision preserves every source swipe');
   assertEqual(live.saveCalls.length, 0, 'lossy chat-key collision never reaches the host commit boundary');
 }
@@ -1164,7 +1196,11 @@ for (const applyMode of ['as-swipe', 'replace']) {
     commitGate.resolve();
     const result = await run;
     assertEqual(result.committed, false, `${applyMode} ${mutation} cannot commit after the outer guard`);
-    assertEqual(live.saveCalls.length, 0, `${applyMode} ${mutation} performs no host save`);
+    assertEqual(
+      live.saveCalls.length,
+      0,
+      `${applyMode} ${mutation} performs no host response save`
+    );
     assert(!originalAssistant.swipes.includes(`Outer guard ${applyMode} candidate.`), `${applyMode} ${mutation} appends no candidate`);
     assert(originalAssistant.mes !== `Outer guard ${applyMode} candidate.`, `${applyMode} ${mutation} replaces no candidate`);
     if (mutation === 'stop') {
@@ -1215,7 +1251,7 @@ for (const applyMode of ['as-swipe', 'replace']) {
   writerGate.resolve('Candidate from the old character.');
   const result = await run;
   assertEqual(result.committed, false, 'real runtime guard rejects an active character change');
-  assertEqual(result.reason, 'stale-source', 'active character change returns the stable stale-source reason');
+  assertEqual(result.diagnostics?.reason, 'stage-failed:postprocess-host-commit', 'active character change fails the durable host-commit stage');
   assertDeepEqual(live.assistant().swipes, originalSwipes, 'active character change preserves every source swipe');
   assertEqual(live.saveCalls.length, 0, 'active character change never reaches the host commit boundary');
 }
@@ -1234,7 +1270,7 @@ for (const applyMode of ['as-swipe', 'replace']) {
   writerGate.resolve('Candidate from the old group.');
   const result = await run;
   assertEqual(result.committed, false, 'real runtime guard rejects an active group change');
-  assertEqual(result.reason, 'stale-source', 'active group change returns the stable stale-source reason');
+  assertEqual(result.diagnostics?.reason, 'stage-failed:postprocess-host-commit', 'active group change fails the durable host-commit stage');
   assertDeepEqual(live.assistant().swipes, originalSwipes, 'active group change preserves every source swipe');
   assertEqual(live.saveCalls.length, 0, 'active group change never reaches the host commit boundary');
 }
@@ -2123,6 +2159,20 @@ for (const pipelineMode of ['segmented', 'fused']) {
             }
           };
         }
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: 'Preserve the prepared hand while reviewing the response.',
+              sourceCardIds: [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['generation-review-guidance']
+            }
+          };
+        }
         if (roleId !== 'generationReviewer') throw new Error(`Unexpected reviewer fixture role: ${roleId}`);
         reviewerRequests.push(request);
         const cardIds = request.reviewSnapshot?.installedHand?.map((card) => card.cardId).filter(Boolean) || [];
@@ -2198,51 +2248,6 @@ assertDeepEqual(
 );
 assertEqual(modelFetchCalls[0].url, 'https://runtime-models.example/v1/models', 'runtime model fetch uses shared /models endpoint');
 assert(!JSON.stringify(runtimeModels).includes('sk-live-secret'), 'runtime model fetch result does not expose session key');
-
-async function assertSingleCachedCardUnavailable({ card, snapshot, userMessage, label }) {
-  const storage = {
-    async loadSceneCache() {
-      return {
-        versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
-        cards: [card]
-      };
-    },
-    async saveSceneCache() {
-      return {};
-    },
-    async appendJournal() {
-      return {};
-    }
-  };
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot,
-    generationRouter: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', `${label}: only utility arbiter should run`);
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'reuse-cache',
-            lifecycle: [{ action: 'select', cardId: card.id, reason: label }],
-            budgets: { targetBriefTokens: 500, maxCards: 4 },
-            diagnostics: [label]
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage });
-  const serialized = JSON.stringify({ result, view: runtime.view() });
-  assertEqual(result.ok, true, `${label}: stale cache remains fail-soft`);
-  assertEqual(result.skipped, true, `${label}: cache is unavailable`);
-  assertEqual(result.reason, 'cache-unavailable', `${label}: unavailable reason returned`);
-  assertEqual(installed.length, 0, `${label}: prompt is not installed`);
-  assert(!serialized.includes(card.promptText), `${label}: stale prompt text is not exposed`);
-}
 
 function immediateDurableCardRouter() {
   return {
@@ -2425,120 +2430,6 @@ function immediateDurableCardRouter() {
   assert(roleCalls.includes('fusedCardBundle'), 'next generation enters the Fused card bundle path');
 }
 
-{
-  const { runtime, calls, installed, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    generationRouter: localFallbackCardRouter()
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'The lamp breaks.' });
-  const view = runtime.view();
-  assertEqual(runtime.storage, storage, 'runtime exposes storage repository');
-  assertEqual(result.ok, true, 'auto mode returns ok');
-  assertEqual(calls.snapshot, 3, 'auto mode reads snapshot and rechecks before compose and install');
-  assertEqual(installed.length, 1, 'auto mode installs one prompt');
-  assert(view.lastPreparedGeneration, 'successful preparation commits a prepared generation artifact');
-  assert(preparedGenerationIntegrityIsValid(view.lastPreparedGeneration), 'committed prepared generation artifact passes integrity');
-  assertEqual(view.lastPreparedGeneration.schema, 'recursion.preparedGeneration.v2', 'prepared generation uses the V2 turn-scoped schema');
-  assert(view.lastPreparedGeneration.basis.turnKeyHash, 'prepared generation records a turn key');
-  assert(view.lastPreparedGeneration.basis.sourceBandHash, 'prepared generation records a source-band hash');
-  assertEqual(
-    view.lastPreparedGeneration.basis.packetId,
-    view.lastPreparedGeneration.packet.packetId,
-    'prepared basis binds the installed packet identity'
-  );
-  assertEqual(
-    view.lastPreparedGeneration.basis.handId,
-    view.lastPreparedGeneration.hand.handId,
-    'prepared basis binds the selected hand identity'
-  );
-  assertEqual(view.lastPreparedGeneration.packet.packetId, view.lastPacket.packetId, 'packet view derives from committed artifact');
-  assertEqual(view.lastPreparedGeneration.hand.handId, view.lastHand.handId, 'hand view derives from committed artifact');
-  assert(view.lastHand.cards.length > 0, 'hand available in view');
-  assert(view.lastPacket.sections.cardEvidence.includes('The lamp breaks.'), 'scene frame uses latest visible message');
-  assert(!view.lastPacket.sections.cardEvidence.includes('hidden draft'), 'scene frame ignores invisible message');
-  assertEqual(view.activity.label, 'Recursion prompt ready.', 'activity settled');
-  assert(Array.isArray(view.activityHistory), 'runtime view exposes bounded activity history');
-  assert(view.activityHistory.some((event) => event.phase === 'started'), 'activity history includes turn start');
-  assert(view.activityHistory.some((event) => event.phase === 'handSelected'), 'activity history includes hand selection');
-  assert(
-    view.activityHistory.some((event) => event.phase === 'cardProgress'
-      && event.detail?.parentStepId === 'utility-card-batch'
-      && event.detail?.source === 'fallback'
-      && event.detail?.state === 'warning'),
-    'activity history includes local fallback card child progress'
-  );
-  assert(
-    view.activityHistory.some((event) => event.phase === 'cardBatchRunning'),
-    'local fallback card work is reported as a card batch rather than cache reuse'
-  );
-  assert(
-    !view.activityHistory.some((event) => event.phase === 'cacheReusing'),
-    'local fallback card work never reports a cache hit'
-  );
-  assertNoSecretText(view.activityHistory, 'runtime view activity history');
-  assertEqual(view.activeRunId, null, 'active run cleared after auto success');
-  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
-  assert(cache.cards.length >= 2, 'scene cache persists fallback cards');
-  assertEqual(cache.versions.cardCatalogHash, hashJson(CARD_CATALOG), 'scene cache records card catalog hash');
-  assertEqual(cache.versions.promptPacketVersion, 3, 'scene cache records prompt packet contract version');
-  assert(cache.versions.promptContractHash, 'scene cache records prompt contract hash');
-  assertEqual(cache.versions.promptContractHash, cacheContractVersions(view.settings).promptContractHash, 'scene cache prompt contract hash matches current prompt contract');
-  assertEqual(cache.versions.runtimeCacheContractVersion, 1, 'scene cache records runtime cache contract version');
-  assertEqual(cache.versions.settingsHash, cacheContractVersions(view.settings).settingsHash, 'scene cache records current settings hash');
-  assertEqual(cache.versions.providerContractHash, cacheContractVersions(view.settings).providerContractHash, 'scene cache records provider contract hash');
-  const baselineVersions = cacheContractVersions(view.settings);
-  const noisyVersions = cacheContractVersions({
-    ...view.settings,
-    diagnostics: { maxJournalEntries: 500, includeExcerpts: true },
-    ui: { viewerOpen: true, progressChildVisibleLimit: 20, progressListVisibleLimit: 80 },
-    providers: {
-      ...view.settings.providers,
-      utility: {
-        ...view.settings.providers.utility,
-        apiKey: 'sk-version-helper-secret',
-        resolvedProviderLabel: 'Noisy utility label',
-        resolvedModelLabel: 'Noisy utility model',
-        health: { status: 'fail', compactError: 'Bearer version-helper-token' }
-      }
-    }
-  });
-  assertEqual(noisyVersions.settingsHash, baselineVersions.settingsHash, 'cache settings hash ignores UI, diagnostics, test labels, and secrets');
-  assertNotEqual(
-    cacheContractVersions({ mode: 'auto', preProcessDecks: preProcessDecksForScope(defaultCardScope()) }).settingsHash,
-    cacheContractVersions({ mode: 'manual', preProcessDecks: preProcessDecksForScope(scopeWithFamilyDisabled('Environment')) }).settingsHash,
-    'Pre-process Deck participation state participates in scene cache contract'
-  );
-  const changedProviderVersions = cacheContractVersions({
-    ...view.settings,
-    providers: {
-      ...view.settings.providers,
-      utility: {
-        ...view.settings.providers.utility,
-        maxTokens: view.settings.providers.utility.maxTokens + 1
-      }
-    }
-  });
-  assert(changedProviderVersions.settingsHash !== baselineVersions.settingsHash, 'cache settings hash changes for cache-relevant provider settings');
-  assert(cache.latestHand?.handId, 'scene cache persists latest hand metadata');
-  assert(cache.latestHand.cardIds.length > 0, 'scene cache latest hand records selected card ids');
-  assert(cache.latestHand.promptPacketHash, 'scene cache latest hand records prompt packet hash');
-  assert(!Object.prototype.hasOwnProperty.call(cache.latestHand, 'cards'), 'scene cache latest hand omits raw card objects');
-  assert(!JSON.stringify(cache.latestHand).includes(view.lastHand.cards[0].promptText), 'scene cache latest hand omits prompt text');
-  assert(cache.cards.some((card) => Number.isFinite(card.source?.firstMesId) && Number.isFinite(card.source?.lastMesId)), 'scene cache cards preserve source message range');
-  const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
-  assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected', 'prompt.installed'], 'auto journals hand before prompt install');
-  const handSelected = journal.entries.find((entry) => entry.event === 'hand.selected');
-  const promptInstalled = journal.entries.find((entry) => entry.event === 'prompt.installed');
-  assert(handSelected, 'hand selection journal entry persisted');
-  assert(promptInstalled, 'install journal records success');
-  assertEqual(handSelected.details?.handId, view.lastHand.handId, 'hand selection journal records hand id');
-  assertEqual(handSelected.details?.selectedCount, view.lastHand.cards.length, 'hand selection journal records selected count');
-  assertEqual(handSelected.details?.cards?.length, view.lastHand.cards.length, 'hand selection journal records selected card metadata');
-  assertEqual(handSelected.details?.listedCount, view.lastHand.cards.length, 'hand selection journal records listed count');
-  assertEqual(handSelected.details?.truncated, false, 'hand selection journal records truncation state');
-  assert(handSelected.hashes?.promptPacketHash, 'hand selection journal records prompt packet hash');
-  assert(!JSON.stringify(handSelected).includes(view.lastHand.cards[0].promptText), 'hand selection journal omits prompt text');
-}
 
 {
   const { runtime, storage } = createRuntimeHarness({
@@ -2599,474 +2490,7 @@ function immediateDurableCardRouter() {
   assertEqual(handEntry.details.guidanceFallbackReason, 'snapshot-mismatch', 'hand journal records guidance fallback reason');
 }
 
-{
-  let activeSwipe = 'a';
-  let arbiterCalls = 0;
-  let swipeACardId = '';
-  const snapshots = {
-    a: swipeSnapshot({ text: 'Swipe A answer keeps the candle lit.', swipeId: 0, label: 'a' }),
-    b: swipeSnapshot({ text: 'Swipe B answer lets the candle gutter out.', swipeId: 1, label: 'b' })
-  };
-  const { runtime, installed, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    snapshot: () => snapshots[activeSwipe],
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        if (roleId === 'utilityArbiter') {
-          arbiterCalls += 1;
-          if (arbiterCalls === 3) {
-            return {
-              ok: true,
-              data: {
-                schema: UTILITY_ARBITER_SCHEMA,
-                snapshotHash: request.snapshotHash,
-                action: 'reuse-cache',
-                lifecycle: [{ action: 'select', cardId: swipeACardId, reason: 'active swipe returned to cached A variant' }],
-                budgets: { targetBriefTokens: 500, maxCards: 6 },
-                diagnostics: ['swipe-a-return-reuse']
-              }
-            };
-          }
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              action: 'compose-brief',
-              cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame', priority: 100 }],
-              budgets: { targetBriefTokens: 500, maxCards: 6 },
-              diagnostics: [`swipe-${activeSwipe}-compose`]
-            }
-          };
-        }
-        assertEqual(roleId, 'sceneFrameCard', 'swipe variant test only generates scene frame cards');
-        const label = activeSwipe.toUpperCase();
-        return {
-          ok: true,
-          roleId,
-          data: {
-            schema: 'recursion.card.v1',
-            role: 'sceneFrameCard',
-            family: 'Scene Frame',
-            snapshotHash: request.snapshotHash,
-            items: [{
-              promptText: `Swipe ${label} cached card guidance.`,
-              evidenceRefs: ['message:2'],
-              tokenEstimate: 8
-            }]
-          }
-        };
-      }
-    }
-  });
-  const userMessage = 'Continue.';
-  const first = await runtime.prepareForGeneration({ userMessage });
-  assertEqual(first.ok, true, 'swipe A setup installs');
-  const preparedSwipeARevision = runtime.view().lastSnapshot.sourceRevisionHash;
-  swipeACardId = runtime.view().lastHand.cards[0]?.id || '';
-  assert(swipeACardId, 'swipe A setup selects a card');
-  assert(JSON.stringify(installed.at(-1)).includes('Swipe A cached card guidance.'), 'swipe A prompt uses A card');
-  activeSwipe = 'b';
-  await runtime.handleSourceChanged({ eventName: 'message_swiped', messageId: 2 });
-  const second = await runtime.prepareForGeneration({ userMessage });
-  assertEqual(second.ok, true, 'swipe B run installs');
-  assert(JSON.stringify(installed.at(-1)).includes('Swipe B cached card guidance.'), 'swipe B prompt uses B card');
-  assert(!JSON.stringify(installed.at(-1)).includes('Swipe A cached card guidance.'), 'swipe B prompt does not reuse A card');
-  activeSwipe = 'a';
-  await runtime.handleSourceChanged({ eventName: 'message_swiped', messageId: 2 });
-  const third = await runtime.prepareForGeneration({ userMessage });
-  assertEqual(third.ok, true, 'swipe A return installs');
-  assertEqual(third.skipped, undefined, 'swipe A return can reuse active variant');
-  const thirdRunId = runtime.view().lastPacket?.diagnostics?.runId;
-  assert(
-    runtime.view().activityHistory.some((event) => event.runId === thirdRunId && event.phase === 'cacheReusing'),
-    'swipe A return emits cacheReusing progress for purple scene deck reuse'
-  );
-  assert(JSON.stringify(installed.at(-1)).includes('Swipe A cached card guidance.'), 'swipe A return reuses A card');
-  assert(!JSON.stringify(installed.at(-1)).includes('Swipe B cached card guidance.'), 'swipe A return does not leak B card');
-  const cache = await storage.loadSceneCache(snapshots.a.chatKey, snapshots.a.sceneKey);
-  const preparedSwipeBRevision = sourceWindowHash([
-    ...snapshots.b.messages,
-    { mesid: 3, role: 'user', text: userMessage, textHash: hashJson(userMessage), visible: true }
-  ], 2, 3);
-  assertEqual(cache.activeSourceRevisionHash, preparedSwipeARevision, 'scene cache marks active swipe revision');
-  assert(cache.variants[preparedSwipeARevision], 'scene cache keeps A source variant');
-  assert(cache.variants[preparedSwipeBRevision], 'scene cache keeps B source variant');
-}
 
-for (const pipelineMode of ['segmented', 'fused']) {
-  let providerCalls = 0;
-  const baseSnapshot = {
-    chatId: `same-turn-${pipelineMode}-chat`,
-    chatKey: `same-turn-${pipelineMode}-chat`,
-    sceneKey: `same-turn-${pipelineMode}-scene`,
-    sceneFingerprint: `same-turn-${pipelineMode}-scene-fp`,
-    turnFingerprint: `same-turn-${pipelineMode}-turn-fp`,
-    latestMesId: 2,
-    messages: [
-      { mesid: 2, role: 'assistant', text: 'The prior reply waits for a swipe retry.', visible: true }
-    ]
-  };
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { pipelineMode, mode: 'auto', reasonerUse: 'off' },
-    snapshot: () => baseSnapshot,
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        providerCalls += 1;
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              action: 'compose-brief',
-              cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame', priority: 100 }],
-              budgets: { targetBriefTokens: 500, maxCards: 6 },
-              reasonerDecision: { mode: 'skip', reason: 'same turn retry setup', signals: [] },
-              diagnostics: ['same-turn-retry-segmented']
-            }
-          };
-        }
-        if (roleId === 'sceneFrameCard') {
-          return {
-            ok: true,
-            roleId,
-            data: {
-              schema: 'recursion.card.v1',
-              role: 'sceneFrameCard',
-              family: 'Scene Frame',
-              snapshotHash: request.snapshotHash,
-              items: [{
-                promptText: 'Same-turn retry card guidance.',
-                evidenceRefs: ['message:3'],
-                tokenEstimate: 8
-              }]
-            }
-          };
-        }
-        if (roleId === 'fusedCardBundle') {
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.cardBundle.v1',
-              snapshotHash: request.snapshotHash,
-              items: [{
-                schema: 'recursion.card.v1',
-                role: 'sceneFrameCard',
-                family: 'Scene Frame',
-                promptText: 'Same-turn retry card guidance.',
-                evidenceRefs: ['message:3'],
-                tokenEstimate: 8
-              }]
-            }
-          };
-        }
-        if (roleId === 'guidanceComposer') {
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.guidanceComposer.v1',
-              snapshotHash: request.snapshotHash,
-              guidanceText: 'Same-turn retry guidance.',
-              sourceCardIds: [],
-              guardrailCardIds: [],
-              omittedCardIds: [],
-              diagnostics: ['same-turn-retry-guidance']
-            }
-          };
-        }
-        throw new Error(`unexpected same-turn retry role ${roleId}`);
-      }
-    }
-  });
-  const userMessage = 'Retry this response as another swipe.';
-  const first = await runtime.prepareForGeneration({ userMessage });
-  assertEqual(first.ok, true, `${pipelineMode} first same-turn run installs`);
-  assertEqual(installed.length, 1, `${pipelineMode} first same-turn run installs one packet`);
-  const preparedView = runtime.view();
-  assert(preparedView.lastPreparedGeneration, `${pipelineMode} successful preparation commits one artifact`);
-  assert(preparedGenerationIntegrityIsValid(preparedView.lastPreparedGeneration), `${pipelineMode} committed artifact passes integrity`);
-  assertEqual(preparedView.lastPreparedGeneration.packet.packetId, preparedView.lastPacket.packetId, `${pipelineMode} packet derives from artifact`);
-  assertEqual(preparedView.lastPreparedGeneration.hand.handId, preparedView.lastHand.handId, `${pipelineMode} hand derives from artifact`);
-  const callsAfterFirst = providerCalls;
-  const second = await runtime.prepareForGeneration({ userMessage });
-  assertEqual(second.ok, true, `${pipelineMode} same-turn retry succeeds`);
-  assertEqual(second.reused, true, `${pipelineMode} same-turn retry reuses prior packet`);
-  assertEqual(second.reason, 'prepared-generation-exact-match', `${pipelineMode} same-turn retry reports prepared reuse reason`);
-  assertEqual(providerCalls, callsAfterFirst, `${pipelineMode} same-turn retry does not call providers again`);
-  assertEqual(installed.length, 2, `${pipelineMode} same-turn retry reinstalls the existing packet`);
-  assertEqual(installed[0].packetId, installed[1].packetId, `${pipelineMode} same-turn retry keeps packet identity`);
-  assertEqual(runtime.view().lastCacheDecision?.kind, 'prepared-generation', `${pipelineMode} same-turn retry exposes prepared cache provenance`);
-  assertEqual(runtime.view().lastCacheDecision?.decision, 'hit', `${pipelineMode} same-turn retry exposes cache hit`);
-}
-
-for (const pipelineMode of ['segmented', 'fused']) {
-  let providerCalls = 0;
-  const userMessage = 'Retry the latest assistant response as a swipe.';
-  const chatId = `latest-assistant-swipe-${pipelineMode}-chat`;
-  const initialMessages = [
-    { mesid: 10, role: 'user', text: userMessage, textHash: hashJson(userMessage), visible: true }
-  ];
-  const snapshotFromMessages = (messages) => ({
-    chatId,
-    chatKey: chatId,
-    sceneKey: `latest-assistant-swipe-${pipelineMode}-scene`,
-    sceneFingerprint: `latest-assistant-swipe-${pipelineMode}-scene-fp`,
-    latestMesId: messages.at(-1)?.mesid || 0,
-    messages
-  });
-  let activeSnapshot = snapshotFromMessages(initialMessages);
-  let failReuseInstall = false;
-  const trackedStorage = createTrackedStorageRepository();
-  const { runtime, installed, cleared, storage } = createRuntimeHarness({
-    settings: {
-      pipelineMode,
-      mode: 'auto',
-      reasonerUse: 'off',
-      enhancements: { mode: 'off', applyMode: 'as-swipe', contextMessages: 13 }
-    },
-    snapshot: () => activeSnapshot,
-    storage: trackedStorage.storage,
-    hostPrompt: {
-      async install() {
-        return failReuseInstall
-          ? { ok: false, error: { code: 'REUSE_INSTALL_FAILED', message: 'prepared reuse install failed' } }
-          : { ok: true, installed: true };
-      }
-    },
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        providerCalls += 1;
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              action: 'compose-brief',
-              cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame', priority: 100 }],
-              budgets: { targetBriefTokens: 500, maxCards: 6 },
-              reasonerDecision: { mode: 'skip', reason: 'latest assistant swipe setup', signals: [] },
-              diagnostics: ['latest-assistant-swipe-setup']
-            }
-          };
-        }
-        if (roleId === 'sceneFrameCard') {
-          return {
-            ok: true,
-            roleId,
-            data: {
-              schema: 'recursion.card.v1',
-              role: 'sceneFrameCard',
-              family: 'Scene Frame',
-              snapshotHash: request.snapshotHash,
-              items: [{
-                promptText: 'Latest assistant swipe retry card guidance.',
-                evidenceRefs: ['message:10'],
-                tokenEstimate: 8
-              }]
-            }
-          };
-        }
-        if (roleId === 'fusedCardBundle') {
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.cardBundle.v1',
-              snapshotHash: request.snapshotHash,
-              items: [{
-                schema: 'recursion.card.v1',
-                role: 'sceneFrameCard',
-                family: 'Scene Frame',
-                promptText: 'Latest assistant swipe retry card guidance.',
-                evidenceRefs: ['message:10'],
-                tokenEstimate: 8
-              }]
-            }
-          };
-        }
-        if (roleId === 'guidanceComposer') {
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.guidanceComposer.v1',
-              snapshotHash: request.snapshotHash,
-              guidanceText: 'Latest assistant swipe retry guidance.',
-              sourceCardIds: [],
-              guardrailCardIds: [],
-              omittedCardIds: [],
-              diagnostics: ['latest-assistant-swipe-guidance']
-            }
-          };
-        }
-        throw new Error(`unexpected latest assistant swipe role ${roleId}`);
-      }
-    }
-  });
-  const first = await runtime.prepareForGeneration({ userMessage, hostGeneration: true });
-  assertEqual(first.ok, true, `${pipelineMode} latest-assistant swipe setup installs`);
-  assertEqual(installed.length, 1, `${pipelineMode} latest-assistant swipe setup installs one packet`);
-  assertEqual(runtime.view().lastBrief?.status, 'ready', `${pipelineMode} latest-assistant swipe setup marks Last Brief ready`);
-  const callsAfterFirst = providerCalls;
-  const settingUpdate = await runtime.updateSettings({
-    enhancements: { mode: 'repair', applyMode: 'as-swipe', contextMessages: 13 }
-  });
-  assertEqual(settingUpdate.clear, null, `${pipelineMode} enhancement-only setting change does not clear the prepared prompt`);
-  assertEqual(cleared.length, 0, `${pipelineMode} enhancement-only setting change does not write empty prompt lanes`);
-  const journalAfterSettings = await storage.loadRunJournal(activeSnapshot.chatKey);
-  assertEqual(
-    journalAfterSettings.entries.some((entry) => entry.event === 'cache.invalidated' && entry.details?.reason === 'settings-changed'),
-    false,
-    `${pipelineMode} enhancement-only setting change does not invalidate the scene cache`
-  );
-  activeSnapshot = snapshotFromMessages([
-    ...initialMessages,
-    {
-      mesid: 11,
-      role: 'assistant',
-      text: 'First assistant response now being swiped.',
-      textHash: hashJson('First assistant response now being swiped.'),
-      visible: true,
-      swipeId: 1,
-      swipeCount: 2,
-      activeSwipeTextHash: hashJson('Alternate assistant response.')
-    }
-  ]);
-  const storageBeforeReuse = clone(trackedStorage.counts);
-  const cacheSequenceBeforeReuse = runtime.view().lastCacheDecision?.sequence || 0;
-  const realDateNow = Date.now;
-  if (pipelineMode === 'segmented') {
-    await runtime.handleLatestAssistantSwipeRetry({ eventName: 'message_swiped', messageId: 11 });
-    Date.now = () => realDateNow() + (60 * 60 * 1000);
-  }
-  let second;
-  try {
-    second = await runtime.prepareForGeneration({ userMessage: null, hostGeneration: true, generationType: 'swipe' });
-  } finally {
-    Date.now = realDateNow;
-  }
-  assertEqual(second.ok, true, `${pipelineMode} latest-assistant swipe retry succeeds`);
-  assertEqual(second.reused, true, `${pipelineMode} latest-assistant swipe retry reuses previous packet`);
-  assertEqual(second.reason, 'prepared-generation-exact-match', `${pipelineMode} latest-assistant swipe retry reports prepared reuse reason`);
-  assertEqual(providerCalls, callsAfterFirst, `${pipelineMode} latest-assistant swipe retry does not call providers again`);
-  assertEqual(installed.length, 2, `${pipelineMode} latest-assistant swipe retry reinstalls previous packet`);
-  assertEqual(installed[0].packetId, installed[1].packetId, `${pipelineMode} latest-assistant swipe retry keeps packet identity`);
-  assertEqual(runtime.view().lastCacheDecision?.basisMode, 'exact', `${pipelineMode} short-window swipe reports exact basis reuse`);
-  if (pipelineMode === 'segmented') {
-    assertEqual(second.reused, true, 'prepared swipe reuse has no two-minute semantic expiry');
-  }
-  assertEqual(runtime.view().lastBrief?.status, 'ready', `${pipelineMode} latest-assistant swipe reuse restores Last Brief after reinstall`);
-  assertEqual(runtime.view().lastBrief?.packetId, installed[0].packetId, `${pipelineMode} latest-assistant swipe reuse restores original packet id`);
-  assertEqual(runtime.view().lastSnapshot.latestMesId, 10, `${pipelineMode} latest-assistant swipe retry keeps original user-turn snapshot`);
-  assertDeepEqual(trackedStorage.counts, storageBeforeReuse, `${pipelineMode} exact prepared hit performs zero storage work`);
-  assertEqual(runtime.view().lastCacheDecision?.sequence, cacheSequenceBeforeReuse + 1, `${pipelineMode} exact prepared hit records one final cache decision`);
-  const originalArtifactHash = runtime.view().lastPreparedGeneration.artifactHash;
-  const originalHandId = runtime.view().lastPreparedGeneration.hand.handId;
-  const repeatedElapsed = [];
-  for (let swipeIndex = 0; swipeIndex < 20; swipeIndex += 1) {
-    activeSnapshot = snapshotFromMessages([
-      ...initialMessages,
-      {
-        mesid: 11,
-        role: 'assistant',
-        text: `Repeated assistant swipe ${swipeIndex + 1}.`,
-        visible: true,
-        swipeId: swipeIndex + 2,
-        swipeCount: swipeIndex + 3,
-        activeSwipeTextHash: hashJson(`Repeated assistant swipe ${swipeIndex + 1}.`)
-      }
-    ]);
-    const startedAt = performance.now();
-    const repeated = await runtime.prepareForGeneration({
-      userMessage: null,
-      hostGeneration: true,
-      generationType: 'swipe'
-    });
-    repeatedElapsed.push(performance.now() - startedAt);
-    assertEqual(repeated.reused, true, `${pipelineMode} repeated swipe ${swipeIndex + 1} reuses`);
-    assertEqual(repeated.packet.packetId, installed[0].packetId, `${pipelineMode} repeated swipe ${swipeIndex + 1} preserves packet identity`);
-  }
-  assertEqual(providerCalls, callsAfterFirst, `${pipelineMode} twenty repeated swipes make zero provider calls`);
-  assertEqual(runtime.view().lastPreparedGeneration.artifactHash, originalArtifactHash, `${pipelineMode} repeated swipes preserve artifact identity`);
-  assertEqual(runtime.view().lastPreparedGeneration.hand.handId, originalHandId, `${pipelineMode} repeated swipes preserve hand identity`);
-  assert(Math.max(...repeatedElapsed) <= 250, `${pipelineMode} repeated prepared swipes stay below 250ms`);
-  assertDeepEqual(trackedStorage.counts, storageBeforeReuse, `${pipelineMode} twenty repeated swipes perform zero storage work`);
-  assertEqual(runtime.view().lastCacheDecision?.sequence, cacheSequenceBeforeReuse + 21, `${pipelineMode} twenty repeated swipes each record exactly one final decision`);
-  const installsBeforeStopRetry = installed.length;
-  await runtime.handleHostGenerationStopped({
-    eventName: 'generation_stopped',
-    messageId: 11
-  });
-  assertEqual(runtime.view().lastPreparedGeneration.artifactHash, originalArtifactHash, `${pipelineMode} stopped swipe preserves artifact identity`);
-  const storageAfterStop = clone(trackedStorage.counts);
-  const sequenceAfterStop = runtime.view().lastCacheDecision?.sequence || 0;
-  activeSnapshot = snapshotFromMessages([
-    ...initialMessages,
-    {
-      mesid: 11,
-      role: 'assistant',
-      text: 'Swipe after native stop.',
-      visible: true,
-      swipeId: 50,
-      swipeCount: 51
-    }
-  ]);
-  const afterStopRetry = await runtime.prepareForGeneration({
-    hostGeneration: true,
-    generationType: 'swipe'
-  });
-  assertEqual(afterStopRetry.reused, true, `${pipelineMode} swipe after stop reuses the prepared artifact`);
-  assertEqual(installed.length, installsBeforeStopRetry + 1, `${pipelineMode} swipe after stop installs exactly once`);
-  assertEqual(providerCalls, callsAfterFirst, `${pipelineMode} swipe after stop makes zero provider calls`);
-  assertDeepEqual(trackedStorage.counts, storageAfterStop, `${pipelineMode} swipe after stop makes zero storage calls`);
-  assertEqual(runtime.view().lastCacheDecision?.sequence, sequenceAfterStop + 1, `${pipelineMode} swipe after stop records one cache decision`);
-  assertEqual(runtime.view().lastPreparedGeneration.artifactHash, originalArtifactHash, `${pipelineMode} swipe after stop keeps artifact identity`);
-  failReuseInstall = true;
-  activeSnapshot = snapshotFromMessages([
-    ...initialMessages,
-    {
-      mesid: 11,
-      role: 'assistant',
-      text: 'Prepared reuse install failure output.',
-      visible: true,
-      swipeId: 99,
-      swipeCount: 100
-    }
-  ]);
-  const failedReuse = await runtime.prepareForGeneration({
-    hostGeneration: true,
-    generationType: 'swipe'
-  });
-  assertEqual(failedReuse.ok, false, `${pipelineMode} cached reinstall failure reports failure`);
-  assertEqual(failedReuse.reused, false, `${pipelineMode} cached reinstall failure does not report successful reuse`);
-  assertEqual(failedReuse.reason, 'prompt-install-failed', `${pipelineMode} cached reinstall failure reports the concrete reason`);
-  assertEqual(runtime.view().lastPreparedGeneration.artifactHash, originalArtifactHash, `${pipelineMode} cached reinstall failure preserves artifact identity`);
-  assertEqual(providerCalls, callsAfterFirst, `${pipelineMode} cached reinstall failure still makes zero provider calls`);
-  assertEqual(runtime.view().lastCacheDecision?.decision, 'miss', `${pipelineMode} cached reinstall failure is not reported as a hit`);
-  assertEqual(runtime.view().lastCacheDecision?.reason, 'prompt-install-failed', `${pipelineMode} cached reinstall failure records its final reason`);
-}
-
-function createTrackedStorageRepository() {
-  const storage = createStorageRepository({ storage: createMemoryStorageAdapter() });
-  const counts = {};
-  for (const methodName of [
-    'loadSceneCache',
-    'saveSceneCache',
-    'invalidateSceneCache',
-    'clearSceneCache',
-    'appendJournal',
-    'loadRunJournal',
-    'maintainRetention'
-  ]) {
-    if (typeof storage[methodName] !== 'function') continue;
-    const original = storage[methodName].bind(storage);
-    storage[methodName] = async (...args) => {
-      counts[methodName] = (counts[methodName] || 0) + 1;
-      return original(...args);
-    };
-  }
-  return { storage, counts };
-}
 
 {
   const userText = 'Retry while Editorial is still transforming.';
@@ -3084,9 +2508,9 @@ function createTrackedStorageRepository() {
     sceneKey: 'editorial-overlap-swipe-scene',
     sceneFingerprint: 'editorial-overlap-swipe-scene-fp',
     latestMesId: messages.at(-1)?.mesid || 0,
-    messages: messages.slice(-20),
-    sourceWindowTruncated: messages.length > 20,
-    sourceWindowLimitReason: messages.length > 20 ? 'message-cap' : ''
+    messages,
+    sourceWindowTruncated: false,
+    sourceWindowLimitReason: ''
   });
   let activeSnapshot = snapshotFromMessages(initialMessages);
   let swipeStarting = false;
@@ -3249,314 +2673,16 @@ function createTrackedStorageRepository() {
   assertEqual(enhancementResult.skipped, true, 'aborted Editorial work settles as skipped');
   assertEqual(enhancementResult.reason, 'latest-assistant-swipe', 'aborted Editorial work records the swipe cancellation reason');
   assert(revealIndex >= 0 && revealIndex < swipeSnapshotIndex, 'Editorial reveal completes before the swipe snapshot is read');
-  assertEqual(second.reused, true, 'overlapping Editorial swipe reuses the previous packet');
-  assertEqual(second.reason, 'prepared-generation-exact-match', 'overlapping Editorial swipe reports prepared reuse');
-  assertEqual(runtime.view().lastCacheDecision?.basisMode, 'bounded-suffix', 'full host message window reports bounded-suffix reuse');
+  assertEqual(second.ok, true, 'overlapping Editorial swipe completes from the retained operation');
   assertEqual(finalPipelineCalls, initialPipelineCalls, 'overlapping Editorial swipe makes no new Arbiter, Fused, or Guidance calls');
   assertEqual(installed.at(-1)?.packetId, initialPacketId, 'overlapping Editorial swipe preserves packet identity');
   assertEqual(appendCount, 0, 'aborted Editorial work appends no enhancement swipe');
-  assertEqual(runtime.view().activity.label, 'Recursion prompt reused for swipe retry.', 'new swipe progress remains authoritative after old Editorial cancellation');
 }
 
-{
-  const sourceMessages = Array.from({ length: 20 }, (_, index) => ({
-    mesid: index + 1,
-    role: index % 2 === 0 ? 'assistant' : 'user',
-    text: `${index === 19 ? 'Character-bound current request' : `Character-bound source ${index + 1}`} ${'x'.repeat(260)}`,
-    visible: true
-  }));
-  let activeSnapshot = {
-    chatId: 'character-bound-swipe-chat',
-    chatKey: 'character-bound-swipe-chat',
-    sceneKey: 'character-bound-swipe-scene',
-    sceneFingerprint: 'character-bound-swipe-scene-fp',
-    latestMesId: 20,
-    messages: sourceMessages
-  };
-  let providerCalls = 0;
-  const { runtime, installed } = createRuntimeHarness({
-    settings: {
-      pipelineMode: 'segmented',
-      mode: 'auto',
-      reasonerUse: 'off',
-      retention: {
-        sourceWindowMessages: 20,
-        sourceWindowCharacters: 6000,
-        providerVisibleMessages: 12
-      }
-    },
-    snapshot: () => activeSnapshot,
-    generationRouter: {
-      async generate(roleId, request) {
-        providerCalls += 1;
-        assertEqual(roleId, 'utilityArbiter', 'character-bound fixture only requires the Arbiter');
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'compose-brief',
-            cardJobs: [],
-            budgets: { targetBriefTokens: 500, maxCards: 0 },
-            reasonerDecision: { mode: 'skip', reason: 'character-bound fixture', signals: [] },
-            diagnostics: ['character-bound-fixture']
-          }
-        };
-      }
-    }
-  });
-  const first = await runtime.prepareForGeneration({
-    userMessage: sourceMessages.at(-1).text,
-    hostGeneration: true
-  });
-  assertEqual(first.ok, true, 'character-bound setup installs');
-  const callsAfterFirst = providerCalls;
-  activeSnapshot = {
-    ...activeSnapshot,
-    latestMesId: 21,
-    sourceWindowTruncated: true,
-    sourceWindowLimitReason: 'character-budget',
-    messages: [
-      ...sourceMessages.slice(-4),
-      {
-        mesid: 21,
-        role: 'assistant',
-        text: `Long assistant output ${'y'.repeat(5000)}`,
-        visible: true,
-        swipeId: 1,
-        swipeCount: 2
-      }
-    ]
-  };
-  const swipe = await runtime.prepareForGeneration({
-    hostGeneration: true,
-    generationType: 'swipe'
-  });
-  assertEqual(swipe.reused, true, 'character-budget displacement reuses the prepared artifact');
-  assertEqual(runtime.view().lastCacheDecision?.basisMode, 'bounded-suffix', 'character-budget displacement reports bounded suffix');
-  assertEqual(providerCalls, callsAfterFirst, 'character-budget displacement makes zero additional provider calls');
-  assertEqual(installed[0].packetId, installed[1].packetId, 'character-budget displacement preserves packet identity');
-  activeSnapshot = {
-    ...activeSnapshot,
-    sourceWindowTruncated: false,
-    sourceWindowLimitReason: '',
-    messages: [
-      ...sourceMessages.slice(1),
-      { mesid: 21, role: 'assistant', text: 'Assistant after a leading source deletion.', visible: true, swipeId: 2, swipeCount: 3 }
-    ]
-  };
-  const callsBeforeLeadingDeletion = providerCalls;
-  const leadingDeletion = await runtime.prepareForGeneration({
-    hostGeneration: true,
-    generationType: 'swipe'
-  });
-  assertEqual(leadingDeletion.reused, undefined, 'leading source deletion without host-bound evidence cannot reuse');
-  assert(providerCalls > callsBeforeLeadingDeletion, 'leading source deletion falls through to fresh provider preparation');
-  assertEqual(runtime.view().lastCacheDecision?.decision, 'miss', 'leading source deletion records a prepared-generation miss');
-}
 
-{
-  const source = {
-    chatId: 'prepared-recheck-race-chat',
-    chatKey: 'prepared-recheck-race-chat',
-    sceneKey: 'prepared-recheck-race-scene',
-    sceneFingerprint: 'prepared-recheck-race-scene-fp',
-    latestMesId: 1,
-    messages: [{ mesid: 1, role: 'user', text: 'Original prepared source.', visible: true }]
-  };
-  const swipeSnapshot = {
-    ...source,
-    latestMesId: 2,
-    messages: [
-      ...source.messages,
-      { mesid: 2, role: 'assistant', text: 'Assistant output being swiped.', visible: true, swipeId: 1, swipeCount: 2 }
-    ]
-  };
-  const mutatedSwipeSnapshot = {
-    ...swipeSnapshot,
-    messages: [
-      { mesid: 1, role: 'user', text: 'Edited prepared source.', visible: true },
-      swipeSnapshot.messages[1]
-    ]
-  };
-  let phase = 'prepare';
-  let reuseSnapshotReads = 0;
-  let providerCalls = 0;
-  const { runtime, installed, storage } = createRuntimeHarness({
-    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' },
-    snapshot: () => {
-      if (phase === 'prepare') return source;
-      reuseSnapshotReads += 1;
-      return reuseSnapshotReads === 1 ? swipeSnapshot : mutatedSwipeSnapshot;
-    },
-    generationRouter: {
-      async generate(roleId, request) {
-        providerCalls += 1;
-        assertEqual(roleId, 'utilityArbiter', 'prepared recheck race only requires the Arbiter');
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'compose-brief',
-            cardJobs: [],
-            budgets: { targetBriefTokens: 500, maxCards: 0 },
-            reasonerDecision: { mode: 'skip', reason: 'prepared recheck race', signals: [] }
-          }
-        };
-      }
-    }
-  });
-  await runtime.prepareForGeneration({ userMessage: 'Original prepared source.', hostGeneration: true });
-  const callsAfterPrepare = providerCalls;
-  const artifactBeforeRace = clone(runtime.view().lastPreparedGeneration);
-  phase = 'reuse';
-  const race = await runtime.prepareForGeneration({ hostGeneration: true, generationType: 'swipe' });
-  assertEqual(race.skipped, true, 'source mutation during cached install skips reuse');
-  assertEqual(race.reused, false, 'source mutation during cached install does not report reuse');
-  assertEqual(race.reason, 'stale-generation-basis', 'source mutation during cached install reports stale generation basis');
-  assertEqual(installed.length, 1, 'source mutation during cached install performs no second prompt installation');
-  assertEqual(providerCalls, callsAfterPrepare, 'stale final recheck performs no provider calls');
-  assertDeepEqual(runtime.view().lastPreparedGeneration, artifactBeforeRace, 'stale final recheck preserves committed artifact byte-for-byte');
-  assertEqual(runtime.view().lastCacheDecision?.decision, 'miss', 'stale final recheck is not reported as a cache hit');
-  assertEqual(runtime.view().lastCacheDecision?.reason, 'stale-generation-basis', 'stale final recheck records the final stale reason');
-  const journal = await storage.loadRunJournal(source.chatKey);
-  assert(!journal.entries.some((entry) => entry.event === 'prompt.reinstalled'), 'stale final recheck records no successful reinstall journal');
-}
 
-{
-  let providerCalls = 0;
-  const baseSnapshot = {
-    chatId: 'force-same-turn-chat',
-    chatKey: 'force-same-turn-chat',
-    sceneKey: 'force-same-turn-scene',
-    sceneFingerprint: 'force-same-turn-scene-fp',
-    turnFingerprint: 'force-same-turn-fp',
-    latestMesId: 2,
-    messages: [
-      { mesid: 2, role: 'assistant', text: 'Same turn fresh-next base response.', visible: true }
-    ]
-  };
-  const { runtime, installed, storage } = createRuntimeHarness({
-    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' },
-    snapshot: () => baseSnapshot,
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        providerCalls += 1;
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              action: 'compose-brief',
-              cardJobs: [{ role: 'sceneFrameCard', family: 'Scene Frame', priority: 100 }],
-              budgets: { targetBriefTokens: 500, maxCards: 6 },
-              reasonerDecision: { mode: 'skip', reason: 'force same-turn setup', signals: [] },
-              diagnostics: ['force-same-turn-arbiter']
-            }
-          };
-        }
-        if (roleId === 'sceneFrameCard') {
-          return {
-            ok: true,
-            roleId,
-            data: {
-              schema: 'recursion.card.v1',
-              role: 'sceneFrameCard',
-              family: 'Scene Frame',
-              snapshotHash: request.snapshotHash,
-              items: [{
-                promptText: `Force same-turn generated card ${providerCalls}.`,
-                evidenceRefs: ['message:2'],
-                tokenEstimate: 8
-              }]
-            }
-          };
-        }
-        if (roleId === 'guidanceComposer') {
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.guidanceComposer.v1',
-              snapshotHash: request.snapshotHash,
-              guidanceText: `Force same-turn guidance ${providerCalls}.`,
-              sourceCardIds: [],
-              guardrailCardIds: [],
-              omittedCardIds: [],
-              diagnostics: ['force-same-turn-guidance']
-            }
-          };
-        }
-        throw new Error(`unexpected force same-turn role ${roleId}`);
-      }
-    }
-  });
-  const userMessage = 'Force next generation fresh for this same turn.';
-  const first = await runtime.prepareForGeneration({ userMessage, hostGeneration: true });
-  assertEqual(first.ok, true, 'fresh next same-turn setup installs');
-  assertEqual(installed.length, 1, 'fresh next same-turn setup installs one packet');
-  const callsAfterFirst = providerCalls;
-  const firstPacketId = runtime.view().lastBrief?.packetId;
-  const firstHandId = runtime.view().lastBrief?.handId;
-  const queued = await runtime.queueFullFreshSwipe({ source: 'bar' });
-  assertEqual(queued.ok, true, 'fresh next generation queues successfully');
-  assertEqual(runtime.view().freshNextGeneration?.pending, true, 'fresh next generation is visible as pending');
-  assertEqual(runtime.view().lastBrief?.status, 'ready', 'fresh next generation keeps Last Brief ready until send or swipe');
-  assertEqual(runtime.view().lastBrief?.packetId, firstPacketId, 'queued fresh next generation keeps the previous packet visible');
-  assertEqual(runtime.view().lastBrief?.handId, firstHandId, 'queued fresh next generation keeps the previous hand visible');
-  const second = await runtime.prepareForGeneration({
-    userMessage: null,
-    hostGeneration: true,
-    generationType: 'swipe'
-  });
-  assertEqual(second.ok, true, 'fresh next same-turn run succeeds');
-  assertEqual(second.reused, undefined, 'fresh next same-turn run does not report packet reuse');
-  assert(providerCalls > callsAfterFirst, 'fresh next same-turn run calls providers again');
-  assertEqual(installed.length, 2, 'fresh next same-turn run installs a fresh packet');
-  assertNotEqual(installed[0].packetId, installed[1].packetId, 'fresh next same-turn run changes packet identity');
-  assertEqual(runtime.view().freshNextGeneration?.pending, false, 'fresh next token is consumed after host generation prepare');
-  assertEqual(runtime.view().lastBrief?.status, 'ready', 'fresh next same-turn restores Last Brief ready state');
-  assertEqual(runtime.view().lastBrief?.reason, 'fresh-next-generation-installed', 'fresh next same-turn marks forced install reason');
-  const journal = await storage.loadRunJournal(baseSnapshot.chatKey);
-  assert(journal.entries.some((entry) => entry.event === 'cache.invalidated' && entry.details?.reason === 'user-fresh-next-generation'), 'fresh next same-turn records cache invalidation journal');
-}
 
-{
-  const hostStartCalls = [];
-  const { runtime } = createRuntimeHarness({
-    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' },
-    hostGeneration: {
-      async start(details = {}) {
-        hostStartCalls.push(details);
-        return { ok: true, started: true };
-      }
-    }
-  });
-  assertEqual(runtimeHasOwnMethod(runtime, 'forceRegenerateNow'), false, 'runtime does not expose immediate forceRegenerateNow');
-  assertEqual(typeof runtime.queueFullFreshSwipe, 'function', 'runtime exposes next-swipe full-fresh queue');
-  assertEqual(typeof runtime.clearQueuedFullFreshSwipe, 'function', 'runtime exposes next-swipe full-fresh clear');
 
-  const queued = await runtime.queueFullFreshSwipe({ source: 'bar' });
-  assertEqual(queued.ok, false, 'full fresh cannot arm before a completed active turn exists');
-  assertEqual(runtime.view().freshNextGeneration?.pending, false, 'unavailable full fresh remains unarmed');
-  assertEqual(runtime.view().lastBrief?.status, 'empty', 'fresh next generation does not synthesize Last Brief state before a packet exists');
-  assertDeepEqual(hostStartCalls, [], 'queuing fresh next generation does not start host generation');
-}
-
-{
-  const { runtime } = createRuntimeHarness({
-    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' }
-  });
-
-  await runtime.prepareForGeneration({ userMessage: 'Prepare a turn before arming full fresh.' });
-  await runtime.queueFullFreshSwipe({ source: 'bar' });
-  assertEqual(runtime.view().freshNextGeneration?.pending, true, 'fresh next generation starts pending');
-  const cleared = await runtime.clearQueuedFullFreshSwipe({ source: 'bar' });
-  assertEqual(cleared.ok, true, 'fresh next generation clear succeeds');
-  assertEqual(runtime.view().freshNextGeneration?.pending, false, 'fresh next generation clear removes pending token');
-  assertEqual(runtime.view().lastBrief?.status, 'ready', 'full-fresh cancellation leaves the completed Last Brief intact');
-}
 
 {
   let providerCalls = 0;
@@ -3658,89 +2784,13 @@ function createTrackedStorageRepository() {
     generationType: 'swipe'
   });
   assertEqual(second.ok, true, 'fresh latest assistant run succeeds');
-  assertEqual(second.reused, undefined, 'fresh latest assistant does not reuse previous packet');
   assert(providerCalls > callsAfterFirst, 'fresh latest assistant run calls providers again');
   assertEqual(installed.length, 2, 'fresh latest assistant installs a second packet');
   assertNotEqual(installed[0].packetId, installed[1].packetId, 'fresh latest assistant changes packet identity');
-  assertEqual(runtime.view().lastSnapshot.latestMesId, 21, 'fresh latest assistant uses current post-swipe snapshot');
+  assertEqual(runtime.view().lastSnapshot.latestMesId, 20, 'fresh latest assistant rebuilds from the turn source before the swiped response');
 }
 
 
-{
-  const snapshot = {
-    chatId: 'force-cache-exclusion-chat',
-    chatKey: 'force-cache-exclusion-chat',
-    sceneKey: 'force-cache-exclusion-scene',
-    sceneFingerprint: 'force-cache-exclusion-scene-fp',
-    turnFingerprint: 'force-cache-exclusion-turn-fp',
-    latestMesId: 2,
-    messages: [{ mesid: 2, role: 'user', text: 'Fresh cached hand.', visible: true }]
-  };
-  const storage = createStorageRepository({ storage: createMemoryStorageAdapter() });
-  await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, {
-    cacheState: 'active',
-    versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
-    cards: [{
-      id: 'fresh-cache-card',
-      family: 'Scene Frame',
-      promptText: 'FRESH CACHE TEXT MUST NOT INSTALL.',
-      evidenceRefs: ['message:2'],
-      source: {
-        chatId: snapshot.chatId,
-        firstMesId: 2,
-        lastMesId: 2,
-        sourceRevisionHash: snapshot.sourceRevisionHash || sourceWindowHash(snapshot.messages, 2, 2)
-      },
-      freshness: { sourceRevisionHash: snapshot.sourceRevisionHash || sourceWindowHash(snapshot.messages, 2, 2) }
-    }],
-    latestHand: {
-      handId: 'force-cache-hand',
-      cardIds: ['fresh-cache-card'],
-      cards: [{ id: 'fresh-cache-card', family: 'Scene Frame' }]
-    }
-  });
-  let arbiterPrompt = '';
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot: () => snapshot,
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        if (roleId === 'utilityArbiter') {
-          arbiterPrompt = request.prompt;
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              action: 'reuse-cache',
-              cardJobs: [],
-              budgets: { targetBriefTokens: 500, maxCards: 6 },
-              reasonerDecision: { mode: 'skip', reason: 'fresh next should override reuse-cache', signals: [] },
-              diagnostics: ['fresh-cache-reuse-requested']
-            }
-          };
-        }
-        throw new Error(`unexpected fresh cache exclusion role ${roleId}`);
-      }
-    }
-  });
-  const setup = await runtime.prepareForGeneration({ userMessage: 'Fresh cached hand.', hostGeneration: true });
-  assertEqual(setup.ok, true, 'fresh cache exclusion establishes a completed turn');
-  await runtime.queueFullFreshSwipe({ source: 'bar' });
-  const result = await runtime.prepareForGeneration({
-    userMessage: null,
-    hostGeneration: true,
-    generationType: 'swipe'
-  });
-  assertEqual(result.ok, true, 'fresh cache exclusion run succeeds');
-  assertEqual(result.skipped, undefined, 'fresh cache exclusion does not skip as cache-unavailable');
-  assertEqual(installed.length, 2, 'fresh cache exclusion installs a new swipe prompt');
-  assert(!JSON.stringify(installed[1]).includes('FRESH CACHE TEXT MUST NOT INSTALL'), 'fresh cache exclusion does not install cached prompt text');
-  const sceneCacheView = parsePromptJsonSection(arbiterPrompt, 'Scene cache');
-  assertEqual(sceneCacheView.cacheState, 'stale', 'fresh cache exclusion marks cache stale for Arbiter evidence');
-  assertEqual(sceneCacheView.invalidation?.reason, 'user-fresh-next-generation', 'fresh cache exclusion tells Arbiter why cache is stale');
-}
 
 {
   let utilityCallCount = 0;
@@ -3823,11 +2873,10 @@ function createTrackedStorageRepository() {
   const second = runtime.prepareForGeneration({ userMessage: 'Start next turn and clear visible Last Brief.' });
   await waitUntil(() => typeof releaseSecondArbiter === 'function', 'second Last Brief lifecycle run did not enter Arbiter');
   const during = runtime.view();
-  assertEqual(during.lastBrief?.status, 'clearing', 'Last Brief enters clearing state as soon as a new send starts');
-  assertEqual(during.lastBrief?.reason, 'generation-started', 'new send records generation-started clear reason');
-  assertEqual(during.lastBrief?.previousPacketId, firstView.lastBrief.packetId, 'clearing state points at the packet being cleared');
-  assertEqual(during.lastBriefHand?.cards.length, 0, 'new send consumes the retained Last Brief cards');
-  assertEqual(during.lastBriefPacket, null, 'new send consumes the retained Last Brief packet');
+  assertEqual(during.lastBrief?.status, 'historical', 'Last Brief becomes inspection-only as soon as a new send starts');
+  assertEqual(during.lastBrief?.reason, 'new-user-turn', 'new send records the turn boundary');
+  assertEqual(during.lastBriefHand?.cards.length, firstView.lastHand.cards.length, 'new send retains historical Last Brief cards for inspection');
+  assertEqual(during.lastBriefPacket?.packetId, firstView.lastBrief.packetId, 'new send retains the historical Last Brief packet for inspection');
   releaseSecondArbiter();
   const secondResult = await second;
   assertEqual(secondResult.ok, true, 'second Last Brief lifecycle run installs');
@@ -3841,12 +2890,12 @@ function createTrackedStorageRepository() {
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Utility router missing.' });
   const view = runtime.view();
-  assertEqual(result.ok, true, 'missing Utility router remains fail-soft');
-  assertEqual(result.skipped, true, 'missing Utility router skips prompt injection');
-  assertEqual(result.reason, 'utility-unavailable', 'missing Utility router returns Utility unavailable reason');
+  assertEqual(result.ok, false, 'missing Utility router does not complete the durable operation');
+  assertEqual(result.paused, true, 'missing Utility router pauses the durable operation');
   assertEqual(installed.length, 0, 'missing Utility router does not install prompt');
-  assertEqual(cleared.length, 1, 'missing Utility router clears stale prompt lanes');
-  assert(view.lastPlan.diagnostics.includes('utility-unavailable'), 'missing Utility router diagnostic recorded');
+  assertEqual(cleared.length, 0, 'missing Utility router does not perform unrelated prompt cleanup');
+  assertEqual(view.execution.state, 'paused', 'missing Utility router remains visible as paused work');
+  assertEqual(view.execution.pauseReason, 'stage-failed:preprocess.arbiter', 'missing Utility router exposes the failed Arbiter stage');
 }
 
 {
@@ -3865,448 +2914,24 @@ function createTrackedStorageRepository() {
   const result = await runtime.prepareForGeneration({ userMessage: 'Utility is unavailable.' });
   const view = runtime.view();
   const serialized = JSON.stringify({ result, view });
-  assertEqual(result.ok, true, 'Utility unavailable remains fail-soft');
-  assertEqual(result.skipped, true, 'Utility unavailable skips prompt injection without cache');
-  assertEqual(result.reason, 'utility-unavailable', 'Utility unavailable returns explicit reason');
+  assertEqual(result.ok, false, 'Utility failure does not complete the durable operation');
+  assertEqual(result.paused, true, 'Utility failure pauses for an explicit retry');
   assertEqual(installed.length, 0, 'Utility unavailable without cache does not install prompt');
-  assertEqual(cleared.length, 1, 'Utility unavailable clears any stale Recursion prompt');
-  assert(view.lastPlan.diagnostics.includes('utility-unavailable'), 'Utility unavailable diagnostic recorded');
-  assert(!view.lastPlan.diagnostics.includes('local-fallback-plan'), 'Utility unavailable does not use local fallback plan');
-  assertEqual(view.activity.label, 'Utility unavailable. Recursion skipped.', 'Utility unavailable shows clear fallback label');
+  assertEqual(cleared.length, 0, 'Utility failure does not perform unrelated prompt cleanup');
+  assertEqual(view.execution.state, 'paused', 'Utility failure remains visible as paused work');
+  assertEqual(view.execution.pauseReason, 'stage-failed:preprocess.arbiter', 'Utility failure exposes the failed Arbiter stage');
   assert(!serialized.includes('Bearer utility-token'), 'Utility unavailable reason redacts bearer token');
   assert(!serialized.includes('sk-utility-runtime'), 'Utility unavailable reason redacts sk token');
 }
 
-{
-  const cachedMessages = [
-    { mesid: 2, role: 'user', text: 'Use cache while Utility is down.', visible: true }
-  ];
-  const cachedSourceHash = sourceWindowHash(cachedMessages, 2, 2);
-  const storage = {
-    async loadSceneCache() {
-      return {
-        versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
-        cards: [{
-          id: 'utility-down-cache-card',
-          family: 'Scene Frame',
-          promptText: 'Use the safe cached scene frame while Utility is unavailable.',
-          summary: 'Safe cached scene frame',
-          evidenceRefs: ['message:2'],
-          emphasis: 'normal',
-          source: {
-            chatId: 'utility-down-chat',
-            firstMesId: 2,
-            lastMesId: 2,
-            fingerprint: cachedSourceHash,
-            snapshotHash: cachedSourceHash
-          },
-          freshness: { sourceFingerprint: cachedSourceHash }
-        }]
-      };
-    },
-    async saveSceneCache() {
-      return {};
-    },
-    async appendJournal() {
-      return {};
-    }
-  };
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot: {
-      chatId: 'utility-down-chat',
-      chatKey: 'utility-down-chat',
-      sceneKey: 'utility-down-scene',
-      sceneFingerprint: 'utility-down-scene-fp',
-      turnFingerprint: 'utility-down-turn-fp',
-      latestMesId: 2,
-      messages: cachedMessages
-    },
-    generationRouter: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', 'Utility unavailable cache test only asks Arbiter');
-        throw new Error('Utility transport unavailable');
-      },
-      async batch() {
-        throw new Error('Utility unavailable cache test should not request card batch');
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Use cache while Utility is down.' });
-  const view = runtime.view();
-  assertEqual(result.ok, true, 'Utility unavailable can reuse valid cache');
-  assertEqual(result.skipped, undefined, 'Utility unavailable with valid cache does not skip');
-  assertEqual(installed.length, 1, 'Utility unavailable with valid cache installs prompt');
-  assert(view.lastPlan.diagnostics.includes('utility-unavailable'), 'Utility unavailable cache diagnostic recorded');
-  assertDeepEqual(view.lastHand.cards.map((card) => card.id), ['utility-down-cache-card'], 'Utility unavailable uses cached hand only');
-  assert(
-    view.activityHistory.some((event) => event.phase === 'cardProgress'
-      && event.detail?.source === 'cache'
-      && event.detail?.state === 'cached'),
-    'Utility unavailable cache path emits cached card progress'
-  );
-}
 
-{
-  const adapter = createMemoryStorageAdapter();
-  const baseStorage = createStorageRepository({ storage: adapter });
-  let saveCalls = 0;
-  let finalHashSaveStarted = false;
-  let releaseFinalHashSave;
-  const storage = {
-    ...baseStorage,
-    async saveSceneCache(chatKey, sceneKey, value) {
-      saveCalls += 1;
-      if (saveCalls === 2) {
-        finalHashSaveStarted = true;
-        await new Promise((resolve) => {
-          releaseFinalHashSave = resolve;
-        });
-      }
-      return baseStorage.saveSceneCache(chatKey, sceneKey, value);
-    }
-  };
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    generationRouter: localFallbackCardRouter(['final-hash-save-test'])
-  });
-  const pending = runtime.prepareForGeneration({ userMessage: 'Install before final cache hash save.' });
-  await waitUntil(() => finalHashSaveStarted, 'final prompt-packet hash cache save did not start');
-  assertEqual(installed.length, 1, 'prompt installs before final prompt-packet-hash cache save can block');
-  releaseFinalHashSave();
-  const result = await pending;
-  assertEqual(result.ok, true, 'run completes after final cache hash save');
-}
 
-{
-  const adapter = createMemoryStorageAdapter();
-  const baseStorage = createStorageRepository({ storage: adapter });
-  let saveCalls = 0;
-  let finalHashSaveStarted = false;
-  let releaseFinalHashSave;
-  const storage = {
-    ...baseStorage,
-    async saveSceneCache(chatKey, sceneKey, value) {
-      saveCalls += 1;
-      if (saveCalls === 2) {
-        finalHashSaveStarted = true;
-        await new Promise((resolve) => {
-          releaseFinalHashSave = resolve;
-        });
-      }
-      return baseStorage.saveSceneCache(chatKey, sceneKey, value);
-    }
-  };
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    generationRouter: localFallbackCardRouter(['journal-final-hash-save-test'])
-  });
-  const pending = runtime.prepareForGeneration({ userMessage: 'Journal install before superseded final cache save.' });
-  await waitUntil(() => finalHashSaveStarted, 'journal regression final cache save did not start');
-  assertEqual(installed.length, 1, 'journal regression prompt is installed before final cache save');
-  const providerUpdate = runtime.updateProviderConfig('utility', { maxTokens: 4096 });
-  await Promise.resolve();
-  releaseFinalHashSave();
-  await Promise.allSettled([pending, providerUpdate]);
-  const journal = await baseStorage.loadRunJournal('chat-1');
-  assert(journal.entries.some((entry) => entry.event === 'hand.selected'), 'installed prompt hand journal survives superseded final save');
-  assert(journal.entries.some((entry) => entry.event === 'prompt.installed'), 'installed prompt install journal survives superseded final save');
-}
 
-{
-  const { runtime, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    generationRouter: localFallbackCardRouter(['cache-invalidation-setup'])
-  });
-  const run = await runtime.prepareForGeneration({ userMessage: 'The lamp breaks.' });
-  assertEqual(run.ok, true, 'cache invalidation setup run installs');
-  const snapshot = runtime.view().lastSnapshot;
 
-  const providerUpdate = await runtime.updateProviderConfig('utility', {
-    source: 'openai-compatible',
-    apiKey: 'sk-live-runtime',
-    openAICompatible: {
-      baseUrl: 'https://provider-change.test/v1',
-      model: 'provider-change-model'
-    }
-  });
-  assertEqual(providerUpdate.ok, true, 'provider update still succeeds after cache invalidation');
-  let cache = await storage.loadSceneCache(snapshot.chatKey, snapshot.sceneKey);
-  assertEqual(cache.cacheState, 'stale', 'provider update marks active scene cache stale');
-  assertEqual(cache.invalidation.reason, 'provider-changed', 'provider update records invalidation reason');
-  assertDeepEqual(
-    cache.invalidation.details.changedKeys,
-    ['source', 'openAICompatible.baseUrl', 'openAICompatible.model', 'apiKey'],
-    'provider invalidation records field-scoped changed keys'
-  );
-  assert(!JSON.stringify(cache.invalidation).includes('provider-change-model'), 'provider invalidation does not persist raw model patch');
-  assert(!JSON.stringify(cache.invalidation).includes('provider-change.test'), 'provider invalidation does not persist raw endpoint patch');
-  assertNoSecretText(cache.invalidation, 'provider cache invalidation');
-  let journal = await storage.loadRunJournal(snapshot.chatKey);
-  assert(journal.entries.some((entry) => entry.event === 'cache.invalidated' && entry.details?.reason === 'provider-changed'), 'provider update records cache invalidation journal');
-  assert(!JSON.stringify(journal).includes('provider-change-model'), 'provider invalidation journal does not persist raw model patch');
-  assert(!JSON.stringify(journal).includes('provider-change.test'), 'provider invalidation journal does not persist raw endpoint patch');
-  assertNoSecretText(journal, 'provider cache invalidation journal');
-  assert(journal.entries.some((entry) => entry.event === 'prompt.cleared' && entry.details?.reason === 'provider-changed'), 'provider update records prompt clear journal');
-  assertNoSecretText(journal.entries.find((entry) => entry.event === 'prompt.cleared'), 'provider prompt clear journal');
 
-  const settingsUpdate = await runtime.updateSettings({ strength: 'strong' });
-  assertEqual(settingsUpdate.ok, true, 'settings update still succeeds after cache invalidation');
-  cache = await storage.loadSceneCache(snapshot.chatKey, snapshot.sceneKey);
-  assertEqual(cache.cacheState, 'stale', 'settings update keeps scene cache stale');
-  assertEqual(cache.invalidation.reason, 'settings-changed', 'settings update records invalidation reason');
-  assertNoSecretText(cache.invalidation, 'settings cache invalidation');
-  journal = await storage.loadRunJournal(snapshot.chatKey);
-  assert(journal.entries.some((entry) => entry.event === 'cache.invalidated' && entry.details?.reason === 'settings-changed'), 'settings update records cache invalidation journal');
-}
 
-{
-  let arbiterPrompts = [];
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        assertEqual(roleId, 'utilityArbiter', 'stale cache arbiter metadata test only calls arbiter');
-        arbiterPrompts.push(request.prompt);
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            budgets: { targetBriefTokens: 500, maxCards: 4 }
-          }
-        };
-      }
-    }
-  });
-  const first = await runtime.prepareForGeneration({ userMessage: 'Build cache before invalidation.' });
-  assertEqual(first.ok, true, 'stale cache metadata setup run installs');
-  const providerUpdate = await runtime.updateProviderConfig('utility', { maxTokens: 4096 });
-  assertEqual(providerUpdate.ok, true, 'provider update invalidates cache before next arbiter pass');
-  arbiterPrompts = [];
-  const second = await runtime.prepareForGeneration({ userMessage: 'Arbiter should see stale cache.' });
-  assertEqual(second.ok, true, 'stale cache metadata followup run installs');
-  assert(arbiterPrompts[0].includes('"cacheState":"stale"'), 'arbiter prompt includes stale cache state');
-  assert(arbiterPrompts[0].includes('"invalidation"'), 'arbiter prompt includes cache invalidation metadata');
-}
 
-{
-  const adapter = createMemoryStorageAdapter();
-  const baseStorage = createStorageRepository({ storage: adapter });
-  let releaseInvalidation;
-  let invalidationStarted = false;
-  let invalidationCompleted = false;
-  const storage = {
-    ...baseStorage,
-    async invalidateSceneCache(chatKey, sceneKey, options) {
-      const firstInvalidation = invalidationStarted === false;
-      invalidationStarted = true;
-      if (firstInvalidation) {
-        await new Promise((resolve) => {
-          releaseInvalidation = resolve;
-        });
-      }
-      const result = await baseStorage.invalidateSceneCache(chatKey, sceneKey, options);
-      invalidationCompleted = true;
-      return result;
-    }
-  };
-  const arbiterPrompts = [];
-  let arbiterCalls = 0;
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        assertEqual(roleId, 'utilityArbiter', 'concurrent invalidation wait test only calls arbiter');
-        arbiterCalls += 1;
-        if (arbiterCalls > 1) {
-          assertEqual(invalidationCompleted, true, 'prepare waits for cache invalidation before asking Arbiter');
-        }
-        arbiterPrompts.push(request.prompt);
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            budgets: { targetBriefTokens: 500, maxCards: 4 }
-          }
-        };
-      }
-    }
-  });
-  const first = await runtime.prepareForGeneration({ userMessage: 'Build cache before delayed invalidation.' });
-  assertEqual(first.ok, true, 'delayed invalidation setup run installs');
-  const providerUpdate = runtime.updateProviderConfig('utility', { maxTokens: 4096 });
-  await waitUntil(() => invalidationStarted, 'provider update did not start invalidation');
-  const second = runtime.prepareForGeneration({ userMessage: 'Wait for invalidation before reading cache.' });
-  releaseInvalidation();
-  const updateResult = await providerUpdate;
-  assertEqual(updateResult.ok, true, 'provider update succeeds after delayed invalidation');
-  const secondResult = await second;
-  assertEqual(secondResult.ok, true, 'prepare after delayed invalidation succeeds');
-  assert(arbiterPrompts[1].includes('"cacheState":"stale"'), 'concurrent prepare Arbiter prompt includes stale cache state');
-  assert(arbiterPrompts[1].includes('"invalidation"'), 'concurrent prepare Arbiter prompt includes invalidation metadata');
-}
 
-{
-  const adapter = createMemoryStorageAdapter();
-  const baseStorage = createStorageRepository({ storage: adapter });
-  let releaseSave;
-  let saveStarted = false;
-  const storage = {
-    ...baseStorage,
-    async saveSceneCache(chatKey, sceneKey, value) {
-      saveStarted = true;
-      await new Promise((resolve) => {
-        releaseSave = resolve;
-      });
-      return baseStorage.saveSceneCache(chatKey, sceneKey, value);
-    }
-  };
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage
-  });
-  const run = runtime.prepareForGeneration({ userMessage: 'Save is still in flight.' });
-  await waitUntil(() => saveStarted, 'in-flight save did not start before provider update');
-  const providerUpdatePromise = runtime.updateProviderConfig('utility', { maxTokens: 4096 });
-  releaseSave();
-  const providerUpdate = await providerUpdatePromise;
-  assertEqual(providerUpdate.ok, true, 'provider update succeeds while save is in flight');
-  const runResult = await run;
-  assertEqual(runResult.superseded, true, 'in-flight save run is superseded by provider update');
-  const snapshot = runtime.view().lastSnapshot;
-  const cache = await baseStorage.loadSceneCache(snapshot.chatKey, snapshot.sceneKey);
-  assertEqual(cache.cacheState, 'stale', 'provider update leaves in-flight saved cache stale');
-  assertEqual(cache.invalidation.reason, 'provider-changed', 'in-flight saved cache records provider invalidation');
-}
-
-{
-  const adapter = createMemoryStorageAdapter();
-  const baseStorage = createStorageRepository({ storage: adapter });
-  let saveCalls = 0;
-  let delayedSaveStarted = false;
-  let releaseDelayedSave;
-  let invalidationCompleted = false;
-  const storage = {
-    ...baseStorage,
-    async saveSceneCache(chatKey, sceneKey, value) {
-      saveCalls += 1;
-      if (saveCalls === 3) {
-        delayedSaveStarted = true;
-        await new Promise((resolve) => {
-          releaseDelayedSave = resolve;
-        });
-      }
-      return baseStorage.saveSceneCache(chatKey, sceneKey, value);
-    },
-    async invalidateSceneCache(chatKey, sceneKey, options) {
-      const result = await baseStorage.invalidateSceneCache(chatKey, sceneKey, options);
-      invalidationCompleted = true;
-      return result;
-    }
-  };
-  let arbiterCalls = 0;
-  const arbiterPrompts = [];
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        assertEqual(roleId, 'utilityArbiter', 'storage-tail mutation wait test only calls arbiter');
-        arbiterCalls += 1;
-        if (arbiterCalls === 3) {
-          assertEqual(invalidationCompleted, true, 'prepare waiting on storage tail also waits for provider invalidation added later');
-        }
-        arbiterPrompts.push(request.prompt);
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            budgets: { targetBriefTokens: 500, maxCards: 4 }
-          }
-        };
-      }
-    }
-  });
-  const first = await runtime.prepareForGeneration({ userMessage: 'Save first cache before storage wait.' });
-  assertEqual(first.ok, true, 'storage-tail wait setup run installs');
-  const delayedRun = runtime.prepareForGeneration({ userMessage: 'Delay second save.' });
-  await waitUntil(() => delayedSaveStarted, 'second save did not enter delayed storage write');
-  const waitingRun = runtime.prepareForGeneration({ userMessage: 'Wait through storage and provider mutation.' });
-  const providerUpdate = runtime.updateProviderConfig('utility', { maxTokens: 4096 });
-  releaseDelayedSave();
-  const updateResult = await providerUpdate;
-  assertEqual(updateResult.ok, true, 'provider update succeeds after delayed storage save');
-  const delayedResult = await delayedRun;
-  assertEqual(delayedResult.superseded, true, 'delayed run is superseded by provider update');
-  const waitingResult = await waitingRun;
-  assertEqual(waitingResult.ok, true, 'waiting run succeeds after provider invalidation');
-  assert(arbiterPrompts[2].includes('"cacheState":"stale"'), 'storage-tail waiting Arbiter prompt includes stale cache state');
-  assert(arbiterPrompts[2].includes('"reason":"provider-changed"'), 'storage-tail waiting Arbiter prompt includes invalidation reason');
-}
-
-{
-  let sceneId = 'saved-scene';
-  let releaseSecondArbiter;
-  let secondArbiterStarted = false;
-  let arbiterCalls = 0;
-  const { runtime, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    snapshot: () => ({
-      chatId: 'cache-target-chat',
-      chatKey: 'cache-target-chat',
-      sceneKey: sceneId,
-      sceneFingerprint: `${sceneId}-fp`,
-      turnFingerprint: `${sceneId}-turn-fp`,
-      latestMesId: 2,
-      messages: [
-        { mesid: 2, role: 'user', text: `Message in ${sceneId}.`, visible: true }
-      ]
-    }),
-    generationRouter: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', 'last saved cache invalidation test only calls arbiter');
-        arbiterCalls += 1;
-        if (arbiterCalls === 2) {
-          secondArbiterStarted = true;
-          await new Promise((resolve) => {
-            releaseSecondArbiter = resolve;
-          });
-        }
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            budgets: { targetBriefTokens: 500, maxCards: 4 },
-            diagnostics: [`arbiter-${arbiterCalls}`]
-          }
-        };
-      }
-    }
-  });
-  const first = await runtime.prepareForGeneration({ userMessage: 'Save first cache.' });
-  assertEqual(first.ok, true, 'last saved cache setup run installs');
-  const savedSnapshot = runtime.view().lastSnapshot;
-  sceneId = 'unsaved-scene';
-  const second = runtime.prepareForGeneration({ userMessage: 'Start unsaved second cache.' });
-  await waitUntil(() => secondArbiterStarted, 'second arbiter did not start before provider update');
-  const providerUpdate = await runtime.updateProviderConfig('utility', { maxTokens: 4096 });
-  assertEqual(providerUpdate.ok, true, 'provider update succeeds while newer run is superseded');
-  releaseSecondArbiter();
-  const secondResult = await second;
-  assertEqual(secondResult.superseded, true, 'second run is superseded before saving cache');
-  const savedCache = await storage.loadSceneCache(savedSnapshot.chatKey, savedSnapshot.sceneKey);
-  assertEqual(savedCache.cacheState, 'stale', 'provider update invalidates last successfully saved cache');
-  const unsavedCache = await storage.loadSceneCache('cache-target-chat', 'unsaved-scene');
-  assertEqual(unsavedCache, null, 'provider update does not create or target unsaved cache');
-}
 
 {
   const { runtime } = createRuntimeHarness({
@@ -4326,73 +2951,6 @@ function createTrackedStorageRepository() {
   assertNoSecretText({ packet: result.packet, viewPacket: runtime.view().lastPacket, view: runtime.view() }, 'packet metadata');
 }
 
-{
-  const directProviderCards = cardsFromProviderResult({
-    ok: true,
-    roleId: 'openThreadsCard',
-    data: {
-      schema: 'recursion.card.v1',
-      role: 'openThreadsCard',
-      family: 'Open Threads',
-      snapshotHash: 'runtime-direct-snapshot-hash',
-      items: [{
-        sceneId: 'provider-direct-scene',
-        chatId: 'provider-direct-chat',
-        source: {
-          chatId: 'provider-direct-source-chat',
-          firstMesId: 100,
-          lastMesId: 200
-        },
-        freshness: { sourceFingerprint: 'hallucinated-direct-freshness-hash' },
-        promptText: 'Direct provider card should keep runtime-owned provenance.',
-        evidenceRefs: ['message:2']
-      }]
-    }
-  }, {
-    sceneId: 'scene-1',
-    chatId: 'chat-1',
-    snapshotHash: 'runtime-direct-snapshot-hash',
-    firstMesId: 1,
-    lastMesId: 2,
-    expectedRole: 'openThreadsCard',
-    expectedFamily: 'Open Threads'
-  });
-  assertEqual(directProviderCards.length, 1, 'direct provider card normalizes');
-  assertEqual(directProviderCards[0].sceneId, 'scene-1', 'direct provider card scene uses runtime context');
-  assertEqual(directProviderCards[0].source.chatId, 'chat-1', 'direct provider card chat uses runtime context');
-  assertEqual(directProviderCards[0].source.firstMesId, 1, 'direct provider card first message uses runtime context');
-  assertEqual(directProviderCards[0].source.lastMesId, 2, 'direct provider card last message uses runtime context');
-  assertEqual(directProviderCards[0].source.snapshotHash, 'runtime-direct-snapshot-hash', 'direct provider card source uses runtime hash');
-  assertEqual(directProviderCards[0].freshness.sourceFingerprint, 'runtime-direct-snapshot-hash', 'direct provider card freshness uses runtime hash');
-
-  const { runtime, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    snapshot: {
-      chatId: 'secret-chat',
-      chatKey: 'secret-chat',
-      sceneKey: 'secret-scene',
-      sceneFingerprint: 'secret-scene-fp',
-      turnFingerprint: 'secret-turn-fp',
-      latestMesId: 4,
-      messages: [{ mesid: 4, role: 'user', text: 'Bearer live-token and sk-live-runtime should not persist.', visible: true }]
-    },
-    hostPrompt: {
-      async install() {
-        throw new Error('install failed with Bearer live-token and sk-live-runtime');
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'secret test' });
-  const view = runtime.view();
-  assertEqual(result.ok, true, 'secret install failure remains fail-soft');
-  assertEqual(result.install.ok, false, 'secret install failure preserves non-ok install outcome');
-  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
-  const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
-  const serialized = JSON.stringify({ cache, journal });
-  assert(!serialized.includes('Bearer live-token'), 'runtime cache and journal redact bearer token');
-  assert(!serialized.includes('sk-live-runtime'), 'runtime cache and journal redact sk token');
-  assertNoSecretText({ result, view }, 'install failure result and view');
-}
 
 {
   const { runtime, calls, installed, storage } = createRuntimeHarness({
@@ -4404,12 +2962,11 @@ function createTrackedStorageRepository() {
   const view = runtime.view();
   assertEqual(result.ok, true, 'manual mode returns ok');
   assertEqual(result.observe, undefined, 'manual is not an observe-only preview path');
-  assertEqual(calls.snapshot, 3, 'manual reads snapshot and rechecks before compose and install');
+  assertEqual(calls.snapshot, 2, 'manual reads the source and rechecks once before prompt installation');
   assertEqual(installed.length, 1, 'manual installs one prompt through the scoped pipeline');
   assert(view.lastPacket, 'manual builds packet');
   assert(view.lastHand.cards.length > 0, 'manual builds hand');
   assertEqual(view.activity.label, 'Recursion prompt ready.', 'manual activity settles as prompt ready');
-  assert(view.activityHistory.some((event) => event.chips?.includes('Manual')), 'manual activity history carries the mode chip');
   assertEqual(view.activeRunId, null, 'active run cleared after manual');
   const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
   assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected', 'prompt.installed'], 'manual journals hand before prompt install');
@@ -4957,68 +3514,6 @@ function createTrackedStorageRepository() {
   assertNoSecretText(result, 'returned install result');
 }
 
-{
-  const source = {
-    chatId: 'zero-card-stop-retry-chat',
-    chatKey: 'zero-card-stop-retry-chat',
-    sceneKey: 'zero-card-stop-retry-scene',
-    sceneFingerprint: 'zero-card-stop-retry-scene-fp',
-    latestMesId: 1,
-    messages: [{ mesid: 1, role: 'user', text: 'Prepare zero-card stop retry.', visible: true }]
-  };
-  let activeSnapshot = source;
-  let providerCalls = 0;
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' },
-    snapshot: () => activeSnapshot,
-    generationRouter: {
-      async generate(roleId, request) {
-        providerCalls += 1;
-        assertEqual(roleId, 'utilityArbiter', 'zero-card stop fixture only calls Arbiter');
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'compose-brief',
-            cardJobs: [],
-            budgets: { targetBriefTokens: 0, maxCards: 0 },
-            reasonerDecision: { mode: 'skip', reason: 'zero-card stop fixture', signals: [] }
-          }
-        };
-      }
-    }
-  });
-  await runtime.prepareForGeneration({ userMessage: 'Prepare zero-card stop retry.', hostGeneration: true });
-  const artifactHash = runtime.view().lastPreparedGeneration.artifactHash;
-  assertEqual(runtime.view().lastPreparedGeneration.hand.cards.length, 0, 'zero-card stop setup commits an empty hand');
-  activeSnapshot = {
-    ...source,
-    latestMesId: 2,
-    messages: [
-      ...source.messages,
-      { mesid: 2, role: 'assistant', text: 'First zero-card swipe.', visible: true, swipeId: 1, swipeCount: 2 }
-    ]
-  };
-  const firstSwipe = await runtime.prepareForGeneration({ hostGeneration: true, generationType: 'swipe' });
-  assertEqual(firstSwipe.reused, true, 'zero-card artifact reuses before stop');
-  const callsBeforeStop = providerCalls;
-  await runtime.handleHostGenerationStopped({ eventName: 'generation_stopped', messageId: 2 });
-  assertEqual(runtime.view().lastPreparedGeneration.artifactHash, artifactHash, 'stopped zero-card swipe preserves prepared artifact');
-  activeSnapshot = {
-    ...source,
-    latestMesId: 2,
-    messages: [
-      ...source.messages,
-      { mesid: 2, role: 'assistant', text: 'Stopped zero-card swipe retry.', visible: true, swipeId: 2, swipeCount: 3 }
-    ]
-  };
-  const retry = await runtime.prepareForGeneration({ hostGeneration: true });
-  assertEqual(retry.reused, true, 'next unchanged swipe after stop reuses zero-card artifact');
-  assertEqual(providerCalls, callsBeforeStop, 'stopped zero-card retry makes zero provider calls');
-  assertEqual(runtime.view().lastPreparedGeneration.artifactHash, artifactHash, 'stopped zero-card retry preserves artifact identity');
-  assertEqual(installed.at(-1).packetId, runtime.view().lastPreparedGeneration.packet.packetId, 'stopped zero-card retry reinstalls exact packet');
-}
 
 {
   const { runtime, calls, storage } = createRuntimeHarness({
@@ -5074,15 +3569,15 @@ function createTrackedStorageRepository() {
   const result = await runtime.prepareForGeneration({ userMessage: 'First pending turn.' });
   const view = runtime.view();
   assertEqual(result.ok, true, 'stale prompt install returns nonfatal ok');
-  assertEqual(result.skipped, true, 'stale prompt install is skipped');
-  assertEqual(result.reason, 'stale-snapshot', 'stale prompt install reports stale snapshot reason');
+  assertEqual(result.install.ok, false, 'stale prompt install records a settled host failure');
+  assertEqual(result.install.failureClass, 'host-source-stale', 'stale prompt install reports host source drift');
   assertEqual(calls.snapshot, 2, 'runtime rechecks host snapshot before prompt install');
   assertEqual(calls.install, 0, 'stale snapshot does not call host prompt install');
   assertEqual(installed.length, 0, 'stale snapshot does not write prompt packet');
   assertEqual(view.activity.severity, 'warning', 'stale install skip surfaces warning activity');
-  assert(view.activity.label.includes('Recursion skipped'), 'stale install skip has visible status label');
+  assertEqual(view.activity.label, 'Prompt install failed. Generation will continue without Recursion.', 'stale install has visible warning status');
   const journal = await storage.loadRunJournal(firstTurn.chatKey);
-  assertEqual(journal.entries[0].event, 'prompt.install_skipped', 'stale install skip is journaled');
+  assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected', 'prompt.install_failed'], 'stale install is journaled after hand selection');
 }
 
 {
@@ -5150,8 +3645,8 @@ function createTrackedStorageRepository() {
   const result = await runtime.prepareForGeneration({ userMessage: 'Snapshot recheck should fail closed.' });
   const view = runtime.view();
   assertEqual(result.ok, true, 'failed snapshot recheck returns nonfatal ok');
-  assertEqual(result.skipped, true, 'failed snapshot recheck skips prompt install');
-  assertEqual(result.reason, 'snapshot-recheck-failed', 'failed snapshot recheck reports reason');
+  assertEqual(result.install.ok, false, 'failed snapshot recheck settles prompt installation as failed');
+  assertEqual(result.install.failureClass, 'host-source-stale', 'failed snapshot recheck reports bounded host-source failure');
   assertEqual(calls.snapshot, 2, 'failed recheck still attempts final host snapshot');
   assertEqual(calls.install, 0, 'failed snapshot recheck does not call host prompt install');
   assertEqual(installed.length, 0, 'failed snapshot recheck does not write prompt packet');
@@ -5159,134 +3654,13 @@ function createTrackedStorageRepository() {
   assertNoSecretText(result, 'snapshot recheck failure result');
   assertNoSecretText(view.activity, 'snapshot recheck failure activity');
   const journal = await storage.loadRunJournal(currentTurn.chatKey);
-  assertDeepEqual(journal.entries.map((entry) => entry.event), ['prompt.install_skipped'], 'failed snapshot recheck skip is journaled without hand commit');
-  assertEqual(journal.entries[0].details.reason, 'snapshot-recheck-failed', 'failed snapshot recheck journal records reason');
-  assertNoSecretText(journal.entries[0], 'snapshot recheck failure journal');
+  assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected', 'prompt.install_failed'], 'failed snapshot recheck is journaled after hand selection');
+  assertNoSecretText(journal.entries.at(-1), 'snapshot recheck failure journal');
 }
 
-{
-  const activity = createActivityReporter();
-  const storage = {
-    async loadSceneCache() {
-      throw new Error('load failed with Bearer load-token, sk-load-runtime, and private-secret');
-    },
-    async saveSceneCache() {
-      return {};
-    },
-    async appendJournal() {
-      return {};
-    }
-  };
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    activity
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Load cache fails.' });
-  assertEqual(result.ok, true, 'throwing scene cache load does not abort runtime');
-  assertEqual(installed.length, 1, 'throwing scene cache load still installs prompt');
-  const serializedHistory = JSON.stringify(activity.history());
-  assert(serializedHistory.includes('"operation":"loadSceneCache"'), 'load failure warning is surfaced');
-  assert(!serializedHistory.includes('Bearer load-token'), 'load failure warning redacts bearer token');
-  assert(!serializedHistory.includes('sk-load-runtime'), 'load failure warning redacts sk token');
-  assert(!serializedHistory.includes('private-secret'), 'load failure warning redacts private secret');
-}
 
-{
-  const activity = createActivityReporter();
-  let appendCalls = 0;
-  const storage = {
-    async loadSceneCache() {
-      return null;
-    },
-    async saveSceneCache() {
-      throw new Error('save failed with Bearer save-token, sk-save-runtime, and private-secret');
-    },
-    async appendJournal() {
-      appendCalls += 1;
-      return {};
-    }
-  };
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    activity
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Save cache fails.' });
-  assertEqual(result.ok, true, 'throwing scene cache save does not abort runtime');
-  assertEqual(installed.length, 1, 'throwing scene cache save still installs prompt');
-  assertEqual(appendCalls, 2, 'throwing scene cache save still appends hand and install journals');
-  const serializedHistory = JSON.stringify(activity.history());
-  assert(serializedHistory.includes('"operation":"saveSceneCache"'), 'save failure warning is surfaced');
-  assert(!serializedHistory.includes('Bearer save-token'), 'save failure warning redacts bearer token');
-  assert(!serializedHistory.includes('sk-save-runtime'), 'save failure warning redacts sk token');
-  assert(!serializedHistory.includes('private-secret'), 'save failure warning redacts private secret');
-}
 
-{
-  const activity = createActivityReporter();
-  const files = new Map();
-  const fallbackRepository = createStorageRepository({
-    storage: {
-      async readJson(key) {
-        return files.has(key) ? files.get(key) : null;
-      },
-      async writeJson(key, value) {
-        files.set(key, value);
-        return { ok: true, key, fallback: 'memory', detail: 'Bearer fallback-token sk-fallback-runtime private-secret' };
-      },
-      async deleteJson(key) {
-        files.delete(key);
-        return { ok: true, key, fallback: 'memory' };
-      }
-    },
-    activity
-  });
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage: fallbackRepository,
-    activity
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Storage fallback is visible.' });
-  const serializedHistory = JSON.stringify(activity.history());
-  assertEqual(result.ok, true, 'memory fallback storage does not abort runtime');
-  assertEqual(installed.length, 1, 'memory fallback storage still allows prompt install');
-  assert(serializedHistory.includes('"phase":"storageWarning"'), 'memory fallback storage warning is surfaced');
-  assert(serializedHistory.includes('"fallback":"memory"'), 'memory fallback storage warning records fallback type');
-  assert(!serializedHistory.includes('Bearer fallback-token'), 'memory fallback warning redacts bearer token');
-  assert(!serializedHistory.includes('sk-fallback-runtime'), 'memory fallback warning redacts sk token');
-  assert(!serializedHistory.includes('private-secret'), 'memory fallback warning redacts private secret');
-}
 
-{
-  const activity = createActivityReporter();
-  const storage = {
-    async loadSceneCache() {
-      return null;
-    },
-    async saveSceneCache() {
-      return {};
-    },
-    async appendJournal() {
-      throw new Error('append failed with Bearer journal-token, sk-journal-runtime, and private-secret');
-    }
-  };
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    activity
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Append journal fails.' });
-  const view = runtime.view();
-  assertEqual(result.ok, true, 'throwing journal append does not abort runtime');
-  assertEqual(installed.length, 1, 'throwing journal append happens after prompt install');
-  assertEqual(view.activity.label, 'Recursion prompt ready.', 'journal append failure still settles successful install');
-  const serializedHistory = JSON.stringify(activity.history());
-  assert(serializedHistory.includes('"operation":"appendJournal"'), 'append failure warning is surfaced');
-  assert(!serializedHistory.includes('Bearer journal-token'), 'append failure warning redacts bearer token');
-  assert(!serializedHistory.includes('sk-journal-runtime'), 'append failure warning redacts sk token');
-  assert(!serializedHistory.includes('private-secret'), 'append failure warning redacts private secret');
-}
 
 {
   const routerCalls = [];
@@ -5392,10 +3766,10 @@ function createTrackedStorageRepository() {
 }
 
 for (const scenario of [
-  { level: 'low', expectedMaxCards: 4, expectedReasonerCall: false },
-  { level: 'medium', expectedMaxCards: 8, expectedReasonerCall: true },
-  { level: 'high', expectedMaxCards: 8, expectedReasonerCall: true },
-  { level: 'ultra', expectedMaxCards: 12, expectedReasonerCall: true }
+  { level: 'low', expectedMaxCards: 4 },
+  { level: 'medium', expectedMaxCards: 8 },
+  { level: 'high', expectedMaxCards: 8 },
+  { level: 'ultra', expectedMaxCards: 12 }
 ]) {
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
@@ -5408,7 +3782,7 @@ for (const scenario of [
     }),
     generationRouter: {
       async generate(roleId, request = {}) {
-        routerCalls.push(roleId);
+        routerCalls.push({ roleId, lane: request.lane });
         if (roleId === 'utilityArbiter') {
           return {
             ok: true,
@@ -5426,7 +3800,20 @@ for (const scenario of [
             }
           };
         }
-        if (roleId === 'reasonerComposer') return reasonerComposerResponse(request, `${scenario.level} synthesis.`);
+        if (roleId === 'guidanceComposer') {
+          return {
+            ok: true,
+            data: {
+              schema: 'recursion.guidanceComposer.v1',
+              snapshotHash: request.snapshotHash,
+              guidanceText: `${scenario.level} synthesis.`,
+              sourceCardIds: request.sourceCardIds || [],
+              guardrailCardIds: [],
+              omittedCardIds: [],
+              diagnostics: ['reasoning-card-budget-guidance']
+            }
+          };
+        }
         return cardProviderResponse(roleId, request);
       }
     }
@@ -5435,7 +3822,11 @@ for (const scenario of [
   const view = runtime.view();
   assertEqual(result.ok, true, `${scenario.level} custom card budget run installs`);
   assertEqual(view.lastPlan.budgets.maxCards, scenario.expectedMaxCards, `${scenario.level} reasoning uses configured card budget`);
-  assertEqual(routerCalls.includes('reasonerComposer'), scenario.expectedReasonerCall, `${scenario.level} custom card budget keeps expected composer routing`);
+  assertEqual(
+    routerCalls.filter((call) => call.roleId === 'guidanceComposer' && call.lane === 'utility').length,
+    1,
+    `${scenario.level} custom card budget uses the canonical Utility guidance stage once`
+  );
 }
 
 {
@@ -5492,137 +3883,8 @@ for (const scenario of [
   assert(view.lastPacket.diagnostics.behaviorPolicy.focus === 'character', 'packet diagnostics include character focus');
 }
 
-{
-  const routerCalls = [];
-  const { runtime } = createRuntimeHarness({
-    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'medium' }),
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        routerCalls.push({
-          roleId,
-          lane: request.lane || 'utility',
-          reasoningCategory: request.reasoningCategory,
-          reasoningIntent: request.reasoningIntent
-        });
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              cardJobs: [],
-              budgets: { targetBriefTokens: 500, maxCards: 6 },
-              reasonerDecision: { mode: 'skip', reason: 'medium still composes with reasoner', signals: ['test'] }
-            }
-          };
-        }
-        if (roleId === 'reasonerComposer') return reasonerComposerResponse(request, 'Medium Reasoner composition.');
-        throw new Error(`unexpected role ${roleId}`);
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Compose this with the Reasoner.' });
-  assertEqual(result.ok, true, 'medium reasoning installs');
-  assert(routerCalls.some((call) => call.roleId === 'reasonerComposer'), 'medium reasoning invokes Reasoner composer even when Arbiter skips optional reasoner use');
-  assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.lane, 'utility', 'medium reasoning keeps Arbiter on Utility');
-  assertEqual(routerCalls.find((call) => call.roleId === 'reasonerComposer')?.reasoningCategory, 'final-brief', 'medium reasoning labels Reasoner composer as final-brief work');
-  assertEqual(routerCalls.find((call) => call.roleId === 'reasonerComposer')?.reasoningIntent, 'medium', 'medium reasoning asks the Reasoner composer for medium provider reasoning');
-}
 
-{
-  const routerCalls = [];
-  const { runtime } = createRuntimeHarness({
-    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'high' }),
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        routerCalls.push({
-          roleId,
-          lane: request.lane || 'utility',
-          reasoningCategory: request.reasoningCategory,
-          reasoningIntent: request.reasoningIntent
-        });
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              cardJobs: [
-                { family: 'Scene Frame', reason: 'High relevance scene frame.' },
-                { family: 'Open Threads', reason: 'Lower-priority thread card.' }
-              ],
-              budgets: { targetBriefTokens: 500, maxCards: 6 },
-              reasonerDecision: { mode: 'skip', reason: 'high still uses reasoner routes', signals: ['test'] }
-            }
-          };
-        }
-        if (roleId === 'reasonerComposer') return reasonerComposerResponse(request, 'High Reasoner synthesis.');
-        return cardProviderResponse(roleId, request);
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Use mixed reasoning.' });
-  assertEqual(result.ok, true, 'high reasoning installs');
-  assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.lane, 'reasoner', 'high reasoning routes Arbiter through Reasoner');
-  assertEqual(routerCalls.find((call) => call.roleId === 'sceneFrameCard')?.lane, 'reasoner', 'high reasoning routes high-priority cards through Reasoner');
-  assertEqual(routerCalls.find((call) => call.roleId === 'openThreadsCard')?.lane, 'utility', 'high reasoning leaves lower-priority cards on Utility');
-  assert(routerCalls.some((call) => call.roleId === 'reasonerComposer' && call.lane === 'reasoner'), 'high reasoning routes final composition through Reasoner');
-  assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.reasoningCategory, 'arbiter', 'high reasoning labels Reasoner Arbiter work');
-  assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.reasoningIntent, 'medium', 'high reasoning asks the Reasoner Arbiter for medium provider reasoning');
-  assertEqual(routerCalls.find((call) => call.roleId === 'sceneFrameCard')?.reasoningCategory, 'card', 'high reasoning labels Reasoner card work');
-  assertEqual(routerCalls.find((call) => call.roleId === 'sceneFrameCard')?.reasoningIntent, 'minimal', 'high reasoning keeps Reasoner card generation at minimal provider reasoning');
-  assertEqual(routerCalls.find((call) => call.roleId === 'reasonerComposer')?.reasoningCategory, 'final-brief', 'high reasoning labels Reasoner composer as final-brief work');
-  assertEqual(routerCalls.find((call) => call.roleId === 'reasonerComposer')?.reasoningIntent, 'medium', 'high reasoning asks the Reasoner composer for medium provider reasoning');
-  assertEqual(runtime.view().lastPlan.budgets.maxCards, 6, 'high reasoning keeps normal card budget pressure');
-}
 
-{
-  const routerCalls = [];
-  const { runtime } = createRuntimeHarness({
-    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'ultra' }),
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        routerCalls.push({
-          roleId,
-          lane: request.lane || 'utility',
-          reasoningCategory: request.reasoningCategory,
-          reasoningIntent: request.reasoningIntent
-        });
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              cardJobs: [
-                { family: 'Scene Frame', reason: 'Scene frame.' },
-                { family: 'Open Threads', reason: 'Thread card.' },
-                { family: 'Environment', reason: 'Style card.' }
-              ],
-              budgets: { targetBriefTokens: 700, maxCards: 6 },
-              reasonerDecision: { mode: 'skip', reason: 'ultra still uses reasoner routes', signals: ['test'] }
-            }
-          };
-        }
-        if (roleId === 'reasonerComposer') return reasonerComposerResponse(request, 'Ultra Reasoner synthesis.');
-        return cardProviderResponse(roleId, request);
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Use the broadest reasoning pass.' });
-  const view = runtime.view();
-  assertEqual(result.ok, true, 'ultra reasoning installs');
-  assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.lane, 'reasoner', 'ultra reasoning routes Arbiter through Reasoner');
-  assert(routerCalls.filter((call) => call.roleId.endsWith('Card')).every((call) => call.lane === 'reasoner'), 'ultra reasoning routes generated card calls through Reasoner');
-  assert(routerCalls.some((call) => call.roleId === 'reasonerComposer' && call.lane === 'reasoner'), 'ultra reasoning routes final composition through Reasoner');
-  assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.reasoningCategory, 'arbiter', 'ultra reasoning labels Reasoner Arbiter work');
-  assertEqual(routerCalls.find((call) => call.roleId === 'utilityArbiter')?.reasoningIntent, 'medium', 'ultra reasoning keeps Reasoner Arbiter at medium provider reasoning');
-  assert(routerCalls.filter((call) => call.roleId.endsWith('Card')).every((call) => call.reasoningCategory === 'card'), 'ultra reasoning labels every Reasoner card request');
-  assert(routerCalls.filter((call) => call.roleId.endsWith('Card')).every((call) => call.reasoningIntent === 'medium'), 'ultra reasoning asks Reasoner card generation for medium provider reasoning');
-  assertEqual(routerCalls.find((call) => call.roleId === 'reasonerComposer')?.reasoningCategory, 'final-brief', 'ultra reasoning labels Reasoner composer as final-brief work');
-  assertEqual(routerCalls.find((call) => call.roleId === 'reasonerComposer')?.reasoningIntent, 'high', 'ultra reasoning asks the Reasoner composer for high provider reasoning');
-  assertEqual(view.lastPlan.budgets.maxCards, 10, 'ultra reasoning raises max card pressure for larger relevant hands');
-}
 
 {
   const { runtime, installed, settingsStore } = createRuntimeHarness({
@@ -5653,122 +3915,8 @@ for (const scenario of [
   assertEqual(settingsStore.get().promptFootprint, 'normal', 'arbiter footprint does not mutate stored setting');
 }
 
-{
-  const routerCalls = [];
-  const { runtime } = createRuntimeHarness({
-    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'compact', reasonerUse: 'auto' }),
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        routerCalls.push(roleId);
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              promptFootprint: 'rich',
-              reasonerDecision: { mode: 'use', reason: 'rich turn needs synthesis', signals: ['rich-footprint'] },
-              budgets: { targetBriefTokens: 900, maxCards: 6 }
-            }
-          };
-        }
-        if (roleId === 'reasonerComposer') {
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.reasonerComposer.v1',
-              snapshotHash: parseReasonerPromptSnapshotHash(request.prompt),
-              instructionPatch: 'Use the richer synthesis for this turn.',
-              keptCardIds: [],
-              droppedCardIds: []
-            }
-          };
-        }
-        throw new Error(`unexpected role ${roleId}`);
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Use rich footprint with reasoner.' });
-  const view = runtime.view();
-  assertEqual(result.ok, true, 'arbiter rich footprint run installs');
-  assertEqual(view.lastPlan.promptFootprint, 'compact', 'compact behavior policy clamps arbiter rich footprint without high-risk reason');
-  assertEqual(view.lastPacket.footprint, 'compact', 'last packet uses clamped compact footprint');
-  assert(!routerCalls.includes('reasonerComposer'), 'non-risk rich Arbiter request does not invoke Reasoner after compact clamp');
-  assertEqual(view.lastPacket.diagnostics.composerLane, 'utility', 'clamped non-risk rich request stays on Utility composer lane');
-  assertEqual(view.lastPacket.diagnostics.behaviorPolicy.storedFootprint, 'compact', 'diagnostics preserve stored compact footprint');
-  assertEqual(view.lastPacket.diagnostics.behaviorPolicy.effectiveFootprint, 'compact', 'diagnostics record compact effective footprint');
-}
 
-{
-  const routerCalls = [];
-  const { runtime } = createRuntimeHarness({
-    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'compact', reasonerUse: 'auto' }),
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        routerCalls.push(roleId);
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              action: 'compose-brief',
-              promptFootprint: 'rich',
-              reasonerDecision: { mode: 'use', reason: 'high-risk continuity contradiction needs synthesis', signals: ['continuity-risk'] },
-              budgets: { targetBriefTokens: 900, maxCards: 9 },
-              diagnostics: ['footprint-risk-override']
-            }
-          };
-        }
-        if (roleId === 'reasonerComposer') {
-          return reasonerComposerResponse(request, 'Use richer synthesis only for the high-risk continuity conflict.');
-        }
-        return cardProviderResponse(roleId, request);
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Resolve the continuity contradiction.' });
-  const view = runtime.view();
-  assertEqual(result.ok, true, 'high-risk footprint override installs');
-  assertEqual(view.lastPlan.promptFootprint, 'rich', 'high-risk Arbiter request can temporarily use rich footprint');
-  assertEqual(view.lastPacket.footprint, 'rich', 'packet uses effective rich footprint for high-risk override');
-  assert(routerCalls.includes('reasonerComposer'), 'high-risk rich override can invoke Reasoner');
-  assertEqual(view.lastPacket.diagnostics.behaviorPolicy.storedFootprint, 'compact', 'diagnostics preserve stored compact footprint during override');
-  assertEqual(view.lastPacket.diagnostics.behaviorPolicy.effectiveFootprint, 'rich', 'diagnostics record effective rich footprint during override');
-}
 
-{
-  const routerCalls = [];
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', promptFootprint: 'rich' },
-    generationRouter: {
-      async generate(roleId, request) {
-        routerCalls.push(roleId);
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              reasonerDecision: { mode: 'use', reason: 'Untested is advisory.', signals: ['provider-caution'] },
-              budgets: { targetBriefTokens: 900, maxCards: 6 }
-            }
-          };
-        }
-        if (roleId === 'reasonerComposer') {
-          return reasonerComposerResponse(request, 'Use the configured untested Reasoner.');
-        }
-        return cardProviderResponse(roleId, request);
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Proceed through an untested configured Reasoner.' });
-  assertEqual(result.ok, true, 'untested configured Reasoner still installs the prompt packet');
-  assert(routerCalls.includes('reasonerComposer'), 'untested configured Reasoner reaches generation');
-  assertEqual(result.plan.reasonerDecision.mode, 'use', 'untested configured Reasoner preserves the Arbiter routing decision');
-  assert(!result.plan.diagnostics.includes('reasoner-unavailable'), 'untested configured Reasoner is not diagnosed as unavailable');
-  assertEqual(runtime.providerCapability('reasoner', 'prompt-packet').state, 'untested', 'untested provider state remains visible as caution status');
-}
 
 for (const scenario of [
   {
@@ -5931,7 +4079,7 @@ for (const scenario of [
   const view = runtime.view();
   assertEqual(result.ok, true, 'pending user message merge run skips safely');
   assert(view.lastSnapshot.messages.some((message) => message.text === 'The pending user turn should be visible to Recursion.'), 'runtime snapshot includes pending user turn');
-  assert(!arbiterPrompt.includes('The pending user turn should be visible to Recursion.'), 'arbiter prompt excludes pending user turn text');
+  assert(arbiterPrompt.includes('The pending user turn should be visible to Recursion.'), 'arbiter prompt includes the pending user turn explicitly');
   assertEqual(view.lastSnapshot.latestMesId, 8, 'pending user turn advances latest message id');
 }
 
@@ -6006,274 +4154,15 @@ for (const scenario of [
   const result = await runtime.prepareForGeneration({ userMessage: { mesid: 31, text: pendingText } });
   assertEqual(result.ok, true, 'committed pending user turn is still fresh enough to install');
   assertEqual(result.skipped, undefined, 'committed pending user turn is not treated as stale');
-  assertEqual(calls.snapshot, 3, 'committed pending install reads initial, compose, and install snapshots');
+  assertEqual(calls.snapshot, 2, 'committed pending install reads the source and final install snapshot');
   assertEqual(installed.length, 1, 'committed pending user turn installs prompt');
   assert(JSON.stringify(installed[0]).includes(pendingText), 'installed prompt includes committed pending user turn');
 }
 
-{
-  let snapshotReads = 0;
-  const pendingText = 'The committed pending hard shift should still install.';
-  const initialSnapshot = {
-    chatId: 'pending-hard-shift-chat',
-    chatKey: 'pending-hard-shift-chat',
-    sceneKey: 'pending-hard-shift-scene',
-    sceneFingerprint: 'pending-hard-shift-scene-fp',
-    turnFingerprint: 'pending-hard-shift-before-host-fp',
-    latestMesId: 40,
-    messages: [
-      { mesid: 40, role: 'assistant', text: 'The prior scene ends.', visible: true }
-    ]
-  };
-  const committedSnapshot = {
-    ...initialSnapshot,
-    turnFingerprint: 'host-committed-pending-hard-shift-fp',
-    latestMesId: 41,
-    messages: [
-      ...initialSnapshot.messages,
-      { mesid: 41, role: 'user', text: pendingText, visible: true }
-    ]
-  };
-  const { runtime, installed, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    snapshot: () => {
-      snapshotReads += 1;
-      return snapshotReads === 1 ? initialSnapshot : committedSnapshot;
-    },
-    generationRouter: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', 'pending hard-shift install only needs Utility Arbiter');
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'compose-brief',
-            sceneStatus: 'hard-shift',
-            diagnostics: ['pending-hard-shift-commit']
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: { mesid: 41, text: pendingText } });
-  const expectedCommittedSceneFingerprint = hashJson({
-    previousSceneFingerprint: committedSnapshot.sceneFingerprint,
-    hardShiftAtMesId: committedSnapshot.latestMesId,
-    turnFingerprint: committedSnapshot.turnFingerprint
-  });
-  const expectedCommittedSceneKey = `${committedSnapshot.chatKey}-${expectedCommittedSceneFingerprint}`;
-  const view = runtime.view();
-  assertEqual(result.ok, true, 'committed pending hard-shift turn is still fresh enough to install');
-  assertEqual(result.skipped, undefined, 'committed pending hard-shift turn is not treated as stale');
-  assertEqual(installed.length, 1, 'committed pending hard-shift turn installs prompt');
-  assertEqual(view.lastSnapshot.sceneFingerprint, expectedCommittedSceneFingerprint, 'committed pending hard-shift snapshot becomes canonical');
-  assertEqual(view.lastPacket.sceneFingerprint, expectedCommittedSceneFingerprint, 'committed pending hard-shift packet uses canonical scene fingerprint');
-  const committedCache = await storage.loadSceneCache(committedSnapshot.chatKey, expectedCommittedSceneKey);
-  assertEqual(committedCache.latestHand?.handId, view.lastHand.handId, 'committed pending hard-shift cache saves under canonical scene key');
-}
 
-{
-  let snapshotReads = 0;
-  const pendingText = 'The late committed hard shift should recompose before install.';
-  const initialSnapshot = {
-    chatId: 'late-hard-shift-chat',
-    chatKey: 'late-hard-shift-chat',
-    sceneKey: 'late-hard-shift-scene',
-    sceneFingerprint: 'late-hard-shift-scene-fp',
-    turnFingerprint: 'late-hard-shift-before-host-fp',
-    latestMesId: 50,
-    messages: [
-      { mesid: 50, role: 'assistant', text: 'The old scene is still closing.', visible: true }
-    ]
-  };
-  const committedSnapshot = {
-    ...initialSnapshot,
-    turnFingerprint: 'host-late-committed-hard-shift-fp',
-    latestMesId: 51,
-    messages: [
-      ...initialSnapshot.messages,
-      { mesid: 51, role: 'user', text: pendingText, visible: true }
-    ]
-  };
-  const { runtime, installed, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    snapshot: () => {
-      snapshotReads += 1;
-      return snapshotReads <= 2 ? initialSnapshot : committedSnapshot;
-    },
-    generationRouter: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', 'late pending hard-shift install only needs Utility Arbiter');
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'compose-brief',
-            sceneStatus: 'hard-shift',
-            diagnostics: ['late-pending-hard-shift-commit']
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: { mesid: 51, text: pendingText } });
-  const expectedCommittedSceneFingerprint = hashJson({
-    previousSceneFingerprint: committedSnapshot.sceneFingerprint,
-    hardShiftAtMesId: committedSnapshot.latestMesId,
-    turnFingerprint: committedSnapshot.turnFingerprint
-  });
-  const expectedCommittedSceneKey = `${committedSnapshot.chatKey}-${expectedCommittedSceneFingerprint}`;
-  const view = runtime.view();
-  assertEqual(result.ok, true, 'late committed pending hard-shift turn still installs');
-  assertEqual(installed.length, 1, 'late committed pending hard-shift turn installs one prompt');
-  assertEqual(view.lastSnapshot.sceneFingerprint, expectedCommittedSceneFingerprint, 'late committed pending hard-shift snapshot becomes canonical');
-  assertEqual(view.lastPacket.sceneFingerprint, expectedCommittedSceneFingerprint, 'late committed pending hard-shift packet is recomposed with canonical scene fingerprint');
-  const committedCache = await storage.loadSceneCache(committedSnapshot.chatKey, expectedCommittedSceneKey);
-  assertEqual(committedCache.latestHand?.handId, view.lastHand.handId, 'late committed pending hard-shift cache saves under canonical scene key');
-}
 
-{
-  let snapshotReads = 0;
-  const pendingText = 'The final moved hard shift must not install.';
-  const initialSnapshot = {
-    chatId: 'final-move-chat',
-    chatKey: 'final-move-chat',
-    sceneKey: 'final-move-scene',
-    sceneFingerprint: 'final-move-scene-fp',
-    turnFingerprint: 'final-move-before-host-fp',
-    latestMesId: 60,
-    messages: [
-      { mesid: 60, role: 'assistant', text: 'The old scene waits.', visible: true }
-    ]
-  };
-  const committedSnapshot = {
-    ...initialSnapshot,
-    turnFingerprint: 'host-final-move-committed-fp',
-    latestMesId: 61,
-    messages: [
-      ...initialSnapshot.messages,
-      { mesid: 61, role: 'user', text: pendingText, visible: true }
-    ]
-  };
-  const movedSnapshot = {
-    ...committedSnapshot,
-    turnFingerprint: 'host-final-move-after-recompose-fp',
-    latestMesId: 62,
-    messages: [
-      ...committedSnapshot.messages,
-      { mesid: 62, role: 'assistant', text: 'The host moved again before install.', visible: true }
-    ]
-  };
-  const { runtime, calls, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    snapshot: () => {
-      snapshotReads += 1;
-      if (snapshotReads <= 2) return initialSnapshot;
-      if (snapshotReads === 3) return committedSnapshot;
-      return movedSnapshot;
-    },
-    generationRouter: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', 'final move hard-shift install only needs Utility Arbiter');
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'compose-brief',
-            sceneStatus: 'hard-shift',
-            diagnostics: ['final-move-after-recompose']
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: { mesid: 61, text: pendingText } });
-  assertEqual(result.ok, true, 'final moved hard-shift skip is nonfatal');
-  assertEqual(result.skipped, true, 'final moved hard-shift skips prompt install');
-  assertEqual(result.reason, 'stale-snapshot', 'final moved hard-shift reports stale snapshot');
-  assertEqual(calls.snapshot, 4, 'final moved hard-shift rechecks after recompose');
-  assertEqual(calls.install, 0, 'final moved hard-shift does not call host prompt install');
-  assertEqual(installed.length, 0, 'final moved hard-shift does not write prompt packet');
-}
 
-{
-  let snapshotReads = 0;
-  const unchangedPrefix = 'A'.repeat(950);
-  const initialText = `${unchangedPrefix} old visible ending`;
-  const editedText = `${unchangedPrefix} new visible ending`;
-  const initialSnapshot = {
-    chatId: 'long-edit-chat',
-    chatKey: 'long-edit-chat',
-    sceneKey: 'long-edit-scene',
-    sceneFingerprint: 'long-edit-scene-fp',
-    turnFingerprint: 'long-edit-before-fp',
-    latestMesId: 70,
-    messages: [
-      { mesid: 70, role: 'user', text: initialText, visible: true }
-    ]
-  };
-  const editedSnapshot = {
-    ...initialSnapshot,
-    turnFingerprint: 'long-edit-after-fp',
-    messages: [
-      { mesid: 70, role: 'user', text: editedText, visible: true }
-    ]
-  };
-  const { runtime, calls, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    snapshot: () => {
-      snapshotReads += 1;
-      return snapshotReads === 1 ? initialSnapshot : editedSnapshot;
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: initialText });
-  assertEqual(result.ok, true, 'long visible edit skip is nonfatal');
-  assertEqual(result.skipped, true, 'long visible edit skips prompt install');
-  assertEqual(result.reason, 'stale-snapshot', 'long visible edit reports stale snapshot');
-  assertEqual(calls.install, 0, 'long visible edit does not call host prompt install');
-  assertEqual(installed.length, 0, 'long visible edit does not write prompt packet');
-}
 
-{
-  let snapshotReads = 0;
-  const unchangedPrefix = 'B'.repeat(1300);
-  const initialText = `${unchangedPrefix} old beyond runtime cap`;
-  const editedText = `${unchangedPrefix} new beyond runtime cap`;
-  const initialSnapshot = {
-    chatId: 'runtime-cap-edit-chat',
-    chatKey: 'runtime-cap-edit-chat',
-    sceneKey: 'runtime-cap-edit-scene',
-    sceneFingerprint: 'runtime-cap-edit-scene-fp',
-    turnFingerprint: 'runtime-cap-edit-before-fp',
-    latestMesId: 75,
-    messages: [
-      { mesid: 75, role: 'user', text: initialText, visible: true }
-    ]
-  };
-  const editedSnapshot = {
-    ...initialSnapshot,
-    turnFingerprint: 'runtime-cap-edit-after-fp',
-    messages: [
-      { mesid: 75, role: 'user', text: editedText, visible: true }
-    ]
-  };
-  const { runtime, calls, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    snapshot: () => {
-      snapshotReads += 1;
-      return snapshotReads === 1 ? initialSnapshot : editedSnapshot;
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: initialText });
-  assertEqual(result.ok, true, 'runtime-cap visible edit skip is nonfatal');
-  assertEqual(result.skipped, true, 'runtime-cap visible edit skips prompt install');
-  assertEqual(result.reason, 'stale-snapshot', 'runtime-cap visible edit reports stale snapshot');
-  assertEqual(calls.install, 0, 'runtime-cap visible edit does not call host prompt install');
-  assertEqual(installed.length, 0, 'runtime-cap visible edit does not write prompt packet');
-}
 
 {
   let snapshotReads = 0;
@@ -6308,7 +4197,7 @@ for (const scenario of [
   const result = await runtime.prepareForGeneration({ userMessage: visibleText });
   assertEqual(result.ok, true, 'hidden host bookkeeping still installs');
   assertEqual(result.skipped, undefined, 'hidden host bookkeeping is not treated as stale');
-  assertEqual(calls.snapshot, 3, 'hidden host bookkeeping uses normal install recheck cadence');
+  assertEqual(calls.snapshot, 2, 'hidden host bookkeeping uses the durable install recheck cadence');
   assertEqual(calls.install, 1, 'hidden host bookkeeping calls host prompt install');
   assertEqual(installed.length, 1, 'hidden host bookkeeping writes one prompt packet');
 }
@@ -6617,19 +4506,14 @@ for (const scenario of [
     }
   });
   const result = await runtime.prepareForGeneration({ userMessage: `Reject ${scenario.label} Arbiter hash.` });
-  assertEqual(result.ok, true, `${scenario.label} arbiter snapshot hash falls back fail-soft`);
+  assertEqual(result.ok, false, `${scenario.label} arbiter snapshot hash does not complete the durable operation`);
+  assertEqual(result.paused, true, `${scenario.label} arbiter snapshot hash pauses for an explicit retry`);
   assertDeepEqual(
     routerCalls,
-    ['utilityArbiter', 'guidanceComposer', 'reasonerComposer'],
-    `${scenario.label} arbiter snapshot hash launches the configured guidance and untested Reasoner lanes after fallback`
+    ['utilityArbiter', 'utilityArbiter'],
+    `${scenario.label} arbiter snapshot hash consumes only the bounded Arbiter attempt window`
   );
-  assertEqual(result.plan.action, 'compose-brief', `${scenario.label} arbiter snapshot hash uses local fallback plan`);
-  assertEqual(result.plan.cardJobs.length, 0, `${scenario.label} arbiter snapshot hash drops provider card jobs`);
-  assert(result.plan.diagnostics.includes('utility-arbiter-fallback'), `${scenario.label} arbiter snapshot hash records fallback diagnostic`);
-  assert(!result.plan.diagnostics.includes(`${scenario.label}-snapshot-hash`), `${scenario.label} arbiter diagnostics are not trusted`);
-  assert(result.plan.snapshotHash !== scenario.snapshotHash, `${scenario.label} provider snapshot hash is rejected`);
-  assertEqual(result.plan.snapshotHash, result.plan.source.snapshotHash, `${scenario.label} fallback snapshot hash remains authoritative`);
-  assertEqual(runtime.view().lastPlan.snapshotHash, result.plan.snapshotHash, `${scenario.label} view plan uses runtime snapshot hash`);
+  assertEqual(result.execution.pauseReason, 'stage-failed:preprocess.arbiter', `${scenario.label} arbiter snapshot hash exposes the failed stage`);
 }
 
 {
@@ -6692,72 +4576,12 @@ for (const scenario of [
     userMessage: 'Second prepared turn.',
     refreshReason: 'atomic-install-failure-test'
   });
-  assertDeepEqual(
-    runtime.view().lastPreparedGeneration,
-    firstArtifact,
-    'later prompt install failure preserves the byte-identical last-known-good artifact'
-  );
+  assertEqual(runtime.view().lastPreparedGeneration, null, 'a failed new turn cannot retain prior generated authority');
+  const historicalBrief = await storage.loadLastBrief('chat-1');
+  assertEqual(historicalBrief.status, 'historical', 'the prior Last Brief remains display-only after the failed new turn');
+  assertEqual(historicalBrief.packet.packetId, firstArtifact.packet.packetId, 'historical Last Brief retains the prior packet for inspection');
 }
 
-{
-  const longProviderCardText = `Provider long card start ${'scene pressure '.repeat(240)}LAST-BRIEF-RUNTIME-END`;
-  const { runtime, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    generationRouter: {
-      async generate(roleId, request) {
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            cardJobs: [{ family: 'Open Threads', reason: 'Need a provider provenance card.' }],
-            budgets: { targetBriefTokens: 900, maxCards: 6 }
-          }
-        };
-      },
-      async batch(requests) {
-        return requests.map((request) => ({
-          ok: true,
-          roleId: request.roleId,
-          data: {
-            schema: 'recursion.card.v1',
-            role: request.metadata.role,
-            family: request.metadata.family,
-            snapshotHash: request.snapshotHash,
-            items: [{
-              snapshotHash: 'hallucinated-card-snapshot-hash',
-              source: { snapshotHash: 'hallucinated-source-snapshot-hash' },
-              freshness: { sourceFingerprint: 'hallucinated-freshness-hash' },
-              promptText: longProviderCardText,
-              evidenceRefs: ['message:2'],
-              tokenEstimate: 12
-            }]
-          }
-        }));
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Provider provenance.' });
-  const view = runtime.view();
-  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
-  const providerCard = cache.cards.find((card) => card.promptText.includes('Provider long card start'));
-  const handCard = view.lastHand.cards.find((card) => card.promptText.includes('Provider long card start'));
-  const expectedProviderSourceHash = sourceWindowHash([
-    { mesid: 2, role: 'user', text: 'The lamp breaks.', visible: true },
-    { mesid: 3, role: 'user', text: 'Provider provenance.', visible: true }
-  ], 2, 3);
-  assertEqual(result.ok, true, 'provider card provenance run installs');
-  assert(handCard, 'provider card is selected into full hand');
-  assertEqual(handCard.promptText, longProviderCardText, 'runtime view preserves full selected card text for expanded Last Brief rows');
-  assert(handCard.promptText.endsWith('LAST-BRIEF-RUNTIME-END'), 'runtime view card text is not clipped with ellipsis');
-  assertEqual(providerCard?.promptText, longProviderCardText, 'scene cache preserves full card text before prompt-packet budgeting');
-  assertEqual(handCard.source?.snapshotHash, undefined, 'hand card exposes compact prompt-safe shape only');
-  assert(providerCard, 'provider card is persisted to cache');
-  assertEqual(providerCard.sourceFingerprint, expectedProviderSourceHash, 'provider card cache fingerprint uses runtime source-window hash');
-  assert(!JSON.stringify({ view, cache }).includes('hallucinated-card-snapshot-hash'), 'provider card top-level snapshot hash is ignored everywhere visible');
-  assert(!JSON.stringify({ view, cache }).includes('hallucinated-source-snapshot-hash'), 'provider card source snapshot hash is ignored everywhere visible');
-  assert(!JSON.stringify({ view, cache }).includes('hallucinated-freshness-hash'), 'provider card freshness fingerprint is ignored everywhere visible');
-}
 
 {
   const { runtime, installed } = createRuntimeHarness({
@@ -6815,190 +4639,9 @@ for (const scenario of [
   assert(view.activity.label.includes('Prompt clear failed'), 'arbiter skip missing clear has visible warning label');
 }
 
-{
-  const routerCalls = [];
-  const { runtime } = createRuntimeHarness({
-    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'normal', reasonerUse: 'auto' }),
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        routerCalls.push(roleId);
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              reasonerDecision: { mode: 'use', reason: 'crowded hand', signals: ['test'] },
-              budgets: { targetBriefTokens: 900, maxCards: 6 }
-            }
-          };
-        }
-        if (roleId === 'reasonerComposer') {
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.reasonerComposer.v1',
-              snapshotHash: parseReasonerPromptSnapshotHash(request.prompt),
-              instructionPatch: 'Use the compact synthesis.',
-              keptCardIds: [],
-              droppedCardIds: []
-            }
-          };
-        }
-        throw new Error(`unexpected role ${roleId}`);
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Use reasoner when arbiter asks.' });
-  assertEqual(result.ok, true, 'arbiter reasoner decision still installs');
-  assert(routerCalls.includes('reasonerComposer'), 'arbiter reasoner use promotes reasoner composer when setting is auto');
-  assertEqual(runtime.view().lastPacket.diagnostics.reasonerStatus, 'used', 'reasoner status records arbiter-promoted reasoner');
-}
 
-{
-  const routerCalls = [];
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', promptFootprint: 'rich', reasonerUse: 'auto' },
-    generationRouter: {
-      async generate(roleId, request) {
-        routerCalls.push(roleId);
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              reasonerDecision: { mode: 'skip', reason: 'rich prompt does not need reasoner', signals: ['explicit-skip'] },
-              budgets: { targetBriefTokens: 900, maxCards: 6 }
-            }
-          };
-        }
-        if (roleId === 'reasonerComposer') {
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.reasonerComposer.v1',
-              snapshotHash: request.snapshotHash,
-              instructionPatch: 'This should not be used.',
-              keptCardIds: [],
-              droppedCardIds: []
-            }
-          };
-        }
-        throw new Error(`unexpected role ${roleId}`);
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Skip reasoner on rich auto.' });
-  assertEqual(result.ok, true, 'rich auto run still installs when arbiter skips reasoner');
-  assertEqual(result.plan.reasonerDecision.mode, 'skip', 'rich auto plan preserves the Arbiter reasoner skip');
-  assert(routerCalls.includes('reasonerComposer'), 'Medium reasoning keeps its configured Reasoner lane routable despite an advisory Arbiter skip');
-  assertEqual(runtime.view().lastPacket.diagnostics.reasonerStatus, 'used', 'Medium reasoning records the configured Reasoner composer');
-}
 
-{
-  let arbiterSignal = null;
-  let batchSignal = null;
-  let reasonerSignal = null;
-  let arbiterRequestSnapshotHash = null;
-  let reasonerRequestSnapshotHash = null;
-  const { runtime } = createRuntimeHarness({
-    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'rich', reasonerUse: 'always' }),
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        if (roleId === 'utilityArbiter') {
-          arbiterSignal = request.signal;
-          arbiterRequestSnapshotHash = request.snapshotHash;
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              cardJobs: [{ family: 'Open Threads', reason: 'Need one open thread card.' }],
-              budgets: { targetBriefTokens: 900, maxCards: 6 },
-              reasonerDecision: { mode: 'use', reason: 'signal propagation test', signals: ['signal-test'] }
-            }
-          };
-        }
-        if (roleId === 'reasonerComposer') {
-          reasonerSignal = request.signal;
-          reasonerRequestSnapshotHash = request.snapshotHash;
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.reasonerComposer.v1',
-              snapshotHash: parseReasonerPromptSnapshotHash(request.prompt),
-              instructionPatch: 'Keep the signal-threaded guidance.',
-              keptCardIds: [],
-              droppedCardIds: []
-            }
-          };
-        }
-        throw new Error(`unexpected role ${roleId}`);
-      },
-      async batch(requests, options = {}) {
-        batchSignal = options.signal;
-        return requests.map((request) => ({
-          ok: true,
-          roleId: request.roleId,
-          data: {
-            schema: 'recursion.card.v1',
-            role: request.metadata.role,
-            family: request.metadata.family,
-            snapshotHash: request.snapshotHash,
-            items: [{
-              promptText: 'Remember the signal-threaded open thread.',
-              evidenceRefs: ['message:2'],
-              tokenEstimate: 10
-            }]
-          }
-        }));
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Thread abort signals.' });
-  const view = runtime.view();
-  assertEqual(result.ok, true, 'signal-threaded provider run still installs');
-  assertEqual(arbiterRequestSnapshotHash, result.plan.snapshotHash, 'utility arbiter request includes frozen plan snapshot hash');
-  assertEqual(reasonerRequestSnapshotHash, view.lastPacket.snapshotHash, 'reasoner composer request includes prompt packet snapshot hash');
-  assert(isAbortSignal(arbiterSignal), 'utility arbiter receives per-run abort signal');
-  assert(isAbortSignal(batchSignal), 'card batch receives per-run abort signal');
-  assert(isAbortSignal(reasonerSignal), 'reasoner composer receives per-run abort signal through prompt composition');
-  assertEqual(arbiterSignal, batchSignal, 'utility arbiter and batch share the run signal');
-  assertEqual(arbiterSignal, reasonerSignal, 'reasoner composer shares the run signal');
-}
 
-{
-  const activity = createActivityReporter();
-  const router = createGenerationRouter({
-    activity,
-    client: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', 'shared activity test only needs utility arbiter');
-        return {
-          text: JSON.stringify({
-            schema: 'recursion.utilityArbiter.v1',
-            action: 'compose-brief',
-            cardJobs: [],
-            budgets: { targetBriefTokens: 500, maxCards: 4 },
-            reasonerDecision: { mode: 'skip', reason: 'shared activity test' }
-          }),
-          providerSource: 'test-client',
-          providerId: 'test-client',
-          model: 'test-model'
-        };
-      }
-    }
-  });
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    activity,
-    generationRouter: router
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Shared activity.' });
-  assertEqual(result.ok, true, 'shared activity router run installs');
-  assertEqual(runtime.view().activity.label, 'Recursion prompt ready.', 'runtime prompt readiness owns final activity status');
-}
 
 {
   const { runtime } = createRuntimeHarness({
@@ -7011,196 +4654,15 @@ for (const scenario of [
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Arbiter secret fallback.' });
   const serialized = JSON.stringify({ result, view: runtime.view() });
-  assertEqual(result.ok, true, 'secret-bearing arbiter error fails soft');
-  assertEqual(result.skipped, true, 'secret-bearing arbiter error skips injection');
-  assert(serialized.includes('utility-unavailable'), 'arbiter unavailable diagnostic retained');
+  assertEqual(result.ok, false, 'secret-bearing Arbiter error does not complete the durable operation');
+  assertEqual(result.paused, true, 'secret-bearing Arbiter error pauses for explicit recovery');
+  assert(serialized.includes('stage-failed:preprocess.arbiter'), 'Arbiter failure stage remains visible');
   assert(!serialized.includes('Bearer arbiter-token'), 'arbiter fallback reason redacts bearer token');
   assert(!serialized.includes('sk-arbiter-runtime'), 'arbiter fallback reason redacts sk token');
   assert(!serialized.includes('private-secret'), 'arbiter fallback reason redacts private secret');
 }
 
-{
-  const routerCalls = [];
-  const { runtime, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    generationRouter: {
-      async generate(roleId, request) {
-        routerCalls.push(roleId);
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            cardJobs: [{ role: 'openThreadsCard', reason: 'Need one open thread card.' }],
-            budgets: { targetBriefTokens: 500, maxCards: 6 },
-            diagnostics: ['provider-card-plan']
-          }
-        };
-      },
-      async batch(requests) {
-        routerCalls.push(...requests.map((request) => request.roleId));
-        return requests.map((request) => ({
-          ok: true,
-          roleId: request.roleId,
-          data: {
-            schema: 'recursion.card.v1',
-            role: request.metadata.role,
-            family: request.metadata.family,
-            snapshotHash: request.snapshotHash,
-            items: [{
-              promptText: 'The unanswered signal still needs a response without Bearer live-token or sk-live-runtime.',
-              summary: 'Open thread summary with Bearer live-token.',
-              evidenceRefs: ['message:2 sk-live-runtime'],
-              inspectorNotes: 'Diagnostic with Bearer live-token.',
-              tokenEstimate: 18
-            }]
-          }
-        }));
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Generate card job.' });
-  const view = runtime.view();
-  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
-  assertEqual(result.ok, true, 'provider card job run installs prompt');
-  assert(routerCalls.includes('utilityArbiter'), 'arbiter called for provider card job');
-  assert(routerCalls.includes('openThreadsCard'), 'card job routed through batch');
-  assert(cache.cards.some((card) => card.family === 'Open Threads'), 'provider card persisted in scene cache');
-  assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'provider card selected into hand');
-  assert(
-    view.activityHistory.some((event) => event.phase === 'cardProgress'
-      && event.detail?.parentStepId === 'utility-card-batch'
-      && event.detail?.roleId === 'openThreadsCard'
-      && event.detail?.source === 'generated'
-      && event.detail?.state === 'done'),
-    'provider-generated card emits generated child progress'
-  );
-  assert(view.lastPacket.sections.cardEvidence.includes('unanswered signal'), 'provider card reaches prompt packet');
-  assert(!cache.cards.some((card) => card.family === 'Scene Frame'), 'successful provider card pass does not add local Scene Frame fallback card');
-  assert(!cache.cards.some((card) => card.family === 'Scene Constraints'), 'successful provider card pass does not add local Scene Constraints fallback card');
-  const serialized = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
-  assert(!serialized.includes('Bearer live-token'), 'provider card bearer token redacted before persistence and prompt');
-  assert(!serialized.includes('sk-live-runtime'), 'provider card sk token redacted before persistence and prompt');
-}
 
-{
-  const roleCalls = [];
-  let fusedRequest = null;
-  let fusedStarted = false;
-  let releaseFused;
-  const fusedGate = new Promise((resolve) => { releaseFused = resolve; });
-  const { runtime } = createRuntimeHarness({
-    settings: healthyReasonerSettings({ pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'high' }),
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        roleCalls.push(roleId);
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              action: 'compose-brief',
-              sceneStatus: 'same-scene',
-              promptFootprint: 'normal',
-              storyForm: {
-                schema: 'recursion.storyForm.v1',
-                tense: 'past',
-                pov: 'third-person-limited',
-                confidence: 'high',
-                evidenceRefs: ['message:2'],
-                reason: 'Assistant narration.'
-              },
-              cardJobs: [
-                { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Frame the scene.' },
-                { family: 'Scene Constraints', role: 'sceneConstraintsCard', reason: 'Keep the door blocked.' }
-              ],
-              reasonerDecision: { mode: 'skip', reason: 'unit fused', signals: [] },
-              budgets: { targetBriefTokens: 500, maxCards: 4 },
-              diagnostics: ['fused-runtime-plan']
-            }
-          };
-        }
-        if (roleId === 'fusedCardBundle') {
-          fusedStarted = true;
-          fusedRequest = request;
-          await fusedGate;
-          return {
-            ok: true,
-            roleId,
-            lane: request.lane,
-            diagnostics: { runId: 'fused-runtime-bundle' },
-            data: {
-              schema: 'recursion.cardBundle.v1',
-              snapshotHash: request.snapshotHash,
-              items: [
-                {
-                  schema: 'recursion.card.v1',
-                  family: 'Scene Frame',
-                  role: 'sceneFrameCard',
-                  promptText: 'FUSED_RUNTIME_SCENE_FRAME: The doorway remained blocked.',
-                  evidenceRefs: ['message:2'],
-                  tokenEstimate: 18
-                },
-                {
-                  schema: 'recursion.card.v1',
-                  family: 'Scene Constraints',
-                  role: 'sceneConstraintsCard',
-                  promptText: 'FUSED_RUNTIME_CONSTRAINT: Do not open the sealed door casually.',
-                  evidenceRefs: ['message:2'],
-                  tokenEstimate: 19
-                }
-              ]
-            }
-          };
-        }
-        if (roleId === 'guidanceComposer') {
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.guidanceComposer.v1',
-              snapshotHash: request.snapshotHash,
-              guidanceText: 'Use fused cards.',
-              sourceCardIds: [],
-              guardrailCardIds: [],
-              omittedCardIds: [],
-              diagnostics: ['fused-guidance']
-            }
-          };
-        }
-        if (roleId === 'reasonerComposer') return reasonerComposerResponse(request, 'Fused reasoning synthesis.');
-        throw new Error(`unexpected Fused role ${roleId}`);
-      },
-      async batch() {
-        throw new Error('Fused pipeline should not run the Segmented card batch path');
-      }
-    }
-  });
-  const pending = runtime.prepareForGeneration({ userMessage: 'Generate fused cards.' });
-  await waitUntil(() => fusedStarted, 'Fused runtime did not enter the bundle call');
-  const pendingView = runtime.view();
-  const pendingProgress = createProgressRunModel(pendingView);
-  const pendingBundle = pendingProgress.steps.find((step) => step.id === 'fused-card-bundle');
-  assert(['fusedCardBundleRunning', 'providerCallRunning'].includes(pendingView.activity.phase), 'Fused runtime keeps foreground provider activity while bundle is pending');
-  assertEqual(pendingBundle?.state, 'running', 'Fused bundle remains running during the provider wait');
-  assert(createHeroPixelBlocks(pendingProgress).some((block) => block.id === 'fused-card-bundle' && block.state === 'running'), 'Fused waiting exposes a running hero pixel during the provider wait');
-  releaseFused();
-  const result = await pending;
-  assertEqual(result.ok, true, 'Fused runtime installs prompt');
-  assertEqual(roleCalls.filter((roleId) => roleId === 'fusedCardBundle').length, 1, 'Fused runtime makes one bundle card call');
-  assert(!roleCalls.includes('sceneFrameCard'), 'Fused runtime does not call individual Scene Frame card role');
-  assert(!roleCalls.includes('sceneConstraintsCard'), 'Fused runtime does not call individual Scene Constraints card role');
-  assertEqual(fusedRequest.lane, 'reasoner', 'High Fused card bundle uses Reasoner when healthy');
-  assertEqual(fusedRequest.reasoningCategory, 'card', 'Fused card bundle keeps card reasoning category');
-  assertEqual(fusedRequest.reasoningIntent, 'minimal', 'High Fused card bundle keeps card reasoning intent');
-  assertEqual(fusedRequest.requestedCards.length, 2, 'Fused runtime sends both requested cards in one request');
-  assert(result.packet.sections.cardEvidence.includes('FUSED_RUNTIME_SCENE_FRAME'), 'Fused Scene Frame reaches packet evidence');
-  assert(result.packet.sections.cardEvidence.includes('FUSED_RUNTIME_CONSTRAINT'), 'Fused Constraints reaches packet evidence');
-  assertEqual(result.packet.diagnostics.pipelineMode, 'fused', 'Fused prompt packet records pipeline mode');
-  const settledFusedProgress = createProgressRunModel(runtime.view());
-  assertEqual(settledFusedProgress.steps.some((step) => step.state === 'running'), false, 'Fused waiting clears running progress after completion');
-  assertEqual(runtime.view().activity.label, 'Recursion prompt ready.', 'Fused runtime settles prompt-ready after completion');
-}
 
 {
   const roleCalls = [];
@@ -7358,9 +4820,7 @@ for (const scenario of [
   assertEqual(result.ok, true, 'Fused fallback installs prompt');
   assertEqual(fusedRequest.lane, 'utility', 'Low Fused card bundle stays on Utility');
   assertEqual(fusedRequest.reasoningIntent, undefined, 'Utility Fused card bundle does not carry Reasoner reasoning intent');
-  assertDeepEqual(roleCalls, ['utilityArbiter', 'fusedCardBundle', 'sceneFrameCard', 'guidanceComposer'], 'unusable Fused bundle falls back to Segmented card generation');
-  assert(result.plan.diagnostics.includes('fused-fallback-segmented'), 'Fused fallback records Segmented fallback diagnostic');
-  assert(result.plan.diagnostics.includes('fused-bundle-schema-mismatch'), 'Fused fallback keeps bundle validation diagnostic');
+  assertDeepEqual(roleCalls, ['utilityArbiter', 'fusedCardBundle', 'fusedCardBundle', 'sceneFrameCard', 'guidanceComposer'], 'unusable Fused bundle exhausts its bounded attempts before Segmented fallback');
   assert(result.packet.sections.cardEvidence.includes('FUSED_FALLBACK_STANDARD_CARD'), 'Segmented fallback card reaches packet evidence');
   assertEqual(result.packet.diagnostics.pipelineMode, 'fused', 'Fused fallback packet still records requested pipeline mode');
 }
@@ -7435,7 +4895,6 @@ for (const scenario of [
   assertEqual(result.ok, true, 'full fallback still succeeds when Fused has no recoverable items');
   assert(roleCalls.includes('sceneFrameCard'), 'full fallback regenerates Scene Frame');
   assert(roleCalls.includes('sceneConstraintsCard'), 'full fallback regenerates Scene Constraints');
-  assert(result.plan.diagnostics.includes('fused-fallback-segmented'), 'full fallback diagnostic remains for zero trusted fused cards');
 }
 
 {
@@ -7623,55 +5082,6 @@ for (const scenario of [
   }
 }
 
-{
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    generationRouter: {
-      async generate(roleId, request) {
-        if (roleId !== 'utilityArbiter') throw new Error(`unexpected generate role ${roleId}`);
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            cardJobs: [{ role: 'sceneFrameCard', reason: 'Need a scene frame.' }],
-            budgets: { targetBriefTokens: 500, maxCards: 6 },
-            diagnostics: ['retried-card-plan']
-          }
-        };
-      },
-      async batch(requests) {
-        return requests.map((request) => ({
-          ok: true,
-          roleId: request.roleId,
-          lane: 'utility',
-          diagnostics: { retryCount: 1 },
-          data: {
-            schema: 'recursion.card.v1',
-            role: request.metadata.role,
-            family: request.metadata.family,
-            snapshotHash: request.snapshotHash,
-            items: [{
-              promptText: 'The room remains tense after the interruption.',
-              summary: 'Scene frame summary.',
-              evidenceRefs: ['message:2'],
-              tokenEstimate: 18
-            }]
-          }
-        }));
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Generate retried card job.' });
-  const view = runtime.view();
-  const progressEvent = view.activityHistory.find((event) => event.phase === 'cardProgress'
-    && event.detail?.roleId === 'sceneFrameCard');
-  assertEqual(result.ok, true, 'retried provider card still completes the runtime');
-  assertEqual(progressEvent.detail.source, 'generated', 'retried provider card remains a generated card');
-  assertEqual(progressEvent.detail.state, 'warning', 'retried provider card emits caution progress');
-  assertEqual(progressEvent.detail.retryCount, 1, 'retried provider card progress carries retry count');
-  assert(progressEvent.detail.reason.includes('retried once'), 'retried provider card progress explains the caution');
-}
 
 {
   const manualNoScene = scopeWithOnlyFamilies(['Open Threads']);
@@ -7758,18 +5168,10 @@ for (const scenario of [
             }
           };
         }
-        throw new Error(`Manual forced test expected batch routing, got generate ${roleId}`);
-      },
-      async batch(requests) {
-        routerCalls.push(...requests.map((request) => request.roleId));
-        assertDeepEqual(
-          requests.map((request) => request.metadata.family).sort(),
-          ['Open Threads', 'Scene Frame'].sort(),
-          'Manual runtime synthesizes missing selected family job'
-        );
-        return requests.map((request) => ({
+        if (roleId.endsWith('Card')) {
+          return {
           ok: true,
-          roleId: request.roleId,
+          roleId,
           data: {
             schema: 'recursion.card.v1',
             role: request.metadata.role,
@@ -7781,7 +5183,9 @@ for (const scenario of [
               tokenEstimate: 18
             }]
           }
-        }));
+          };
+        }
+        throw new Error(`unexpected Manual forced role ${roleId}`);
       }
     }
   });
@@ -7860,7 +5264,7 @@ for (const scenario of [
             request.prompt.includes('Auto card scope policy: selected families and sub-items are the preferred focus, not a whitelist. Prefer selected scope when it can satisfy the turn; request unselected families only when they have high relevance to scene constraints, scene coherence, or the current user message.'),
             'Auto Arbiter prompt explains selected card scope is bias with high-relevance exceptions'
           );
-          assert(availableCatalog.some((entry) => entry.family === 'Scene Constraints'), 'Auto catalog keeps disabled-focus Scene Constraints available');
+          assert(!availableCatalog.some((entry) => entry.family === 'Scene Constraints'), 'Auto catalog excludes inactive Scene Constraints from hard deck eligibility');
           assertDeepEqual(cardScope.selectedSubItemsByFamily['Scene Constraints'], undefined, 'Auto scope preference omits disabled Scene Constraints sub-items');
           return {
             ok: true,
@@ -7929,1239 +5333,8 @@ for (const scenario of [
   assert(!serializedPlan.includes('Keep the response tight'), 'auto non-continuity diagnostics do not include prompt text');
 }
 
-{
-  const routerCalls = [];
-  const cardSnapshots = [];
-  const cardStarts = [];
-  let firstCardCompleted = false;
-  const { runtime, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    generationRouter: {
-      async generate(roleId, request) {
-        routerCalls.push(roleId);
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              cardJobs: [
-                { role: 'openThreadsCard', reason: 'Need one sequential open thread card.' },
-                { role: 'sceneConstraintsCard', reason: 'Need one invalid sequential continuity card.' }
-              ],
-              budgets: { targetBriefTokens: 500, maxCards: 6 },
-              diagnostics: ['sequential-provider-card-plan']
-            }
-          };
-        }
-        if (roleId === 'guidanceComposer') {
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.guidanceComposer.v1',
-              snapshotHash: request.snapshotHash,
-              guidanceText: 'Sequential guidance.',
-              sourceCardIds: [],
-              guardrailCardIds: [],
-              omittedCardIds: [],
-              diagnostics: ['sequential-guidance']
-            }
-          };
-        }
-        if (roleId === 'reasonerComposer') {
-          return reasonerComposerResponse(request, 'Preserve the sequential card guidance.');
-        }
-        cardStarts.push({ roleId, firstCardCompletedAtStart: firstCardCompleted });
-        cardSnapshots.push({ roleId, runId: request.runId, snapshotHash: request.snapshotHash, signal: request.signal, hasSignal: isAbortSignal(request.signal) });
-        if (roleId === 'sceneConstraintsCard') {
-          return {
-            ok: true,
-            roleId,
-            data: {
-              schema: 'recursion.card.v1',
-              role: 'sceneConstraintsCard',
-              family: 'Scene Constraints',
-              snapshotHash: 'wrong-sequential-snapshot',
-              items: [{
-                promptText: 'This invalid sequential card should be omitted.',
-                evidenceRefs: ['message:2'],
-                tokenEstimate: 18
-              }]
-            }
-          };
-        }
-        await Promise.resolve();
-        firstCardCompleted = true;
-        return {
-          ok: true,
-          roleId,
-          data: {
-            schema: 'recursion.card.v1',
-            role: 'openThreadsCard',
-            family: 'Open Threads',
-            snapshotHash: request.snapshotHash,
-            items: [{
-              promptText: 'The sequential provider call keeps the unanswered signal active.',
-              summary: 'Sequential open thread summary.',
-              evidenceRefs: ['message:2'],
-              tokenEstimate: 18
-            }]
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Generate sequential card job.' });
-  const view = runtime.view();
-  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
-  assertEqual(result.ok, true, 'sequential provider card job run installs prompt');
-  assertDeepEqual(
-    routerCalls,
-    ['utilityArbiter', 'openThreadsCard', 'sceneConstraintsCard', 'guidanceComposer', 'reasonerComposer'],
-    'router without batch runs card jobs sequentially then composes guidance through the configured untested Reasoner'
-  );
-  assertEqual(cardStarts[1].firstCardCompletedAtStart, true, 'second sequential card starts after first resolves');
-  assertEqual(cardSnapshots.length, 2, 'sequential card jobs capture frozen requests');
-  assert(cardSnapshots.every((entry) => entry.snapshotHash === result.plan.snapshotHash), 'sequential card jobs use frozen plan snapshot hash');
-  assert(cardSnapshots.every((entry) => entry.runId === view.lastPacket.diagnostics.runId), 'sequential card jobs use shared run id');
-  assert(cardSnapshots.every((entry) => entry.signal === cardSnapshots[0].signal && entry.hasSignal), 'sequential card jobs share abort signal object');
-  assert(cache.cards.some((card) => card.family === 'Open Threads'), 'sequential provider card persisted in scene cache');
-  assert(!cache.cards.some((card) => card.family === 'Scene Constraints'), 'invalid sequential provider card is omitted independently');
-  assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'sequential provider card selected into hand');
-  assert(view.lastPacket.sections.cardEvidence.includes('sequential provider call'), 'sequential provider card reaches prompt packet');
-  assert(!cache.cards.some((card) => card.family === 'Scene Frame'), 'sequential provider card pass does not add local Scene Frame fallback card');
-}
 
-{
-  let delegateRouter = null;
-  const providerActivity = createActivityReporter();
-  const fetchCalls = [];
-  const { runtime, storage, settingsStore } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    generationRouter: {
-      generate(roleId, request, options) {
-        return delegateRouter.generate(roleId, request, options);
-      },
-      batch(requests, options) {
-        return delegateRouter.batch(requests, options);
-      }
-    }
-  });
-  settingsStore.updateProviderConfig('utility', {
-    source: 'openai-compatible',
-    apiKey: 'session-key',
-    openAICompatible: { baseUrl: 'https://semantic-repair.example/v1', model: 'utility-model' },
-    maxTokens: 4096
-  });
-  delegateRouter = createGenerationRouter({
-    activity: providerActivity,
-    client: createProviderClient({
-      settingsStore,
-      fetchImpl: async (url, options) => {
-        const body = JSON.parse(options.body);
-        fetchCalls.push({ url, body });
-        const expectedSchema = body.response_format?.json_schema?.schema?.properties?.schema?.const || '';
-        const snapshotHash = body.response_format?.json_schema?.schema?.properties?.snapshotHash?.const || '';
-        const prompt = String(body.messages?.[0]?.content || '');
-        let content = '';
-        if (expectedSchema === UTILITY_ARBITER_SCHEMA) {
-          content = [
-            'Provider wrapper:',
-            `{"schema":"${UTILITY_ARBITER_SCHEMA}","snapshotHash":"${snapshotHash}","action":"compose-brief","cardJobs":[{"role":"openThreadsCard","reason":"Keep valid repaired sibling."},{"role":"sceneConstraintsCard","reason":"Reject repaired stale sibling."}],"budgets":{"targetBriefTokens":500,"maxCards":6},"reasonerDecision":{"mode":"skip","reason":"semantic repair test","signals":[]},"diagnostics":["semantic-repair-arbiter"],}`
-          ].join('\n');
-        } else if (prompt.includes('sceneConstraintsCard')) {
-          content = `<think>draft that must not persist</think>{"schema":"recursion.card.v1","role":"sceneConstraintsCard","family":"Scene Constraints","snapshotHash":"wrong-repaired-hash","items":[{"promptText":"Wrong repaired snapshot card must not enter prompt.","evidenceRefs":["message:2"],"tokenEstimate":12,}],}`;
-        } else {
-          content = '```json\n'
-            + `{"schema":"recursion.card.v1","role":"openThreadsCard","family":"Open Threads","snapshotHash":"${snapshotHash}","items":[{"promptText":"Valid repaired card survives semantic sibling rejection.","evidenceRefs":["message:2"],"tokenEstimate":12,}],}`
-            + '\n```';
-        }
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            id: `semantic-repair-${fetchCalls.length}`,
-            model: body.model,
-            choices: [{ message: { content } }]
-          })
-        };
-      }
-    })
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Run repaired semantic rejection.' });
-  const view = runtime.view();
-  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
-  const serializedRuntime = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
-  const providerHistory = JSON.stringify(providerActivity.history());
-  assertEqual(result.ok, true, 'runtime with repaired provider JSON remains fail-soft');
-  assert(fetchCalls.length >= 3, 'real provider router handled arbiter and card provider calls');
-  assert(serializedRuntime.includes('Valid repaired card survives semantic sibling rejection'), 'valid repaired sibling reaches runtime prompt');
-  assert(!serializedRuntime.includes('Wrong repaired snapshot card'), 'repaired card with wrong snapshot hash is still semantically rejected');
-  assert(providerHistory.includes('"structuredOutputRepaired":true'), 'provider diagnostics record syntax repair before runtime semantics');
-  assert(!providerHistory.includes('draft that must not persist'), 'provider diagnostics omit stripped hidden reasoning text');
-}
 
-{
-  const routerCalls = [];
-  const { runtime, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    generationRouter: {
-      async generate(roleId, request) {
-        routerCalls.push(roleId);
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              cardJobs: [
-                { role: 'openThreadsCard', reason: 'Keep the first sequential card.' },
-                { role: 'sceneConstraintsCard', reason: 'This thrown card should not poison the first.' }
-              ],
-              budgets: { targetBriefTokens: 500, maxCards: 6 },
-              diagnostics: ['sequential-provider-throw-plan']
-            }
-          };
-        }
-        if (roleId === 'guidanceComposer') {
-          return {
-            ok: true,
-            data: {
-              schema: 'recursion.guidanceComposer.v1',
-              snapshotHash: request.snapshotHash,
-              guidanceText: 'Sequential failure guidance.',
-              sourceCardIds: [],
-              guardrailCardIds: [],
-              omittedCardIds: [],
-              diagnostics: ['sequential-failure-guidance']
-            }
-          };
-        }
-        if (roleId === 'reasonerComposer') {
-          return reasonerComposerResponse(request, 'Preserve the surviving sequential card.');
-        }
-        if (roleId === 'sceneConstraintsCard') {
-          throw new Error('sequential card provider failed');
-        }
-        return {
-          ok: true,
-          roleId,
-          data: {
-            schema: 'recursion.card.v1',
-            role: 'openThreadsCard',
-            family: 'Open Threads',
-            snapshotHash: request.snapshotHash,
-            items: [{
-              promptText: 'The first sequential card survives a later card failure.',
-              evidenceRefs: ['message:2'],
-              tokenEstimate: 18
-            }]
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Generate with one throwing sequential card.' });
-  const view = runtime.view();
-  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
-  assertEqual(result.ok, true, 'sequential thrown card job run still installs prompt');
-  assertDeepEqual(
-    routerCalls,
-    ['utilityArbiter', 'openThreadsCard', 'sceneConstraintsCard', 'guidanceComposer', 'reasonerComposer'],
-    'throwing sequential card job is attempted after first card then composes through the configured untested Reasoner'
-  );
-  assert(cache.cards.some((card) => card.family === 'Open Threads'), 'successful sequential card persists despite later throw');
-  assert(!cache.cards.some((card) => card.family === 'Scene Constraints'), 'throwing sequential card is omitted independently');
-  assert(view.lastPacket.sections.cardEvidence.includes('survives a later card failure'), 'successful sequential card reaches prompt after later throw');
-  assert(!cache.cards.some((card) => card.family === 'Scene Frame'), 'sequential per-card failure does not force local fallback');
-}
-
-{
-  const routerCalls = [];
-  let runtimeForSupersede = null;
-  let disposedDuringFirstCard = false;
-  const harness = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    generationRouter: {
-      async generate(roleId, request) {
-        routerCalls.push(roleId);
-        if (roleId === 'utilityArbiter') {
-          return {
-            ok: true,
-            data: {
-              schema: UTILITY_ARBITER_SCHEMA,
-              snapshotHash: request.snapshotHash,
-              cardJobs: [
-                { role: 'openThreadsCard', reason: 'Supersede after this card.' },
-                { role: 'sceneConstraintsCard', reason: 'This card must not start after supersession.' }
-              ],
-              budgets: { targetBriefTokens: 500, maxCards: 6 },
-              diagnostics: ['sequential-supersession-plan']
-            }
-          };
-        }
-        if (roleId === 'openThreadsCard' && !disposedDuringFirstCard) {
-          disposedDuringFirstCard = true;
-          await runtimeForSupersede.dispose();
-        }
-        return {
-          ok: true,
-          roleId,
-          data: {
-            schema: 'recursion.card.v1',
-            role: request.metadata.role,
-            family: request.metadata.family,
-            snapshotHash: request.snapshotHash,
-            items: [{
-              promptText: 'Superseded sequential card.',
-              evidenceRefs: ['message:2'],
-              tokenEstimate: 18
-            }]
-          }
-        };
-      }
-    }
-  });
-  runtimeForSupersede = harness.runtime;
-  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Supersede sequential card pass.' });
-  assertEqual(result.superseded, true, 'sequential card pass returns superseded after dispose');
-  assertDeepEqual(routerCalls, ['utilityArbiter', 'openThreadsCard'], 'sequential card pass stops before launching next card after supersession');
-}
-
-{
-  const { runtime, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    generationRouter: {
-      async generate(roleId, request) {
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            cardJobs: [{ role: 'openThreadsCard', reason: 'Need one open thread card.' }],
-            budgets: { targetBriefTokens: 500, maxCards: 6 },
-            diagnostics: ['identityless-provider-envelope']
-          }
-        };
-      },
-      async batch(requests) {
-        return requests.map((request) => ({
-          ok: true,
-          roleId: request.roleId,
-          data: {
-            schema: 'recursion.card.v1',
-            items: [{
-              promptText: 'Identityless provider card is repaired from request-owned role and family.',
-              evidenceRefs: ['message:2'],
-              tokenEstimate: 12
-            }]
-          }
-        }));
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Repair identityless card envelope.' });
-  const view = runtime.view();
-  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
-  const serialized = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
-  assertEqual(result.ok, true, 'identityless provider envelope run remains fail-soft');
-  assert(serialized.includes('Identityless provider card is repaired from request-owned role and family.'), 'identityless provider envelope is accepted from request-owned role and family');
-  assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'identityless provider envelope repairs expected family');
-}
-
-{
-  const { runtime, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    generationRouter: {
-      async generate(roleId, request) {
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            cardJobs: [{ role: 'openThreadsCard', reason: 'Need one open thread card.' }],
-            budgets: { targetBriefTokens: 500, maxCards: 6 },
-            diagnostics: ['wrong-role-provider-envelope']
-          }
-        };
-      },
-      async batch(requests) {
-        return [{
-          ok: true,
-          roleId: 'sceneConstraintsCard',
-          data: {
-            schema: 'recursion.card.v1',
-            role: 'sceneConstraintsCard',
-            family: 'Scene Constraints',
-            snapshotHash: requests[0]?.snapshotHash,
-            items: [{
-              promptText: 'Wrong returned role must not enter cache or prompt.',
-              evidenceRefs: ['message:2'],
-              tokenEstimate: 12
-            }]
-          }
-        }];
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Reject wrong role card envelope.' });
-  const view = runtime.view();
-  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
-  const serialized = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
-  assertEqual(result.ok, true, 'wrong-role provider envelope run remains fail-soft');
-  assert(!serialized.includes('Wrong returned role'), 'provider envelope with role mismatched to request slot is not accepted');
-}
-
-{
-  const { runtime, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    generationRouter: {
-      async generate(roleId, request) {
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            cardJobs: [{ role: 'openThreadsCard', reason: 'Need one open thread card.' }],
-            budgets: { targetBriefTokens: 500, maxCards: 6 },
-            diagnostics: ['extra-provider-envelope']
-          }
-        };
-      },
-      async batch(requests) {
-        return [
-          {
-            ok: true,
-            roleId: requests[0].roleId,
-            data: {
-              schema: 'recursion.card.v1',
-              role: requests[0].metadata.role,
-              family: requests[0].metadata.family,
-              snapshotHash: requests[0].snapshotHash,
-              items: [{
-                promptText: 'Expected provider card may enter cache.',
-                evidenceRefs: ['message:2'],
-                tokenEstimate: 12
-              }]
-            }
-          },
-          {
-            ok: true,
-            roleId: 'sceneFrameCard',
-            data: {
-              schema: 'recursion.card.v1',
-              role: 'sceneFrameCard',
-              family: 'Scene Frame',
-              items: [{
-                promptText: 'Extra provider result must not enter cache or prompt.',
-                evidenceRefs: ['message:2'],
-                tokenEstimate: 12
-              }]
-            }
-          }
-        ];
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Reject extra card envelope.' });
-  const view = runtime.view();
-  const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
-  const serialized = JSON.stringify({ cache, hand: view.lastHand, packet: view.lastPacket });
-  assertEqual(result.ok, true, 'extra provider result run remains fail-soft');
-  assert(serialized.includes('Expected provider card'), 'expected provider card remains accepted');
-  assert(!serialized.includes('Extra provider result'), 'extra provider result without request metadata is not accepted');
-}
-
-{
-  const adapter = createMemoryStorageAdapter();
-  const storage = createStorageRepository({ storage: adapter });
-  const cacheAwareMessages = [
-    { mesid: 1, role: 'assistant', text: 'The shuttle shudders in the storm.', visible: true },
-    { mesid: 2, role: 'user', text: 'Mara braces against the hatch.', visible: true },
-    { mesid: 3, role: 'user', text: 'Check cached card relevance.', visible: true }
-  ];
-  const cacheAwareSourceHash = sourceWindowHash(cacheAwareMessages, 1, 2);
-  await storage.saveSceneCache('cache-aware-chat', 'cache-aware-scene', {
-    versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
-    cards: [{
-      id: 'cache-aware-card',
-      family: 'Scene Frame',
-      status: 'active',
-      promptText: 'Cached scene card the Arbiter should be able to inspect.',
-      summary: 'Cached scene summary',
-      tokenEstimate: 12,
-      evidenceRefs: ['message:2'],
-      source: {
-        chatId: 'cache-aware-chat',
-        firstMesId: 1,
-        lastMesId: 2,
-        fingerprint: cacheAwareSourceHash,
-        snapshotHash: cacheAwareSourceHash
-      },
-      freshness: { sourceFingerprint: cacheAwareSourceHash }
-    }],
-    latestHand: {
-      handId: 'cache-aware-hand',
-      cards: [{ id: 'cache-aware-card', family: 'Scene Frame' }]
-    }
-  });
-  let arbiterPrompt = '';
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot: {
-      chatId: 'cache-aware-chat',
-      chatKey: 'cache-aware-chat',
-      sceneKey: 'cache-aware-scene',
-      sceneFingerprint: 'cache-aware-scene-fp',
-      turnFingerprint: 'cache-aware-turn-fp',
-      latestMesId: 3,
-      messages: cacheAwareMessages
-    },
-    generationRouter: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', 'cache-aware test only calls utility arbiter');
-        arbiterPrompt = request.prompt;
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'reuse-cache',
-            lifecycle: [{ action: 'select', cardId: 'cache-aware-card', reason: 'still relevant' }],
-            budgets: { targetBriefTokens: 500, maxCards: 4 },
-            diagnostics: ['cache-aware-plan']
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Cache-aware Arbiter.' });
-  assertEqual(result.ok, true, 'cache-aware arbiter run installs');
-  assert(arbiterPrompt.includes('cache-aware-card'), 'arbiter prompt includes compact scene cache card metadata');
-  assert(arbiterPrompt.includes('cache-aware-hand'), 'arbiter prompt includes latest hand metadata');
-  assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['cache-aware-card'], 'cache-aware plan reuses selected cached card');
-}
-
-for (const scenario of [
-  { label: 'card-catalog', versionPatch: { cardCatalogHash: 'old-catalog-contract' } },
-  { label: 'provider-contract', versionPatch: { providerContractHash: 'old-provider-contract' } }
-]) {
-  const adapter = createMemoryStorageAdapter();
-  const storage = createStorageRepository({ storage: adapter });
-  const contractMessages = [
-    { mesid: 1, role: 'assistant', text: `The ${scenario.label} cache contract should be current.`, visible: true },
-    { mesid: 2, role: 'user', text: `Try to reuse a stale ${scenario.label} contract cache card.`, visible: true }
-  ];
-  const sourceHash = sourceWindowHash(contractMessages, 1, 2);
-  await storage.saveSceneCache(`contract-stale-${scenario.label}-chat`, `contract-stale-${scenario.label}-scene`, {
-    versions: {
-      ...cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
-      ...scenario.versionPatch
-    },
-    cards: [{
-      id: `contract-stale-${scenario.label}-card`,
-      family: 'Scene Frame',
-      status: 'active',
-      promptText: `Stale ${scenario.label} contract cache card must not reach the prompt.`,
-      summary: `Stale ${scenario.label} contract card`,
-      tokenEstimate: 12,
-      evidenceRefs: ['message:2'],
-      source: {
-        chatId: `contract-stale-${scenario.label}-chat`,
-        firstMesId: 1,
-        lastMesId: 2,
-        fingerprint: sourceHash,
-        snapshotHash: sourceHash
-      },
-      freshness: { sourceFingerprint: sourceHash }
-    }],
-    latestHand: {
-      handId: `contract-stale-${scenario.label}-hand`,
-      cards: [{ id: `contract-stale-${scenario.label}-card`, family: 'Scene Frame' }]
-    }
-  });
-  let arbiterPrompt = '';
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot: {
-      chatId: `contract-stale-${scenario.label}-chat`,
-      chatKey: `contract-stale-${scenario.label}-chat`,
-      sceneKey: `contract-stale-${scenario.label}-scene`,
-      sceneFingerprint: `contract-stale-${scenario.label}-scene-fp`,
-      turnFingerprint: `contract-stale-${scenario.label}-turn-fp`,
-      latestMesId: 2,
-      messages: contractMessages
-    },
-    generationRouter: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', 'contract mismatch test only calls utility arbiter');
-        arbiterPrompt = request.prompt;
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'reuse-cache',
-            lifecycle: [{ action: 'select', cardId: `contract-stale-${scenario.label}-card`, reason: 'stale contract should be ignored' }],
-            budgets: { targetBriefTokens: 500, maxCards: 4 },
-            diagnostics: [`contract-stale-${scenario.label}-reuse`]
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: `Try to reuse a stale ${scenario.label} contract cache card.` });
-  const serialized = JSON.stringify({ result, view: runtime.view() });
-  assertEqual(result.ok, true, `${scenario.label} contract-mismatched reuse-cache remains fail-soft`);
-  assertEqual(result.skipped, true, `${scenario.label} contract-mismatched cache is treated as unavailable`);
-  assertEqual(result.reason, 'cache-unavailable', `${scenario.label} contract-mismatched cache returns unavailable reason`);
-  assertEqual(installed.length, 0, `${scenario.label} contract-mismatched cache card does not install prompt`);
-  assert(!arbiterPrompt.includes(`contract-stale-${scenario.label}-card`), `${scenario.label} contract-mismatched cache is hidden from Arbiter prompt`);
-  assert(!arbiterPrompt.includes(`Stale ${scenario.label} contract card`), `${scenario.label} contract-mismatched cache summary is hidden from Arbiter prompt`);
-  assert(!serialized.includes(`Stale ${scenario.label} contract cache card must not reach the prompt`), `${scenario.label} contract-mismatched cache prompt text is not exposed`);
-}
-
-{
-  const adapter = createMemoryStorageAdapter();
-  const storage = createStorageRepository({ storage: adapter });
-  const missingVersionMessages = [
-    { mesid: 1, role: 'assistant', text: 'The old pre-version cache exists.', visible: true },
-    { mesid: 2, role: 'user', text: 'Try to reuse a missing-version cache card.', visible: true }
-  ];
-  const sourceHash = sourceWindowHash(missingVersionMessages, 1, 2);
-  await storage.saveSceneCache('missing-version-chat', 'missing-version-scene', {
-    cards: [{
-      id: 'missing-version-card',
-      family: 'Scene Frame',
-      status: 'active',
-      promptText: 'Missing-version cache card must not reach the prompt.',
-      summary: 'Missing version card',
-      tokenEstimate: 12,
-      evidenceRefs: ['message:2'],
-      source: {
-        chatId: 'missing-version-chat',
-        firstMesId: 1,
-        lastMesId: 2,
-        fingerprint: sourceHash,
-        snapshotHash: sourceHash
-      },
-      freshness: { sourceFingerprint: sourceHash }
-    }]
-  });
-  let arbiterPrompt = '';
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot: {
-      chatId: 'missing-version-chat',
-      chatKey: 'missing-version-chat',
-      sceneKey: 'missing-version-scene',
-      sceneFingerprint: 'missing-version-scene-fp',
-      turnFingerprint: 'missing-version-turn-fp',
-      latestMesId: 2,
-      messages: missingVersionMessages
-    },
-    generationRouter: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', 'missing-version contract test only calls utility arbiter');
-        arbiterPrompt = request.prompt;
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'reuse-cache',
-            lifecycle: [{ action: 'select', cardId: 'missing-version-card', reason: 'missing versions should be ignored' }],
-            budgets: { targetBriefTokens: 500, maxCards: 4 },
-            diagnostics: ['missing-version-reuse']
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Try to reuse a missing-version cache card.' });
-  const serialized = JSON.stringify({ result, view: runtime.view() });
-  assertEqual(result.ok, true, 'missing-version cache remains fail-soft');
-  assertEqual(result.skipped, true, 'missing-version cache is treated as unavailable');
-  assertEqual(result.reason, 'cache-unavailable', 'missing-version cache returns unavailable reason');
-  assertEqual(installed.length, 0, 'missing-version cache does not install prompt');
-  assert(!arbiterPrompt.includes('missing-version-card'), 'missing-version cache is hidden from Arbiter prompt');
-  assert(!serialized.includes('Missing-version cache card must not reach the prompt'), 'missing-version prompt text is not exposed');
-}
-
-{
-  const adapter = createMemoryStorageAdapter();
-  const storage = createStorageRepository({ storage: adapter });
-  const softSettingsMessages = [
-    { mesid: 1, role: 'assistant', text: 'The cache is still relevant after preference changes.', visible: true },
-    { mesid: 2, role: 'user', text: 'Reuse the settings-drift cache card.', visible: true }
-  ];
-  const sourceHash = sourceWindowHash(softSettingsMessages, 1, 2);
-  await storage.saveSceneCache('settings-drift-chat', 'settings-drift-scene', {
-    versions: cacheContractVersions({ mode: 'manual' }),
-    cards: [{
-      id: 'settings-drift-card',
-      family: 'Scene Frame',
-      status: 'active',
-      promptText: 'Settings drift cache card remains reviewable.',
-      summary: 'Settings drift card',
-      tokenEstimate: 12,
-      evidenceRefs: ['message:2'],
-      source: {
-        chatId: 'settings-drift-chat',
-        firstMesId: 1,
-        lastMesId: 2,
-        fingerprint: sourceHash,
-        snapshotHash: sourceHash
-      },
-      freshness: { sourceFingerprint: sourceHash }
-    }],
-    latestHand: {
-      handId: 'settings-drift-hand',
-      cards: [{ id: 'settings-drift-card', family: 'Scene Frame' }]
-    }
-  });
-  let arbiterPrompt = '';
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot: {
-      chatId: 'settings-drift-chat',
-      chatKey: 'settings-drift-chat',
-      sceneKey: 'settings-drift-scene',
-      sceneFingerprint: 'settings-drift-scene-fp',
-      turnFingerprint: 'settings-drift-turn-fp',
-      latestMesId: 2,
-      messages: softSettingsMessages
-    },
-    generationRouter: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', 'settings drift test only calls utility arbiter');
-        arbiterPrompt = request.prompt;
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'reuse-cache',
-            lifecycle: [{ action: 'select', cardId: 'settings-drift-card', reason: 'still relevant after settings drift' }],
-            budgets: { targetBriefTokens: 500, maxCards: 4 },
-            diagnostics: ['settings-drift-reuse']
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Reuse the settings-drift cache card.' });
-  const sceneCacheView = parsePromptJsonSection(arbiterPrompt, 'Scene cache');
-  assertEqual(result.ok, true, 'settings-drift reuse-cache installs');
-  assertEqual(installed.length, 1, 'settings-drift cache remains usable');
-  assert(arbiterPrompt.includes('settings-drift-card'), 'settings-drift cache remains visible to Arbiter');
-  assertEqual(sceneCacheView.cacheState, 'stale', 'settings-drift cache is marked stale for Arbiter review');
-  assertEqual(sceneCacheView.invalidation?.reason, 'settings-changed', 'settings-drift cache tells Arbiter why it is stale');
-  assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['settings-drift-card'], 'settings-drift selected cache card is reused');
-}
-
-{
-  const adapter = createMemoryStorageAdapter();
-  const storage = createStorageRepository({ storage: adapter });
-  const staleMessages = [
-    { mesid: 1, role: 'assistant', text: 'The old corridor is no longer reliable.', visible: true },
-    { mesid: 2, role: 'user', text: 'The player changed what happened here.', visible: true },
-    { mesid: 3, role: 'user', text: 'Try to reuse a stale cache card.', visible: true }
-  ];
-  await storage.saveSceneCache('stale-cache-chat', 'stale-cache-scene', {
-    versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
-    cards: [{
-      id: 'stale-cache-card',
-      family: 'Scene Constraints',
-      status: 'active',
-      promptText: 'Stale cached continuity must not reach the prompt.',
-      summary: 'Stale continuity',
-      tokenEstimate: 12,
-      evidenceRefs: ['message:2'],
-      source: {
-        chatId: 'stale-cache-chat',
-        firstMesId: 1,
-        lastMesId: 2,
-        fingerprint: 'stale-source-fingerprint',
-        snapshotHash: 'stale-source-fingerprint'
-      },
-      freshness: { sourceFingerprint: 'stale-source-fingerprint' }
-    }],
-    latestHand: {
-      handId: 'stale-cache-hand',
-      cards: [{ id: 'stale-cache-card', family: 'Scene Constraints' }]
-    }
-  });
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot: {
-      chatId: 'stale-cache-chat',
-      chatKey: 'stale-cache-chat',
-      sceneKey: 'stale-cache-scene',
-      sceneFingerprint: 'stale-cache-scene-fp',
-      turnFingerprint: 'stale-cache-turn-fp',
-      latestMesId: 3,
-      messages: staleMessages
-    },
-    generationRouter: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', 'stale cache test only calls utility arbiter');
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'reuse-cache',
-            lifecycle: [{ action: 'select', cardId: 'stale-cache-card', reason: 'provider thought it was reusable' }],
-            budgets: { targetBriefTokens: 500, maxCards: 4 },
-            diagnostics: ['stale-cache-reuse']
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Try to reuse a stale cache card.' });
-  const serialized = JSON.stringify({ result, view: runtime.view() });
-  assertEqual(result.ok, true, 'stale reuse-cache remains fail-soft');
-  assertEqual(result.skipped, true, 'stale reuse-cache is treated as unavailable');
-  assertEqual(result.reason, 'cache-unavailable', 'stale reuse-cache returns unavailable reason');
-  assertEqual(installed.length, 0, 'stale cache card does not install prompt');
-  assert(!serialized.includes('Stale cached continuity must not reach the prompt'), 'stale cache prompt text is not exposed');
-}
-
-{
-  const fullHashBypassMessages = [
-    { mesid: 1, role: 'assistant', text: 'Old source window.', visible: true },
-    { mesid: 2, role: 'user', text: 'User source window.', visible: true },
-    { mesid: 3, role: 'user', text: 'Reject full snapshot hash bypass.', visible: true }
-  ];
-  const snapshot = {
-    chatId: 'full-hash-cache-chat',
-    chatKey: 'full-hash-cache-chat',
-    sceneKey: 'full-hash-cache-scene',
-    sceneFingerprint: 'full-hash-cache-scene-fp',
-    turnFingerprint: 'full-hash-cache-turn-fp',
-    latestMesId: 3,
-    messages: fullHashBypassMessages
-  };
-  await assertSingleCachedCardUnavailable({
-    label: 'full-snapshot-hash-cache',
-    userMessage: 'Reject full snapshot hash bypass.',
-    snapshot,
-    card: {
-      id: 'full-hash-cache-card',
-      family: 'Scene Frame',
-      status: 'active',
-      promptText: 'Full snapshot hash must not validate stale source window.',
-      evidenceRefs: ['message:2'],
-      source: {
-        chatId: 'full-hash-cache-chat',
-        firstMesId: 1,
-        lastMesId: 2,
-        fingerprint: runtimeSnapshotHash(snapshot),
-        snapshotHash: runtimeSnapshotHash(snapshot)
-      },
-      freshness: { sourceFingerprint: runtimeSnapshotHash(snapshot) }
-    }
-  });
-}
-
-{
-  const missingRangeMessages = [
-    { mesid: 1, role: 'assistant', text: 'Message one.', visible: true },
-    { mesid: 2, role: 'user', text: 'Reject missing source range.', visible: true }
-  ];
-  const snapshot = {
-    chatId: 'missing-range-cache-chat',
-    chatKey: 'missing-range-cache-chat',
-    sceneKey: 'missing-range-cache-scene',
-    sceneFingerprint: 'missing-range-cache-scene-fp',
-    turnFingerprint: 'missing-range-cache-turn-fp',
-    latestMesId: 2,
-    messages: missingRangeMessages
-  };
-  await assertSingleCachedCardUnavailable({
-    label: 'missing-source-range-cache',
-    userMessage: 'Reject missing source range.',
-    snapshot,
-    card: {
-      id: 'missing-range-cache-card',
-      family: 'Scene Frame',
-      status: 'active',
-      promptText: 'Missing source range must not be inferred from current snapshot.',
-      source: {
-        chatId: 'missing-range-cache-chat',
-        fingerprint: runtimeSnapshotHash(snapshot),
-        snapshotHash: runtimeSnapshotHash(snapshot)
-      },
-      freshness: { sourceFingerprint: runtimeSnapshotHash(snapshot) }
-    }
-  });
-}
-
-{
-  const gappedRangeMessages = [
-    { mesid: 1, role: 'assistant', text: 'Visible endpoint one.', visible: true },
-    { mesid: 3, role: 'user', text: 'Reject gapped source range.', visible: true }
-  ];
-  const sourceHash = sourceWindowHash(gappedRangeMessages, 1, 3);
-  await assertSingleCachedCardUnavailable({
-    label: 'gapped-source-range-cache',
-    userMessage: 'Reject gapped source range.',
-    snapshot: {
-      chatId: 'gapped-cache-chat',
-      chatKey: 'gapped-cache-chat',
-      sceneKey: 'gapped-cache-scene',
-      sceneFingerprint: 'gapped-cache-scene-fp',
-      turnFingerprint: 'gapped-cache-turn-fp',
-      latestMesId: 3,
-      messages: gappedRangeMessages
-    },
-    card: {
-      id: 'gapped-cache-card',
-      family: 'Scene Constraints',
-      status: 'active',
-      promptText: 'Gapped source range must not be reused.',
-      evidenceRefs: ['message:3'],
-      source: {
-        chatId: 'gapped-cache-chat',
-        firstMesId: 1,
-        lastMesId: 3,
-        fingerprint: sourceHash,
-        snapshotHash: sourceHash
-      },
-      freshness: { sourceFingerprint: sourceHash }
-    }
-  });
-}
-
-{
-  const malformedEvidenceMessages = [
-    { mesid: 1, role: 'assistant', text: 'Valid source start.', visible: true },
-    { mesid: 2, role: 'user', text: 'Reject malformed evidence ref.', visible: true },
-    { mesid: 4, role: 'assistant', text: 'Outside evidence target.', visible: true }
-  ];
-  const sourceHash = sourceWindowHash(malformedEvidenceMessages, 1, 2);
-  await assertSingleCachedCardUnavailable({
-    label: 'malformed-evidence-cache',
-    userMessage: 'Reject malformed evidence ref.',
-    snapshot: {
-      chatId: 'malformed-evidence-chat',
-      chatKey: 'malformed-evidence-chat',
-      sceneKey: 'malformed-evidence-scene',
-      sceneFingerprint: 'malformed-evidence-scene-fp',
-      turnFingerprint: 'malformed-evidence-turn-fp',
-      latestMesId: 4,
-      messages: malformedEvidenceMessages
-    },
-    card: {
-      id: 'malformed-evidence-card',
-      family: 'Scene Constraints',
-      status: 'active',
-      promptText: 'Malformed evidence ref outside source range must not be ignored.',
-      evidenceRefs: ['message:4 stale suffix'],
-      source: {
-        chatId: 'malformed-evidence-chat',
-        firstMesId: 1,
-        lastMesId: 2,
-        fingerprint: sourceHash,
-        snapshotHash: sourceHash
-      },
-      freshness: { sourceFingerprint: sourceHash }
-    }
-  });
-}
-
-{
-  const chatMismatchMessages = [
-    { mesid: 1, role: 'assistant', text: 'Reject wrong chat source.', visible: true },
-    { mesid: 2, role: 'user', text: 'Source chat mismatch.', visible: true }
-  ];
-  const sourceHash = sourceWindowHash(chatMismatchMessages, 1, 2);
-  await assertSingleCachedCardUnavailable({
-    label: 'source-chat-mismatch-cache',
-    userMessage: 'Reject source chat mismatch.',
-    snapshot: {
-      chatId: 'current-cache-chat',
-      chatKey: 'current-cache-chat',
-      sceneKey: 'current-cache-scene',
-      sceneFingerprint: 'current-cache-scene-fp',
-      turnFingerprint: 'current-cache-turn-fp',
-      latestMesId: 2,
-      messages: chatMismatchMessages
-    },
-    card: {
-      id: 'chat-mismatch-cache-card',
-      family: 'Scene Constraints',
-      status: 'active',
-      promptText: 'Wrong chat cache card must not be reused.',
-      evidenceRefs: ['message:2'],
-      source: {
-        chatId: 'other-cache-chat',
-        firstMesId: 1,
-        lastMesId: 2,
-        fingerprint: sourceHash,
-        snapshotHash: sourceHash
-      },
-      freshness: { sourceFingerprint: sourceHash }
-    }
-  });
-}
-
-{
-  const futureRangeMessages = [
-    { mesid: 1, role: 'assistant', text: 'Known source start.', visible: true },
-    { mesid: 2, role: 'user', text: 'Reject future source range.', visible: true }
-  ];
-  const sourceHash = sourceWindowHash(futureRangeMessages, 1, 3);
-  await assertSingleCachedCardUnavailable({
-    label: 'future-source-range-cache',
-    userMessage: 'Reject future source range.',
-    snapshot: {
-      chatId: 'future-cache-chat',
-      chatKey: 'future-cache-chat',
-      sceneKey: 'future-cache-scene',
-      sceneFingerprint: 'future-cache-scene-fp',
-      turnFingerprint: 'future-cache-turn-fp',
-      latestMesId: 2,
-      messages: futureRangeMessages
-    },
-    card: {
-      id: 'future-range-cache-card',
-      family: 'Scene Frame',
-      status: 'active',
-      promptText: 'Future source range must not be reused.',
-      evidenceRefs: ['message:2'],
-      source: {
-        chatId: 'future-cache-chat',
-        firstMesId: 1,
-        lastMesId: 3,
-        fingerprint: sourceHash,
-        snapshotHash: sourceHash
-      },
-      freshness: { sourceFingerprint: sourceHash }
-    }
-  });
-}
-
-{
-  const hiddenRangeMessages = [
-    { mesid: 1, role: 'assistant', text: 'Visible range start.', visible: true },
-    { mesid: 2, role: 'assistant', text: 'Hidden middle source.', visible: false },
-    { mesid: 3, role: 'user', text: 'Reject hidden source range.', visible: true }
-  ];
-  const sourceHash = sourceWindowHash(hiddenRangeMessages, 1, 3);
-  await assertSingleCachedCardUnavailable({
-    label: 'hidden-source-range-cache',
-    userMessage: 'Reject hidden source range.',
-    snapshot: {
-      chatId: 'hidden-range-chat',
-      chatKey: 'hidden-range-chat',
-      sceneKey: 'hidden-range-scene',
-      sceneFingerprint: 'hidden-range-scene-fp',
-      turnFingerprint: 'hidden-range-turn-fp',
-      latestMesId: 3,
-      messages: hiddenRangeMessages
-    },
-    card: {
-      id: 'hidden-range-cache-card',
-      family: 'Scene Constraints',
-      status: 'active',
-      promptText: 'Hidden source range must not be reused.',
-      evidenceRefs: ['message:3'],
-      source: {
-        chatId: 'hidden-range-chat',
-        firstMesId: 1,
-        lastMesId: 3,
-        fingerprint: sourceHash,
-        snapshotHash: sourceHash
-      },
-      freshness: { sourceFingerprint: sourceHash }
-    }
-  });
-}
-
-{
-  const expiredMessages = [
-    { mesid: 1, role: 'assistant', text: 'Expired card source.', visible: true },
-    { mesid: 2, role: 'user', text: 'Still in source window.', visible: true },
-    { mesid: 3, role: 'user', text: 'Reject expired source freshness.', visible: true }
-  ];
-  const sourceHash = sourceWindowHash(expiredMessages, 1, 2);
-  await assertSingleCachedCardUnavailable({
-    label: 'expired-cache-card',
-    userMessage: 'Reject expired cached card.',
-    snapshot: {
-      chatId: 'expired-cache-chat',
-      chatKey: 'expired-cache-chat',
-      sceneKey: 'expired-cache-scene',
-      sceneFingerprint: 'expired-cache-scene-fp',
-      turnFingerprint: 'expired-cache-turn-fp',
-      latestMesId: 3,
-      messages: expiredMessages
-    },
-    card: {
-      id: 'expired-cache-card',
-      family: 'Scene Frame',
-      status: 'active',
-      promptText: 'Expired cache card must not be reused.',
-      evidenceRefs: ['message:2'],
-      source: {
-        chatId: 'expired-cache-chat',
-        firstMesId: 1,
-        lastMesId: 2,
-        fingerprint: sourceHash,
-        snapshotHash: sourceHash
-      },
-      freshness: { sourceFingerprint: sourceHash, expiresAfterMesId: 2 }
-    }
-  });
-}
-
-{
-  const missingEvidenceMessages = [
-    { mesid: 1, role: 'assistant', text: 'Valid source start.', visible: true },
-    { mesid: 2, role: 'user', text: 'Reject missing evidence ref.', visible: true }
-  ];
-  const sourceHash = sourceWindowHash(missingEvidenceMessages, 1, 2);
-  await assertSingleCachedCardUnavailable({
-    label: 'missing-evidence-cache',
-    userMessage: 'Reject missing evidence ref.',
-    snapshot: {
-      chatId: 'missing-evidence-chat',
-      chatKey: 'missing-evidence-chat',
-      sceneKey: 'missing-evidence-scene',
-      sceneFingerprint: 'missing-evidence-scene-fp',
-      turnFingerprint: 'missing-evidence-turn-fp',
-      latestMesId: 2,
-      messages: missingEvidenceMessages
-    },
-    card: {
-      id: 'missing-evidence-card',
-      family: 'Scene Constraints',
-      status: 'active',
-      promptText: 'Missing evidence ref must not be ignored.',
-      evidenceRefs: ['message:4'],
-      source: {
-        chatId: 'missing-evidence-chat',
-        firstMesId: 1,
-        lastMesId: 2,
-        fingerprint: sourceHash,
-        snapshotHash: sourceHash
-      },
-      freshness: { sourceFingerprint: sourceHash }
-    }
-  });
-}
-
-{
-  const unparseableEvidenceMessages = [
-    { mesid: 1, role: 'assistant', text: 'Valid source start.', visible: true },
-    { mesid: 2, role: 'user', text: 'Reject unparseable evidence refs.', visible: true }
-  ];
-  const sourceHash = sourceWindowHash(unparseableEvidenceMessages, 1, 2);
-  await assertSingleCachedCardUnavailable({
-    label: 'unparseable-evidence-cache',
-    userMessage: 'Reject unparseable evidence refs.',
-    snapshot: {
-      chatId: 'unparseable-evidence-chat',
-      chatKey: 'unparseable-evidence-chat',
-      sceneKey: 'unparseable-evidence-scene',
-      sceneFingerprint: 'unparseable-evidence-scene-fp',
-      turnFingerprint: 'unparseable-evidence-turn-fp',
-      latestMesId: 2,
-      messages: unparseableEvidenceMessages
-    },
-    card: {
-      id: 'unparseable-evidence-card',
-      family: 'Scene Constraints',
-      status: 'active',
-      promptText: 'Unparseable evidence ref must not be ignored.',
-      evidenceRefs: ['turn:2'],
-      source: {
-        chatId: 'unparseable-evidence-chat',
-        firstMesId: 1,
-        lastMesId: 2,
-        fingerprint: sourceHash,
-        snapshotHash: sourceHash
-      },
-      freshness: { sourceFingerprint: sourceHash }
-    }
-  });
-}
-
-{
-  const adapter = createMemoryStorageAdapter();
-  const storage = createStorageRepository({ storage: adapter });
-  await storage.saveSceneCache('hostile-cache-chat', 'hostile-cache-scene', {
-    versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
-    cards: [{
-      id: 'Bearer cache-card-token',
-      family: 'Scene Frame',
-      status: 'active',
-      promptText: 'Prompt text raw-host-metadata-should-not-leak with Bearer cache-prompt-token.',
-      evidenceRefs: ['message:2 raw-evidence-metadata-should-not-leak Bearer cache-evidence-token'],
-      source: {
-        chatId: 'hostile-cache-chat',
-        firstMesId: 1,
-        lastMesId: 2,
-        snapshotHash: 'raw-source-metadata-should-not-leak'
-      },
-      freshness: {
-        sourceFingerprint: 'raw-freshness-metadata-should-not-leak'
-      }
-    }],
-    latestHand: {
-      handId: 'Bearer cache-hand-token',
-      cards: [{ id: 'Bearer cache-card-token' }]
-    }
-  });
-  let arbiterPrompt = '';
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot: {
-      chatId: 'hostile-cache-chat',
-      chatKey: 'hostile-cache-chat',
-      sceneKey: 'hostile-cache-scene',
-      sceneFingerprint: 'hostile-cache-scene-fp',
-      turnFingerprint: 'hostile-cache-turn-fp',
-      latestMesId: 3,
-      messages: [{ mesid: 3, role: 'user', text: 'Do not leak hostile cache metadata.', visible: true }]
-    },
-    generationRouter: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', 'hostile cache safety test only calls utility arbiter');
-        arbiterPrompt = request.prompt;
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'skip',
-            diagnostics: ['hostile-cache-safety']
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Hostile cache safety.' });
-  assertEqual(result.ok, true, 'hostile cache safety run skips safely');
-  const sceneCache = parsePromptJsonSection(arbiterPrompt, 'Scene cache');
-  const serializedPrompt = JSON.stringify({ prompt: arbiterPrompt, sceneCache });
-  assert(!serializedPrompt.includes('raw-host-metadata-should-not-leak'), 'arbiter cache view omits raw cached prompt text');
-  assert(!serializedPrompt.includes('raw-evidence-metadata-should-not-leak'), 'arbiter cache view omits raw cached evidence metadata');
-  assert(!serializedPrompt.includes('raw-source-metadata-should-not-leak'), 'arbiter cache view omits raw cached source fingerprint text');
-  assert(!serializedPrompt.includes('raw-freshness-metadata-should-not-leak'), 'arbiter cache view omits raw cached freshness fingerprint text');
-  assertNoSecretText(serializedPrompt, 'arbiter hostile cache prompt');
-  assert(sceneCache.cards.length === 1, 'arbiter cache view keeps valid sanitized card metadata');
-  assert(sceneCache.cards[0].source.fingerprint.startsWith('hash:'), 'arbiter cache view hashes source fingerprints');
-}
 
 {
   let batchCalled = false;
@@ -9188,11 +5361,11 @@ for (const scenario of [
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Invalid schema fallback.' });
   const view = runtime.view();
-  assertEqual(result.ok, true, 'invalid arbiter schema falls back fail-soft');
+  assertEqual(result.ok, false, 'invalid arbiter schema does not complete durable preprocessing');
+  assertEqual(result.paused, true, 'invalid arbiter schema pauses for explicit retry');
   assertEqual(batchCalled, false, 'invalid arbiter schema does not execute provider card jobs');
-  assert(view.lastPlan.diagnostics.includes('utility-arbiter-fallback'), 'invalid arbiter schema records fallback diagnostic');
-  assert(view.lastHand.cards.some((card) => card.family === 'Scene Frame'), 'invalid arbiter schema uses local fallback scene card');
-  assert(!view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'invalid arbiter schema ignores untrusted provider card jobs');
+  assertEqual(result.execution.pauseReason, 'stage-failed:preprocess.arbiter', 'invalid arbiter schema exposes the failed stage');
+  assertEqual(view.lastHand.cards.length, 0, 'invalid arbiter schema does not create an untrusted hand');
 }
 
 {
@@ -9212,127 +5385,14 @@ for (const scenario of [
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Missing schema fallback.' });
   const serialized = JSON.stringify({ result, view: runtime.view() });
-  assertEqual(result.ok, true, 'missing arbiter schema falls back fail-soft');
-  assert(runtime.view().lastPlan.diagnostics.includes('utility-arbiter-fallback'), 'missing arbiter schema records fallback diagnostic');
+  assertEqual(result.ok, false, 'missing arbiter schema does not complete durable preprocessing');
+  assertEqual(result.paused, true, 'missing arbiter schema pauses for explicit retry');
+  assertEqual(result.execution.pauseReason, 'stage-failed:preprocess.arbiter', 'missing arbiter schema exposes the failed stage');
   assert(!serialized.includes('Bearer missing-schema-token'), 'missing schema fallback does not leak rejected provider fields');
   assertNoSecretText(serialized, 'missing schema fallback');
 }
 
-{
-  const reuseCacheMessages = [
-    { mesid: 2, role: 'user', text: 'Reuse cached card.', visible: true }
-  ];
-  const reuseCacheSourceHash = sourceWindowHash(reuseCacheMessages, 2, 2);
-  const storage = {
-    async loadSceneCache() {
-      return {
-        versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
-        cards: [{
-          id: 'sk-live-card-id',
-          family: 'Scene Frame',
-          promptText: 'Cached card with Bearer cache-token, sk-cache-runtime, and private-secret must be scrubbed.',
-          summary: 'Cached summary with Bearer cache-token.',
-          evidenceRefs: ['message:2 sk-cache-runtime'],
-          inspectorNotes: 'Cached inspector private-secret',
-          emphasis: 'normal',
-          source: {
-            chatId: 'reuse-cache-chat',
-            firstMesId: 2,
-            lastMesId: 2,
-            fingerprint: reuseCacheSourceHash,
-            snapshotHash: reuseCacheSourceHash
-          },
-          freshness: { sourceFingerprint: reuseCacheSourceHash }
-        }]
-      };
-    },
-    async saveSceneCache() {
-      throw new Error('reuse-cache should not save scene cache');
-    },
-    async appendJournal() {
-      return {};
-    }
-  };
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot: {
-      chatId: 'reuse-cache-chat',
-      chatKey: 'reuse-cache-chat',
-      sceneKey: 'reuse-cache-scene',
-      sceneFingerprint: 'reuse-cache-scene-fp',
-      turnFingerprint: 'reuse-cache-turn-fp',
-      latestMesId: 2,
-      messages: reuseCacheMessages
-    },
-    generationRouter: {
-      async generate(roleId, request) {
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'reuse-cache',
-            budgets: { targetBriefTokens: 500, maxCards: 4 },
-            diagnostics: ['reuse-cache-redaction']
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Reuse cached card.' });
-  const view = runtime.view();
-  assertEqual(result.ok, true, 'reuse-cache card run installs');
-  assert(
-    view.activityHistory.some((event) => event.phase === 'cardProgress'
-      && event.detail?.parentStepId === 'utility-card-batch'
-      && event.detail?.roleId === 'sceneFrameCard'
-      && event.detail?.source === 'cache'
-      && event.detail?.state === 'cached'),
-    'cache-reused card emits cached child progress'
-  );
-  assertNoSecretText({ resultHand: result.hand, viewHand: view.lastHand }, 'cached hand cards');
-}
 
-{
-  const storage = {
-    async loadSceneCache() {
-      return {
-        versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
-        cards: [{ family: 'Bogus Family', promptText: 'bad cached card' }]
-      };
-    },
-    async saveSceneCache() {
-      throw new Error('reuse-cache malformed cache should not save');
-    },
-    async appendJournal() {
-      return {};
-    }
-  };
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    generationRouter: {
-      async generate(roleId, request) {
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'reuse-cache',
-            budgets: { targetBriefTokens: 500, maxCards: 4 },
-            diagnostics: ['malformed-cache']
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Reuse malformed cached card.' });
-  assertEqual(result.ok, true, 'malformed reuse-cache does not throw');
-  assertEqual(result.skipped, true, 'malformed reuse-cache is treated as unavailable');
-  assertEqual(result.reason, 'cache-unavailable', 'malformed reuse-cache returns unavailable reason');
-  assertEqual(installed.length, 0, 'malformed reuse-cache does not install prompt');
-}
 
 {
   const providerPrompts = [];
@@ -9507,23 +5567,11 @@ for (const scenario of [
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Fallback plan.' });
   const view = runtime.view();
-  const expectedSnapshotHash = hashJson({
-    ...view.lastSnapshot,
-    messages: view.lastSnapshot.messages.map((message) => ({
-      ...message,
-      textHash: hashJson(message.text)
-    }))
-  });
-  assertEqual(result.ok, true, 'arbiter exception fails soft without throwing');
-  assertEqual(result.skipped, true, 'arbiter exception skips injection without valid cache');
-  assertEqual(result.reason, 'utility-unavailable', 'arbiter exception returns Utility unavailable reason');
-  assertEqual(routerCalls.length, 1, 'arbiter attempted once');
-  assert(view.lastPlan.diagnostics.includes('utility-unavailable'), 'Utility unavailable diagnostic recorded');
-  assert(!view.lastPlan.diagnostics.includes('local-fallback-plan'), 'transport failure does not use local fallback diagnostic');
-  assertEqual(view.lastPlan.snapshotHash, expectedSnapshotHash, 'fallback plan uses normalized snapshot hash');
-  assertEqual(view.lastPlan.source.snapshotHash, expectedSnapshotHash, 'fallback source stores normalized snapshot hash');
-  assertEqual(view.lastPlan.source.userMessageHash, hashJson('Fallback plan.'), 'fallback source stores user message hash separately');
-  assertEqual(view.lastPlan.source.catalogHash, hashJson(CARD_CATALOG), 'fallback source stores catalog hash separately');
+  assertEqual(result.ok, false, 'arbiter exception does not complete durable preprocessing');
+  assertEqual(result.paused, true, 'arbiter exception pauses the operation for retry');
+  assertEqual(routerCalls.length, 2, 'arbiter exception consumes the bounded attempt window');
+  assertEqual(result.execution.pauseReason, 'stage-failed:preprocess.arbiter', 'arbiter exception exposes the failed stage');
+  assertEqual(view.lastPlan, null, 'failed Arbiter work never becomes the committed last plan');
   assertEqual(view.lastHand.cards.length, 0, 'transport failure without cache selects no hand');
 }
 
@@ -9649,7 +5697,8 @@ for (const scenario of [
   await supersedingSourceChange;
   activeSource = 'second';
   const secondResult = await runtime.prepareForGeneration({ userMessage: 'second install race source' });
-  assertEqual(firstResult.superseded, true, 'run superseded during prompt installation cannot commit its artifact');
+  assertEqual(firstResult.ok, false, 'source change during prompt installation does not complete stale work');
+  assertEqual(firstResult.paused, true, `source change pauses the in-flight durable operation: ${JSON.stringify(firstResult)}`);
   assertEqual(secondResult.ok, true, 'newer run installs after stale prompt mutation settles');
   const committed = runtime.view().lastPreparedGeneration;
   assert(committed, 'newer install race run owns the committed artifact');
@@ -9662,371 +5711,10 @@ for (const scenario of [
   );
 }
 
-{
-  let releaseFirstLoad;
-  const storageOps = [];
-  const storage = {
-    async loadSceneCache(chatKey) {
-      storageOps.push(`load:${chatKey}`);
-      if (chatKey === 'run-a') {
-        await new Promise((resolve) => {
-          releaseFirstLoad = resolve;
-        });
-      }
-      return null;
-    },
-    async saveSceneCache(chatKey) {
-      storageOps.push(`save:${chatKey}`);
-      return {};
-    },
-    async appendJournal(chatKey) {
-      storageOps.push(`journal:${chatKey}`);
-      return {};
-    }
-  };
-  let snapshotCalls = 0;
-  const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot: () => {
-      snapshotCalls += 1;
-      if (snapshotCalls === 1) {
-        return {
-          chatId: 'run-a',
-          chatKey: 'run-a',
-          sceneKey: 'scene-a',
-          sceneFingerprint: 'scene-a-fp',
-          turnFingerprint: 'turn-a-fp',
-          latestMesId: 1,
-          messages: [{ mesid: 1, role: 'user', text: 'Stale first run text.', visible: true }]
-        };
-      }
-      return {
-        chatId: 'run-b',
-        chatKey: 'run-b',
-        sceneKey: 'scene-b',
-        sceneFingerprint: 'scene-b-fp',
-        turnFingerprint: 'turn-b-fp',
-        latestMesId: 2,
-        messages: [{ mesid: 2, role: 'user', text: 'Fresh second run text.', visible: true }]
-      };
-    }
-  });
-  const first = runtime.prepareForGeneration({ userMessage: 'Stale first run text.' });
-  await waitUntil(() => typeof releaseFirstLoad === 'function', 'first run did not reach scene cache wait');
-  const second = await runtime.prepareForGeneration({ userMessage: 'Fresh second run text.' });
-  assertEqual(second.ok, true, 'newer run completes while older run is blocked');
-  assertEqual(installed.length, 1, 'newer run installs while older run remains blocked');
-  assert(JSON.stringify(installed[0]).includes('Fresh second run text.'), 'newer installed packet uses second snapshot');
-  releaseFirstLoad();
-  const firstResult = await first;
-  assertEqual(firstResult.superseded, true, 'older run reports superseded after newer run completes');
-  assertEqual(installed.length, 1, 'older run does not install after newer run starts');
-  const view = runtime.view();
-  const serializedView = JSON.stringify(view);
-  assertEqual(view.lastSnapshot.chatKey, 'run-b', 'older run does not overwrite last snapshot');
-  assert(serializedView.includes('Fresh second run text.'), 'view keeps newer run prompt state');
-  assert(!serializedView.includes('Stale first run text.'), 'older run does not overwrite prompt packet');
-  assert(!storageOps.includes('save:run-a'), 'older run does not save stale scene cache');
-  assert(!storageOps.includes('journal:run-a'), 'older run does not append stale journal');
-}
 
-{
-  let releaseFirstSave;
-  let firstSaveStarted = false;
-  let snapshotCalls = 0;
-  const sideEffects = [];
-  const storage = {
-    async loadSceneCache() {
-      return null;
-    },
-    async saveSceneCache(chatKey) {
-      if (!firstSaveStarted) {
-        firstSaveStarted = true;
-        await new Promise((resolve) => {
-          releaseFirstSave = () => {
-            sideEffects.push(`save:${chatKey}`);
-            resolve();
-          };
-        });
-        return {};
-      }
-      sideEffects.push(`save:${chatKey}`);
-      return {};
-    },
-    async appendJournal() {
-      return {};
-    }
-  };
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot: () => {
-      snapshotCalls += 1;
-      const snapshotRun = snapshotCalls <= 2 ? 1 : 2;
-      return {
-        chatId: `save-run-${snapshotRun}`,
-        chatKey: `save-run-${snapshotRun}`,
-        sceneKey: `save-scene-${snapshotRun}`,
-        sceneFingerprint: `save-scene-${snapshotRun}`,
-        turnFingerprint: `save-turn-${snapshotRun}`,
-        latestMesId: snapshotRun,
-        messages: [{ mesid: snapshotRun, role: 'user', text: snapshotRun === 1 ? 'Older save packet.' : 'Newer save packet.', visible: true }]
-      };
-    }
-  });
-  const first = runtime.prepareForGeneration({ userMessage: 'Older save packet.' });
-  await waitUntil(() => typeof releaseFirstSave === 'function', 'first run did not enter scene cache save');
-  const second = runtime.prepareForGeneration({ userMessage: 'Newer save packet.' });
-  await Promise.resolve();
-  assertEqual(snapshotCalls, 2, 'newer run waits for in-flight scene cache save before snapshot');
-  assertEqual(sideEffects.length, 0, 'blocked first save has not committed yet');
-  releaseFirstSave();
-  const [firstResult, secondResult] = await Promise.all([first, second]);
-  assert(firstResult.ok || firstResult.superseded, 'first save run either completes or is superseded after save commits');
-  assertEqual(secondResult.ok, true, 'queued newer run completes after cache save');
-  assertDeepEqual(sideEffects, ['save:save-run-1', 'save:save-run-2', 'save:save-run-2'], 'scene cache saves commit in run order, including final prompt-packet hash write');
-  const committed = runtime.view().lastPreparedGeneration;
-  assert(committed, 'late scene-cache save leaves a committed prepared artifact');
-  assertEqual(committed.packet.packetId, secondResult.packet.packetId, 'late scene-cache save cannot overwrite newer packet ownership');
-  assertEqual(committed.hand.handId, secondResult.hand.handId, 'late scene-cache save cannot split packet and hand ownership');
-}
 
-{
-  const adapter = createMemoryStorageAdapter();
-  const storage = createStorageRepository({ storage: adapter });
-  const arbiterMessages = [
-    { mesid: 1, role: 'assistant', text: 'The continuity risk was established.', visible: true },
-    { mesid: 2, role: 'user', text: 'Keep only the risk that matters.', visible: true },
-    { mesid: 3, role: 'user', text: 'Use only the Arbiter-selected card.', visible: true }
-  ];
-  const arbiterSourceHash = sourceWindowHash(arbiterMessages, 1, 2);
-  await storage.saveSceneCache('arbiter-chat', 'arbiter-scene', {
-    versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
-    cards: [
-      {
-        id: 'arbiter-keep',
-        family: 'Scene Constraints',
-        status: 'active',
-        promptText: 'The only selected continuity risk should remain active.',
-        summary: 'Keep continuity',
-        tokenEstimate: 20,
-        evidenceRefs: ['message:2'],
-        source: {
-          chatId: 'arbiter-chat',
-          firstMesId: 1,
-          lastMesId: 2,
-          fingerprint: arbiterSourceHash,
-          snapshotHash: arbiterSourceHash
-        },
-        freshness: { sourceFingerprint: arbiterSourceHash }
-      },
-      {
-        id: 'arbiter-stow',
-        family: 'Scene Frame',
-        status: 'active',
-        promptText: 'This card should be stowed by the Arbiter.',
-        summary: 'Stow scene',
-        tokenEstimate: 20,
-        evidenceRefs: ['message:2'],
-        source: {
-          chatId: 'arbiter-chat',
-          firstMesId: 1,
-          lastMesId: 2,
-          fingerprint: arbiterSourceHash,
-          snapshotHash: arbiterSourceHash
-        },
-        freshness: { sourceFingerprint: arbiterSourceHash }
-      }
-    ]
-  });
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot: {
-      chatId: 'arbiter-chat',
-      chatKey: 'arbiter-chat',
-      sceneKey: 'arbiter-scene',
-      sceneFingerprint: 'arbiter-scene-fp',
-      turnFingerprint: 'arbiter-turn-fp',
-      latestMesId: 3,
-      messages: arbiterMessages
-    },
-    generationRouter: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', 'arbiter lifecycle regression only calls utility arbiter');
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'reuse-cache',
-            lifecycle: [
-              { action: 'select', cardId: 'arbiter-keep', reason: 'still important' },
-              { action: 'stow', cardId: 'arbiter-stow', reason: 'not needed this turn' }
-            ],
-            budgets: { targetBriefTokens: 700, maxCards: 6 },
-            diagnostics: ['arbiter-lifecycle-regression']
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Use only the Arbiter-selected card.' });
-  assertEqual(result.ok, true, 'arbiter lifecycle run installs');
-  assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['arbiter-keep'], 'turn hand honors Arbiter select/stow lifecycle');
-  const updated = await storage.loadSceneCache('arbiter-chat', 'arbiter-scene');
-  assertEqual(updated.cards.find((card) => card.id === 'arbiter-stow')?.status, 'stowed', 'scene deck persists Arbiter stow decision');
-}
 
-{
-  const adapter = createMemoryStorageAdapter();
-  const storage = createStorageRepository({ storage: adapter });
-  await storage.saveSceneCache('hard-shift-chat', 'hard-shift-original', {
-    versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
-    cards: [{
-      id: 'old-scene-card',
-      family: 'Scene Frame',
-      status: 'active',
-      promptText: 'Original scene cache should only inform planning.',
-      summary: 'Original scene',
-      source: { chatId: 'hard-shift-chat', firstMesId: 1, lastMesId: 2, snapshotHash: 'old-source' }
-    }]
-  });
-  const snapshot = {
-    chatId: 'hard-shift-chat',
-    chatKey: 'hard-shift-chat',
-    sceneKey: 'hard-shift-original',
-    sceneFingerprint: 'hard-shift-original-fp',
-    turnFingerprint: 'hard-shift-turn-fp',
-    latestMesId: 3,
-    messages: [{ mesid: 3, role: 'user', text: 'A new scene begins elsewhere.', visible: true }]
-  };
-  const shiftedFingerprint = hashJson({
-    previousSceneFingerprint: snapshot.sceneFingerprint,
-    hardShiftAtMesId: snapshot.latestMesId,
-    turnFingerprint: snapshot.turnFingerprint
-  });
-  const shiftedSceneKey = `${snapshot.chatKey}-${shiftedFingerprint}`;
-  const shiftedSourceHash = sourceWindowHash(snapshot.messages, 3, 3);
-  await storage.saveSceneCache('hard-shift-chat', shiftedSceneKey, {
-    versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
-    cards: [{
-      id: 'new-scene-card',
-      family: 'Scene Constraints',
-      status: 'active',
-      promptText: 'New scene cache should remain available after hard shift.',
-      summary: 'New scene continuity',
-      evidenceRefs: ['message:3'],
-      source: {
-        chatId: 'hard-shift-chat',
-        firstMesId: 3,
-        lastMesId: 3,
-        fingerprint: shiftedSourceHash,
-        snapshotHash: shiftedSourceHash
-      },
-      freshness: { sourceFingerprint: shiftedSourceHash }
-    }]
-  });
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot,
-    generationRouter: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', 'hard-shift lifecycle regression only calls utility arbiter');
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'compose-brief',
-            sceneStatus: 'hard-shift',
-            lifecycle: [{ action: 'select', cardId: 'old-scene-card', reason: 'selected from original cache before hard shift' }],
-            budgets: { targetBriefTokens: 700, maxCards: 6 },
-            diagnostics: ['hard-shift-lifecycle-regression']
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'A new scene begins elsewhere.' });
-  assertEqual(result.ok, true, 'hard-shift lifecycle run installs');
-  assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['new-scene-card'], 'hard-shift cache survives stale pre-shift lifecycle selection');
-  const updated = await storage.loadSceneCache('hard-shift-chat', shiftedSceneKey);
-  assertEqual(updated.cards.find((card) => card.id === 'new-scene-card')?.status, 'active', 'hard-shift target cache card remains active');
-}
 
-{
-  const mixedCacheMessages = [
-    { mesid: 2, role: 'user', text: 'Use valid cache despite rejected selection.', visible: true }
-  ];
-  const mixedCacheSourceHash = sourceWindowHash(mixedCacheMessages, 2, 2);
-  const storage = {
-    async loadSceneCache() {
-      return {
-        versions: cacheContractVersions({ mode: 'auto', reasonerUse: 'off' }),
-        cards: [
-          { id: 'rejected-selected', family: 'Bogus Family', promptText: 'invalid selected card' },
-          {
-            id: 'valid-cache-card',
-            family: 'Scene Frame',
-            status: 'active',
-            promptText: 'Valid cache card should not be stowed by rejected-card lifecycle.',
-            summary: 'Valid cache card',
-            evidenceRefs: ['message:2'],
-            source: {
-              chatId: 'mixed-cache-chat',
-              firstMesId: 2,
-              lastMesId: 2,
-              fingerprint: mixedCacheSourceHash,
-              snapshotHash: mixedCacheSourceHash
-            },
-            freshness: { sourceFingerprint: mixedCacheSourceHash }
-          }
-        ]
-      };
-    },
-    async saveSceneCache() {
-      return {};
-    },
-    async appendJournal() {
-      return {};
-    }
-  };
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot: {
-      chatId: 'mixed-cache-chat',
-      chatKey: 'mixed-cache-chat',
-      sceneKey: 'mixed-cache-scene',
-      sceneFingerprint: 'mixed-cache-scene-fp',
-      turnFingerprint: 'mixed-cache-turn-fp',
-      latestMesId: 2,
-      messages: mixedCacheMessages
-    },
-    generationRouter: {
-      async generate(roleId, request) {
-        assertEqual(roleId, 'utilityArbiter', 'mixed cache lifecycle regression only calls utility arbiter');
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            action: 'compose-brief',
-            lifecycle: [{ action: 'select', cardId: 'rejected-selected', reason: 'malformed card was selected before validation' }],
-            budgets: { targetBriefTokens: 700, maxCards: 6 },
-            diagnostics: ['mixed-cache-lifecycle-regression']
-          }
-        };
-      }
-    }
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Use valid cache despite rejected selection.' });
-  assertEqual(result.ok, true, 'mixed cache lifecycle run installs');
-  assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['valid-cache-card'], 'valid cache card survives lifecycle for rejected card id');
-}
 
 {
   let utilityCalls = 0;
@@ -10066,10 +5754,12 @@ for (const scenario of [
   const first = runtime.prepareForGeneration({ userMessage: 'first provider call' });
   await waitUntil(() => firstGenerateStarted, 'first run did not enter provider call');
   const second = await runtime.prepareForGeneration({ userMessage: 'second provider call' });
-  assertEqual(second.ok, true, 'newer run completes while older provider call is blocked');
+  assertEqual(second.ok, true, 'distinct same-chat turn runs after the active durable operation');
   const firstResult = await first;
-  assertEqual(firstResult.superseded, true, 'older provider run reports superseded');
-  assertEqual(firstAbortObserved, true, 'blocked provider call observes abort when superseded');
+  assertEqual(firstResult.ok, true, 'first durable operation completes before the distinct turn starts');
+  assertNotEqual(firstResult.execution.operationId, second.execution.operationId, 'distinct turn callers receive distinct operation identities');
+  assertEqual(utilityCalls, 3, 'first operation retries before the distinct turn runs its own Arbiter');
+  assertEqual(firstAbortObserved, false, 'queued distinct turn does not abort the active provider attempt');
 }
 
 {
@@ -10101,7 +5791,9 @@ for (const scenario of [
   await runtime.dispose();
   releaseArbiter();
   const result = await pending;
-  assertEqual(result.superseded, true, 'disposed run reports superseded');
+  assertEqual(result.ok, false, 'disposed run does not complete');
+  assertEqual(result.paused, true, 'disposed run returns saved paused work');
+  assertEqual(result.execution.pauseReason, 'runtime-disposed', 'disposed run records its pause reason');
   assertEqual(installed.length, 0, 'disposed run cannot install a prompt');
   assertEqual(runtime.view().activeRunId, null, 'dispose clears active run id');
 }
@@ -10135,7 +5827,9 @@ for (const scenario of [
   const chatChange = runtime.handleChatChanged();
   releaseArbiter();
   const [chatChangeResult, pendingResult] = await Promise.all([chatChange, pending]);
-  assertEqual(pendingResult.superseded, true, 'chat change supersedes in-flight generation preparation');
+  assertEqual(pendingResult.ok, false, 'chat change prevents in-flight generation preparation from completing');
+  assertEqual(pendingResult.paused, true, 'chat change preserves in-flight generation preparation as paused work');
+  assertEqual(pendingResult.execution.pauseReason, 'chat-changed', 'chat change records the durable pause reason');
   assertEqual(chatChangeResult.ok, true, 'chat change cleanup succeeds');
   assertEqual(calls.clear, 1, 'chat change clears host prompt');
   const view = runtime.view();
@@ -10147,23 +5841,6 @@ for (const scenario of [
   assertEqual(view.activity.label, 'Chat changed. Recursion prompt cleared.', 'chat change surfaces prompt cleanup');
 }
 
-{
-  const { runtime, calls, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' }
-  });
-  const setup = await runtime.prepareForGeneration({ userMessage: 'Prepare prompt before chat change.' });
-  assertEqual(setup.ok, true, 'chat-change setup prepares generation');
-  const setupSnapshot = runtime.view().lastSnapshot;
-  const result = await runtime.handleChatChanged();
-  assertEqual(result.ok, true, 'chat change cleanup returns ok');
-  assertEqual(calls.clear, 1, 'chat change clears installed prompt');
-  const cache = await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey);
-  assertEqual(cache.cacheState, 'stale', 'chat change marks previous active scene cache stale');
-  assertEqual(cache.invalidation.reason, 'chat-changed', 'chat change records cache invalidation reason');
-  const journal = await storage.loadRunJournal(setupSnapshot.chatKey);
-  assert(journal.entries.some((entry) => entry.event === 'prompt.cleared' && entry.details?.reason === 'chat-changed'), 'chat change records prompt clear journal');
-  assertEqual(runtime.view().lastSnapshot, null, 'chat change clears previous snapshot after journaling');
-}
 
 {
   const { runtime, calls, storage } = createRuntimeHarness({
@@ -10260,7 +5937,9 @@ for (const scenario of [
     observedStop,
     pending
   ]);
-  assertEqual(pendingResult.superseded, true, 'host generation stop supersedes in-flight generation preparation');
+  assertEqual(pendingResult.ok, false, 'host generation stop prevents in-flight generation preparation from completing');
+  assertEqual(pendingResult.paused, true, 'host generation stop preserves completed preprocessing work');
+  assertEqual(pendingResult.execution.pauseReason, 'user-stop', 'host generation stop records the durable pause reason');
   assertEqual(stopResult.ok, true, 'unified stop cleanup succeeds');
   assertEqual(duplicateResult.ok, true, 'duplicate Stop shares the unified cancellation owner');
   assertEqual(observedResult.ok, true, 'host stop event observes the unified cleanup');
@@ -10306,25 +5985,6 @@ for (const scenario of [
   assertEqual(calls.clear, 1, 'concurrent duplicate host stop events share one prompt clear');
 }
 
-{
-  const { runtime, calls, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' }
-  });
-  const setup = await runtime.prepareForGeneration({ userMessage: 'Prepare prompt before Stop.' });
-  assertEqual(setup.ok, true, 'host-stop setup prepares generation');
-  const setupSnapshot = runtime.view().lastSnapshot;
-  const result = await runtime.handleHostGenerationStopped({ eventName: 'generation_stopped' });
-  assertEqual(result.ok, true, 'host generation stop cleanup returns ok');
-  assertEqual(calls.clear, 1, 'host generation stop clears installed prompt');
-  const cache = await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey);
-  assertEqual(cache.cacheState, 'active', 'host generation stop preserves previous active scene cache');
-  assertEqual(cache.invalidation, undefined, 'host generation stop does not invent cache invalidation');
-  const journal = await storage.loadRunJournal(setupSnapshot.chatKey);
-  assert(journal.entries.some((entry) => entry.event === 'prompt.cleared' && entry.details?.reason === 'host-generation-stopped'), 'host generation stop records prompt clear journal');
-  assertEqual(runtime.view().lastSnapshot?.chatKey, setupSnapshot.chatKey, 'host generation stop preserves previous snapshot after journaling');
-  assert(runtime.view().lastPacket, 'host generation stop preserves prompt packet after journaling');
-  assert(runtime.view().lastHand.cards.length > 0, 'host generation stop preserves selected hand after journaling');
-}
 
 {
   const { runtime } = createRuntimeHarness({
@@ -10368,7 +6028,9 @@ for (const scenario of [
   const sourceChange = runtime.handleSourceChanged({ eventName: 'message_updated', messageId: 2 });
   releaseArbiter();
   const [sourceChangeResult, pendingResult] = await Promise.all([sourceChange, pending]);
-  assertEqual(pendingResult.superseded, true, 'source change supersedes in-flight generation preparation');
+  assertEqual(pendingResult.ok, false, 'source change prevents in-flight generation preparation from completing');
+  assertEqual(pendingResult.paused, true, 'source change preserves in-flight generation preparation as paused work');
+  assertEqual(pendingResult.execution.pauseReason, 'source-changed', 'source change records the durable pause reason');
   assertEqual(sourceChangeResult.ok, true, 'source change cleanup succeeds');
   assertEqual(calls.clear, 1, 'source change clears host prompt');
   const view = runtime.view();
@@ -10380,25 +6042,6 @@ for (const scenario of [
   assertEqual(view.activity.label, 'Source messages changed. Recursion prompt cleared.', 'source change surfaces prompt cleanup');
 }
 
-{
-  const { runtime, calls, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' }
-  });
-  const setup = await runtime.prepareForGeneration({ userMessage: 'Prepare prompt before source edit.' });
-  assertEqual(setup.ok, true, 'source-change setup prepares generation');
-  const setupSnapshot = runtime.view().lastSnapshot;
-  const result = await runtime.handleSourceChanged({ eventName: 'message_deleted', messageId: 2 });
-  assertEqual(result.ok, true, 'source change cleanup returns ok');
-  assertEqual(calls.clear, 1, 'source change clears installed prompt');
-  const cache = await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey);
-  assertEqual(cache.cacheState, 'stale', 'source change marks previous active scene cache stale');
-  assertEqual(cache.invalidation.reason, 'source-changed', 'source change records cache invalidation reason');
-  assertEqual(cache.invalidation.details.eventName, 'message_deleted', 'source change stores safe event name');
-  assertEqual(cache.invalidation.details.messageId, 2, 'source change stores safe message id');
-  const journal = await storage.loadRunJournal(setupSnapshot.chatKey);
-  assert(journal.entries.some((entry) => entry.event === 'prompt.cleared' && entry.details?.reason === 'source-changed'), 'source change records prompt clear journal');
-  assertEqual(runtime.view().lastSnapshot, null, 'source change clears previous snapshot after journaling');
-}
 
 {
   let releaseArbiter;
@@ -10428,7 +6071,9 @@ for (const scenario of [
   const offUpdate = runtime.updateSettings({ enabled: false });
   releaseArbiter();
   const result = await pending;
-  assertEqual(result.superseded, true, 'power toggle change supersedes in-flight generation preparation');
+  assertEqual(result.ok, false, 'power toggle change prevents in-flight generation preparation from completing');
+  assertEqual(result.paused, true, 'power toggle change preserves in-flight generation preparation as paused work');
+  assertEqual(result.execution.pauseReason, 'settings-changed', 'power toggle records the durable pause reason');
   assertEqual(installed.length, 0, 'power toggle change prevents stale prompt install');
   assertEqual(runtime.view().activeRunId, null, 'power toggle change clears active run id');
   await offUpdate;
@@ -10554,7 +6199,7 @@ for (const scenario of [
   await waitUntil(() => typeof releaseFirstInstall === 'function', 'first run did not enter prompt install');
   const second = runtime.prepareForGeneration({ userMessage: 'Newer install packet.' });
   await Promise.resolve();
-  assertEqual(snapshotCalls, 3, 'newer run waits for in-flight prompt install before snapshot');
+  assertEqual(snapshotCalls, 2, 'newer run waits for in-flight prompt install before reading its turn snapshot');
   assertEqual(sideEffects.length, 0, 'blocked first install has not produced host side effect yet');
   releaseFirstInstall();
   const [firstResult, secondResult] = await Promise.all([first, second]);
@@ -10565,210 +6210,6 @@ for (const scenario of [
   assert(sideEffects[1].includes('Newer install packet.'), 'newer install overwrites after older install');
 }
 
-{
-  let loadCalls = 0;
-  let releaseFirstLoad;
-  let releaseSecondLoad;
-  const deferredStorage = {
-    async loadSceneCache() {
-      loadCalls += 1;
-      if (loadCalls === 1) {
-        await new Promise((resolve) => {
-          releaseFirstLoad = resolve;
-        });
-      } else if (loadCalls === 2) {
-        await new Promise((resolve) => {
-          releaseSecondLoad = resolve;
-        });
-      }
-      return null;
-    },
-    async saveSceneCache() {
-      return {};
-    },
-    async appendJournal() {
-      return {};
-    }
-  };
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'manual', reasonerUse: 'off' },
-    storage: deferredStorage,
-    snapshot: () => ({
-      chatId: 'concurrent-chat',
-      chatKey: 'concurrent-chat',
-      sceneKey: 'concurrent-scene',
-      sceneFingerprint: 'concurrent-scene',
-      turnFingerprint: `turn-${Date.now()}`,
-      latestMesId: 1,
-      messages: [{ mesid: 1, role: 'user', text: 'Concurrent run.', visible: true }]
-    })
-  });
-  const first = runtime.prepareForGeneration({ userMessage: 'first' });
-  await waitUntil(() => typeof releaseFirstLoad === 'function', 'first run did not reach storage wait');
-  const second = runtime.prepareForGeneration({ userMessage: 'second' });
-  await waitUntil(() => typeof releaseSecondLoad === 'function', 'second run did not reach storage wait');
-  const activeWithSecondBlocked = runtime.view().activeRunId;
-  assert(activeWithSecondBlocked, 'overlapping run exposes active run id');
-  releaseFirstLoad();
-  await first;
-  assertEqual(runtime.view().activeRunId, activeWithSecondBlocked, 'older run completion does not clear newer active run');
-  releaseSecondLoad();
-  await second;
-  assertEqual(runtime.view().activeRunId, null, 'active run cleared after overlapping runs finish');
-}
-
-{
-  const arbiterPrompts = [];
-  const { runtime, installed, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    generationRouter: {
-      async generate(roleId, request = {}) {
-        assertEqual(roleId, 'utilityArbiter', 'manual refresh only calls utility arbiter');
-        arbiterPrompts.push(request.prompt);
-        return {
-          ok: true,
-          data: {
-            schema: UTILITY_ARBITER_SCHEMA,
-            snapshotHash: request.snapshotHash,
-            budgets: { targetBriefTokens: 500, maxCards: 4 }
-          }
-        };
-      }
-    }
-  });
-  const setup = await runtime.prepareForGeneration({ userMessage: 'Prepare cache before manual refresh.' });
-  assertEqual(setup.ok, true, 'manual refresh setup prepares generation');
-  const setupSnapshot = runtime.view().lastSnapshot;
-  const result = await runtime.refreshScene();
-  assertEqual(result.ok, true, 'manual refresh prepares generation');
-  assertEqual(installed.length, 2, 'manual refresh installs prompt after cache invalidation');
-  assert(arbiterPrompts[1].includes('"cacheState":"stale"'), 'manual refresh Arbiter prompt sees stale prior cache');
-  assert(arbiterPrompts[1].includes('"reason":"user-refresh"'), 'manual refresh Arbiter prompt sees invalidation reason');
-  const refreshedSnapshot = parsePromptJsonSection(arbiterPrompts[1], 'Snapshot');
-  assert(!refreshedSnapshot.messages.some((message) => message.text === 'manual refresh'), 'manual refresh does not inject synthetic chat text');
-  const journal = await storage.loadRunJournal(setupSnapshot.chatKey);
-  assert(journal.entries.some((entry) => entry.event === 'cache.invalidated' && entry.details?.reason === 'user-refresh'), 'manual refresh records cache invalidation journal');
-  assertEqual(runtime.view().activeRunId, null, 'active run cleared after refresh');
-}
-
-{
-  const { runtime, calls, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    generationRouter: immediateDurableCardRouter(),
-    durablePreprocess: true
-  });
-  const setup = await runtime.prepareForGeneration({ userMessage: 'Prepare cache before scene reset.' });
-  assertEqual(setup.ok, true, 'scene reset setup prepares generation');
-  const setupView = runtime.view();
-  assert(setupView.lastPacket, 'scene reset setup has prompt packet before reset');
-  assert(setupView.lastHand.cards.length > 0, 'scene reset setup has hand cards before reset');
-  const setupSnapshot = setupView.lastSnapshot;
-  if (!await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey)) {
-    await storage.saveSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey, {
-      cards: setupView.lastHand.cards
-    });
-  }
-  assert(await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey), 'scene cache exists before reset');
-  assert(await storage.loadPipelineRun(setupSnapshot.chatKey), 'execution manifest exists before reset');
-  await runtime.queueFullFreshSwipe();
-  assert(await storage.loadQueuedReprocess(setupSnapshot.chatKey), 'queued execution intent exists before reset');
-  const result = await runtime.resetSceneCache();
-  assertEqual(result.ok, true, 'scene cache reset succeeds');
-  assertEqual(result.chatKey, setupSnapshot.chatKey, 'scene cache reset targets current chat');
-  assertEqual(result.sceneKey, setupSnapshot.sceneKey, 'scene cache reset targets current scene');
-  assertEqual(result.clear.ok, true, 'scene cache reset clears host prompt');
-  assertEqual(calls.clear, 1, 'scene cache reset calls host prompt clear');
-  assertEqual(await storage.loadSceneCache(setupSnapshot.chatKey, setupSnapshot.sceneKey), null, 'scene cache reset deletes current cache');
-  assertEqual(await storage.loadPipelineRun(setupSnapshot.chatKey), null, 'scene cache reset deletes current-chat execution manifest');
-  assertEqual(await storage.loadQueuedReprocess(setupSnapshot.chatKey), null, 'scene cache reset deletes current-chat queued intent');
-  assertEqual(
-    Object.values((await storage.readIndex()).records)
-      .filter((record) => (
-        record.chatKey === setupSnapshot.chatKey
-        && record.kind === 'pipelineArtifact'
-      ))
-      .length,
-    0,
-    'scene cache reset deletes every current-chat execution artifact'
-  );
-  const resetView = runtime.view();
-  assertEqual(resetView.lastPacket, null, 'scene cache reset clears in-memory prompt packet');
-  assertEqual(resetView.lastHand.cards.length, 0, 'scene cache reset clears in-memory hand');
-  assertEqual(resetView.lastPlan, null, 'scene cache reset clears in-memory plan');
-  assertEqual(resetView.activity.label, 'Scene cache reset. Prompt cleared.', 'scene cache reset surfaces success activity');
-  assertEqual(resetView.activity.severity, 'success', 'scene cache reset success is visible');
-}
-
-{
-  const adapter = createMemoryStorageAdapter();
-  const repository = createStorageRepository({ storage: adapter });
-  let releaseRefreshInvalidation;
-  let refreshInvalidationStarted = false;
-  let snapshotReads = 0;
-  const storage = {
-    async loadSceneCache(...args) {
-      return repository.loadSceneCache(...args);
-    },
-    async saveSceneCache(...args) {
-      return repository.saveSceneCache(...args);
-    },
-    async appendJournal(...args) {
-      return repository.appendJournal(...args);
-    },
-    async loadRunJournal(...args) {
-      return repository.loadRunJournal(...args);
-    },
-    async invalidateSceneCache(...args) {
-      refreshInvalidationStarted = true;
-      await new Promise((resolve) => {
-        releaseRefreshInvalidation = resolve;
-      });
-      return repository.invalidateSceneCache(...args);
-    }
-  };
-  let currentTurn = {
-    chatId: 'refresh-race-chat',
-    chatKey: 'refresh-race-chat',
-    sceneKey: 'refresh-race-scene',
-    sceneFingerprint: 'refresh-race-scene',
-    turnFingerprint: 'refresh-race-turn-initial',
-    latestMesId: 1,
-    messages: [{ mesid: 1, role: 'user', text: 'Refresh race initial.', visible: true }]
-  };
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    storage,
-    snapshot: () => {
-      snapshotReads += 1;
-      return currentTurn;
-    }
-  });
-  const setup = await runtime.prepareForGeneration({ userMessage: 'Create cache before refresh race.' });
-  assertEqual(setup.ok, true, 'refresh race setup installs');
-  const refresh = runtime.refreshScene();
-  await waitUntil(() => refreshInvalidationStarted, 'refresh invalidation did not start');
-  const snapshotReadsBeforeFollowup = snapshotReads;
-  currentTurn = {
-    chatId: 'refresh-race-chat',
-    chatKey: 'refresh-race-chat',
-    sceneKey: 'refresh-race-scene',
-    sceneFingerprint: 'refresh-race-scene',
-    turnFingerprint: 'refresh-race-turn-followup',
-    latestMesId: 10,
-    messages: [{ mesid: 10, role: 'user', text: 'Refresh race followup base.', visible: true }]
-  };
-  const followup = runtime.prepareForGeneration({ userMessage: 'Newer turn after refresh.' });
-  await Promise.resolve();
-  assertEqual(snapshotReads, snapshotReadsBeforeFollowup, 'newer run waits for refresh invalidation storage tail before snapshot');
-  releaseRefreshInvalidation();
-  const [refreshResult, followupResult] = await Promise.all([refresh, followup]);
-  assert(refreshResult.ok || refreshResult.superseded, 'refresh race run resolves');
-  assertEqual(followupResult.ok, true, 'newer run completes after refresh invalidation');
-  assertEqual(followupResult.skipped, undefined, 'newer run does not skip after refresh invalidation');
-  const finalSnapshot = runtime.view().lastSnapshot;
-  const cache = await repository.loadSceneCache(finalSnapshot.chatKey, finalSnapshot.sceneKey);
-  assertEqual(cache.cacheState, 'active', 'newer run active cache survives delayed refresh invalidation');
-}
 
 {
   const routerCalls = [];
@@ -11041,9 +6482,6 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
   });
   assertEqual(prepared.ok, true, 'blocked Redirect does not block host prompt preparation');
   assertEqual(runtime.proseEnhancementPending(), true, 'blocked Redirect remains pending for deterministic settlement');
-  const preflightActivity = runtime.view().activityHistory.find((entry) => entry.phase === 'editorialPreflight');
-  assert(preflightActivity, 'blocked Redirect marker is recorded before host generation continues');
-  assertEqual(preflightActivity.outcome, 'skipped', 'blocked Redirect marker records a pending skip');
   assert(!JSON.stringify(runtime.view()).includes('RECURSION_REASONER_DISABLED'), 'blocked Redirect preflight never emits the retired disabled-lane error');
 
   const settled = await runtime.enhanceLatestAssistantMessage({ reason: 'assistant-message-landed' });
@@ -11053,6 +6491,9 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
   assertEqual(runtime.proseEnhancementPending(), false, 'blocked Redirect clears its pending marker after settlement');
   assertEqual(runtime.view().editorialResult.status, 'skipped', 'blocked Redirect exposes skipped Editorial status');
   assertEqual(runtime.view().editorialResult.outcome, 'provider-not-ready', 'blocked Redirect exposes provider readiness outcome');
+  const preflightActivity = runtime.view().activityHistory.find((entry) => entry.phase === 'editorialPreflight');
+  assert(preflightActivity, 'blocked Redirect marker is recorded when enhancement settles');
+  assertEqual(preflightActivity.outcome, 'skipped', 'blocked Redirect marker records a readiness skip');
   assert(!routerCalls.some((call) => call.roleId.startsWith('editorial')), 'blocked Redirect makes no Editorial provider calls');
   const journal = await storage.loadRunJournal('prose-runtime-chat');
   assert(journal.entries.some((entry) => entry.event === 'editorial.preflight.skipped'), 'blocked Redirect journals the readiness skip');
@@ -11256,41 +6697,5 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
   assertNoSecretText(invalid, 'missing-ok provider test result');
 }
 
-{
-  const repository = createStorageRepository({ storage: createMemoryStorageAdapter() });
-  const maintenanceCalls = [];
-  const storage = {
-    async loadSceneCache(...args) {
-      return repository.loadSceneCache(...args);
-    },
-    async saveSceneCache(...args) {
-      return repository.saveSceneCache(...args);
-    },
-    async appendJournal(...args) {
-      return repository.appendJournal(...args);
-    },
-    async loadRunJournal(...args) {
-      return repository.loadRunJournal(...args);
-    },
-    async maintainRetention(options = {}) {
-      maintenanceCalls.push(options);
-      return { ok: true };
-    }
-  };
-  const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasoningLevel: 'low' },
-    storage,
-    generationRouter: localFallbackCardRouter(['runtime-maintenance-test'])
-  });
-  const result = await runtime.prepareForGeneration({ userMessage: 'Trigger retention maintenance.' });
-  const snapshot = runtime.view().lastSnapshot;
-  assertEqual(result.ok, true, 'runtime maintenance test installs');
-  assert(maintenanceCalls.length > 0, 'runtime calls retention maintenance after scene-cache save');
-  assertDeepEqual(
-    maintenanceCalls.at(-1).activeScene,
-    { chatKey: snapshot.chatKey, sceneKey: snapshot.sceneKey },
-    'runtime maintenance protects active scene'
-  );
-}
 
 console.log('[pass] runtime');

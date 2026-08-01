@@ -376,16 +376,20 @@ function normalizePrecomposedGuidance(value, allowedIds) {
   const sourceIds = filterGuidanceIds(source.sourceCardIds, allowedIds);
   const guardrailIds = filterGuidanceIds(source.guardrailCardIds, allowedIds);
   const omitted = filterGuidanceOmissions(source.omittedCardIds, allowedIds);
+  const status = VALID_GUIDANCE_STATUSES.has(source.status) ? source.status : 'used';
+  const diagnostics = cleanStringList(source.diagnostics, MAX_DIAGNOSTIC_TEXT, 16);
   return {
     schema: GUIDANCE_SCHEMA,
-    status: VALID_GUIDANCE_STATUSES.has(source.status) ? source.status : 'used',
+    status,
     text,
     sourceCardIds: sourceIds.ids,
     guardrailCardIds: guardrailIds.ids,
     omittedCardIds: omitted.omissions,
-    diagnostics: cleanStringList(source.diagnostics, MAX_DIAGNOSTIC_TEXT, 16),
+    diagnostics,
     invalidSourceIdCount: sourceIds.invalidCount + guardrailIds.invalidCount + omitted.invalidCount,
-    fallbackReason: ''
+    fallbackReason: status === 'fallback-raw-only'
+      ? safeText(source.fallbackReason || diagnostics[0] || status, MAX_DIAGNOSTIC_TEXT)
+      : ''
   };
 }
 

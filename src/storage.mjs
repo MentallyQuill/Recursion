@@ -23,9 +23,6 @@ export {
 
 const RECURSION_VERSION = '0.2.0-alpha.1';
 const MAX_JOURNAL_ENTRIES = 500;
-const DEFAULT_MAX_SCENE_CACHES_PER_CHAT = 3;
-const DEFAULT_MAX_SCENE_CACHES_TOTAL = 24;
-const SCENE_CACHE_KEY_PATTERN = /^recursion-scene-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v1\.json$/;
 const RUN_JOURNAL_KEY_PATTERN = /^recursion-run-journal-[A-Za-z0-9_.-]+\.v1\.json$/;
 const PIPELINE_RUN_KEY_PATTERN = /^recursion-pipeline-run-[A-Za-z0-9_.-]+\.v2\.json$/;
 const PIPELINE_ARTIFACT_KEY_PATTERN = /^recursion-pipeline-artifact-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v2\.json$/;
@@ -33,7 +30,6 @@ const QUEUED_REPROCESS_KEY_PATTERN = /^recursion-queued-reprocess-[A-Za-z0-9_.-]
 const LAST_BRIEF_KEY_PATTERN = /^recursion-last-brief-[A-Za-z0-9_.-]+\.v1\.json$/;
 const RETIRED_GENERATED_KEY_PATTERN = /^recursion-scene-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v1\.json$/;
 const INDEX_KINDS = new Set([
-  'sceneCache',
   'runJournal',
   'pipelineRun',
   'pipelineArtifact',
@@ -106,10 +102,6 @@ const JOURNAL_EVENTS = new Set([
 ]);
 
 export const SYSTEM_INDEX_KEY = 'recursion-system-index.v1.json';
-
-export function sceneCacheKey(chatKey, sceneKey) {
-  return `recursion-scene-${safeId(chatKey, 'chat')}-${safeId(sceneKey, 'scene')}.v1.json`;
-}
 
 export function runJournalKey(chatKey) {
   return `recursion-run-journal-${safeId(chatKey, 'chat')}.v1.json`;
@@ -348,240 +340,15 @@ function safeMetadataList(value, limit = 160, max = 12) {
     .slice(0, max);
 }
 
-function normalizeInvalidation(value = {}) {
-  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  const details = source.details === undefined ? undefined : sanitizedJsonValue(source.details, undefined);
-  return redactSecretText(redact({
-    reason: stringValue(source.reason, 'runtime-change').slice(0, 120) || 'runtime-change',
-    detectedAt: timestampValue(source.detectedAt),
-    ...(details === undefined ? {} : { details })
-  }));
-}
-
 function normalizeNonNegativeInteger(value, fallback = 0) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.max(0, Math.round(number));
 }
 
-function normalizeSourceRole(value) {
-  const role = safeMetadataText(value, 40, '');
-  return ['user', 'assistant', 'system', 'unknown'].includes(role) ? role : undefined;
-}
-
-function normalizeSourceRef(value) {
-  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  const refId = safeMetadataText(source.refId || source.id || '', 160, '');
-  const textHash = safeMetadataText(source.textHash || source.hash || '', 160, '');
-  if (!refId || !textHash) return null;
-  const output = {
-    refId,
-    firstMesId: normalizeNonNegativeInteger(source.firstMesId),
-    lastMesId: normalizeNonNegativeInteger(source.lastMesId),
-    textHash
-  };
-  const role = normalizeSourceRole(source.role);
-  if (role) output.role = role;
-  const excerpt = sanitizedOptionalTextValue(source.excerpt, 160);
-  if (excerpt) output.excerpt = excerpt;
-  return output;
-}
-
-function normalizeSceneSource(value) {
-  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  return {
-    chatIdHash: safeMetadataText(source.chatIdHash || '', 160, ''),
-    firstMesId: normalizeNonNegativeInteger(source.firstMesId),
-    lastMesId: normalizeNonNegativeInteger(source.lastMesId),
-    latestMesId: normalizeNonNegativeInteger(source.latestMesId),
-    sceneFingerprint: safeMetadataText(source.sceneFingerprint || '', 160, ''),
-    chatWindowHash: safeMetadataText(source.chatWindowHash || '', 160, ''),
-    sourceRevisionHash: safeMetadataText(source.sourceRevisionHash || '', 180, ''),
-    sourceWindowHash: safeMetadataText(source.sourceWindowHash || '', 180, ''),
-    sceneStatus: safeMetadataText(source.sceneStatus || '', 80, ''),
-    sourceRefs: Array.isArray(source.sourceRefs)
-      ? source.sourceRefs.map(normalizeSourceRef).filter(Boolean).slice(0, 32)
-      : []
-  };
-}
-
-function normalizeSceneCard(card) {
-  if (!card || typeof card !== 'object' || Array.isArray(card)) return null;
-  const source = card.source && typeof card.source === 'object' && !Array.isArray(card.source) ? card.source : {};
-  const freshness = card.freshness && typeof card.freshness === 'object' && !Array.isArray(card.freshness) ? card.freshness : {};
-  const arbiter = card.arbiter && typeof card.arbiter === 'object' && !Array.isArray(card.arbiter) ? card.arbiter : {};
-  const sourceFingerprint = safeMetadataText(
-    card.sourceFingerprint || source.snapshotHash || source.fingerprint || freshness.sourceFingerprint || '',
-    160
-  );
-  const sourceRevisionHash = safeMetadataText(
-    card.sourceRevisionHash || source.sourceRevisionHash || freshness.sourceRevisionHash || sourceFingerprint,
-    180
-  );
-  const firstMesId = Number(source.firstMesId ?? card.firstMesId ?? 0);
-  const lastMesId = Number(source.lastMesId ?? card.lastMesId ?? 0);
-  const expiresAfterMesId = Number(freshness.expiresAfterMesId);
-  const sourceCardIds = safeMetadataList(card.sourceCardIds, 180, 32);
-  const sourceCards = Array.isArray(card.sourceCards)
-    ? card.sourceCards.map((sourceCard) => {
-        const entry = sourceCard && typeof sourceCard === 'object' && !Array.isArray(sourceCard) ? sourceCard : {};
-        const id = safeMetadataText(entry.id, 180, '');
-        const name = safeMetadataText(entry.name || entry.label || id, 120, '');
-        if (!id || !name) return null;
-        return {
-          id,
-          name,
-          selectionState: ['active', 'priority', 'off'].includes(entry.selectionState) ? entry.selectionState : 'active'
-        };
-      }).filter(Boolean).slice(0, 32)
-    : [];
-  const sourceCoverage = ['included', 'requested', 'reported', 'covered', 'missing', 'cached', 'unknown'].includes(card.sourceCoverage)
-    ? card.sourceCoverage
-    : '';
-  const inclusionEvidence = ['provider-confirmed', 'generation-contract', 'explicit-omission'].includes(card.inclusionEvidence)
-    ? card.inclusionEvidence
-    : '';
-  const coveredSourceCardIds = safeMetadataList(card.coveredSourceCardIds, 180, 32);
-  const omittedSourceCardIds = safeMetadataList(card.omittedSourceCardIds, 180, 32);
-  return {
-    id: safeIdentifier(card.id || makeId('card'), 'card'),
-    family: safeMetadataText(card.family || 'unknown', 80, 'unknown'),
-    role: safeMetadataText(card.role || '', 80),
-    sceneId: safeIdentifier(card.sceneId || '', ''),
-    catalogKey: safeMetadataText(card.catalogKey || '', 160),
-    status: ['candidate', 'active', 'stowed', 'stale', 'discarded'].includes(card.status) ? card.status : 'active',
-    summary: sanitizedTextValue(card.summary || '', 400),
-    promptText: sanitizedTextValue(card.promptText || '', Infinity),
-    evidenceRefs: safeMetadataList(card.evidenceRefs, 160, 12),
-    tokenEstimate: Math.max(0, Math.min(1000, Number(card.tokenEstimate) || 0)),
-    emphasis: ['normal', 'emphasized', 'muted'].includes(card.emphasis) ? card.emphasis : 'normal',
-    detailProfile: ['compact', 'standard', 'expanded'].includes(card.detailProfile) ? card.detailProfile : 'standard',
-    ...(['cache', 'generated', 'fallback'].includes(card.origin) ? { origin: card.origin } : {}),
-    generatedAt: timestampValue(card.generatedAt || freshness.generatedAt),
-    sourceFingerprint,
-    source: {
-      chatId: safeIdentifier(source.chatId || card.chatId || '', ''),
-      firstMesId: Number.isFinite(firstMesId) ? Math.max(0, Math.round(firstMesId)) : 0,
-      lastMesId: Number.isFinite(lastMesId) ? Math.max(0, Math.round(lastMesId)) : 0,
-      fingerprint: safeMetadataText(source.fingerprint || sourceFingerprint, 160),
-      snapshotHash: safeMetadataText(source.snapshotHash || sourceFingerprint, 160),
-      sourceRevisionHash
-    },
-    freshness: {
-      generatedAt: timestampValue(freshness.generatedAt || card.generatedAt),
-      sourceFingerprint,
-      sourceRevisionHash,
-      ...(Number.isFinite(expiresAfterMesId) ? { expiresAfterMesId: Math.round(expiresAfterMesId) } : {})
-    },
-    arbiter: {
-      lastDecisionId: safeMetadataText(arbiter.lastDecisionId || card.decisionId || '', 160),
-      reason: safeMetadataText(arbiter.reason || card.reason || '', 240)
-    },
-    arbiterDecisionHash: safeOptionalMetadataText(card.arbiterDecisionHash, 160),
-    inspectorNotes: sanitizedOptionalTextValue(card.inspectorNotes, 800),
-    ...(sourceCardIds.length ? { sourceCardIds } : {}),
-    ...(sourceCards.length ? { sourceCards } : {}),
-    ...(sourceCoverage ? { sourceCoverage } : {}),
-    ...(inclusionEvidence ? { inclusionEvidence } : {}),
-    ...(coveredSourceCardIds.length ? { coveredSourceCardIds } : {}),
-    ...(omittedSourceCardIds.length ? { omittedSourceCardIds } : {})
-  };
-}
-
-function normalizeLatestHand(value) {
-  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : null;
-  if (!source) return null;
-  const cardIds = safeMetadataList(source.cardIds, 160, 32);
-  const omitted = Array.isArray(source.omitted)
-    ? source.omitted.map((entry) => {
-      const omission = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {};
-      const cardId = safeMetadataText(omission.cardId, 160, '');
-      const reason = safeMetadataText(omission.reason, 160, '');
-      return cardId && reason ? { cardId, reason } : null;
-    }).filter(Boolean).slice(0, 32)
-    : [];
-  return redactSecretText(redact({
-    handId: safeMetadataText(source.handId, 160, ''),
-    composedAt: timestampValue(source.composedAt),
-    cardIds,
-    promptPacketHash: safeMetadataText(source.promptPacketHash, 160, ''),
-    omitted
-  }));
-}
-
-function normalizeVariantKey(value) {
-  return safeMetadataText(value, 180, '');
-}
-
-function normalizeSceneCacheVariant(key, value = {}) {
-  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  const sourceRevisionHash = normalizeVariantKey(source.sourceRevisionHash || key);
-  if (!sourceRevisionHash) return null;
-  const variant = {
-    sourceRevisionHash,
-    source: normalizeSceneSource({
-      ...(source.source || {}),
-      sourceRevisionHash
-    }),
-    cards: Array.isArray(source.cards) ? source.cards.map(normalizeSceneCard).filter(Boolean) : [],
-    latestHand: normalizeLatestHand(source.latestHand),
-    updatedAt: timestampValue(source.updatedAt)
-  };
-  if (!variant.source.sourceRevisionHash) variant.source.sourceRevisionHash = sourceRevisionHash;
-  return variant;
-}
-
-function normalizeSceneCacheVariants(source, retention = {}) {
-  const variantLimit = normalizeRetentionSettings(retention).sourceVariantsPerScene;
-  const variantsSource = source && typeof source.variants === 'object' && !Array.isArray(source.variants)
-    ? source.variants
-    : {};
-  const normalized = {};
-  const requestedOrder = Array.isArray(source?.variantOrder)
-    ? source.variantOrder.map(normalizeVariantKey).filter(Boolean)
-    : [];
-  for (const [key, value] of Object.entries(variantsSource)) {
-    const variant = normalizeSceneCacheVariant(key, value);
-    if (variant) normalized[variant.sourceRevisionHash] = variant;
-  }
-  const discoveredOrder = Object.keys(normalized).filter((key) => !requestedOrder.includes(key));
-  const boundedOrder = [...requestedOrder, ...discoveredOrder]
-    .filter((key, index, list) => key && normalized[key] && list.indexOf(key) === index)
-    .slice(-variantLimit);
-  const bounded = {};
-  for (const key of boundedOrder) bounded[key] = normalized[key];
-  return { variants: bounded, variantOrder: boundedOrder };
-}
-
-function normalizeSceneCache(chatKey, sceneKey, value = {}, retention = {}) {
-  const source = value && typeof value === 'object' ? value : {};
-  const normalizedVariants = normalizeSceneCacheVariants(source, retention);
-  const activeSourceRevisionHash = normalizeVariantKey(source.activeSourceRevisionHash || normalizedVariants.variantOrder.at(-1) || '');
-  return baseRecord('recursion.sceneCache', {
-    createdAt: source.createdAt,
-    chatKey: safeId(chatKey, 'chat'),
-    sceneKey: safeId(sceneKey, 'scene'),
-    cacheState: ['active', 'stale', 'retired', 'invalid'].includes(source.cacheState) ? source.cacheState : 'active',
-    cards: Array.isArray(source.cards) ? source.cards.map(normalizeSceneCard).filter(Boolean) : [],
-    latestHand: normalizeLatestHand(source.latestHand),
-    source: normalizeSceneSource(source.source),
-    activeSourceRevisionHash,
-    variants: normalizedVariants.variants,
-    variantOrder: normalizedVariants.variantOrder,
-    versions: sanitizedJsonValue(source.versions, {}),
-    ...(source.invalidation === undefined ? {} : { invalidation: normalizeInvalidation(source.invalidation) })
-  });
-}
-
 function normalizeMaxEntries(value) {
   const numeric = Math.floor(Number(value));
   return Number.isFinite(numeric) ? Math.max(1, Math.min(MAX_JOURNAL_ENTRIES, numeric)) : 1;
-}
-
-function normalizeRetentionLimit(value, fallback) {
-  if (value === undefined || value === null || value === '') return fallback;
-  const numeric = Math.floor(Number(value));
-  return Number.isFinite(numeric) && numeric >= 0 ? Math.min(500, numeric) : fallback;
 }
 
 function normalizeNextIndex(value, fallback) {
@@ -762,7 +529,6 @@ function normalizeIndexRecord(fallbackKey, value = {}) {
 
 function normalizeIndexKey(kind, value) {
   if (typeof value !== 'string' || !value || /[\\/]/.test(value)) return null;
-  if (kind === 'sceneCache') return SCENE_CACHE_KEY_PATTERN.test(value) ? value : null;
   if (kind === 'runJournal') return RUN_JOURNAL_KEY_PATTERN.test(value) ? value : null;
   if (kind === 'pipelineRun') return PIPELINE_RUN_KEY_PATTERN.test(value) ? value : null;
   if (kind === 'pipelineArtifact') return PIPELINE_ARTIFACT_KEY_PATTERN.test(value) ? value : null;
@@ -772,7 +538,6 @@ function normalizeIndexKey(kind, value) {
 }
 
 function indexKindForKey(key) {
-  if (SCENE_CACHE_KEY_PATTERN.test(key)) return 'sceneCache';
   if (RUN_JOURNAL_KEY_PATTERN.test(key)) return 'runJournal';
   if (PIPELINE_RUN_KEY_PATTERN.test(key)) return 'pipelineRun';
   if (PIPELINE_ARTIFACT_KEY_PATTERN.test(key)) return 'pipelineArtifact';
@@ -789,18 +554,6 @@ function indexRecordFromStoredRecord(key, value) {
   const kind = indexKindForKey(key);
   if (!kind || !isStorageObject(value)) return null;
   if (kind === 'queuedReprocess' ? value.schemaVersion !== 2 : value.schemaVersion !== 1) return null;
-  if (kind === 'sceneCache') {
-    if (value.recordType !== 'recursion.sceneCache' || !Array.isArray(value.cards)) return null;
-    const chatKey = safeIdentifier(value.chatKey, '');
-    const sceneKey = safeIdentifier(value.sceneKey, '');
-    if (!chatKey || !sceneKey) return null;
-    return {
-      key,
-      kind,
-      chatKey,
-      updatedAt: timestampValue(value.updatedAt)
-    };
-  }
   if (kind === 'runJournal') {
     if (value.recordType !== 'recursion.runJournal' || !Array.isArray(value.entries)) return null;
     const chatKey = safeIdentifier(value.chatKey, '');
@@ -984,69 +737,6 @@ function cleanupJournalEvents(repaired, pruned) {
   return events;
 }
 
-function protectedSceneKeySet(options = {}) {
-  const protectedKeys = new Set();
-  const source = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
-  for (const key of Array.isArray(source.protectedKeys) ? source.protectedKeys : []) {
-    if (typeof key === 'string' && SCENE_CACHE_KEY_PATTERN.test(key)) protectedKeys.add(key);
-  }
-  for (const scene of Array.isArray(source.protectedScenes) ? source.protectedScenes : []) {
-    if (!scene || typeof scene !== 'object' || Array.isArray(scene)) continue;
-    protectedKeys.add(sceneCacheKey(scene.chatKey, scene.sceneKey));
-  }
-  if (source.activeScene && typeof source.activeScene === 'object' && !Array.isArray(source.activeScene)) {
-    protectedKeys.add(sceneCacheKey(source.activeScene.chatKey, source.activeScene.sceneKey));
-  }
-  return protectedKeys;
-}
-
-function sortSceneRecordsNewestFirst(left, right) {
-  const rightTime = Date.parse(right.updatedAt) || 0;
-  const leftTime = Date.parse(left.updatedAt) || 0;
-  if (rightTime !== leftTime) return rightTime - leftTime;
-  return String(left.key).localeCompare(String(right.key));
-}
-
-function plannedSceneCachePrunes(records, { maxPerChat, maxTotal, protectedKeys }) {
-  const pruned = new Map();
-  const sceneRecords = records.filter((record) => record?.kind === 'sceneCache' && SCENE_CACHE_KEY_PATTERN.test(record.key));
-  const byChat = new Map();
-  for (const record of sceneRecords) {
-    const chatKey = safeIdentifier(record.chatKey || 'chat', 'chat');
-    if (!byChat.has(chatKey)) byChat.set(chatKey, []);
-    byChat.get(chatKey).push(record);
-  }
-
-  for (const group of byChat.values()) {
-    group.sort(sortSceneRecordsNewestFirst);
-    const protectedInGroup = group.filter((record) => protectedKeys.has(record.key)).length;
-    let remainingUnprotected = Math.max(0, maxPerChat - protectedInGroup);
-    for (const record of group) {
-      if (protectedKeys.has(record.key)) continue;
-      if (remainingUnprotected > 0) {
-        remainingUnprotected -= 1;
-        continue;
-      }
-      pruned.set(record.key, { record, reason: 'per-chat-retention-limit' });
-    }
-  }
-
-  const kept = sceneRecords
-    .filter((record) => !pruned.has(record.key))
-    .sort(sortSceneRecordsNewestFirst);
-  const protectedTotal = kept.filter((record) => protectedKeys.has(record.key)).length;
-  let remainingUnprotectedTotal = Math.max(0, maxTotal - protectedTotal);
-  for (const record of kept) {
-    if (protectedKeys.has(record.key)) continue;
-    if (remainingUnprotectedTotal > 0) {
-      remainingUnprotectedTotal -= 1;
-      continue;
-    }
-    pruned.set(record.key, { record, reason: 'total-retention-limit' });
-  }
-
-  return [...pruned.values()];
-}
 
 function reportActivity(activity, event) {
   try {
@@ -1319,81 +1009,6 @@ export function createStorageRepository({
     };
   }
 
-  async function pruneSceneCaches(options = {}) {
-    const source = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
-    const repair = await repairIndex();
-    const index = normalizeIndex(await storage.readJson(SYSTEM_INDEX_KEY));
-    const protectedKeys = protectedSceneKeySet(source);
-    const plannedPrunes = plannedSceneCachePrunes(Object.values(index.records), {
-      maxPerChat: normalizeRetentionLimit(source.maxPerChat, DEFAULT_MAX_SCENE_CACHES_PER_CHAT),
-      maxTotal: normalizeRetentionLimit(source.maxTotal, DEFAULT_MAX_SCENE_CACHES_TOTAL),
-      protectedKeys
-    });
-    const pruned = [];
-    const skipped = [];
-    for (const { record, reason } of plannedPrunes) {
-      const read = await readRepairRecord(record.key);
-      if (!read.ok) {
-        skipped.push(repairDiagnostic('scene-cache-retained', {
-          kind: 'sceneCache',
-          chatKey: record.chatKey,
-          reason: 'read-failed'
-        }));
-        continue;
-      }
-      const validRecord = indexRecordFromStoredRecord(record.key, read.value);
-      if (!validRecord || validRecord.kind !== 'sceneCache') {
-        skipped.push(repairDiagnostic('scene-cache-retained', {
-          kind: 'sceneCache',
-          chatKey: record.chatKey,
-          reason: 'invalid-record'
-        }));
-        continue;
-      }
-      try {
-        const deleted = await storage.deleteJson(record.key);
-        if (deleted?.ok === false) {
-          skipped.push(repairDiagnostic('scene-cache-retained', {
-            kind: 'sceneCache',
-            chatKey: record.chatKey,
-            reason: 'delete-failed'
-          }));
-          continue;
-        }
-        delete index.records[record.key];
-        pruned.push(repairDiagnostic('scene-cache-deleted', {
-          kind: 'sceneCache',
-          chatKey: record.chatKey,
-          reason
-        }));
-      } catch {
-        skipped.push(repairDiagnostic('scene-cache-retained', {
-          kind: 'sceneCache',
-          chatKey: record.chatKey,
-          reason: 'delete-failed'
-        }));
-      }
-    }
-    if (pruned.length > 0) {
-      index.updatedAt = nowIso();
-      await storage.writeJson(SYSTEM_INDEX_KEY, index);
-    }
-    return {
-      ok: true,
-      repaired: repair.repaired,
-      pruned,
-      skipped: [...repair.skipped, ...skipped],
-      keptCount: Object.values(index.records).filter((record) => record.kind === 'sceneCache').length,
-      deletedCount: pruned.length,
-      journalEvents: [...repair.journalEvents, ...cleanupJournalEvents([], pruned)]
-    };
-  }
-
-  async function loadSceneCache(chatKey, sceneKey) {
-    const key = sceneCacheKey(chatKey, sceneKey);
-    const existing = await storage.readJson(key);
-    return existing ? normalizeSceneCache(chatKey, sceneKey, existing, currentRetention()) : null;
-  }
 
   async function loadRunJournal(chatKey) {
     const key = runJournalKey(chatKey);
@@ -1879,88 +1494,6 @@ export function createStorageRepository({
   }
 
   return {
-    loadSceneCache,
-    async saveSceneCache(chatKey, sceneKey, value) {
-      const key = sceneCacheKey(chatKey, sceneKey);
-      const operationId = makeId('storage');
-      reportActivity(activity, {
-        operationId,
-        phase: 'storageProgress',
-        logicalStage: 'Updating scene cache',
-        mode: 'background',
-        severity: 'info',
-        label: 'Updating scene cache...',
-        detail: {
-          kind: 'sceneCache',
-          chatKey: safeId(chatKey, 'chat'),
-          sceneKey: safeId(sceneKey, 'scene')
-        }
-      });
-      const record = normalizeSceneCache(chatKey, sceneKey, value, currentRetention());
-      const writeResult = await storage.writeJson(key, record);
-      const sceneWriteStatus = storageWriteStatus(writeResult);
-      let verifiedSceneWriteStatus = sceneWriteStatus;
-      if (sceneWriteStatus.persisted) {
-        const persistedRecord = await storage.readJson(key);
-        const verified = persistedRecord
-          && persistedRecord.recordType === record.recordType
-          && persistedRecord.chatKey === record.chatKey
-          && persistedRecord.sceneKey === record.sceneKey;
-        if (!verified) {
-          const failure = typeof storage.getLastFailure === 'function' ? storage.getLastFailure() : null;
-          verifiedSceneWriteStatus = {
-            persisted: false,
-            reason: 'write-verification-failed',
-            ...(failure?.message ? { fallbackReason: failure.message } : {})
-          };
-        }
-      }
-      let indexWriteStatus = { persisted: true };
-      if (verifiedSceneWriteStatus.persisted || verifiedSceneWriteStatus.fallback) {
-        indexWriteStatus = storageWriteStatus(await writeIndexEntry(key, 'sceneCache', safeId(chatKey, 'chat')));
-      }
-      const storageStatus = combineStorageStatuses(verifiedSceneWriteStatus, indexWriteStatus);
-      reportStorageWriteStatus(activity, operationId, storageStatus, {
-        kind: 'sceneCache',
-        chatKey: safeId(chatKey, 'chat'),
-        sceneKey: safeId(sceneKey, 'scene'),
-        cardCount: record.cards.length
-      });
-      return attachStorageStatus(record, storageStatus);
-    },
-    async invalidateSceneCache(chatKey, sceneKey, options = {}) {
-      const key = sceneCacheKey(chatKey, sceneKey);
-      const existing = await storage.readJson(key);
-      if (!existing) return { ok: false, reason: 'missing-cache', key };
-      const source = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
-      const reason = stringValue(source.reason, 'runtime-change').slice(0, 120) || 'runtime-change';
-      const cacheState = ['active', 'stale', 'retired', 'invalid'].includes(source.cacheState) ? source.cacheState : 'stale';
-      const invalidation = normalizeInvalidation({
-        reason,
-        detectedAt: source.detectedAt,
-        details: source.details
-      });
-      const record = normalizeSceneCache(chatKey, sceneKey, {
-        ...existing,
-        cacheState,
-        invalidation
-      }, currentRetention());
-      await storage.writeJson(key, record);
-      await writeIndexEntry(key, 'sceneCache', safeId(chatKey, 'chat'));
-      const journalEntry = await appendJournal(chatKey, {
-        event: 'cache.invalidated',
-        severity: 'info',
-        summary: `Scene cache marked ${record.cacheState}: ${invalidation.reason}`,
-        runId: optionalStringValue(source.runId),
-        sceneKey: safeId(sceneKey, 'scene'),
-        details: {
-          reason: invalidation.reason,
-          cacheState: record.cacheState,
-          ...(invalidation.details === undefined ? {} : { details: invalidation.details })
-        }
-      });
-      return { ok: true, key, record, journalEntry };
-    },
     loadRunJournal,
     async clearRunJournal(chatKey) {
       const key = runJournalKey(chatKey);
@@ -1988,30 +1521,7 @@ export function createStorageRepository({
     pruneRetiredGeneratedRecords,
     prunePipelineExecution,
     repairIndex,
-    pruneSceneCaches,
-    async maintainRetention(options = {}) {
-      const retention = currentRetention();
-      const scenes = await pruneSceneCaches({
-        ...options,
-        maxPerChat: retention.sceneCachesPerChat,
-        maxTotal: retention.sceneCachesTotal
-      });
-      const pipeline = await prunePipelineExecution();
-      return {
-        ...scenes,
-        repaired: [...scenes.repaired, ...pipeline.repaired],
-        pruned: [...scenes.pruned, ...pipeline.pruned],
-        skipped: [...scenes.skipped, ...pipeline.skipped],
-        journalEvents: [...scenes.journalEvents, ...pipeline.journalEvents],
-        pipeline
-      };
-    },
-    async clearSceneCache(chatKey, sceneKey) {
-      const key = sceneCacheKey(chatKey, sceneKey);
-      await storage.deleteJson(key);
-      await removeIndexEntry(key);
-      return { ok: true, key };
-    },
+    maintainRetention: prunePipelineExecution,
     async readIndex() {
       return normalizeIndex(await storage.readJson(SYSTEM_INDEX_KEY));
     }

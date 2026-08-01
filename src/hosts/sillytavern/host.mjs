@@ -1670,6 +1670,7 @@ export function createSillyTavernHost({
         commitId,
         sourceIdentity
       });
+      if (source.signal?.aborted) return canceledPostProcessCommit();
       if (existing) {
         return {
           ok: true,

@@ -143,11 +143,17 @@ const { runtime, installedBlocks, storage } = createRuntimeHarness({
 
 const result = await runtime.prepareForGeneration({ userMessage: 'Use every generated SG-1 card.' });
 const view = runtime.view();
-const cache = await storage.loadSceneCache(view.lastSnapshot.chatKey, view.lastSnapshot.sceneKey);
+const manifest = await storage.loadPipelineRun(view.lastSnapshot.chatKey);
+const handRef = manifest.stageRecords['preprocess.hand'].checkpoint.artifactRef;
+const storedHand = await storage.loadPipelineArtifact(
+  manifest.chatKey,
+  manifest.operationId,
+  handRef.artifactId
+);
 
 assertEqual(result.ok, true, 'all generated card run installs prompt');
-assertEqual(cache.cards.length, 6, 'scene cache persists every generated card');
-assertEqual(view.lastHand.cards.length, 6, 'legacy target brief budget does not drop generated active cards');
+assertEqual(storedHand.cards.length, 6, 'turn checkpoint persists every generated hand card');
+assertEqual(view.lastHand.cards.length, 6, 'target brief budget does not drop generated active cards');
 assertEqual(view.lastPacket.selectedCardRefs.length, 6, 'prompt packet refs include every generated active card');
 const guidancePrompt = guidancePrompts[0] || '';
 const injectedCardEvidence = installedBlocks.find((block) => block.id === 'cardEvidence')?.text || '';

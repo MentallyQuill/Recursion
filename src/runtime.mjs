@@ -958,7 +958,11 @@ function normalizePlanCardJobs(value) {
     const role = safeText(source.role, 120);
     const roleId = safeText(source.roleId, 120);
     const reason = safeText(source.reason, 240);
-    if (family) output.family = family;
+    const inferredFamily = family || safeText(
+      CARD_CATALOG.find((entry) => entry.role === (role || roleId))?.family || '',
+      120
+    );
+    if (inferredFamily) output.family = inferredFamily;
     if (role) output.role = role;
     if (roleId) output.roleId = roleId;
     if (reason) output.reason = reason;
@@ -1294,28 +1298,6 @@ function rebaseCardsForSnapshot(cards, snapshot) {
   return (Array.isArray(cards) ? cards : []).map((card) => normalizeCard(card, context));
 }
 
-function sceneCacheLatestHand(hand, packet = null) {
-  const selectedCards = Array.isArray(hand?.cards) ? hand.cards : [];
-  const omittedCards = Array.isArray(hand?.omitted) ? hand.omitted : [];
-  return {
-    handId: safeIdentifier(hand?.handId || '', 'hand', 160),
-    composedAt: timestampOrNow(hand?.composedAt),
-    cardIds: selectedCards
-      .map((card) => safeIdentifier(card?.id || card?.cardId || '', 'card', 160))
-      .filter(Boolean)
-      .slice(0, 32),
-    omitted: omittedCards
-      .map((entry) => {
-        const cardId = safeIdentifier(entry?.cardId || entry?.id || '', 'card', 160);
-        const reason = safeText(entry?.reason || '', 160);
-        return cardId && reason ? { cardId, reason } : null;
-      })
-      .filter(Boolean)
-      .slice(0, 32),
-    promptPacketHash: packet ? hashJson(packet) : safeIdentifier(hand?.promptPacketHash || '', '', 160)
-  };
-}
-
 function activeSourceRevisionHash(snapshot) {
   return safeText(snapshot?.sourceRevisionHash || sourceWindowFingerprint(snapshot), 180);
 }
@@ -1522,66 +1504,6 @@ function preparedTurnBasis({
   };
 }
 
-function cloneCacheVariants(cache) {
-  const source = asObject(cache);
-  const variants = asObject(source.variants);
-  const output = {};
-  for (const [key, value] of Object.entries(variants)) {
-    const variantKey = safeText(value?.sourceRevisionHash || key, 180);
-    if (!variantKey) continue;
-    output[variantKey] = {
-      ...asObject(value),
-      sourceRevisionHash: variantKey,
-      cards: Array.isArray(value?.cards) ? value.cards : [],
-      latestHand: value?.latestHand || null
-    };
-  }
-  return output;
-}
-
-function sceneCachePayload(snapshot, deck, hand, plan, packet = null, settings = {}, previousCache = null, options = {}) {
-  const sourceRevisionHash = activeSourceRevisionHash(snapshot);
-  const range = sourceWindowRange(snapshot);
-  const variantLimit = normalizeRetentionSettings(settings.retention).sourceVariantsPerScene;
-  const variants = cloneCacheVariants(previousCache);
-  const existingOrder = Array.isArray(previousCache?.variantOrder)
-    ? previousCache.variantOrder.map((key) => safeText(key, 180)).filter(Boolean)
-    : Object.keys(variants);
-  const latestHand = sceneCacheLatestHand(hand, packet);
-  const source = {
-    chatIdHash: hashJson(snapshot.chatId),
-    firstMesId: range.firstMesId,
-    lastMesId: range.lastMesId,
-    latestMesId: snapshot.latestMesId,
-    sceneFingerprint: snapshot.sceneFingerprint,
-    chatWindowHash: hashJson(snapshot.messages),
-    sourceRevisionHash,
-    sourceWindowHash: sourceWindowFingerprint(snapshot, range.firstMesId, range.lastMesId),
-    sceneStatus: plan.sceneStatus
-  };
-  variants[sourceRevisionHash] = {
-    sourceRevisionHash,
-    source,
-    cards: deck.cards,
-    latestHand,
-    updatedAt: nowIso()
-  };
-  const variantOrder = [...existingOrder.filter((key) => key !== sourceRevisionHash), sourceRevisionHash]
-    .filter((key) => variants[key])
-    .slice(-variantLimit);
-  const prunedVariants = {};
-  for (const key of variantOrder) prunedVariants[key] = variants[key];
-  return {
-    cacheState: 'active',
-    versions: cacheContractVersions(settings),
-    source,
-    activeSourceRevisionHash: sourceRevisionHash,
-    variantOrder,
-    variants: prunedVariants,
-    cards: deck.cards,
-    latestHand
-  };
-}
 
 function promptFootprintFromSettings(settings = {}) {
   const footprint = safeText(settings.promptFootprint || 'compact', 40);
@@ -1625,7 +1547,14 @@ function budgetOr(value, fallback) {
 }
 
 function prioritySelectionForSettings(settings = {}) {
-  if (settings?.mode === 'manual') return { forcedCardIds: [], forcedFamilies: [], diagnostics: [] };
+  if (settings?.mode === 'manual') {
+    const forcedFamilies = runtimeScopePayload(settings).selectedFamilies || [];
+    return {
+      forcedCardIds: [],
+      forcedFamilies,
+      diagnostics: forcedFamilies.length > 0 ? ['manual-card-scope-active'] : []
+    };
+  }
   const activeDeck = getActiveCardDeck(settings);
   const forcedCardIds = deckPriorityCardIds(activeDeck, settings);
   const forcedFamilies = deckPriorityFamilies(activeDeck, settings);
@@ -2289,8 +2218,7 @@ export function createRecursionRuntime({
   storage = createStorageRepository({ storage: createMemoryStorageAdapter() }),
   activity = createActivityReporter(),
   generationRouter = null,
-  fetchImpl = globalThis.fetch,
-  durablePreprocess = false
+  fetchImpl = globalThis.fetch
 } = {}) {
   const runState = createRuntimeRunState();
   const activeProviderOperations = new Map();
@@ -2400,7 +2328,6 @@ export function createRecursionRuntime({
     cardCount: 0,
     updatedAt: nowIso()
   };
-  let lastSavedSceneCacheRef = null;
   let promptInstallTail = Promise.resolve();
   let storageSaveTail = Promise.resolve();
   let pendingProseEnhancement = null;
@@ -2414,17 +2341,15 @@ export function createRecursionRuntime({
   const preprocessGraphs = new Map();
   const preprocessContexts = new Map();
   const durablePreparePromises = new Map();
-  const executionScheduler = durablePreprocess
-    ? createExecutionScheduler({
-        repository: storage,
-        attemptsPerStep: () => settingsStore.get().modelAttemptsPerStep,
-        onViewChanged(manifest) {
-          if (!activeExecutionChatKey || manifest?.chatKey === activeExecutionChatKey) {
-            executionView = manifest || null;
-          }
-        }
-      })
-    : null;
+  const executionScheduler = createExecutionScheduler({
+    repository: storage,
+    attemptsPerStep: () => settingsStore.get().modelAttemptsPerStep,
+    onViewChanged(manifest) {
+      if (!activeExecutionChatKey || manifest?.chatKey === activeExecutionChatKey) {
+        executionView = manifest || null;
+      }
+    }
+  });
 
   async function postProcessSourceStillCurrent(source = {}) {
     if (typeof host?.messages?.postProcessSourceIdentity !== 'function') return false;
@@ -2464,15 +2389,13 @@ export function createRecursionRuntime({
       storyForm: lastBriefPacket?.storyForm ?? null
     }),
     sourceGuard: postProcessSourceStillCurrent,
-    durableExecution: durablePreprocess
-      ? {
-          scheduler: executionScheduler,
-          repository: storage,
-          onQueuedReprocessChanged(intent) {
-            queuedReprocessView = intent || null;
-          }
-        }
-      : null
+    durableExecution: {
+      scheduler: executionScheduler,
+      repository: storage,
+      onQueuedReprocessChanged(intent) {
+        queuedReprocessView = intent || null;
+      }
+    }
   });
 
   function createPreparedGenerationCandidate(packet, hand, snapshot, settings, turnIdentity = null) {
@@ -2718,7 +2641,7 @@ export function createRecursionRuntime({
   }
 
   function freshNextGenerationView() {
-    if (durablePreprocess && queuedReprocessView?.mode === 'full-fresh') {
+    if (queuedReprocessView?.mode === 'full-fresh') {
       return {
         pending: true,
         id: '',
@@ -2791,57 +2714,24 @@ export function createRecursionRuntime({
       clearLastBrief({ status: 'empty', reason: 'disabled' });
       return { ok: true, skipped: true, reason: 'disabled' };
     }
-    if (durablePreprocess) {
-      const snapshot = await readSnapshot();
-      const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;
-      const manifest = await storage.loadPipelineRun(chatKey);
-      if (!manifest || manifest.state !== 'completed' || !manifest.turnKeyHash) {
-        return { ok: false, reason: 'completed-turn-unavailable' };
-      }
-      const intent = {
-        schema: QUEUED_REPROCESS_SCHEMA,
-        chatKey,
-        phase: 'preprocess',
-        turnKeyHash: manifest.turnKeyHash,
-        queuedAt: nowIso(),
-        mode: 'full-fresh',
-        stageIds: []
-      };
-      await storage.saveQueuedReprocess(chatKey, intent);
-      activeExecutionChatKey = chatKey;
-      queuedReprocessView = intent;
-      clearPendingLatestAssistantSwipeRetry();
-      settleRuntimeActivity({
-        runId: safeText(executionView?.operationId || makeId('queued-full-fresh'), 180),
-        outcome: 'success',
-        phase: 'settled',
-        severity: 'success',
-        label: 'Full fresh generation queued.',
-        chips: ['Queued']
-      });
-      return {
-        ok: true,
-        queuedReprocess: redact(intent),
-        freshNextGeneration: {
-          pending: true,
-          id: '',
-          reason: 'full-fresh',
-          requestedAt: nowIso(),
-          source: safeText(asObject(details).source || 'bar', 80) || 'bar'
-        }
-      };
-    }
-    const source = asObject(details);
-    if (!lastPreparedGeneration || !preparedGenerationIntegrityIsValid(lastPreparedGeneration)) {
+    const snapshot = await readSnapshot();
+    const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;
+    const manifest = await storage.loadPipelineRun(chatKey);
+    if (!manifest || manifest.state !== 'completed' || !manifest.turnKeyHash) {
       return { ok: false, reason: 'completed-turn-unavailable' };
     }
-    runState.setQueuedFullFresh({
-      id: makeId('fresh-next-generation'),
-      reason: 'user-fresh-next-generation',
-      requestedAt: nowIso(),
-      consumeByRunId: '',
-      source: safeText(source.source || 'bar', 80) || 'bar'
-    });
+    const intent = {
+      schema: QUEUED_REPROCESS_SCHEMA,
+      chatKey,
+      phase: 'preprocess',
+      turnKeyHash: manifest.turnKeyHash,
+      queuedAt: nowIso(),
+      mode: 'full-fresh',
+      stageIds: []
+    };
+    await storage.saveQueuedReprocess(chatKey, intent);
+    activeExecutionChatKey = chatKey;
+    queuedReprocessView = intent;
     clearPendingLatestAssistantSwipeRetry();
     settleRuntimeActivity({
       runId: makeId('queued-full-fresh'),
@@ -2853,32 +2743,23 @@ export function createRecursionRuntime({
     });
     return {
       ok: true,
-      freshNextGeneration: freshNextGenerationView()
+      queuedReprocess: redact(intent),
+      freshNextGeneration: {
+        pending: true,
+        id: '',
+        reason: 'full-fresh',
+        requestedAt: nowIso(),
+        source: safeText(asObject(details).source || 'bar', 80) || 'bar'
+      }
     };
   }
 
   async function clearQueuedFullFreshSwipe() {
-    if (durablePreprocess) {
-      const snapshot = await readSnapshot();
-      const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;
-      const intent = await storage.loadQueuedReprocess(chatKey, 'preprocess');
-      if (intent?.mode === 'full-fresh') await storage.clearQueuedReprocess(chatKey, 'preprocess');
-      queuedReprocessView = intent?.mode === 'full-fresh' ? null : intent;
-      settleRuntimeActivity({
-        runId: safeText(executionView?.operationId || makeId('queued-reprocess-canceled'), 180),
-        outcome: 'success',
-        phase: 'settled',
-        severity: 'success',
-        label: 'Queued reprocessing canceled.',
-        chips: ['Queued']
-      });
-      return {
-        ok: true,
-        queuedReprocess: queuedReprocessView ? redact(queuedReprocessView) : null,
-        freshNextGeneration: freshNextGenerationView()
-      };
-    }
-    clearPendingFreshNextGeneration();
+    const snapshot = await readSnapshot();
+    const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;
+    const intent = await storage.loadQueuedReprocess(chatKey, 'preprocess');
+    if (intent?.mode === 'full-fresh') await storage.clearQueuedReprocess(chatKey, 'preprocess');
+    queuedReprocessView = intent?.mode === 'full-fresh' ? null : intent;
     settleRuntimeActivity({
       runId: makeId('queued-reprocess-canceled'),
       outcome: 'success',
@@ -2889,6 +2770,7 @@ export function createRecursionRuntime({
     });
     return {
       ok: true,
+      queuedReprocess: queuedReprocessView ? redact(queuedReprocessView) : null,
       freshNextGeneration: freshNextGenerationView()
     };
   }
@@ -2998,7 +2880,6 @@ export function createRecursionRuntime({
     clearPreparedGeneration();
     lastPlan = null;
     lastSnapshot = null;
-    lastSavedSceneCacheRef = null;
     runState.clearLatestAssistantSwipeRetry();
     runState.clearAttempt?.();
     runState.clearQueuedFullFresh();
@@ -3132,7 +3013,7 @@ export function createRecursionRuntime({
   }
 
   async function reconcileDurableExecutionAfterSettingsChange() {
-    if (!durablePreprocess || !executionView?.operationId) return null;
+    if (!executionView?.operationId) return null;
     if (executionView.state === 'running') {
       await pauseOperation({ reason: 'settings-changed' });
     }
@@ -3162,8 +3043,9 @@ export function createRecursionRuntime({
     }
     if (isPipelineOnlySettingsChange(changedKeys)) {
       supersedeActiveRun();
+      const executionReconcile = reconcileDurableExecutionAfterSettingsChange();
       return trackRuntimeMutation(async () => {
-        await reconcileDurableExecutionAfterSettingsChange();
+        await executionReconcile;
         const clear = await clearPromptAfterSupersede({
           successLabel: 'Recursion prompt cleared after pipeline change.',
           journalReason: 'pipeline-mode-changed'
@@ -3183,11 +3065,9 @@ export function createRecursionRuntime({
     if (changedKeys.length > 0) {
       supersedeActiveRun();
       if (next.enabled === false) clearPreparedGeneration();
+      const executionReconcile = reconcileDurableExecutionAfterSettingsChange();
       const result = await trackRuntimeMutation(async () => {
-        await reconcileDurableExecutionAfterSettingsChange();
-        await invalidateActiveSceneCacheBestEffort('settings-changed', {
-          changedKeys
-        });
+        await executionReconcile;
         const clear = await clearPromptAfterSupersede({
           successLabel: next.enabled === false
             ? 'Recursion disabled. Prompt cleared.'
@@ -3244,7 +3124,7 @@ export function createRecursionRuntime({
 
     supersedeActiveRun();
     return trackRuntimeMutation(async () => {
-      await invalidateActiveSceneCacheBestEffort('settings-reset', { changedKeys });
+      await reconcileDurableExecutionAfterSettingsChange();
       const clear = await clearPromptAfterSupersede({
         successLabel: 'Recursion settings reset to defaults. Providers and decks were preserved.',
         journalReason: 'settings-reset'
@@ -3278,10 +3158,7 @@ export function createRecursionRuntime({
         before: beforeCapability,
         after: afterCapability
       });
-      await invalidateActiveSceneCacheBestEffort('provider-changed', {
-        lane: resolvedLane,
-        changedKeys: update.changedKeys
-      });
+      await reconcileDurableExecutionAfterSettingsChange();
       const clear = await clearPromptAfterSupersede({
         successLabel: 'Recursion prompt cleared after provider change.',
         journalReason: 'provider-changed'
@@ -3310,9 +3187,7 @@ export function createRecursionRuntime({
         before: beforeCapability,
         after: afterCapability
       });
-      await invalidateActiveSceneCacheBestEffort('provider-key-cleared', {
-        lane: resolvedLane
-      });
+      await reconcileDurableExecutionAfterSettingsChange();
       const clear = await clearPromptAfterSupersede({
         successLabel: 'Recursion prompt cleared after provider key change.',
         journalReason: 'provider-key-cleared'
@@ -3550,32 +3425,20 @@ export function createRecursionRuntime({
     });
   }
 
-  async function resetSceneCache() {
-    const runId = makeId('scene-reset');
+  async function resetTurnCache() {
+    const runId = makeId('turn-reset');
     supersedeActiveRun();
-    const durableOperationId = durablePreprocess
-      ? safeText(executionView?.operationId || '', 180)
-      : '';
-    if (durableOperationId) {
-      await executionScheduler.abandon({
-        operationId: durableOperationId,
-        reason: 'scene-cache-reset'
-      });
-    }
+    postProcessRuntime.cancelPostProcess('reset-turn-cache');
+    const operationId = safeText(executionView?.operationId || '', 180);
     return trackRuntimeMutation(async () => {
       startRuntimeActivity({
         runId,
         phase: 'storageProgress',
         mode: 'review',
         severity: 'info',
-        label: 'Resetting Recursion scene cache...',
-        chips: ['Cache']
+        label: 'Resetting current-turn Recursion data...',
+        chips: ['Turn']
       });
-      try {
-        await storageSaveTail.catch(() => {});
-      } catch {
-        // Storage save failures are already reported by their source.
-      }
       let snapshot = null;
       try {
         snapshot = await readSnapshot();
@@ -3584,57 +3447,51 @@ export function createRecursionRuntime({
       }
       lastSnapshot = snapshot;
       const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 160) || DEFAULT_CHAT_ID;
-      const sceneKey = safeText(snapshot.sceneKey || DEFAULT_SCENE_KEY, 160) || DEFAULT_SCENE_KEY;
-      const executionClear = durablePreprocess
-        ? await storage.clearPipelineExecution(chatKey)
-        : { ok: true };
-      if (durablePreprocess) {
-        if (durableOperationId) {
-          preprocessContexts.delete(durableOperationId);
-          preprocessGraphs.delete(durableOperationId);
-        }
-        executionView = null;
-        queuedReprocessView = null;
+      const revoke = operationId
+        ? await storage.revokeTurnExecution(chatKey, {
+            operationId,
+            reason: 'reset-turn-cache'
+          })
+        : { ok: true, revoked: false, reason: 'missing-operation' };
+      if (operationId) {
+        preprocessContexts.delete(operationId);
+        preprocessGraphs.delete(operationId);
       }
-      const result = typeof storage.clearSceneCache === 'function'
-        ? await storage.clearSceneCache(chatKey, sceneKey)
-        : { ok: false, reason: 'unsupported' };
-      if (result?.ok === false || executionClear?.ok === false) {
+      executionView = null;
+      queuedReprocessView = null;
+      if (revoke?.ok === false) {
         settleRuntimeActivity({
           runId,
           outcome: 'warning',
           phase: 'storageWarning',
           severity: 'warning',
-          label: 'Scene cache reset failed.',
-          chips: ['Cache'],
-          detail: redact(result)
+          label: 'Current-turn Recursion reset failed.',
+          chips: ['Turn'],
+          detail: redact(revoke)
         });
         return {
           ok: false,
           chatKey,
-          sceneKey,
-          result: redact(result),
-          executionClear: redact(executionClear),
+          revoke: redact(revoke),
           clear: null
         };
       }
       clearPreparedGeneration();
       lastPlan = null;
-      lastSavedSceneCacheRef = null;
       runState.clearLatestAssistantSwipeRetry();
       runState.clearQueuedFullFresh();
-      clearLastBrief({ status: 'empty', reason: 'scene-cache-reset' });
+      clearLastBrief({ status: 'empty', reason: 'reset-turn-cache' });
       stageRuntimeActivity({
         runId,
         phase: 'promptClearing',
         mode: 'review',
         severity: 'info',
-        label: 'Clearing Recursion prompt after scene cache reset...',
-        chips: ['Cache', 'Prompt']
+        label: 'Clearing Recursion prompt after current-turn reset...',
+        chips: ['Turn', 'Prompt']
       });
       const clear = await runPromptMutationSection(null, async () => {
         const clearResult = await clearPromptBestEffort(host);
-        await appendPromptClearedJournal(runId, promptClearContext(snapshot), clearResult, 'scene-cache-reset');
+        await appendPromptClearedJournal(runId, promptClearContext(snapshot), clearResult, 'reset-turn-cache');
         return clearResult;
       });
       if (clear?.ok === false) {
@@ -3642,9 +3499,7 @@ export function createRecursionRuntime({
         return {
           ok: false,
           chatKey,
-          sceneKey,
-          result: redact(result),
-          executionClear: redact(executionClear),
+          revoke: redact(revoke),
           clear
         };
       }
@@ -3653,15 +3508,13 @@ export function createRecursionRuntime({
         outcome: 'success',
         phase: 'settled',
         severity: 'success',
-        label: 'Scene cache reset. Prompt cleared.',
-        chips: ['Cache', 'Prompt']
+        label: 'Current-turn Recursion data reset. Prompt cleared.',
+        chips: ['Turn', 'Prompt']
       });
       return {
         ok: true,
         chatKey,
-        sceneKey,
-        result: redact(result),
-        executionClear: redact(executionClear),
+        revoke: redact(revoke),
         clear
       };
     });
@@ -3735,7 +3588,6 @@ export function createRecursionRuntime({
   async function clearForHostEvent({
     idPrefix,
     reason,
-    invalidationDetails = {},
     startLabel,
     successLabel,
     chips,
@@ -3743,13 +3595,13 @@ export function createRecursionRuntime({
     settleSeverity = 'success',
     clearVolatileState = true,
     preserveLastBrief = false,
-    invalidateCache = true,
     clearSwipeRetry = true
   }) {
     postProcessRuntime.cancelPostProcess(reason);
     const runId = makeId(idPrefix);
     if (clearSwipeRetry) clearPendingLatestAssistantSwipeRetry();
     clearPendingFreshNextGeneration();
+    await pauseOperation({ reason });
     supersedeActiveRun();
     return trackRuntimeMutation(async () => {
       const clearContext = promptClearContext();
@@ -3761,7 +3613,6 @@ export function createRecursionRuntime({
         label: startLabel,
         chips
       });
-      if (invalidateCache) await invalidateActiveSceneCacheBestEffort(reason, invalidationDetails);
       if (clearVolatileState) clearVolatileSceneState({ preserveLastBrief });
       const clear = await runPromptMutationSection(null, async () => {
         const clearResult = await clearPromptBestEffort(host);
@@ -3788,25 +3639,16 @@ export function createRecursionRuntime({
     return clearForHostEvent({
       idPrefix: 'chat-change',
       reason: 'chat-changed',
-      invalidationDetails: { source: 'host-event' },
       startLabel: 'Clearing Recursion prompt after chat change...',
       successLabel: 'Chat changed. Recursion prompt cleared.',
       chips: ['Chat', 'Prompt']
     });
   }
 
-  async function handleSourceChanged(details = {}) {
-    const source = asObject(details);
-    const eventName = safeText(source.eventName || source.event || '', 80);
-    const messageId = finiteNumberOrNull(source.messageId ?? source.mesid ?? source.id);
+  async function handleSourceChanged() {
     return clearForHostEvent({
       idPrefix: 'source-change',
       reason: 'source-changed',
-      invalidationDetails: {
-        source: 'host-event',
-        ...(eventName ? { eventName } : {}),
-        ...(messageId !== null ? { messageId } : {})
-      },
       startLabel: 'Clearing Recursion prompt after source message change...',
       successLabel: 'Source messages changed. Recursion prompt cleared.',
       chips: ['Source', 'Prompt'],
@@ -3860,8 +3702,9 @@ export function createRecursionRuntime({
           })
         : Promise.resolve(null);
       postProcessRuntime.cancelPostProcess('host-generation-stopped');
+      const postProcessSettlement = postProcessRuntime.waitForPostProcessSettlement();
       const cancellation = cancelActiveProseEnhancement('prose-enhancement-canceled');
-      await Promise.all([cancellation, stopJournal]);
+      await Promise.all([cancellation, stopJournal, postProcessSettlement]);
       try {
         await host.messages?.removeEmptyAssistantSwipePlaceholders?.(source.messageId);
       } catch {
@@ -3881,11 +3724,6 @@ export function createRecursionRuntime({
       const result = await clearForHostEvent({
         idPrefix: 'host-stop',
         reason: 'host-generation-stopped',
-        invalidationDetails: {
-          source: safeText(source.source || 'host-event', 80),
-          ...(eventName ? { eventName } : {}),
-          ...(source.hostStop ? { hostStop: redact(source.hostStop) } : {})
-        },
         startLabel: 'Stopping Recursion after generation cancel...',
         successLabel: preserveLastKnownGood
           ? 'Swipe stopped; previous context preserved.'
@@ -3894,7 +3732,6 @@ export function createRecursionRuntime({
         outcome: 'skipped',
         settleSeverity: 'info',
         clearVolatileState: false,
-        invalidateCache: false,
         clearSwipeRetry: false
       });
       runState.clearAttempt?.(attempt?.runId);
@@ -5520,14 +5357,12 @@ export function createRecursionRuntime({
     const task = (async () => {
       postProcessRuntime.cancelPostProcess('stop-generation');
       cancelPendingProseEnhancement('prose-enhancement-canceled');
-      if (durablePreprocess) {
-        await pauseOperation({ reason: 'user-stop' });
-      }
-      supersedeActiveRun();
       recursionStopRequest = {
         source: safeText(details.source || 'recursion-ui', 80),
         requestedAt: nowIso()
       };
+      await pauseOperation({ reason: 'user-stop' });
+      supersedeActiveRun();
       const hostStop = await requestHostGenerationStop(details);
       const cleanup = await handleHostGenerationStopped({
         source: 'recursion-ui',
@@ -5802,110 +5637,6 @@ export function createRecursionRuntime({
     });
   }
 
-  function reportCacheContractStatus(runId, status) {
-    if (!isActiveRun(runId)) return;
-    stageRuntimeActivity({
-      runId,
-      phase: 'cacheWarning',
-      severity: 'info',
-      label: status.hard
-        ? 'Scene cache contract changed; rebuilding cache.'
-        : 'Scene cache settings changed; reviewing cached cards.',
-      chips: ['Cache'],
-      detail: {
-        reason: status.reason,
-        ...(status.missing?.length ? { missing: status.missing.slice(0, 12) } : {}),
-        ...(status.mismatches?.length ? { mismatches: status.mismatches.slice(0, 12) } : {})
-      }
-    });
-  }
-
-  async function invalidateLoadedSceneCache(runId, snapshot, status, cacheState) {
-    if (typeof storage.invalidateSceneCache !== 'function') return null;
-    try {
-      return await storage.invalidateSceneCache(snapshot.chatKey, snapshot.sceneKey, {
-        reason: status.reason,
-        cacheState,
-        runId,
-        details: {
-          ...(status.missing?.length ? { missing: status.missing.slice(0, 12) } : {}),
-          ...(status.mismatches?.length ? { mismatches: status.mismatches.slice(0, 12) } : {})
-        }
-      });
-    } catch (error) {
-      reportStorageWarning(runId, 'invalidateSceneCache', error);
-      return null;
-    }
-  }
-
-  async function loadSceneCacheSafe(runId, snapshot, settings) {
-    try {
-      const cache = await storage.loadSceneCache(snapshot.chatKey, snapshot.sceneKey);
-      if (!cache) return null;
-      const cacheState = cleanString(cache.cacheState, 'active');
-      if (cacheState === 'invalid' || cacheState === 'retired') {
-        return null;
-      }
-      const status = cacheContractStatus(cache, settings);
-      if (status.hard) {
-        reportCacheContractStatus(runId, status);
-        await invalidateLoadedSceneCache(runId, snapshot, status, 'invalid');
-        return null;
-      }
-      if (status.soft) {
-        reportCacheContractStatus(runId, status);
-        const invalidation = {
-          reason: status.reason,
-          detectedAt: nowIso(),
-          details: {
-            ...(status.missing?.length ? { missing: status.missing.slice(0, 12) } : {}),
-            ...(status.mismatches?.length ? { mismatches: status.mismatches.slice(0, 12) } : {})
-          }
-        };
-        await invalidateLoadedSceneCache(runId, snapshot, status, 'stale');
-        return {
-          ...cache,
-          cacheState: 'stale',
-          invalidation
-        };
-      }
-      return cache;
-    } catch (error) {
-      reportStorageWarning(runId, 'loadSceneCache', error);
-      return null;
-    }
-  }
-
-  async function saveSceneCacheSafe(runId, snapshot, value) {
-    try {
-      const result = await storage.saveSceneCache(snapshot.chatKey, snapshot.sceneKey, value);
-      if (result?.storageStatus?.persisted === false) {
-        lastSavedSceneCacheRef = null;
-      } else {
-        lastSavedSceneCacheRef = {
-          chatKey: snapshot.chatKey,
-          sceneKey: snapshot.sceneKey
-        };
-        await maintainRetentionSafe(runId, snapshot);
-      }
-      return result;
-    } catch (error) {
-      reportStorageWarning(runId, 'saveSceneCache', error);
-      return null;
-    }
-  }
-
-  async function maintainRetentionSafe(runId, snapshot) {
-    if (typeof storage.maintainRetention !== 'function') return null;
-    try {
-      return await storage.maintainRetention({
-        activeScene: { chatKey: snapshot.chatKey, sceneKey: snapshot.sceneKey }
-      });
-    } catch (error) {
-      reportStorageWarning(runId, 'maintainRetention', error);
-      return null;
-    }
-  }
 
   async function appendJournalSafe(runId, chatKey, entry) {
     try {
@@ -5923,12 +5654,13 @@ export function createRecursionRuntime({
         sceneKey: snapshot.sceneKey
       };
     }
-    if (lastSavedSceneCacheRef?.chatKey) {
+    if (lastSnapshot?.chatKey) {
       return {
-        chatKey: lastSavedSceneCacheRef.chatKey,
-        sceneKey: lastSavedSceneCacheRef.sceneKey
+        chatKey: lastSnapshot.chatKey,
+        sceneKey: lastSnapshot.sceneKey
       };
     }
+    if (activeExecutionChatKey) return { chatKey: activeExecutionChatKey, sceneKey: '' };
     return null;
   }
 
@@ -6002,23 +5734,6 @@ export function createRecursionRuntime({
         omittedCount: omittedCards.length
       }
     });
-  }
-
-  async function invalidateActiveSceneCacheBestEffort(reason, details = {}) {
-    try {
-      await storageSaveTail.catch(() => {});
-    } catch {
-      // Storage save failures are already normalized by their source.
-    }
-    if (!lastSavedSceneCacheRef || typeof storage.invalidateSceneCache !== 'function') return null;
-    try {
-      return await storage.invalidateSceneCache(lastSavedSceneCacheRef.chatKey, lastSavedSceneCacheRef.sceneKey, {
-        reason,
-        details
-      });
-    } catch {
-      return null;
-    }
   }
 
   function messageIds(snapshot) {
@@ -6178,8 +5893,15 @@ export function createRecursionRuntime({
 
   async function recheckPromptInstallSnapshot(runId, expectedSnapshot, plan, pendingUserMessage, options = {}) {
     try {
+      const observedSnapshot = await readSnapshot();
+      const latestAssistant = options.withoutLatestAssistant === true
+        ? latestVisibleAssistantEntry(observedSnapshot)
+        : null;
+      const sourceSnapshot = latestAssistant
+        ? (snapshotWithoutLatestAssistant(observedSnapshot, latestAssistant) || observedSnapshot)
+        : observedSnapshot;
       const currentSnapshot = snapshotForPlan(
-        snapshotWithPendingUserMessage(await readSnapshot(), pendingUserMessage),
+        snapshotWithPendingUserMessage(sourceSnapshot, pendingUserMessage),
         plan
       );
       if (!snapshotsMatchForPromptInstall(expectedSnapshot, currentSnapshot, pendingUserMessage, options)) {
@@ -6850,6 +6572,27 @@ export function createRecursionRuntime({
         ...(scoped.diagnostics || [])
       )
     };
+    const manualCoverage = reconcileManualForcedCardJobs({
+      plan,
+      settings: context.settings,
+      cacheCards: [],
+      forceContext: context.turnIdentity
+    });
+    plan = {
+      ...plan,
+      cardJobs: manualCoverage.cardJobs,
+      budgets: {
+        ...plan.budgets,
+        maxCards: Math.max(
+          budgetOr(plan.budgets?.maxCards, 0),
+          manualCoverage.forcedFamilies.length
+        )
+      },
+      diagnostics: mergeDiagnostics(
+        plan.diagnostics,
+        manualCoverage.diagnostics
+      )
+    };
     plan = budgetCardJobsForGeneration(
       plan,
       runPolicyForEffectivePlan(context.settings, plan),
@@ -6944,13 +6687,20 @@ export function createRecursionRuntime({
         context.settings,
         runtimeProviderCapability
       ));
-    const requestByFamily = new Map(
-      requests.map((request) => [safeText(request.metadata?.family || '', 120), request])
+    const requestByKey = new Map();
+    for (const request of requests) {
+      for (const key of [request.metadata?.family, request.roleId]) {
+        const normalized = safeText(key || '', 120);
+        if (normalized) requestByKey.set(normalized, request);
+      }
+    }
+    const requestForSelectedCard = (selectedCard) => requestByKey.get(
+      safeText(selectedCard?.family || selectedCard?.role || selectedCard?.roleId || '', 120)
     );
     return createSegmentedCardStages({
       selectedCards: plan.cardJobs,
       createCardRequest(selectedCard) {
-        return requestByFamily.get(safeText(selectedCard?.family || '', 120)) || null;
+        return requestForSelectedCard(selectedCard) || null;
       },
       async generateCard(request, { signal }) {
         if (!request || !generationRouter || typeof generationRouter.generate !== 'function') {
@@ -6966,7 +6716,7 @@ export function createRecursionRuntime({
         );
       },
       validateCard(result, { selectedCard, reuse = false }) {
-        const request = requestByFamily.get(safeText(selectedCard?.family || '', 120));
+        const request = requestForSelectedCard(selectedCard);
         if (
           reuse
           && safeText(result?.family || '', 120) === safeText(selectedCard?.family || '', 120)
@@ -7344,18 +7094,32 @@ export function createRecursionRuntime({
           storyForm: plan.storyForm || UNKNOWN_STORY_FORM
         });
       },
-      run({ request, signal }) {
+      async run({ request, signal }) {
         if (!generationRouter || typeof generationRouter.generate !== 'function') {
-          throw Object.assign(new Error('Guidance provider is unavailable.'), {
-            code: 'RECURSION_GUIDANCE_PROVIDER_UNAVAILABLE',
-            retryable: false
-          });
+          return {
+            ok: false,
+            error: {
+              code: 'RECURSION_GUIDANCE_PROVIDER_UNAVAILABLE',
+              message: 'Guidance provider is unavailable.'
+            }
+          };
         }
-        return generationRouter.generate(
-          request.roleId,
-          { ...request.request, signal },
-          { runId: context.runId, signal }
-        );
+        try {
+          return await generationRouter.generate(
+            request.roleId,
+            { ...request.request, signal },
+            { runId: context.runId, signal }
+          );
+        } catch (error) {
+          return {
+            ok: false,
+            error: sanitizePromptError(
+              error,
+              'RECURSION_GUIDANCE_PROVIDER_FAILED',
+              'Guidance provider failed.'
+            )
+          };
+        }
       },
       validate(result, validationContext = {}) {
         if (
@@ -7366,10 +7130,26 @@ export function createRecursionRuntime({
         ) {
           return { ok: true, value: result };
         }
-        return validateGuidanceStageResult(result, {
+        const validation = validateGuidanceStageResult(result, {
           hand: validationContext.dependencies?.['preprocess.hand']?.artifact,
           snapshot: context.snapshot
         });
+        if (validation.ok === true) return validation;
+        const fallbackReason = safeText(validation.error?.reason || 'guidance-invalid', 180);
+        return {
+          ok: true,
+          value: {
+            schema: PROMPT_GUIDANCE_SCHEMA,
+            status: 'fallback-raw-only',
+            text: 'Guidance unavailable; use the raw Recursion card evidence directly.',
+            sourceCardIds: [],
+            guardrailCardIds: [],
+            omittedCardIds: [],
+            diagnostics: [fallbackReason],
+            invalidSourceIdCount: 0,
+            fallbackReason
+          }
+        };
       },
       buildCorrectionRequest({ request, error, attempt }) {
         return {
@@ -7469,10 +7249,12 @@ export function createRecursionRuntime({
           context.runId,
           context.snapshot,
           plan,
-          context.pendingUserMessage
+          context.pendingUserMessage,
+          { withoutLatestAssistant: context.generationType === 'swipe' }
         );
         if (freshness.ok === false) {
           return {
+            ok: false,
             installed: false,
             settled: true,
             failureClass: 'host-source-stale',
@@ -7483,6 +7265,7 @@ export function createRecursionRuntime({
         if (install?.ok === false) {
           await clearPromptBestEffort(host);
           return {
+            ok: false,
             installed: false,
             settled: true,
             failureClass: 'host-install-rejected',
@@ -7495,6 +7278,7 @@ export function createRecursionRuntime({
           };
         }
         return {
+          ok: true,
           installed: true,
           settled: true,
           failureClass: '',
@@ -7678,6 +7462,42 @@ export function createRecursionRuntime({
     if (!plan) throw new Error('Durable Arbiter checkpoint artifact is unavailable.');
     lastPlan = plan;
 
+    if (planAction(plan) === 'skip') {
+      const clear = await clearPromptBestEffort(host);
+      clearPreparedGeneration();
+      executionView = manifest;
+      await appendJournalSafe(context.runId, context.chatKey, {
+        event: 'prompt.install_skipped',
+        severity: clear?.ok === false ? 'warn' : 'info',
+        summary: 'Utility Arbiter skipped Recursion prompt installation.',
+        runId: context.runId,
+        sceneKey: context.snapshot.sceneKey,
+        details: { reason: 'arbiter-skip' }
+      });
+      if (clear?.ok === false) {
+        reportClearWarning(context.runId, clear);
+      } else {
+        settleRuntimeActivity({
+          runId: context.runId,
+          outcome: 'success',
+          phase: 'settled',
+          severity: 'success',
+          label: 'Recursion skipped by Utility Arbiter.'
+        });
+      }
+      clearActiveRun(context.runId);
+      return {
+        ok: true,
+        skipped: true,
+        reason: 'arbiter-skip',
+        clear,
+        plan,
+        execution: manifest,
+        continuePrimaryGeneration: true,
+        recursionPromptInstalled: false
+      };
+    }
+
     let segmentedFallback = false;
     if (context.settings.pipelineMode === 'fused') {
       const fusedRecord = manifest.stageRecords?.['preprocess.cards.fused'];
@@ -7768,10 +7588,10 @@ export function createRecursionRuntime({
       context.settings,
       context.turnIdentity
     );
-    if (candidate) commitPreparedGeneration(candidate);
+    const installed = installSettlement?.installed === true;
+    if (candidate && installed) commitPreparedGeneration(candidate);
     lastPlan = plan;
     lastSnapshot = context.snapshot;
-    const installed = installSettlement?.installed === true;
     if (installed) {
       readyLastBrief({ runId: context.runId, reason: 'packet-installed' });
       try {
@@ -7795,6 +7615,16 @@ export function createRecursionRuntime({
         runId: context.runId
       });
     }
+    await appendHandSelectedJournal(context.runId, context.snapshot, hand, packet);
+    await appendJournalSafe(context.runId, context.chatKey, {
+      event: installed ? 'prompt.installed' : 'prompt.install_failed',
+      severity: installed ? 'info' : 'warn',
+      summary: installSummary(installSettlement),
+      runId: context.runId,
+      sceneKey: context.snapshot.sceneKey,
+      details: installJournalDetails(installSettlement),
+      hashes: { promptPacketHash: hashJson(packet) }
+    });
     settleRuntimeActivity({
       runId: context.runId,
       outcome: installed ? 'success' : 'warning',
@@ -7802,6 +7632,7 @@ export function createRecursionRuntime({
       severity: installed ? 'success' : 'warning',
       label: installed ? 'Recursion prompt ready.' : INSTALL_FAILURE_LABEL
     });
+    clearActiveRun(context.runId);
     return {
       ok: true,
       packet,
@@ -8143,8 +7974,18 @@ export function createRecursionRuntime({
     lastSnapshot = snapshot;
     const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;
     activeExecutionChatKey = chatKey;
-    const existingPromise = durablePreparePromises.get(chatKey);
-    if (existingPromise) return existingPromise;
+    const existingPrepare = durablePreparePromises.get(chatKey);
+    if (existingPrepare) {
+      if (existingPrepare.turnKeyHash === turnIdentity.turnKeyHash) {
+        return existingPrepare.promise;
+      }
+      try {
+        await existingPrepare.promise;
+      } catch {
+        // A distinct turn still needs its own attempt after the prior one settles.
+      }
+      return prepareForGenerationDurable({ userMessage, hostGeneration, generationType });
+    }
     const run = (async () => {
       const storedManifest = await storage.loadPipelineRun(chatKey);
       const classification = classifyGeneration({
@@ -8336,9 +8177,11 @@ export function createRecursionRuntime({
         diagnosticClassification
       });
     })().finally(() => {
-      durablePreparePromises.delete(chatKey);
+      if (durablePreparePromises.get(chatKey)?.promise === run) {
+        durablePreparePromises.delete(chatKey);
+      }
     });
-    durablePreparePromises.set(chatKey, run);
+    durablePreparePromises.set(chatKey, { turnKeyHash: turnIdentity.turnKeyHash, promise: run });
     return run;
   }
 
@@ -8355,7 +8198,7 @@ export function createRecursionRuntime({
       await postProcessRuntime.waitForPostProcessSettlement();
     }
     setHostGenerationActive(hostGeneration);
-    if (durablePreprocess && settings.enabled !== false) {
+    if (settings.enabled !== false) {
       await waitForExternalMutations();
       const runId = makeId('run');
       let preGenerationSourceIdentity = null;
@@ -8366,6 +8209,29 @@ export function createRecursionRuntime({
           preGenerationSourceIdentity = null;
         }
         armProseEnhancementForHostGeneration(settings, runId);
+        if (pendingProseEnhancement?.blockedCapability) {
+          stageRuntimeActivity({
+            runId,
+            phase: 'editorialPreflight',
+            severity: 'warning',
+            outcome: 'skipped',
+            label: pendingProseEnhancement.blockedCapability.message,
+            chips: ['Enhancement', 'Redirect', 'Skipped'],
+            detail: pendingProseEnhancement.blockedCapability
+          });
+        }
+        if (pendingProseEnhancement?.cautionCapability) {
+          stageRuntimeActivity({
+            runId,
+            phase: 'providerCaution',
+            severity: 'warning',
+            outcome: 'warning',
+            label: pendingProseEnhancement.cautionCapability.message,
+            chips: ['Enhancement', 'Provider untested'],
+            detail: pendingProseEnhancement.cautionCapability
+          });
+          pendingProseEnhancement.cautionReported = true;
+        }
       } else {
         postProcessRuntime.cancelPostProcess('not-host-generation');
         clearPendingProseEnhancement();
@@ -8373,11 +8239,27 @@ export function createRecursionRuntime({
       if (explicitSwipe && !runState.current().pendingLatestAssistantSwipeRetry) {
         markLatestAssistantSwipeRetry({ eventName: 'host-generation-swipe' });
       }
-      const durableResult = await prepareForGenerationDurable({
-        userMessage: explicitSwipe ? '' : userMessage,
-        hostGeneration,
-        generationType
-      });
+      let durableResult;
+      try {
+        durableResult = await prepareForGenerationDurable({
+          userMessage: explicitSwipe ? '' : userMessage,
+          hostGeneration,
+          generationType
+        });
+      } catch (error) {
+        const failure = failureFromError(error, { stage: 'started', category: 'internal' });
+        settleRuntimeActivity({
+          runId,
+          phase: 'settled',
+          logicalStage: 'started',
+          severity: 'error',
+          label: 'Recursion failed before generation.',
+          detail: { failure }
+        });
+        const safeError = new Error(failure.message);
+        safeError.code = failure.code;
+        throw safeError;
+      }
       const preprocessTurnKeyHash = safeText(
         durableResult?.execution?.turnKeyHash || lastTurnScope?.turnKeyHash || '',
         180
@@ -8422,588 +8304,6 @@ export function createRecursionRuntime({
       return { ok: true, skipped: true, reason: 'disabled', clear };
     }
 
-    await waitForExternalMutations();
-    let pendingUserMessage = normalizePendingUserMessage(userMessage);
-    const runId = makeId('run');
-    if (hostGeneration === true) {
-      let preGenerationSourceIdentity = null;
-      try {
-        preGenerationSourceIdentity = await host?.messages?.postProcessSourceIdentity?.() || null;
-      } catch {
-        preGenerationSourceIdentity = null;
-      }
-      postProcessRuntime.preparePostProcessTrigger({
-        preprocessTurnKeyHash: safeText(
-          lastPreparedGeneration?.basis?.turnKeyHash || lastTurnScope?.turnKeyHash || '',
-          180
-        ),
-        preGenerationSourceIdentity,
-        generationType: hostGenerationType || 'normal'
-      });
-    }
-    else postProcessRuntime.cancelPostProcess('not-host-generation');
-    if (hostGeneration === true) armProseEnhancementForHostGeneration(settings, runId);
-    else clearPendingProseEnhancement();
-    const signal = startRun(runId);
-    if (explicitSwipe) {
-      // SillyTavern's swipe interceptor payload can end on the preceding user row
-      // while the authoritative host snapshot still contains the assistant row.
-      pendingUserMessage = normalizePendingUserMessage('');
-    }
-    if (hostGeneration === true && !explicitSwipe && runState.current().queuedFullFresh) {
-      clearPendingFreshNextGeneration();
-    }
-    const freshContext = hostGeneration === true && explicitSwipe
-      ? consumePendingFreshNextGeneration(runId)
-      : null;
-    const freshReason = freshContext
-      ? 'user-fresh-next-generation'
-      : (explicitRegenerate ? 'host-regenerate' : '');
-    const modeChip = settings.mode === 'manual' ? 'Manual' : 'Auto';
-    startRuntimeActivity({ runId, label: 'Reading current turn...', chips: [modeChip] });
-    if (pendingProseEnhancement?.blockedCapability) {
-      stageRuntimeActivity({
-        runId,
-        phase: 'editorialPreflight',
-        severity: 'warning',
-        outcome: 'skipped',
-        label: pendingProseEnhancement.blockedCapability.message,
-        chips: ['Enhancement', 'Redirect', 'Skipped'],
-        detail: pendingProseEnhancement.blockedCapability
-      });
-    }
-    if (pendingProseEnhancement?.cautionCapability) {
-      stageRuntimeActivity({
-        runId,
-        phase: 'providerCaution',
-        severity: 'warning',
-        outcome: 'warning',
-        label: pendingProseEnhancement.cautionCapability.message,
-        chips: ['Enhancement', 'Provider untested'],
-        detail: pendingProseEnhancement.cautionCapability
-      });
-      pendingProseEnhancement.cautionReported = true;
-    }
-    if (explicitSwipe && !runState.current().pendingLatestAssistantSwipeRetry) {
-      // SillyTavern passes `swipe` directly to the interceptor after changing the active swipe.
-      // This is the authoritative signal; MESSAGE_SWIPED remains only a UI/navigation fallback.
-      markLatestAssistantSwipeRetry({ eventName: 'host-generation-swipe' });
-    }
-    const hasSwipeRetry = explicitSwipe || Boolean(runState.current().pendingLatestAssistantSwipeRetry);
-    if (lastBrief.status !== 'clearing') {
-      clearLastBrief({
-        status: 'clearing',
-        reason: freshReason || (hasSwipeRetry ? 'latest-assistant-swipe' : (refreshReason || 'generation-started')),
-        runId
-      });
-    }
-    try {
-      const hostSnapshot = await readSnapshot();
-      if (!pendingUserMessage.text && hostGeneration === true) {
-        const latest = latestVisibleMessage(hostSnapshot);
-        if (latest?.role === 'user' && safeText(latest.text || '', PROVIDER_MESSAGE_TEXT_LIMIT)) {
-          pendingUserMessage = normalizePendingUserMessage({
-            text: latest.text,
-            mesid: latest.mesid
-          });
-        }
-      }
-      const bypassSwipeReuse = Boolean(refreshReason || freshContext || explicitRegenerate);
-      const baseSnapshot = hostSnapshot;
-      const snapshot = snapshotWithPendingUserMessage(baseSnapshot, pendingUserMessage);
-      if (!isActiveRun(runId)) return supersededResult(runId);
-      runState.beginAttempt?.({
-        runId,
-        kind: (freshContext || explicitRegenerate) ? 'fresh' : (hasSwipeRetry ? 'swipe' : 'normal'),
-        sourceRevisionHash: activeSourceRevisionHash(snapshot),
-        packetId: preparedPacket()?.packetId
-      });
-      const swipeRetry = hasSwipeRetry && !bypassSwipeReuse
-        ? runState.takeLatestAssistantSwipeRetry()
-        : null;
-      if (bypassSwipeReuse) {
-        clearPendingLatestAssistantSwipeRetry();
-        recordCacheDecision(runId, {
-          decision: 'bypassed',
-          kind: 'prepared-generation',
-          reason: explicitRegenerate ? 'explicit-regenerate' : 'force-fresh'
-        });
-      } else if (hasSwipeRetry) {
-        const swipeMessageId = finiteNumberOrNull(swipeRetry?.messageId);
-        const swipeBasis = generationBasisForLatestAssistantSwipe(
-          hostSnapshot,
-          swipeMessageId,
-          settings
-        );
-        if (!swipeBasis) {
-          recordCacheDecision(runId, {
-            decision: 'miss',
-            kind: 'prepared-generation',
-            reason: 'swipe-basis-unavailable'
-          });
-        } else {
-          const reuse = await tryPreparedGenerationReuse(runId, {
-            basis: swipeBasis,
-            settings,
-            swipe: true,
-            swipeMessageId
-          });
-          if (reuse.reused || reuse.preparedMatch) return reuse;
-        }
-      } else {
-        const directBasis = generationBasisForSnapshot(snapshot, settings);
-        const reuse = await tryPreparedGenerationReuse(runId, {
-          basis: directBasis,
-          settings,
-          pendingUserMessage
-        });
-        if (reuse.reused || reuse.preparedMatch) return reuse;
-      }
-      clearPendingLatestAssistantSwipeRetry();
-      lastSnapshot = snapshot;
-      const invalidationReason = freshReason || refreshReason;
-      if (invalidationReason && typeof storage.invalidateSceneCache === 'function') {
-        await runStorageSaveSection(runId, async () => {
-          try {
-            return await storage.invalidateSceneCache(snapshot.chatKey, snapshot.sceneKey, {
-              reason: invalidationReason,
-              runId,
-              details: freshContext
-                ? freshNextGenerationDetails(freshContext, snapshot)
-                : { latestMesId: snapshot.latestMesId }
-            });
-          } catch {
-            // Refresh invalidation is best-effort; missing caches and storage failures should not block preparation.
-            return null;
-          }
-        });
-        if (!isActiveRun(runId)) return supersededResult(runId);
-      }
-      const initialCache = freshStaleSceneCache(
-        await loadSceneCacheSafe(runId, snapshot, settings),
-        freshContext,
-        snapshot
-      );
-      if (!isActiveRun(runId)) return supersededResult(runId);
-      const freshDiagnostics = freshContext
-        ? [
-            'fresh-next-generation:user-requested',
-            'fresh-next-generation:cache-bypassed'
-          ]
-        : [];
-      const fallbackPlan = localFallbackPlan(snapshot, settings);
-      fallbackPlan.source = {
-        ...fallbackPlan.source,
-        userMessageHash: hashJson(pendingUserMessage.text),
-        catalogHash: hashJson(CARD_CATALOG)
-      };
-      const arbiterSnapshot = snapshotWithoutVisiblePendingUserMessage(snapshot, pendingUserMessage);
-      const latestAssistant = latestVisibleAssistantEntry(arbiterSnapshot);
-      const latestAssistantText = latestAssistant?.message?.text || '';
-      let plan = await askUtilityArbiter({
-        runId,
-        snapshot: arbiterSnapshot,
-        settings,
-        fallbackPlan,
-        sceneCache: initialCache,
-        userMessage: pendingUserMessage.text,
-        signal
-      });
-      if (settings.storyFormOverride && settings.storyFormOverride !== 'auto') {
-        const forced = forcedStoryForm(settings.storyFormOverride);
-        if (forced) plan = { ...plan, storyForm: normalizeStoryForm(forced) };
-      } else {
-        plan = { ...plan, storyForm: normalizeStoryFormWithHeuristic(plan.storyForm, UNKNOWN_STORY_FORM, latestAssistantText) };
-      }
-      plan = enforceReasonerAvailability(plan, settings, runtimeProviderCapability);
-      plan = applyReasoningPolicyToPlan(plan, settings);
-      plan = applyBehaviorPolicyToPlan(plan, settings);
-      const scopedCardJobs = filterCardJobsForRuntimeScope(plan.cardJobs, settings);
-      const activeCacheForManual = activeSceneCacheVariant(initialCache, snapshot);
-      const manualReconciled = reconcileManualForcedCardJobs({
-        plan: { ...plan, cardJobs: scopedCardJobs.cardJobs },
-        settings,
-        cacheCards: cardsWithOrigin(sanitizedCacheCards(runId, snapshot, activeCacheForManual.cards), 'cache'),
-        forceContext: freshContext,
-        snapshot
-      });
-      const manualForcedFamilies = manualReconciled.forcedFamilies;
-      const prioritySelection = prioritySelectionForSettings(settings);
-      const forcedFamiliesForSelection = mergeForcedFamilies(prioritySelection.forcedFamilies, manualForcedFamilies);
-      plan = {
-        ...plan,
-        cardJobs: manualReconciled.cardJobs,
-        ...(manualReconciled.synthesizedFamilies.length && planAction(plan) === 'reuse-cache' ? { action: 'compose-brief' } : {}),
-        budgets: settings.mode === 'manual'
-          ? {
-              ...asObject(plan.budgets),
-              maxCards: Math.max(budgetOr(plan.budgets?.maxCards, 6), manualForcedFamilies.length)
-            }
-          : plan.budgets,
-        diagnostics: mergeDiagnostics(
-          plan.diagnostics,
-          freshDiagnostics,
-          scopeOmissionReasons(scopedCardJobs.omitted),
-          ...(scopedCardJobs.diagnostics || []),
-          autoScopeExceptionReasons(scopedCardJobs.cardJobs, settings),
-          prioritySelection.diagnostics,
-          manualReconciled.diagnostics
-        )
-      };
-      plan = budgetCardJobsForGeneration(
-        plan,
-        runPolicyForEffectivePlan(settings, plan),
-        forcedFamiliesForSelection
-      ).plan;
-      if (!isActiveRun(runId)) return supersededResult(runId);
-      lastPlan = plan;
-      const sceneSnapshot = snapshotForPlan(snapshot, plan);
-      if (sceneSnapshot !== snapshot) {
-        lastSnapshot = sceneSnapshot;
-      }
-      if (freshContext && planAction(plan) === 'reuse-cache') {
-        plan = {
-          ...plan,
-          action: 'compose-brief',
-          diagnostics: mergeDiagnostics(plan.diagnostics, ['fresh-next-generation:reuse-cache-overridden'])
-        };
-        lastPlan = plan;
-      }
-      const action = planAction(plan);
-      if (action === 'skip') {
-        const clear = await runPromptMutationSection(runId, async () => {
-          const result = await clearPromptBestEffort(host);
-          if (result?.superseded) return result;
-          if (!isActiveRun(runId)) return supersededResult(runId);
-          await appendPromptClearedJournal(runId, promptClearContext(sceneSnapshot), result, 'arbiter-skip');
-          return result;
-        });
-        if (clear?.superseded) return clear;
-        if (!isActiveRun(runId)) return supersededResult(runId);
-        if (clear?.ok === false) {
-          reportClearWarning(runId, clear);
-        } else {
-          settleRuntimeActivity({
-            runId,
-            outcome: 'success',
-            label: 'Recursion skipped by Utility Arbiter.'
-          });
-        }
-        return { ok: true, skipped: true, reason: 'arbiter-skip', plan, clear };
-      }
-
-      const cache = sceneSnapshot.chatKey === snapshot.chatKey && sceneSnapshot.sceneKey === snapshot.sceneKey
-        ? initialCache
-        : freshStaleSceneCache(await loadSceneCacheSafe(runId, sceneSnapshot, settings), freshContext, sceneSnapshot);
-      if (!isActiveRun(runId)) return supersededResult(runId);
-      const scopedCardOmissionDiagnostics = [];
-      const filterScopedCards = (cards) => {
-        const scoped = filterCardsForRuntimeScope(cards, settings);
-        scopedCardOmissionDiagnostics.push(
-          ...scopeOmissionReasons(scoped.omitted),
-          ...autoScopeExceptionReasons(scoped.cards, settings)
-        );
-        return scoped.cards;
-      };
-      const activeCache = activeSceneCacheVariant(cache, sceneSnapshot);
-      const cacheCards = freshContext
-        ? []
-        : filterScopedCards(cardsWithOrigin(sanitizedCacheCards(runId, sceneSnapshot, activeCache.cards), 'cache'));
-      const reuseCacheOnly = !freshContext && action === 'reuse-cache' && cacheCards.length > 0;
-      stageRuntimeActivity({
-        runId,
-        phase: reuseCacheOnly ? 'cacheReusing' : 'cardBatchRunning',
-        label: reuseCacheOnly ? 'Reusing scene deck...' : 'Generating scene cards...',
-        cardCounts: { requested: plan.cardJobs?.length || 0 },
-        chips: ['Cards']
-      });
-      recordCacheDecision(runId, {
-        decision: reuseCacheOnly ? 'hit' : 'miss',
-        kind: 'scene-cards',
-        reason: reuseCacheOnly ? 'arbiter-reuse-cache' : (action === 'reuse-cache' ? 'cache-unavailable' : 'card-generation-required'),
-        variant: activeSceneCacheVariant(cache, sceneSnapshot).exact ? 'exact' : 'miss',
-        reusedCardIds: reuseCacheOnly ? cacheCards.map((card) => card.id) : [],
-        providerCallsSkipped: reuseCacheOnly
-          ? settings.pipelineMode === 'fused'
-            ? ['segmentedCardCalls', 'fusedCardBundle', 'guidanceComposer']
-            : ['segmentedCardCalls', 'guidanceComposer']
-          : []
-      });
-      const generatedCardResult = reuseCacheOnly
-        ? { cards: [], diagnostics: [] }
-        : await generatePlanCards({ runId, plan, snapshot: sceneSnapshot, settings, signal });
-      if (generatedCardResult.diagnostics.length) {
-        plan = {
-          ...plan,
-          diagnostics: mergeDiagnostics(plan.diagnostics, generatedCardResult.diagnostics)
-        };
-        lastPlan = plan;
-      }
-      const providerCards = reuseCacheOnly ? [] : filterScopedCards(
-        cardsWithOrigin(generatedCardResult.cards.map(sanitizeGeneratedCard), 'generated')
-      );
-      if (!isActiveRun(runId)) return supersededResult(runId);
-      const useLocalFallbackCards = !reuseCacheOnly && !cacheCards.length && !providerCards.length;
-      const generatedCards = useLocalFallbackCards ? filterScopedCards(cardsWithOrigin(localCards(sceneSnapshot).map(sanitizeGeneratedCard), 'fallback')) : [];
-      if (scopedCardOmissionDiagnostics.length) {
-        plan = {
-          ...plan,
-          diagnostics: mergeDiagnostics(plan.diagnostics, scopedCardOmissionDiagnostics)
-        };
-        lastPlan = plan;
-      }
-      const sourceCardsByFamily = activeCardDeckSourceCards(settings);
-      stageCardProgress(runId, cacheCards, {
-        source: 'cache',
-        state: 'cached',
-        sourceCardsByFamily,
-        parentStepId: settings.pipelineMode === 'fused' && !reuseCacheOnly ? 'fused-card-bundle' : undefined
-      });
-      stageCardProgress(runId, providerCards, { source: 'generated', state: 'done', sourceCardsByFamily });
-      stageCardProgress(runId, generatedCards, { source: 'fallback', state: 'warning', sourceCardsByFamily });
-      if (action === 'reuse-cache' && !cacheCards.length) {
-        const clear = await runPromptMutationSection(runId, async () => {
-          const result = await clearPromptBestEffort(host);
-          if (result?.superseded) return result;
-          if (!isActiveRun(runId)) return supersededResult(runId);
-          await appendPromptClearedJournal(runId, promptClearContext(sceneSnapshot), result, 'cache-unavailable');
-          return result;
-        });
-        if (clear?.superseded) return clear;
-        if (!isActiveRun(runId)) return supersededResult(runId);
-        if (clear?.ok === false) {
-          reportClearWarning(runId, clear);
-        } else {
-          settleRuntimeActivity({
-            runId,
-            outcome: 'warning',
-            label: plan.utilityUnavailable
-              ? 'Utility unavailable. Recursion skipped.'
-              : 'Recursion skipped: no reusable scene hand.'
-          });
-        }
-        return { ok: true, skipped: true, reason: plan.utilityUnavailable ? 'utility-unavailable' : 'cache-unavailable', plan, clear };
-      }
-      const candidateCards = reuseCacheOnly ? cacheCards : [...cacheCards, ...providerCards, ...generatedCards];
-      const deck = applyCardPlan(cacheCards, {
-        acceptedCards: [...generatedCards, ...providerCards],
-        lifecycle: lifecycleForDeck(
-          candidateCards,
-          plan,
-          (card) => (reuseCacheOnly
-            ? 'reused scene cache'
-            : (providerCards.some((entry) => entry.id === card.id)
-                ? 'utility generated card'
-                : (generatedCards.some((entry) => entry.id === card.id) ? 'current fallback hand' : 'scene cache')))
-        )
-      });
-      if (!isActiveRun(runId)) return supersededResult(runId);
-      const effectiveSettings = settingsForPlan(settings, plan, runtimeProviderCapability);
-      const behaviorPolicy = runPolicyForEffectivePlan(settings, plan);
-
-      stageRuntimeActivity({
-        runId,
-        phase: 'handSelected',
-        label: 'Selecting turn hand...',
-        cardCounts: { selected: Math.min(deck.cards.length, budgetOr(plan.budgets?.maxCards, 6)) }
-      });
-      let promptSnapshot = sceneSnapshot;
-      let promptDeck = deck;
-      let hand = selectHand(filterCardsForRuntimeScope(deck.cards, settings).cards, {
-        maxCards: budgetOr(plan.budgets?.maxCards, 6),
-        maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
-        behaviorPolicy,
-        forcedFamilies: forcedFamiliesForSelection,
-        forcedCardIds: prioritySelection.forcedCardIds
-      });
-
-      const freshness = await recheckPromptInstallSnapshot(runId, sceneSnapshot, plan, pendingUserMessage);
-      if (!isActiveRun(runId)) return supersededResult(runId);
-      if (freshness.ok === false) {
-        return await skipPromptInstallAfterFreshnessFailure(runId, {
-          reason: freshness.reason,
-          sceneSnapshot,
-          currentSnapshot: freshness.currentSnapshot,
-          hand,
-          plan,
-          error: freshness.error,
-          comparison: freshness.comparison
-        });
-      }
-      promptSnapshot = freshness.snapshot;
-      if (promptSnapshot.sceneKey !== sceneSnapshot.sceneKey || promptSnapshot.sceneFingerprint !== sceneSnapshot.sceneFingerprint) {
-        promptDeck = {
-          ...deck,
-          cards: rebaseCardsForSnapshot(deck.cards, promptSnapshot, plan)
-        };
-        hand = selectHand(filterCardsForRuntimeScope(promptDeck.cards, settings).cards, {
-          maxCards: budgetOr(plan.budgets?.maxCards, 6),
-          maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
-          behaviorPolicy,
-          forcedFamilies: forcedFamiliesForSelection,
-          forcedCardIds: prioritySelection.forcedCardIds
-        });
-      }
-      lastSnapshot = promptSnapshot;
-
-      await runStorageSaveSection(runId, () => saveSceneCacheSafe(
-        runId,
-        promptSnapshot,
-        sceneCachePayload(promptSnapshot, promptDeck, hand, plan, null, settings, cache)
-      ));
-      if (!isActiveRun(runId)) return supersededResult(runId);
-
-      let packet = await composePromptPacket({
-        hand,
-        snapshot: promptSnapshot,
-        settings: effectiveSettings,
-        behaviorPolicy,
-        generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId, isActiveRun),
-        activity,
-        runId,
-        signal,
-        storyForm: plan.storyForm || UNKNOWN_STORY_FORM,
-        pipelineMode: settings.pipelineMode === 'fused' ? 'fused' : 'segmented',
-        planDiagnostics: plan.diagnostics
-      });
-      if (!isActiveRun(runId)) return supersededResult(runId);
-
-      if (!isActiveRun(runId)) return supersededResult(runId);
-      const installedResult = await runPromptMutationSection(runId, async () => {
-        stageRuntimeActivity({
-          runId,
-          phase: 'promptInstalling',
-          label: 'Installing Recursion prompt...',
-          chips: ['Prompt']
-        });
-        if (!isActiveRun(runId)) return supersededResult(runId);
-        let recomposeAttempts = 0;
-        while (true) {
-          const freshness = await recheckPromptInstallSnapshot(runId, promptSnapshot, plan, pendingUserMessage);
-          if (!isActiveRun(runId)) return supersededResult(runId);
-          if (freshness.ok === false) {
-            return skipPromptInstallAfterFreshnessFailure(runId, {
-              reason: freshness.reason,
-              sceneSnapshot: promptSnapshot,
-              currentSnapshot: freshness.currentSnapshot,
-              packet,
-              hand,
-              plan,
-              error: freshness.error,
-              comparison: freshness.comparison
-            });
-          }
-          if (promptSnapshotMetadataMatches(promptSnapshot, freshness.snapshot)) break;
-          recomposeAttempts += 1;
-          if (recomposeAttempts > 3) {
-            return skipPromptInstallAfterFreshnessFailure(runId, {
-              reason: 'stale-snapshot',
-              sceneSnapshot: promptSnapshot,
-              currentSnapshot: freshness.snapshot,
-              packet,
-              hand,
-              plan
-            });
-          }
-          promptSnapshot = freshness.snapshot;
-          promptDeck = {
-            ...promptDeck,
-            cards: rebaseCardsForSnapshot(promptDeck.cards, promptSnapshot, plan)
-          };
-          hand = selectHand(filterCardsForRuntimeScope(promptDeck.cards, settings).cards, {
-            maxCards: budgetOr(plan.budgets?.maxCards, 6),
-            maxTokens: cardEvidenceTokenBudget(settings, plan, behaviorPolicy),
-            behaviorPolicy,
-            forcedFamilies: forcedFamiliesForSelection,
-            forcedCardIds: prioritySelection.forcedCardIds
-          });
-          await runStorageSaveSection(runId, () => saveSceneCacheSafe(
-            runId,
-            promptSnapshot,
-            sceneCachePayload(promptSnapshot, promptDeck, hand, plan, null, settings, cache)
-          ));
-          if (!isActiveRun(runId)) return supersededResult(runId);
-          packet = await composePromptPacket({
-            hand,
-            snapshot: promptSnapshot,
-            settings: effectiveSettings,
-            behaviorPolicy,
-            generationRouter: signalAwareGenerationRouter(generationRouter, signal, runId, isActiveRun),
-            activity,
-            runId,
-            signal,
-            storyForm: plan.storyForm || UNKNOWN_STORY_FORM,
-            pipelineMode: settings.pipelineMode === 'fused' ? 'fused' : 'segmented',
-            planDiagnostics: plan.diagnostics
-          });
-          if (!isActiveRun(runId)) return supersededResult(runId);
-          lastSnapshot = promptSnapshot;
-        }
-        const candidate = createPreparedGenerationCandidate(packet, hand, promptSnapshot, settings);
-        if (!candidate) {
-          return skipPromptInstallAfterFreshnessFailure(runId, {
-            reason: 'prepared-generation-basis-unavailable',
-            sceneSnapshot: promptSnapshot,
-            currentSnapshot: promptSnapshot,
-            packet,
-            hand,
-            plan
-          });
-        }
-        const install = await installPrompt(host, packet);
-        if (!isActiveRun(runId)) return supersededResult(runId);
-        const installOk = install?.ok !== false;
-        if (installOk && candidate) {
-          commitPreparedGeneration(candidate);
-          readyLastBrief({
-            runId,
-            reason: freshContext ? 'fresh-next-generation-installed' : 'packet-installed'
-          });
-        } else {
-          clearLastBrief({ status: 'empty', reason: 'prompt-install-failed', runId });
-        }
-        await appendHandSelectedJournal(runId, promptSnapshot, hand, packet);
-        await appendJournalSafe(runId, promptSnapshot.chatKey, {
-          event: installOk ? 'prompt.installed' : 'prompt.install_failed',
-          severity: installOk ? 'info' : 'warn',
-          summary: installSummary(install),
-          runId,
-          sceneKey: promptSnapshot.sceneKey,
-          details: installJournalDetails(install),
-          hashes: { promptPacketHash: hashJson(packet) }
-        });
-        await runStorageSaveSection(runId, () => saveSceneCacheSafe(
-          runId,
-          promptSnapshot,
-          sceneCachePayload(promptSnapshot, promptDeck, hand, plan, packet, settings, cache)
-        ));
-        if (!isActiveRun(runId)) return supersededResult(runId);
-        settleRuntimeActivity({
-          runId,
-          outcome: installOk ? 'success' : 'warning',
-          label: installOk ? 'Recursion prompt ready.' : INSTALL_FAILURE_LABEL
-        });
-        return { ok: true, packet, hand, plan, install };
-      });
-      return installedResult;
-    } catch (error) {
-      if (!isActiveRun(runId)) return supersededResult(runId);
-      const activeActivity = safeCurrentActivity(activity);
-      const logicalStage = activeActivity?.phase || 'runtime';
-      const safeError = runtimeError(error);
-      const failure = failureFromError(error, { stage: logicalStage });
-      settleRuntimeActivity({
-        runId,
-        phase: 'settled',
-        logicalStage,
-        outcome: 'error',
-        label: 'Recursion could not prepare the prompt.',
-        detail: { failure }
-      });
-      throw safeError;
-    } finally {
-      clearActiveRun(runId);
-    }
   }
 
   async function appendProviderCapabilityMutation({
@@ -9545,7 +8845,10 @@ export function createRecursionRuntime({
   }
 
   async function runPostProcessForLatestAssistant(details = {}) {
-    const result = await postProcessRuntime.runPostProcessForLatestAssistant(details);
+    const rawResult = await postProcessRuntime.runPostProcessForLatestAssistant(details);
+    const result = rawResult?.canceled === true && !rawResult.reason
+      ? { ...rawResult, reason: 'canceled' }
+      : rawResult;
     if (result?.execution) {
       executionView = result.execution;
       activeExecutionChatKey = safeText(result.execution.chatKey || activeExecutionChatKey, 180);
@@ -9569,9 +8872,7 @@ export function createRecursionRuntime({
     queueFullFreshSwipe,
     clearQueuedFullFreshSwipe,
     async dispose() {
-      if (durablePreprocess) {
-        await pauseOperation({ reason: 'runtime-disposed' });
-      }
+      await pauseOperation({ reason: 'runtime-disposed' });
       supersedeActiveRun();
       postProcessRuntime.cancelPostProcess('runtime-disposed');
       clearPendingFreshNextGeneration();
@@ -9616,7 +8917,7 @@ export function createRecursionRuntime({
     evaluateRedirectEffectiveness,
     recommendCardDraft,
     listProviderConnectionProfiles: listProviderConnectionProfilesForUi,
-    resetSceneCache,
+    resetTurnCache,
     clearRunJournal,
     exportDiagnostics,
     view() {

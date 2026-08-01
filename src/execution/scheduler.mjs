@@ -784,6 +784,7 @@ export function createExecutionScheduler({
       });
       break;
     }
+    if (runtime.transitionPromise) await runtime.transitionPromise;
     return clone(runtime.manifest);
   }
 

@@ -46,6 +46,23 @@ function cloneValue(value, seen = new WeakMap()) {
   return result;
 }
 
+function combinedAbortSignal(...values) {
+  const signals = values.filter((value) => value && typeof value.aborted === 'boolean');
+  if (signals.length <= 1) return signals[0] || null;
+  if (typeof globalThis.AbortSignal?.any === 'function') return globalThis.AbortSignal.any(signals);
+  return {
+    get aborted() {
+      return signals.some((signal) => signal.aborted);
+    },
+    addEventListener(type, listener, options) {
+      for (const signal of signals) signal.addEventListener?.(type, listener, options);
+    },
+    removeEventListener(type, listener, options) {
+      for (const signal of signals) signal.removeEventListener?.(type, listener, options);
+    }
+  };
+}
+
 function deepFreeze(value, seen = new WeakSet()) {
   if (!value || typeof value !== 'object' || seen.has(value)) return value;
   seen.add(value);
@@ -1311,6 +1328,7 @@ export function createPostProcessRuntime({
         finalArtifactHash,
         signal
       }) {
+        const commitSignal = combinedAbortSignal(signal, operation.signal);
         let current = false;
         try {
           current = guardAllowsCommit(
@@ -1325,6 +1343,15 @@ export function createPostProcessRuntime({
             applied: false,
             error: {
               code: 'RECURSION_POST_PROCESS_SOURCE_STALE'
+            }
+          };
+        }
+        if (commitSignal?.aborted) {
+          return {
+            ok: false,
+            applied: false,
+            error: {
+              code: 'RECURSION_POST_PROCESS_COMMIT_CANCELED'
             }
           };
         }
@@ -1356,7 +1383,7 @@ export function createPostProcessRuntime({
           text,
           mode: operation.applyMode,
           marker,
-          signal
+          signal: commitSignal
         };
         const result = typeof host?.commitPostProcessResult === 'function'
           ? await host.commitPostProcessResult(input)
@@ -1512,11 +1539,17 @@ export function createPostProcessRuntime({
       provenance,
       record
     });
-    const settled = await durableScheduler.start({
+    let settled = await durableScheduler.start({
       manifest,
       graph,
       context: {}
     });
+    if (operation.signal?.aborted || settled?.state === 'paused') {
+      settled = await durableScheduler.pause({
+        operationId: operation.operationId,
+        reason: settled.pauseReason || 'post-process-stopped'
+      }) || settled;
+    }
     durableExecution?.onQueuedReprocessChanged?.(
       await durableRepository.loadQueuedReprocess?.(manifest.chatKey, 'postprocess') || null
     );
@@ -1859,6 +1892,7 @@ export function createPostProcessRuntime({
     finalizationClaim = null;
     if (!active) return { ok: true, canceled };
     if (durableEnabled && active.operationId) {
+      active.controller.abort();
       void durableScheduler.pause({
         operationId: active.operationId,
         reason: 'post-process-stopped'

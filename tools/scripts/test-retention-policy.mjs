@@ -21,9 +21,9 @@ const clamped = normalizeRetentionSettings({
 assertEqual(clamped.sourceWindowMessages, 200, 'sourceWindowMessages clamps high');
 assertEqual(clamped.sourceWindowCharacters, 12000, 'invalid sourceWindowCharacters falls back');
 assertEqual(clamped.providerVisibleMessages, 4, 'providerVisibleMessages clamps low');
-assertEqual(clamped.sceneCachesPerChat, 9, 'sceneCachesPerChat keeps valid value');
-assertEqual(clamped.sceneCachesTotal, 9, 'sceneCachesTotal rises to per-chat cap');
-assertEqual(clamped.sourceVariantsPerScene, 8, 'sourceVariantsPerScene clamps high');
+assertEqual(Object.hasOwn(clamped, 'sceneCachesPerChat'), false, 'obsolete per-chat cache cap is discarded');
+assertEqual(Object.hasOwn(clamped, 'sceneCachesTotal'), false, 'obsolete total cache cap is discarded');
+assertEqual(Object.hasOwn(clamped, 'sourceVariantsPerScene'), false, 'obsolete source variant cap is discarded');
 assertEqual(clamped.runJournalEntries, 500, 'runJournalEntries clamps high');
 
 const rawMessages = Array.from({ length: 16 }, (_, index) => ({

@@ -2,9 +2,6 @@ export const DEFAULT_RETENTION_SETTINGS = Object.freeze({
   sourceWindowMessages: 20,
   sourceWindowCharacters: 12000,
   providerVisibleMessages: 12,
-  sceneCachesPerChat: 3,
-  sceneCachesTotal: 24,
-  sourceVariantsPerScene: 4,
   runJournalEntries: 100
 });
 
@@ -12,9 +9,6 @@ export const RETENTION_LIMITS = Object.freeze({
   sourceWindowMessages: { min: 12, max: 200, step: 4 },
   sourceWindowCharacters: { min: 6000, max: 100000, step: 1000 },
   providerVisibleMessages: { min: 4, max: 32, step: 1 },
-  sceneCachesPerChat: { min: 1, max: 12, step: 1 },
-  sceneCachesTotal: { min: 4, max: 100, step: 4 },
-  sourceVariantsPerScene: { min: 1, max: 8, step: 1 },
   runJournalEntries: { min: 10, max: 500, step: 10 }
 });
 
@@ -75,28 +69,12 @@ export function normalizeRetentionSettings(value = {}) {
       DEFAULT_RETENTION_SETTINGS.providerVisibleMessages,
       RETENTION_LIMITS.providerVisibleMessages
     ),
-    sceneCachesPerChat: integerInRange(
-      source.sceneCachesPerChat,
-      DEFAULT_RETENTION_SETTINGS.sceneCachesPerChat,
-      RETENTION_LIMITS.sceneCachesPerChat
-    ),
-    sceneCachesTotal: integerInRange(
-      source.sceneCachesTotal,
-      DEFAULT_RETENTION_SETTINGS.sceneCachesTotal,
-      RETENTION_LIMITS.sceneCachesTotal
-    ),
-    sourceVariantsPerScene: integerInRange(
-      source.sourceVariantsPerScene,
-      DEFAULT_RETENTION_SETTINGS.sourceVariantsPerScene,
-      RETENTION_LIMITS.sourceVariantsPerScene
-    ),
     runJournalEntries: integerInRange(
       source.runJournalEntries,
       DEFAULT_RETENTION_SETTINGS.runJournalEntries,
       RETENTION_LIMITS.runJournalEntries
     )
   };
-  normalized.sceneCachesTotal = Math.max(normalized.sceneCachesTotal, normalized.sceneCachesPerChat);
   return normalized;
 }
 

@@ -4,7 +4,7 @@ function selectedCardKey(card) {
   const source = card && typeof card === 'object' ? card : {};
   const value = typeof card === 'string'
     ? card
-    : source.family || source.roleId || source.id || '';
+    : source.family || source.role || source.roleId || source.id || '';
   return String(value).trim();
 }
 
@@ -14,7 +14,7 @@ function stageIdPart(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  if (!part) throw new TypeError('Selected card requires a stable family, roleId, or id.');
+  if (!part) throw new TypeError('Selected card requires a stable family, role, roleId, or id.');
   return part;
 }
 

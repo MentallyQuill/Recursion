@@ -589,8 +589,7 @@ export function bootstrapRecursion() {
       settingsStore: nextHost.settingsStore,
       storage,
       activity,
-      generationRouter,
-      durablePreprocess: true
+      generationRouter
     });
     const nextUi = mountRecursionUi({ runtime: nextRuntime });
     host = nextHost;

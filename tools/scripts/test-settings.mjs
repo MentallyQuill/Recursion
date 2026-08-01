@@ -220,9 +220,9 @@ const retentionDefaults = normalizeSettings({ retention: {} }).retention;
 assertEqual(retentionDefaults.sourceWindowMessages, 20, 'retention source messages default');
 assertEqual(retentionDefaults.sourceWindowCharacters, 12000, 'retention character budget default');
 assertEqual(retentionDefaults.providerVisibleMessages, 12, 'retention provider messages default');
-assertEqual(retentionDefaults.sceneCachesPerChat, 3, 'retention per-chat scene cache default');
-assertEqual(retentionDefaults.sceneCachesTotal, 24, 'retention total scene cache default');
-assertEqual(retentionDefaults.sourceVariantsPerScene, 4, 'retention source variant default');
+assertEqual(Object.hasOwn(retentionDefaults, 'sceneCachesPerChat'), false, 'obsolete per-chat cache default is absent');
+assertEqual(Object.hasOwn(retentionDefaults, 'sceneCachesTotal'), false, 'obsolete total cache default is absent');
+assertEqual(Object.hasOwn(retentionDefaults, 'sourceVariantsPerScene'), false, 'obsolete source variant default is absent');
 assertEqual(retentionDefaults.runJournalEntries, 100, 'retention journal default');
 
 const retentionClamped = normalizeSettings({
@@ -239,8 +239,9 @@ const retentionClamped = normalizeSettings({
 assertEqual(retentionClamped.sourceWindowMessages, 200, 'settings clamps source message cap');
 assertEqual(retentionClamped.sourceWindowCharacters, 6000, 'settings clamps source character cap');
 assertEqual(retentionClamped.providerVisibleMessages, 4, 'settings clamps provider message cap');
-assertEqual(retentionClamped.sceneCachesTotal, 9, 'settings keeps total at least per-chat cap');
-assertEqual(retentionClamped.sourceVariantsPerScene, 8, 'settings clamps source variants');
+assertEqual(Object.hasOwn(retentionClamped, 'sceneCachesPerChat'), false, 'settings discards obsolete per-chat cache cap');
+assertEqual(Object.hasOwn(retentionClamped, 'sceneCachesTotal'), false, 'settings discards obsolete total cache cap');
+assertEqual(Object.hasOwn(retentionClamped, 'sourceVariantsPerScene'), false, 'settings discards obsolete source variant cap');
 assertEqual(retentionClamped.runJournalEntries, 500, 'settings clamps journal entries');
 
 const defaultUi = normalizeSettings({});

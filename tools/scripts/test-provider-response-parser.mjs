@@ -31,6 +31,11 @@ const fenced = parseStructuredJsonText('```json\n{"schema":"recursion.providerTe
 assertEqual(fenced.ok, true, 'fenced json parses');
 assertEqual(fenced.value.ok, true, 'fenced json value returned');
 
+const escapedFenced = parseStructuredJsonText('```json\\n{\\n  "schema": "recursion.providerTest.v1",\\n  "ok": true\\n}\\n```');
+assertEqual(escapedFenced.ok, true, 'escaped fenced json parses after one transport decode');
+assertEqual(escapedFenced.value.schema, 'recursion.providerTest.v1', 'escaped fenced json preserves schema');
+assertEqual(escapedFenced.value.ok, true, 'escaped fenced json preserves boolean fields');
+
 const wrapped = parseStructuredJsonText('Here is the JSON:\n{"schema":"recursion.providerTest.v1","ok":true}\nDone.');
 assertEqual(wrapped.ok, true, 'wrapper prose with first balanced object parses');
 

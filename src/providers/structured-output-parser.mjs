@@ -206,6 +206,16 @@ function repairWithJsonRepair(text = '') {
   }
 }
 
+function decodeEscapedTransportLineBreaks(text = '') {
+  const source = String(text || '').trim();
+  if (!/\\(?:r\\n|n|r)/.test(source)) return '';
+  return source
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\n')
+    .trim();
+}
+
 export function parseStructuredJsonText(text = '', options = {}) {
   const source = String(text || '').trim();
   if (!source) {
@@ -220,12 +230,20 @@ export function parseStructuredJsonText(text = '', options = {}) {
 
   const stripped = stripMarkdownFence(source);
   const balanced = extractBalancedJsonObject(source);
+  const transportDecoded = decodeEscapedTransportLineBreaks(source);
+  const transportDecodedStripped = stripMarkdownFence(transportDecoded);
+  const transportDecodedBalanced = extractBalancedJsonObject(transportDecoded);
   const candidates = uniqueCandidates([
     { value: stripped },
     { value: balanced },
     { value: repairCommonJson(balanced), repairKind: 'common-json-repair' },
     { value: repairCommonJson(stripped), repairKind: 'common-json-repair' },
-    { value: repairWithJsonRepair(balanced), repairKind: 'local-json-repair' }
+    { value: repairWithJsonRepair(balanced), repairKind: 'local-json-repair' },
+    { value: transportDecodedStripped, repairKind: 'escaped-transport-line-breaks' },
+    { value: transportDecodedBalanced, repairKind: 'escaped-transport-line-breaks' },
+    { value: repairCommonJson(transportDecodedBalanced), repairKind: 'escaped-transport-line-breaks' },
+    { value: repairCommonJson(transportDecodedStripped), repairKind: 'escaped-transport-line-breaks' },
+    { value: repairWithJsonRepair(transportDecodedBalanced), repairKind: 'escaped-transport-line-breaks' }
   ]);
   let lastError = null;
 

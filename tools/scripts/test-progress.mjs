@@ -21,6 +21,19 @@ const progressActionCases = [
     }
   },
   {
+    name: 'running queued frontier owns Stop before Cancel',
+    operation: { operationId: 'run-a', state: 'running', frontierStageIds: ['preprocess.arbiter'] },
+    stage: { id: 'preprocess.arbiter', state: 'running', executable: true },
+    queuedReprocess: { mode: 'stage', stageIds: ['preprocess.arbiter'] },
+    expected: {
+      kind: 'stop',
+      stageId: 'preprocess.arbiter',
+      operationId: 'run-a',
+      label: 'Stop and pause this operation',
+      icon: 'square'
+    }
+  },
+  {
     name: 'paused frontier owns Resume',
     operation: {
       operationId: 'run-a',

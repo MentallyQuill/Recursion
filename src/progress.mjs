@@ -257,10 +257,6 @@ export function actionForProgressStage({
   ) {
     return null;
   }
-  if (queuedStageIds(queuedReprocess).has(stageId)) {
-    return actionDescriptor('cancel-reprocess', operationSource, stageSource);
-  }
-
   const operationState = cleanText(operationSource.state).toLowerCase();
   const stageState = cleanText(stageSource.state, 'pending').toLowerCase();
   const frontier = Array.isArray(operationSource.frontierStageIds)
@@ -272,6 +268,9 @@ export function actionForProgressStage({
     && frontier[0] === stageId
   ) {
     return actionDescriptor('stop', operationSource, stageSource);
+  }
+  if (queuedStageIds(queuedReprocess).has(stageId)) {
+    return actionDescriptor('cancel-reprocess', operationSource, stageSource);
   }
   const failedStageId = cleanText(operationSource.pauseReason)
     .replace(/^stage-failed:/, '');

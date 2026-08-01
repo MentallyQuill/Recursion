@@ -543,14 +543,17 @@ function chatMessagesFromPayload(chat) {
   return [];
 }
 
-function latestPendingUserMessageFromPayload(chat) {
+export function latestPendingUserMessageFromPayload(chat) {
   if (typeof chat === 'string') return { text: chat.trim() };
   const messages = chatMessagesFromPayload(chat);
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (isSuppressedMessage(message)) continue;
-    if (!isRawUserChatMessage(message)) return null;
     const text = messageText(message);
+    if (!isRawUserChatMessage(message)) {
+      if (!text) continue;
+      return null;
+    }
     if (text) return { text, mesid: messageMesId(message) };
     return null;
   }

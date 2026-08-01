@@ -9,6 +9,25 @@ const RECURSION_PROMPT_KEYS = [
 
 const extensionModule = await import('../../src/extension/index.js');
 
+const placeholderPayload = [
+  { mesid: 31, is_user: false, mes: 'Prior assistant response.' },
+  { mesid: 32, is_user: true, mes: 'Begin the next turn.' },
+  { mesid: 33, is_user: false, mes: '' }
+];
+assertDeepEqual(
+  extensionModule.latestPendingUserMessageFromPayload(placeholderPayload),
+  { text: 'Begin the next turn.', mesid: 32 },
+  'empty assistant placeholder does not hide authoritative pending user input'
+);
+assertEqual(
+  extensionModule.latestPendingUserMessageFromPayload([
+    ...placeholderPayload.slice(0, 2),
+    { mesid: 33, is_user: false, mes: 'Completed assistant response.' }
+  ]),
+  null,
+  'non-empty assistant response closes pending-user search'
+);
+
 function legacyEnhancementSettingsRoot(settings = {}) {
   const legacyEnhancements = { ...(settings.enhancements || {}) };
   let canonicalSettings = { ...settings };

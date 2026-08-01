@@ -757,6 +757,135 @@ function immediateProvider(calls = []) {
 
 {
   const providerCalls = [];
+  const cardAttempts = new Map();
+  const requestedCards = [
+    { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Preserve current beat.' },
+    { family: 'Active Cast', role: 'activeCastCard', reason: 'Preserve who is present.' },
+    { family: 'Character Motivation', role: 'characterMotivationCard', reason: 'Preserve visible pressure.' }
+  ];
+  const familyForRole = {
+    sceneFrameCard: 'Scene Frame',
+    activeCastCard: 'Active Cast',
+    characterMotivationCard: 'Character Motivation'
+  };
+  const provider = {
+    async generate(roleId, request = {}) {
+      providerCalls.push({ roleId, request });
+      if (roleId === 'utilityArbiter') return arbiterResponse(request, requestedCards);
+      if (Object.hasOwn(familyForRole, roleId)) {
+        const attempt = (cardAttempts.get(roleId) || 0) + 1;
+        cardAttempts.set(roleId, attempt);
+        if (roleId === 'activeCastCard' && attempt === 1) {
+          return {
+            ok: false,
+            roleId,
+            error: {
+              code: 'RECURSION_PROVIDER_SCHEMA_MISMATCH',
+              message: 'Provider output schema did not match the requested role.',
+              retryable: true,
+              roleId,
+              expectedSchema: 'recursion.card.v1',
+              actualSchema: '(missing)',
+              responseFields: ['envelope', 'items']
+            },
+            diagnostics: {
+              model: 'TheDrummer/Cydonia-24B-v4.3',
+              failure: { category: 'provider-output' }
+            }
+          };
+        }
+        return cardResponse(roleId, request, { family: familyForRole[roleId] });
+      }
+      if (roleId === 'guidanceComposer') return guidanceResponse(request);
+      throw new Error(`unexpected provider role ${roleId}`);
+    }
+  };
+  const { runtime, storage } = createHarness({
+    provider,
+    settings: {
+      pipelineMode: 'segmented',
+      modelAttemptsPerStep: 2
+    }
+  });
+  const result = await runtime.prepareForGeneration({
+    userMessage: 'I ask what she remembers.',
+    hostGeneration: true
+  });
+  assertEqual(result.ok, true, 'corrected Segmented card run completes');
+  assertEqual(cardAttempts.get('sceneFrameCard'), 1, 'accepted Scene Frame sibling is not repeated');
+  assertEqual(cardAttempts.get('characterMotivationCard'), 1, 'accepted Character Motivation sibling is not repeated');
+  assertEqual(cardAttempts.get('activeCastCard'), 2, 'schema-mismatched Active Cast card consumes one correction attempt');
+  const activeCastRequests = providerCalls.filter((entry) => entry.roleId === 'activeCastCard');
+  assert(
+    activeCastRequests[1].request.prompt.includes('RECURSION_PROVIDER_SCHEMA_MISMATCH')
+      && activeCastRequests[1].request.prompt.includes('Returned fields: envelope, items.'),
+    'Segmented correction request names the exact provider contract failure'
+  );
+  const manifest = await storage.loadPipelineRun('chat-preprocess');
+  assertEqual(manifest.stageRecords['preprocess.cards.segmented.active-cast'].state, 'completed', 'corrected Active Cast stage completes');
+  assertEqual(manifest.stageRecords['preprocess.deck'].summary.providerCardCount, 3, 'all accepted Segmented siblings reach the deck');
+}
+
+{
+  const cardAttempts = new Map();
+  const requestedCards = [
+    { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Preserve current beat.' },
+    { family: 'Active Cast', role: 'activeCastCard', reason: 'Preserve who is present.' }
+  ];
+  const provider = {
+    async generate(roleId, request = {}) {
+      if (roleId === 'utilityArbiter') return arbiterResponse(request, requestedCards);
+      if (roleId === 'sceneFrameCard') {
+        cardAttempts.set(roleId, (cardAttempts.get(roleId) || 0) + 1);
+        return cardResponse(roleId, request);
+      }
+      if (roleId === 'activeCastCard') {
+        cardAttempts.set(roleId, (cardAttempts.get(roleId) || 0) + 1);
+        return {
+          ok: true,
+          roleId,
+          data: {
+            schema: 'recursion.card.v1',
+            role: 'sceneFrameCard',
+            family: 'Scene Frame',
+            snapshotHash: request.snapshotHash,
+            items: [{
+              promptText: 'Keep Mara beside the sealed archive.',
+              evidenceRefs: ['message:2']
+            }]
+          }
+        };
+      }
+      if (roleId === 'guidanceComposer') return guidanceResponse(request);
+      throw new Error(`unexpected provider role ${roleId}`);
+    }
+  };
+  const { runtime, storage } = createHarness({
+    provider,
+    settings: {
+      pipelineMode: 'segmented',
+      modelAttemptsPerStep: 2
+    }
+  });
+  const result = await runtime.prepareForGeneration({
+    userMessage: 'I ask what she remembers.',
+    hostGeneration: true
+  });
+  assertEqual(result.ok, true, 'Segmented semantic card exhaustion remains fail-soft');
+  assertEqual(cardAttempts.get('sceneFrameCard'), 1, 'valid sibling remains checkpointed during another card exhaustion');
+  assertEqual(cardAttempts.get('activeCastCard'), 2, 'invalid Active Cast card consumes its bounded attempt window');
+  const manifest = await storage.loadPipelineRun('chat-preprocess');
+  const activeFailure = manifest.stageRecords['preprocess.cards.segmented.active-cast'].failure;
+  assertEqual(manifest.state, 'completed', 'continuing card failure does not block downstream completion');
+  assertEqual(activeFailure.code, 'RECURSION_CARD_INVALID', 'semantic card exhaustion persists the stable failure code');
+  assertEqual(activeFailure.message, 'Active Cast card failed semantic validation (catalog-mismatch).', 'semantic card exhaustion persists the exact reject reason');
+  assertEqual(activeFailure.suggestedAction, 'Retry Active Cast. If it repeats, inspect the card validation reason.', 'semantic card exhaustion persists a useful action');
+  assertEqual(manifest.stageRecords['preprocess.deck'].summary.providerCardCount, 1, 'valid sibling alone reaches the deck');
+  assertEqual(manifest.stageRecords['preprocess.install'].state, 'completed', 'partial Segmented packet still installs');
+}
+
+{
+  const providerCalls = [];
   const requestedCards = [
     { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Preserve current beat.' },
     { family: 'Active Cast', role: 'activeCastCard', reason: 'Preserve who is present.' }

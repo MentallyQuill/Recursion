@@ -435,18 +435,22 @@ Common card output envelope:
   "snapshotHash": "string",
   "items": [
     {
-      "id": "string",
-      "text": "string",
-      "evidence": ["message:42"],
-      "confidence": 0.87,
-      "tokenCost": 18
+      "promptText": "Keep the next response grounded in the visible scene.",
+      "summary": "Current scene frame",
+      "evidenceRefs": ["message:42"],
+      "tokenEstimate": 18,
+      "detailProfile": "standard",
+      "emphasis": "normal"
     }
-  ],
-  "warnings": ["string"]
+  ]
 }
 ```
 
-Cards should be concise, observable, and player-message-adjacent. Provider cards are omitted independently when the envelope role/family does not match the requested catalog slot, the envelope `snapshotHash` is missing or does not match the frozen request hash, the card lacks parseable `message:N` evidence, or prompt-facing text contains hidden-reasoning wording. They must not include hidden character thoughts, private chain-of-thought, or broad plot plans.
+The machine JSON Schema for a Segmented card request requires the complete envelope: `schema`, frozen `snapshotHash`, request-owned `role`, request-owned `family`, and exactly one `items` object with `promptText` and `evidenceRefs`. Optional item fields are bounded to the canonical V1 card contract. The provider prompt repeats the same contract because provider-side JSON Schema enforcement is not universal.
+
+Cards should be concise, observable, and player-message-adjacent. Provider cards are omitted independently when the envelope role/family does not match the requested catalog slot, the envelope `snapshotHash` does not match the frozen request hash, the card lacks parseable `message:N` evidence, or prompt-facing text contains hidden-reasoning wording. They must not include hidden character thoughts, private chain-of-thought, or broad plot plans.
+
+A Segmented response shaped as `{ "envelope": { ... }, "items": [ ... ] }` may be flattened only when the frozen request supplies a nonempty role, family, and snapshot hash, exactly one object item exists, and every provider-supplied schema/role/family/snapshot value agrees with that request. Missing identity is restored from the frozen request; conflicting identity is never overwritten. Successful recovery records `semanticNormalization: "nested-card-envelope"` without retaining raw provider text.
 
 Manual forced selection does not create a new provider schema. Runtime still sends one request per selected or Arbiter-requested family and expects the same `recursion.card.v1` envelope with one prompt-facing item for that family. If Manual selected a family that the Arbiter omitted, runtime synthesizes the missing `cardJob` after scope filtering with `forcedBy: "manual-selection"`; the provider is not asked to generate multiple families in one response.
 
@@ -559,13 +563,15 @@ Validation requirements:
 - clamp confidence and token estimates to valid ranges;
 - mark each accepted card or composer patch with schema version and source role.
 
+Schema mismatch diagnostics may retain the requested role, expected and actual schema names, provider source/model, safe top-level field names, and a bounded value-free response structure such as `items:array(1)`. They must not retain provider field values, card text, prompts, transcript text, secrets, or reasoning. Durable model-stage failures preserve a safe precise message and suggested action so progress does not collapse a known provider-output error into an internal failure.
+
 Repaired output remains untrusted until all role-specific validation passes. Local repair runs only after strict/common parsing fails and only for candidates with complete object boundaries; it does not turn truncated Fused prefixes into synthetic complete bundles. A repaired Arbiter object missing or mismatching the frozen `snapshotHash` still falls back to the conservative local plan. A repaired card object with a missing or mismatched role, family, `snapshotHash`, or evidence range is omitted independently. Success diagnostics may record compact metadata such as `structuredOutputRepaired`, `structuredOutputRepairCode`, `structuredOutputRecovery: "local-json-repair"`, `originalResponseHash`, `repairedResponseHash`, and `visibleContentLength`; diagnostics, journals, activity, and artifacts must not persist raw malformed provider text or hidden reasoning.
 
 `providerTest` is a connectivity and structured-output probe, not a content job. It passes only when the router succeeds and the parsed payload contains `schema: "recursion.providerTest.v1"` plus explicit `ok: true`; missing or false `ok` fails the lane test.
 
 Invalid Utility Arbiter output should fall back to conservative local behavior: reuse valid cache, use the local fallback plan when safe, or skip Recursion injection for the turn. A missing, timed-out, or transport-failing Utility provider should not create fresh local cards; it should reuse valid cache or skip.
 
-Invalid card output should omit only that card. One bad card must not poison the whole batch.
+Invalid card output should omit only that card. One bad card must not poison the whole batch. A retry receives the prior stable code and validation message while preserving the original frozen request. If attempts are exhausted, the completed fail-soft operation remains `Needs attention`; the failed card row, exact reason, and suggested action stay visible even though valid siblings continue through guidance and prompt installation.
 
 Invalid Reasoner output should fall back to Utility guidance plus raw selected Card Evidence.
 

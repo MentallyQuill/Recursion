@@ -1456,6 +1456,8 @@ function executionProgressStep(stage, operation, queuedReprocess, overrides = {}
     source: state === 'cached' ? 'cache' : null,
     retryCount: retryCount > 1 ? retryCount - 1 : 0,
     reason: reason || null,
+    suggestedAction: safeDisplayText(source.failure?.suggestedAction, '', 180) || null,
+    failureCode: safeDisplayText(source.failure?.code, '', 120) || null,
     action: actionForProgressStage({
       operation,
       stage: source,
@@ -1608,10 +1610,12 @@ export function progressFromExecution(execution, queuedReprocess = null) {
     }));
   }
   topLevel.sort((left, right) => left.order - right.order);
+  const completedWithFailures = operation.state === 'completed'
+    && topLevel.some((step) => step.state === 'failed');
   const title = operation.state === 'running'
     ? 'Generating'
     : (operation.state === 'completed'
-        ? 'Ready'
+        ? (completedWithFailures ? 'Needs attention' : 'Ready')
         : (operation.state === 'failed' ? 'Issue' : 'Needs attention'));
   return finalizeProgress({
     runId: cleanText(operation.operationId) || null,

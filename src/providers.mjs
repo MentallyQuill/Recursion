@@ -77,7 +77,7 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'providerTest'
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer', 'postProcessGuidanceReasoner']);
-export const PROVIDER_CONTRACT_VERSION = 6;
+export const PROVIDER_CONTRACT_VERSION = 7;
 const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   utilityArbiter: 'recursion.utilityArbiter.v1',
   sceneFrameCard: 'recursion.card.v1',
@@ -104,6 +104,11 @@ const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   postProcessGuidanceReasoner: POST_PROCESS_GUIDANCE_SCHEMA,
   providerTest: 'recursion.providerTest.v1'
 });
+const SEGMENTED_CARD_ROLES = new Set(
+  Object.entries(ROLE_RESPONSE_SCHEMAS)
+    .filter(([, schema]) => schema === 'recursion.card.v1')
+    .map(([roleId]) => roleId)
+);
 export const PROVIDER_CONTRACT_HASH = hashJson({
   providerContractVersion: PROVIDER_CONTRACT_VERSION,
   utilityRoles: UTILITY_ROLE_IDS,
@@ -514,6 +519,50 @@ function editorialVerificationChecksSchema(validEvidenceIds) {
 export function machineJsonSchemaForRequest(request = {}) {
   const schema = String(request?.responseSchema || '').trim();
   if (!schema || request?.machineJson !== true) return null;
+  if (schema === 'recursion.card.v1') {
+    const metadata = plainObject(request?.metadata) ? request.metadata : {};
+    const snapshotHash = String(request?.snapshotHash || '').trim();
+    const role = String(metadata.role || request?.roleId || '').trim();
+    const family = String(metadata.family || '').trim();
+    return {
+      name: schemaSafeName(schema),
+      schema: {
+        type: 'object',
+        properties: {
+          schema: { const: schema },
+          snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
+          role: role ? { const: role } : { type: 'string' },
+          family: family ? { const: family } : { type: 'string' },
+          items: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 1,
+            items: {
+              type: 'object',
+              properties: {
+                promptText: { type: 'string' },
+                summary: { type: 'string' },
+                evidenceRefs: {
+                  type: 'array',
+                  minItems: 1,
+                  maxItems: 12,
+                  items: { type: 'string' }
+                },
+                tokenEstimate: { type: 'integer', minimum: 1, maximum: 1000 },
+                detailProfile: { enum: ['compact', 'standard', 'expanded'] },
+                emphasis: { enum: ['normal', 'emphasized', 'muted'] },
+                inspectorNotes: { type: 'string' }
+              },
+              required: ['promptText', 'evidenceRefs'],
+              additionalProperties: false
+            }
+          }
+        },
+        required: ['schema', 'snapshotHash', 'role', 'family', 'items'],
+        additionalProperties: false
+      }
+    };
+  }
   if (schema === POST_PROCESS_GUIDANCE_SCHEMA) {
     const snapshotHash = String(request?.snapshotHash || '').trim();
     const sourceHash = String(request?.sourceHash || '').trim();
@@ -852,6 +901,27 @@ export function machineJsonSchemaForRequest(request = {}) {
   };
 }
 
+function responseStructure(value) {
+  if (!plainObject(value)) return [];
+  return Object.keys(value)
+    .filter((key) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(key))
+    .sort()
+    .slice(0, 24)
+    .map((key) => {
+      const child = value[key];
+      if (Array.isArray(child)) return `${key}:array(${Math.min(child.length, 999)})`;
+      if (plainObject(child)) {
+        const fields = Object.keys(child)
+          .filter((field) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(field))
+          .sort()
+          .slice(0, 12);
+        return `${key}:object(${fields.join(',')})`;
+      }
+      if (child === null) return `${key}:null`;
+      return `${key}:${typeof child}`;
+    });
+}
+
 function validateRoleResponseSchema(roleId, data) {
   const expected = expectedResponseSchema(roleId);
   if (!expected) throw unsupportedRoleError(roleId);
@@ -862,10 +932,13 @@ function validateRoleResponseSchema(roleId, data) {
       'Provider output schema did not match the requested role.',
       { retryable: false }
     );
+    error.roleId = roleId;
+    error.expectedSchema = expected;
     error.actualSchema = actual || '(missing)';
     error.responseFields = plainObject(data)
       ? Object.keys(data).filter((key) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(key)).sort().slice(0, 24)
       : [];
+    error.responseShape = responseStructure(data);
     throw error;
   }
 }
@@ -885,6 +958,71 @@ function normalizeRepairFailedCardIds(failedCardIds, request = {}) {
   });
   if (normalized.some((cardId) => !cardId) || new Set(normalized).size !== normalized.length) return null;
   return normalized;
+}
+
+function identityValuesAgree(values, expected) {
+  return values
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .every((value) => value === expected);
+}
+
+function normalizeNestedCardEnvelope(roleId, data, request = {}) {
+  if (!SEGMENTED_CARD_ROLES.has(roleId) || !plainObject(data)) return null;
+  if (String(data.schema || '').trim()) return null;
+  const envelope = plainObject(data.envelope) ? data.envelope : null;
+  const items = Array.isArray(data.items) ? data.items : [];
+  const item = items.length === 1 && plainObject(items[0]) ? items[0] : null;
+  const metadata = plainObject(request?.metadata) ? request.metadata : {};
+  const expectedRole = String(metadata.role || '').trim();
+  const expectedFamily = String(metadata.family || '').trim();
+  const expectedSnapshotHash = String(request?.snapshotHash || '').trim();
+  if (
+    !envelope
+    || !item
+    || expectedRole !== roleId
+    || !expectedFamily
+    || !expectedSnapshotHash
+  ) {
+    return null;
+  }
+  if (!identityValuesAgree(
+    [data.schema, envelope.schema, item.schema],
+    'recursion.card.v1'
+  )) return null;
+  if (!identityValuesAgree(
+    [data.role, data.roleId, envelope.role, envelope.roleId, item.role, item.roleId],
+    expectedRole
+  )) return null;
+  if (!identityValuesAgree(
+    [data.family, envelope.family, item.family],
+    expectedFamily
+  )) return null;
+  if (!identityValuesAgree(
+    [data.snapshotHash, envelope.snapshotHash, item.snapshotHash],
+    expectedSnapshotHash
+  )) return null;
+  return {
+    data: {
+      schema: 'recursion.card.v1',
+      snapshotHash: expectedSnapshotHash,
+      role: expectedRole,
+      family: expectedFamily,
+      items
+    },
+    diagnostics: {
+      semanticNormalization: 'nested-card-envelope'
+    }
+  };
+}
+
+function normalizeRoleResponse(roleId, data, request = {}) {
+  const nestedCard = normalizeNestedCardEnvelope(roleId, data, request);
+  if (nestedCard) return nestedCard;
+  return {
+    data: normalizeRoleResponseEnvelope(roleId, data, request),
+    diagnostics: {}
+  };
 }
 
 function normalizeRoleResponseEnvelope(roleId, data, request = {}) {
@@ -1769,16 +1907,45 @@ function sanitizedError(error, request = {}) {
     ? 'Provider generation failed.'
     : scrubKnownRequestText(actionable?.message || 'Provider generation failed.', request);
   const actualSchema = scrubKnownRequestText(actionable?.actualSchema || '', request);
+  const expectedSchema = scrubKnownRequestText(actionable?.expectedSchema || '', request);
+  const roleId = String(actionable?.roleId || '')
+    .replace(/[^a-zA-Z0-9_-]+/g, '')
+    .slice(0, 80);
   const responseFields = Array.isArray(actionable?.responseFields)
     ? actionable.responseFields.map((field) => String(field).replace(/[^a-zA-Z0-9_-]+/g, '').slice(0, 80)).filter(Boolean).slice(0, 24)
+    : [];
+  const responseShape = Array.isArray(actionable?.responseShape)
+    ? actionable.responseShape
+      .map((entry) => String(entry).replace(/[^a-zA-Z0-9_():,-]+/g, '').slice(0, 240))
+      .filter(Boolean)
+      .slice(0, 24)
     : [];
   return sanitize({
     code: scrubKnownRequestText(rawCode, request),
     message: truncate(compact(message), 300),
     retryable: retryableError(error),
     ...providerFailureDiagnostics(error),
+    ...(roleId ? { roleId } : {}),
+    ...(expectedSchema ? { expectedSchema: truncate(compact(expectedSchema), 120) } : {}),
     ...(actualSchema ? { actualSchema: truncate(compact(actualSchema), 120) } : {}),
-    ...(responseFields.length ? { responseFields } : {})
+    ...(responseFields.length ? { responseFields } : {}),
+    ...(responseShape.length ? { responseShape } : {})
+  }, 300);
+}
+
+function responseIdentityDiagnostics(response = {}) {
+  const source = plainObject(response) ? response : {};
+  const providerSource = String(source.providerSource || '').trim();
+  const providerId = String(source.providerId || '').trim();
+  const model = String(source.model || '').trim();
+  const responseId = String(source.responseId || '').trim();
+  const visibleContentLength = String(source.text || '').length;
+  return sanitize({
+    ...(providerSource ? { providerSource } : {}),
+    ...(providerId ? { providerId } : {}),
+    ...(model ? { model } : {}),
+    ...(responseId ? { responseId } : {}),
+    ...(visibleContentLength ? { visibleContentLength } : {})
   }, 300);
 }
 
@@ -2459,11 +2626,13 @@ export function createGenerationRouter({ client, activity = null, journal = null
         composedExternalSignal.signal || null
       );
       const parsed = parseProviderStructuredOutput(raw.text);
-      const data = normalizeRoleResponseEnvelope(roleId, parsed.data, request);
+      const normalized = normalizeRoleResponse(roleId, parsed.data, request);
+      const data = normalized.data;
       validateRoleResponseSchema(roleId, data);
       const diagnostics = sanitize({
         ...lastDiagnostics,
         ...parsed.diagnostics,
+        ...normalized.diagnostics,
         ...reasoningDiagnostics(raw),
         providerSource: raw.providerSource,
         providerId: raw.providerId,
@@ -2505,6 +2674,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
       const diagnostics = sanitize({
         ...lastDiagnostics,
         ...providerFailureDiagnostics(error),
+        ...responseIdentityDiagnostics(raw),
         retryCount: 0,
         latencyMs: Date.now() - started,
         error: safeError,
@@ -2654,11 +2824,13 @@ export function createGenerationRouter({ client, activity = null, journal = null
     async function successResult(entry, raw, retryCount = 0, extraDiagnostics = {}) {
       throwSlotFailure(raw);
       const parsed = parseProviderStructuredOutput(raw?.text);
-      const data = normalizeRoleResponseEnvelope(entry.roleId, parsed.data, entry.request);
+      const normalized = normalizeRoleResponse(entry.roleId, parsed.data, entry.request);
+      const data = normalized.data;
       validateRoleResponseSchema(entry.roleId, data);
       const diagnostics = sanitize({
         ...entry.diagnostics,
         ...parsed.diagnostics,
+        ...normalized.diagnostics,
         ...reasoningDiagnostics(raw),
         providerSource: raw?.providerSource,
         providerId: raw?.providerId,
@@ -2710,7 +2882,8 @@ export function createGenerationRouter({ client, activity = null, journal = null
 
     function emitSlotSuccessActivity(entry, raw, retryCount = 0) {
       const parsed = parseProviderStructuredOutput(raw?.text);
-      const data = normalizeRoleResponseEnvelope(entry.roleId, parsed.data, entry.request);
+      const normalized = normalizeRoleResponse(entry.roleId, parsed.data, entry.request);
+      const data = normalized.data;
       validateRoleResponseSchema(entry.roleId, data);
       emitSlotActivity(entry, {
         severity: retryCount > 0 ? 'warning' : 'success',
@@ -2719,6 +2892,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         detail: sanitize({
           ...entry.diagnostics,
           ...parsed.diagnostics,
+          ...normalized.diagnostics,
           ...reasoningDiagnostics(raw),
           providerSource: raw?.providerSource,
           providerId: raw?.providerId,
@@ -2861,7 +3035,10 @@ export function createGenerationRouter({ client, activity = null, journal = null
         results[entry.index] = await successResult(entry, raw, 0);
         emitSlotSettledActivity(entry, raw, 0);
       } catch (error) {
-        results[entry.index] = await failureResult(entry, error, 0, batchDiagnosticsFromResponse(raw));
+        results[entry.index] = await failureResult(entry, error, 0, {
+          ...batchDiagnosticsFromResponse(raw),
+          ...responseIdentityDiagnostics(raw)
+        });
         emitSlotFailureActivity(entry, error, raw, 0, { force: true });
       }
     }

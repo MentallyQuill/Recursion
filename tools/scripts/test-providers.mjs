@@ -127,7 +127,7 @@ const expectedUtilityRoles = [
 assertDeepEqual(UTILITY_ROLE_IDS, expectedUtilityRoles, 'utility role catalog exactly matches Task 6 plan');
 assert(!UTILITY_ROLE_IDS.includes('briefUtilityComposer'), 'old brief utility composer role is removed');
 assertDeepEqual(REASONER_ROLE_IDS, ['reasonerComposer', 'postProcessGuidanceReasoner'], 'reasoner role catalog includes strict post-process guidance');
-assertEqual(PROVIDER_CONTRACT_VERSION, 6, 'provider contract version advances for post-process guidance');
+assertEqual(PROVIDER_CONTRACT_VERSION, 7, 'provider contract version advances for the complete Segmented card schema');
 assertEqual(roleLane('postProcessGuidanceUtility'), 'utility', 'postProcessGuidanceUtility uses Utility');
 assertEqual(roleLane('postProcessGuidanceReasoner'), 'reasoner', 'postProcessGuidanceReasoner uses Reasoner');
 for (const utilityRole of expectedUtilityRoles) {
@@ -352,6 +352,33 @@ assertEqual(calls.at(-1).lane, 'utility', 'fusedCardBundle uses utility lane by 
 assertEqual(calls.at(-1).responseSchema, 'recursion.cardBundle.v1', 'fusedCardBundle request carries card-bundle response schema');
 assertEqual(calls.at(-1).machineJson, true, 'fusedCardBundle request marks machine JSON calls');
 assertEqual(machineJsonSchemaForRequest(calls.at(-1)).schema.properties.schema.const, 'recursion.cardBundle.v1', 'fusedCardBundle machine schema constrains bundle schema');
+
+const segmentedCardMachineSchema = machineJsonSchemaForRequest({
+  responseSchema: 'recursion.card.v1',
+  machineJson: true,
+  roleId: 'activeCastCard',
+  snapshotHash: 'card-snapshot-hash',
+  metadata: {
+    role: 'activeCastCard',
+    family: 'Active Cast'
+  }
+});
+assertDeepEqual(
+  segmentedCardMachineSchema.schema.required,
+  ['schema', 'snapshotHash', 'role', 'family', 'items'],
+  'Segmented card machine schema requires the complete canonical envelope'
+);
+assertEqual(segmentedCardMachineSchema.schema.properties.schema.const, 'recursion.card.v1', 'Segmented card machine schema constrains schema identity');
+assertEqual(segmentedCardMachineSchema.schema.properties.snapshotHash.const, 'card-snapshot-hash', 'Segmented card machine schema constrains snapshot identity');
+assertEqual(segmentedCardMachineSchema.schema.properties.role.const, 'activeCastCard', 'Segmented card machine schema constrains role identity');
+assertEqual(segmentedCardMachineSchema.schema.properties.family.const, 'Active Cast', 'Segmented card machine schema constrains family identity');
+assertEqual(segmentedCardMachineSchema.schema.properties.items.minItems, 1, 'Segmented card machine schema requires one item');
+assertEqual(segmentedCardMachineSchema.schema.properties.items.maxItems, 1, 'Segmented card machine schema rejects multiple items');
+assertDeepEqual(
+  segmentedCardMachineSchema.schema.properties.items.items.required,
+  ['promptText', 'evidenceRefs'],
+  'Segmented card machine schema requires prompt text and evidence references'
+);
 
 const editorialDiagnosisMachineSchema = machineJsonSchemaForRequest({
   responseSchema: 'recursion.editorialDiagnosis.v1',
@@ -1402,6 +1429,169 @@ assertDeepEqual(
   ['provider-batch-malformed-entry', 'provider-batch-malformed-entry', 'provider-batch-malformed-entry'],
   'batch malformed-entry diagnostics keep shared run id'
 );
+
+const nestedCardEnvelopeRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          envelope: {
+            schema: 'recursion.card.v1',
+            role: 'activeCastCard',
+            family: 'Active Cast',
+            snapshotHash: 'nested-card-snapshot'
+          },
+          items: [{
+            promptText: 'Keep Jack and Hermione present in the rain-soaked alley.',
+            evidenceRefs: ['message:2']
+          }]
+        }),
+        providerId: 'nested-envelope-host',
+        model: 'TheDrummer/Cydonia-24B-v4.3'
+      };
+    }
+  }
+});
+const nestedCardEnvelope = await nestedCardEnvelopeRouter.generate('activeCastCard', {
+  prompt: 'Return one Active Cast card.',
+  snapshotHash: 'nested-card-snapshot',
+  metadata: {
+    role: 'activeCastCard',
+    family: 'Active Cast'
+  }
+});
+assertEqual(nestedCardEnvelope.ok, true, 'card router recovers the live nested card envelope shape');
+assertDeepEqual(
+  {
+    schema: nestedCardEnvelope.data.schema,
+    role: nestedCardEnvelope.data.role,
+    family: nestedCardEnvelope.data.family,
+    snapshotHash: nestedCardEnvelope.data.snapshotHash
+  },
+  {
+    schema: 'recursion.card.v1',
+    role: 'activeCastCard',
+    family: 'Active Cast',
+    snapshotHash: 'nested-card-snapshot'
+  },
+  'nested card envelope recovery restores canonical request-owned identity'
+);
+assertEqual(
+  nestedCardEnvelope.diagnostics.semanticNormalization,
+  'nested-card-envelope',
+  'nested card envelope recovery records compact semantic normalization'
+);
+const canonicalNestedCardData = {
+  envelope: {
+    schema: 'recursion.card.v1',
+    role: 'activeCastCard',
+    family: 'Active Cast',
+    snapshotHash: 'nested-card-snapshot'
+  },
+  items: [{
+    promptText: 'Keep Jack and Hermione present in the rain-soaked alley.',
+    evidenceRefs: ['message:2']
+  }]
+};
+const nestedCardConflictCases = [
+  ['wrong nested schema', {
+    ...canonicalNestedCardData,
+    envelope: { ...canonicalNestedCardData.envelope, schema: 'recursion.cardBundle.v1' }
+  }, {}],
+  ['wrong nested role', {
+    ...canonicalNestedCardData,
+    envelope: { ...canonicalNestedCardData.envelope, role: 'sceneFrameCard' }
+  }, {}],
+  ['wrong nested family', {
+    ...canonicalNestedCardData,
+    envelope: { ...canonicalNestedCardData.envelope, family: 'Scene Frame' }
+  }, {}],
+  ['wrong nested snapshot', {
+    ...canonicalNestedCardData,
+    envelope: { ...canonicalNestedCardData.envelope, snapshotHash: 'wrong-snapshot' }
+  }, {}],
+  ['wrong item role', {
+    ...canonicalNestedCardData,
+    items: [{ ...canonicalNestedCardData.items[0], role: 'sceneFrameCard' }]
+  }, {}],
+  ['multiple items', {
+    ...canonicalNestedCardData,
+    items: [canonicalNestedCardData.items[0], canonicalNestedCardData.items[0]]
+  }, {}],
+  ['missing request metadata', canonicalNestedCardData, { metadata: null }],
+  ['missing frozen snapshot', canonicalNestedCardData, { snapshotHash: '' }]
+];
+for (const [label, responseData, requestPatch] of nestedCardConflictCases) {
+  const conflictRouter = createGenerationRouter({
+    client: {
+      async generate() {
+        return {
+          text: JSON.stringify(responseData),
+          providerId: 'nested-envelope-host',
+          model: 'TheDrummer/Cydonia-24B-v4.3'
+        };
+      }
+    }
+  });
+  const conflictResult = await conflictRouter.generate('activeCastCard', {
+    prompt: `Reject ${label}.`,
+    snapshotHash: 'nested-card-snapshot',
+    metadata: {
+      role: 'activeCastCard',
+      family: 'Active Cast'
+    },
+    ...requestPatch
+  });
+  assertEqual(conflictResult.ok, false, `nested card recovery rejects ${label}`);
+  assertEqual(conflictResult.error.code, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', `${label} keeps the provider schema mismatch code`);
+}
+
+const nestedCardDiagnosticMarker = 'RAW_NESTED_CARD_SECRET_sk-live-secret';
+const nestedCardDiagnosticRouter = createGenerationRouter({
+  client: {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          envelope: {
+            schema: 'wrong.card.schema',
+            role: 'activeCastCard',
+            family: 'Active Cast',
+            snapshotHash: 'nested-card-snapshot'
+          },
+          items: [{
+            promptText: nestedCardDiagnosticMarker,
+            evidenceRefs: ['message:2']
+          }]
+        }),
+        providerSource: 'host-connection-profile',
+        providerId: 'nested-envelope-host',
+        model: 'TheDrummer/Cydonia-24B-v4.3'
+      };
+    }
+  }
+});
+const nestedCardDiagnostic = await nestedCardDiagnosticRouter.generate('activeCastCard', {
+  prompt: 'Return one Active Cast card.',
+  snapshotHash: 'nested-card-snapshot',
+  metadata: {
+    role: 'activeCastCard',
+    family: 'Active Cast'
+  }
+});
+assertEqual(nestedCardDiagnostic.ok, false, 'conflicting nested card identity remains a provider failure');
+assertEqual(nestedCardDiagnostic.error.roleId, 'activeCastCard', 'schema mismatch identifies the requested role');
+assertEqual(nestedCardDiagnostic.error.expectedSchema, 'recursion.card.v1', 'schema mismatch identifies the expected schema');
+assertEqual(nestedCardDiagnostic.error.actualSchema, '(missing)', 'schema mismatch distinguishes a missing top-level schema');
+assertDeepEqual(nestedCardDiagnostic.error.responseFields, ['envelope', 'items'], 'schema mismatch reports safe top-level response fields');
+assertDeepEqual(
+  nestedCardDiagnostic.error.responseShape,
+  ['envelope:object(family,role,schema,snapshotHash)', 'items:array(1)'],
+  'schema mismatch reports a bounded value-free response structure'
+);
+assertEqual(nestedCardDiagnostic.diagnostics.model, 'TheDrummer/Cydonia-24B-v4.3', 'schema mismatch diagnostics retain the provider model');
+assertEqual(nestedCardDiagnostic.diagnostics.providerSource, 'host-connection-profile', 'schema mismatch diagnostics retain the provider source');
+assertEqual(nestedCardDiagnostic.diagnostics.failure.category, 'provider-output', 'schema mismatch is categorized as provider output');
+assertNoProviderMarker(nestedCardDiagnostic, nestedCardDiagnosticMarker, 'schema mismatch diagnostics never retain raw provider item text');
 
 const wrongSchemaRouter = createGenerationRouter({
   client: {

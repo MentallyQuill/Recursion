@@ -1,7 +1,8 @@
 import {
   createCheckpoint,
   createPipelineRun,
-  createStageRecord
+  createStageRecord,
+  normalizePipelineRun
 } from '../../src/execution/checkpoints.mjs';
 import { createExecutionScheduler } from '../../src/execution/scheduler.mjs';
 import { createExecutionGraph } from '../../src/execution/stage-registry.mjs';
@@ -259,6 +260,39 @@ function createIds() {
   assertEqual(saved.state, 'paused', 'blocking artifact write failure pauses the operation');
   assertEqual(saved.stageRecords.root.state, 'failed', 'artifact write failure marks the stage failed');
   assertEqual(saved.stageRecords.root.checkpoint, null, 'artifact write failure never creates a checkpoint');
+}
+
+{
+  const repository = createRepository();
+  const actionableStage = {
+    ...stage('actionable-card', [], async () => ({ invalid: true })),
+    validate() {
+      return {
+        ok: false,
+        error: {
+          code: 'RECURSION_PROVIDER_SCHEMA_MISMATCH',
+          category: 'provider-output',
+          message: 'Active Cast provider output did not match recursion.card.v1.',
+          retryable: true,
+          suggestedAction: 'Retry Active Cast.'
+        }
+      };
+    }
+  };
+  const graph = createExecutionGraph({ stages: [actionableStage] });
+  const scheduler = createExecutionScheduler({
+    repository,
+    now: createClock(),
+    createId: createIds(),
+    attemptsPerStep: 1
+  });
+  await scheduler.start({ manifest: manifest({ operationId: 'actionable-failure' }), graph, context: {} });
+  const saved = await repository.loadPipelineRun('chat-a');
+  assertEqual(saved.stageRecords['actionable-card'].failure.message, 'Active Cast provider output did not match recursion.card.v1.', 'durable stage failure persists the actionable message');
+  assertEqual(saved.stageRecords['actionable-card'].failure.suggestedAction, 'Retry Active Cast.', 'durable stage failure persists the suggested action');
+  const normalized = normalizePipelineRun(saved);
+  assertEqual(normalized.stageRecords['actionable-card'].failure.message, 'Active Cast provider output did not match recursion.card.v1.', 'pipeline normalization preserves the actionable failure message');
+  assertEqual(normalized.stageRecords['actionable-card'].failure.suggestedAction, 'Retry Active Cast.', 'pipeline normalization preserves the suggested action');
 }
 
 {

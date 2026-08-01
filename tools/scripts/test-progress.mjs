@@ -170,6 +170,51 @@ assertEqual(
   'concurrent Segmented children expose only one Stop'
 );
 
+const completedPartialSegmented = progressFromExecution({
+  operationId: 'run-completed-partial',
+  phase: 'preprocess',
+  state: 'completed',
+  frontierStageIds: [],
+  stages: [
+    {
+      stageId: 'preprocess.cards.segmented.scene-frame',
+      state: 'completed',
+      executable: true,
+      kind: 'model',
+      summary: { family: 'Scene Frame' },
+      attempts: { total: 1 }
+    },
+    {
+      stageId: 'preprocess.cards.segmented.active-cast',
+      state: 'failed',
+      executable: true,
+      kind: 'model',
+      attempts: { total: 2 },
+      failure: {
+        code: 'RECURSION_PROVIDER_SCHEMA_MISMATCH',
+        failureClass: 'provider-output',
+        retryable: true,
+        message: 'Active Cast provider output did not match recursion.card.v1. Returned fields: envelope, items.',
+        suggestedAction: 'Retry Active Cast. If it repeats, use a model with reliable JSON Schema output.'
+      }
+    },
+    {
+      stageId: 'preprocess.install',
+      state: 'completed',
+      executable: true,
+      kind: 'host'
+    }
+  ]
+});
+const completedPartialCards = completedPartialSegmented.steps.find((step) => step.id === 'preprocess.cards.segmented');
+const completedPartialFailure = completedPartialCards.children.find((step) => step.id === 'preprocess.cards.segmented.active-cast');
+assertEqual(completedPartialSegmented.title, 'Needs attention', 'completed fail-soft card loss is not presented as Ready');
+assertEqual(completedPartialCards.state, 'failed', 'completed Segmented parent remains failed when a child was omitted');
+assertEqual(completedPartialFailure.state, 'failed', 'omitted card remains a red failed child');
+assertEqual(completedPartialFailure.reason, 'Active Cast provider output did not match recursion.card.v1. Returned fields: envelope, items.', 'completed partial card shows the exact failure reason');
+assertEqual(completedPartialFailure.failureCode, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'completed partial card exposes its stable failure code');
+assertEqual(completedPartialFailure.suggestedAction, 'Retry Active Cast. If it repeats, use a model with reliable JSON Schema output.', 'completed partial card exposes its suggested action');
+
 const ownershipProgress = progressFromExecution({
   operationId: 'run-owners',
   phase: 'postprocess',

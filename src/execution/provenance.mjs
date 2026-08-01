@@ -65,7 +65,10 @@ export function normalizeExecutionProvenance(value = {}) {
     'cardConfigurationHash',
     'promptContractHash',
     'postProcessMode',
-    'postProcessDeckHash'
+    'postProcessDeckHash',
+    'preprocessTurnKeyHash',
+    'responseIdentityHash',
+    'nativeGenerationType'
   ]) {
     if (cleanText(source[key])) normalized[key] = cleanText(source[key]);
   }

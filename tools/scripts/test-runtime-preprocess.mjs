@@ -815,6 +815,36 @@ function roleCounts(calls = []) {
 }
 
 {
+  const providerCalls = [];
+  const harness = createHarness({
+    provider: immediateProvider(providerCalls),
+    settings: { postProcess: { enabled: true } }
+  });
+  await harness.runtime.prepareForGeneration({
+    userMessage: { text: 'I ask what she remembers.', mesid: 2 },
+    hostGeneration: true,
+    generationType: 'normal'
+  });
+  const firstCounts = roleCounts(providerCalls);
+  assertEqual(harness.runtime.postProcessPending(), true, 'completed Pre-process arms one response-owned Post-process trigger');
+  harness.setSnapshot({
+    ...snapshot(),
+    latestMesId: 3,
+    messages: [
+      ...snapshot().messages,
+      { mesid: 3, role: 'assistant', text: 'First native response.', visible: true }
+    ]
+  });
+  await harness.runtime.prepareForGeneration({
+    userMessage: null,
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
+  assertDeepEqual(roleCounts(providerCalls), firstCounts, 'same-turn swipe still reuses all Pre-process model work');
+  assertEqual(harness.runtime.postProcessPending(), true, 'same-turn swipe replaces the pending trigger for the new response');
+}
+
+{
   const bandMessages = Array.from({ length: 14 }, (_, index) => ({
     mesid: index + 1,
     role: (index + 1) % 2 === 0 ? 'user' : 'assistant',

@@ -1158,14 +1158,13 @@ test('27. Queued Post-process stage binds to and is consumed by the eligible ope
   const storage = createStorageRepository({
     storage: createMemoryStorageAdapter()
   });
-  await storage.saveQueuedReprocess('post-process-queued-chat', {
-    schema: 'recursion.queuedReprocess.v2',
+  let activeSnapshot = snapshot({
     chatKey: 'post-process-queued-chat',
-    phase: 'postprocess',
-    turnKeyHash: 'turn-post-process-queued',
-    queuedAt: '2026-08-01T12:00:00.000Z',
-    mode: 'stage',
-    stageIds: ['postprocess.unified.guidance']
+    sourceMessageId: 12,
+    sourceSwipeId: 0,
+    sourceHash: hashJson('first response'),
+    snapshotHash: '',
+    originalDraft: 'first response'
   });
   const queuedViews = [];
   const scheduler = createExecutionScheduler({
@@ -1202,9 +1201,7 @@ test('27. Queued Post-process stage binds to and is consumed by the eligible ope
         }
       })
     },
-    snapshotProvider: async () => snapshot({
-      chatKey: 'post-process-queued-chat'
-    }),
+    snapshotProvider: async () => activeSnapshot,
     deckProvider: async () => deckFrom(['natural-prose']),
     sourceGuard: async () => true,
     commitResult: async ({ commitId, finalArtifactHash }) => ({
@@ -1220,8 +1217,53 @@ test('27. Queued Post-process stage binds to and is consumed by the eligible ope
       }
     }
   });
-  const result = await runtime.runPostProcessForLatestAssistant();
-  assertEqual(result.committed, true, 'queued Post-process operation commits');
+  runtime.preparePostProcessTrigger({
+    preprocessTurnKeyHash: 'turn-post-process-queued',
+    generationType: 'normal',
+    requireFinalTargetVerification: false
+  });
+  const first = await runtime.runPostProcessForLatestAssistant();
+  assertEqual(first.committed, true, 'first response owns one Post-process operation');
+  const duplicateFirst = await runtime.runPostProcessForLatestAssistant();
+  assertEqual(duplicateFirst.skipped, true, 'the same assistant response cannot open a second Post-process operation');
+  assertEqual(duplicateFirst.reason, 'response-already-owned', 'duplicate response ownership has a bounded reason');
+
+  await storage.saveQueuedReprocess('post-process-queued-chat', {
+    schema: 'recursion.queuedReprocess.v2',
+    chatKey: 'post-process-queued-chat',
+    phase: 'postprocess',
+    turnKeyHash: 'turn-post-process-queued',
+    queuedAt: '2026-08-01T12:00:00.000Z',
+    mode: 'stage',
+    stageIds: ['postprocess.unified.guidance']
+  });
+  runtime.preparePostProcessTrigger({
+    preprocessTurnKeyHash: 'turn-post-process-queued',
+    generationType: 'swipe',
+    requireFinalTargetVerification: false
+  });
+  assert(
+    await storage.loadQueuedReprocess('post-process-queued-chat', 'postprocess'),
+    'queued Post-process stage remains armed while the native swipe is pending'
+  );
+  activeSnapshot = snapshot({
+    chatKey: 'post-process-queued-chat',
+    sourceMessageId: 12,
+    sourceSwipeId: 1,
+    sourceHash: hashJson('second response'),
+    snapshotHash: '',
+    originalDraft: 'second response'
+  });
+  const second = await runtime.runPostProcessForLatestAssistant();
+  assertEqual(second.committed, true, 'replacement swipe owns a fresh Post-process operation');
+  assert(
+    first.execution.provenance.responseIdentityHash
+      !== second.execution.provenance.responseIdentityHash,
+    'each assistant swipe has a distinct response identity'
+  );
+  assertEqual(second.reusedResponseArtifactCount, 0, 'Post-process never reuses a prior swipe rewrite');
+  assertEqual(second.execution.provenance.preprocessTurnKeyHash, 'turn-post-process-queued', 'Post-process records its parent Pre-process turn');
+  assertEqual(second.execution.provenance.nativeGenerationType, 'swipe', 'Post-process records the native generation type');
   assertEqual(
     await storage.loadQueuedReprocess('post-process-queued-chat', 'postprocess'),
     null,

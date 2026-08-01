@@ -755,7 +755,10 @@ export function createPostProcessStages({
     buildInputFingerprint() {
       return {
         snapshotHash: cleanText(sourceSnapshot.snapshotHash),
-        sourceHash: cleanText(sourceSnapshot.sourceHash)
+        sourceHash: cleanText(sourceSnapshot.sourceHash),
+        preprocessTurnKeyHash: cleanText(sourceSnapshot.preprocessTurnKeyHash),
+        responseIdentityHash: cleanText(sourceSnapshot.responseIdentityHash),
+        nativeGenerationType: cleanText(sourceSnapshot.nativeGenerationType)
       };
     },
     run() {
@@ -1042,6 +1045,7 @@ export function createPostProcessRuntime({
   let finalizationClaim = null;
   let lastDiagnostics = diagnosticsFor(null);
   const durableOperations = new Map();
+  const responseOwners = new Map();
   const durableScheduler = durableExecution?.scheduler || null;
   const durableRepository = durableExecution?.repository || null;
   const durableEnabled = Boolean(durableScheduler && durableRepository);
@@ -1204,7 +1208,10 @@ export function createPostProcessRuntime({
       promptContractHash: hashJson({
         writerPacketSchema: POST_PROCESS_WRITER_PACKET_SCHEMA,
         boundaries: POST_PROCESS_WRITER_BOUNDARIES
-      })
+      }),
+      preprocessTurnKeyHash: operation.preprocessTurnKeyHash,
+      responseIdentityHash: operation.responseIdentityHash,
+      nativeGenerationType: operation.nativeGenerationType
     });
   }
 
@@ -1451,6 +1458,7 @@ export function createPostProcessRuntime({
       requestedApplyMode: operation.applyMode,
       committedApplyMode: operation.applyMode,
       outcomes,
+      reusedResponseArtifactCount: 0,
       diagnostics: lastDiagnostics,
       commit: commitArtifact,
       execution: manifest
@@ -1470,8 +1478,10 @@ export function createPostProcessRuntime({
       pipelineMode: 'segmented',
       sourceIdentity: provenance.sourceIdentity,
       provenance,
-      turnKeyHash: queuedIntent?.turnKeyHash || '',
-      sourceBandHash: ''
+      turnKeyHash: operation.preprocessTurnKeyHash,
+      sourceBandHash: operation.responseIdentityHash,
+      hostOwned: true,
+      nativeGenerationType: operation.nativeGenerationType
     });
     if (queuedIntent) {
       const binding = bindQueuedReprocess({
@@ -1528,6 +1538,32 @@ export function createPostProcessRuntime({
         currentSettings,
         host
       );
+      const responseIdentityHash = hashJson({
+        messageId: String(capturedSnapshot.sourceMessageId ?? ''),
+        swipeId: Number(capturedSnapshot.sourceSwipeId || 0),
+        textHash: capturedSnapshot.sourceHash
+      });
+      const preprocessTurnKeyHash = cleanText(record.consumedTrigger?.preprocessTurnKeyHash)
+        || cleanText(rawSnapshot?.preprocessTurnKeyHash)
+        || hashJson({
+          chatKey: capturedSnapshot.chatKey,
+          latestUserMessageHash: hashJson(
+            String(capturedSnapshot.supportingContext?.latestUserMessage || '')
+          )
+        });
+      const requestedGenerationType = cleanText(
+        record.consumedTrigger?.generationType || rawSnapshot?.nativeGenerationType || 'normal'
+      ).toLowerCase();
+      const nativeGenerationType = ['normal', 'swipe', 'regenerate'].includes(requestedGenerationType)
+        ? requestedGenerationType
+        : 'normal';
+      capturedSnapshot.preprocessTurnKeyHash = preprocessTurnKeyHash;
+      capturedSnapshot.responseIdentityHash = responseIdentityHash;
+      capturedSnapshot.nativeGenerationType = nativeGenerationType;
+      capturedSnapshot.snapshotHash = hashJson({
+        ...capturedSnapshot,
+        snapshotHash: ''
+      });
       if (record.expectedFinalTarget) {
         const expected = record.expectedFinalTarget;
         const matchesVerifiedTarget = capturedSnapshot.chatIdentityHash === expected.chatIdentityHash
@@ -1542,6 +1578,14 @@ export function createPostProcessRuntime({
       } else if (record.consumedTrigger && record.consumedTrigger.requireFinalTargetVerification !== false) {
         return finishWithoutCommit(null, 'final-target-unverified', [], {}, record);
       }
+      const responseOwnerKey = `${capturedSnapshot.chatKey}|${responseIdentityHash}`;
+      if (responseOwners.has(responseOwnerKey)) {
+        return finishWithoutCommit(null, 'response-already-owned', [], {}, record);
+      }
+      responseOwners.set(responseOwnerKey, true);
+      while (responseOwners.size > 32) {
+        responseOwners.delete(responseOwners.keys().next().value);
+      }
       const deck = await deckProvider(currentSettings);
       operation = {
         ...buildPostProcessPlan({
@@ -1549,6 +1593,9 @@ export function createPostProcessRuntime({
           deck,
           snapshot: capturedSnapshot
         }),
+        preprocessTurnKeyHash,
+        responseIdentityHash,
+        nativeGenerationType,
         signal: record.controller.signal
       };
       record.phase = 'running';
@@ -1721,6 +1768,7 @@ export function createPostProcessRuntime({
         requestedApplyMode: operation.applyMode,
         committedApplyMode,
         outcomes,
+        reusedResponseArtifactCount: 0,
         diagnostics: lastDiagnostics,
         commit
       };
@@ -1796,6 +1844,7 @@ export function createPostProcessRuntime({
       : null;
     pendingTrigger = deepFreeze({
       operationToken: makeId('post-process-trigger'),
+      preprocessTurnKeyHash: cleanText(input.preprocessTurnKeyHash),
       generationType: cleanText(input.generationType || 'normal').toLowerCase(),
       requireFinalTargetVerification: input.requireFinalTargetVerification !== false,
       before
@@ -1959,6 +2008,9 @@ export function createPostProcessRuntime({
     const operation = {
       ...basePlan,
       operationId: manifest.operationId,
+      preprocessTurnKeyHash: cleanText(sourceArtifact.snapshot.preprocessTurnKeyHash),
+      responseIdentityHash: cleanText(sourceArtifact.snapshot.responseIdentityHash),
+      nativeGenerationType: cleanText(sourceArtifact.snapshot.nativeGenerationType || 'normal'),
       rewriteFlow: normalizedRewriteFlow(
         sourceArtifact.mode || basePlan.rewriteFlow
       ),
@@ -1966,6 +2018,12 @@ export function createPostProcessRuntime({
         ? cloneValue(sourceArtifact.categories)
         : basePlan.categories
     };
+    if (operation.responseIdentityHash) {
+      responseOwners.set(
+        `${operation.snapshot.chatKey}|${operation.responseIdentityHash}`,
+        true
+      );
+    }
     const graph = durableGraph(operation);
     const provenance = durableProvenance(operation, currentSettings);
     durableOperations.set(operation.operationId, {

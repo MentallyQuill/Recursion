@@ -8358,17 +8358,13 @@ export function createRecursionRuntime({
     if (durablePreprocess && settings.enabled !== false) {
       await waitForExternalMutations();
       const runId = makeId('run');
+      let preGenerationSourceIdentity = null;
       if (hostGeneration === true) {
-        let preGenerationSourceIdentity = null;
         try {
           preGenerationSourceIdentity = await host?.messages?.postProcessSourceIdentity?.() || null;
         } catch {
           preGenerationSourceIdentity = null;
         }
-        postProcessRuntime.preparePostProcessTrigger({
-          preGenerationSourceIdentity,
-          generationType: hostGenerationType || 'normal'
-        });
         armProseEnhancementForHostGeneration(settings, runId);
       } else {
         postProcessRuntime.cancelPostProcess('not-host-generation');
@@ -8377,11 +8373,29 @@ export function createRecursionRuntime({
       if (explicitSwipe && !runState.current().pendingLatestAssistantSwipeRetry) {
         markLatestAssistantSwipeRetry({ eventName: 'host-generation-swipe' });
       }
-      return prepareForGenerationDurable({
+      const durableResult = await prepareForGenerationDurable({
         userMessage: explicitSwipe ? '' : userMessage,
         hostGeneration,
         generationType
       });
+      const preprocessTurnKeyHash = safeText(
+        durableResult?.execution?.turnKeyHash || lastTurnScope?.turnKeyHash || '',
+        180
+      );
+      if (
+        hostGeneration === true
+        && durableResult?.continuePrimaryGeneration !== false
+        && preprocessTurnKeyHash
+      ) {
+        postProcessRuntime.preparePostProcessTrigger({
+          preprocessTurnKeyHash,
+          preGenerationSourceIdentity,
+          generationType: hostGenerationType || 'normal'
+        });
+      } else if (hostGeneration === true) {
+        postProcessRuntime.cancelPostProcess('preprocess-not-ready');
+      }
+      return durableResult;
     }
     if (settings.enabled === false) {
       postProcessRuntime.cancelPostProcess('recursion-disabled');
@@ -8419,6 +8433,10 @@ export function createRecursionRuntime({
         preGenerationSourceIdentity = null;
       }
       postProcessRuntime.preparePostProcessTrigger({
+        preprocessTurnKeyHash: safeText(
+          lastPreparedGeneration?.basis?.turnKeyHash || lastTurnScope?.turnKeyHash || '',
+          180
+        ),
         preGenerationSourceIdentity,
         generationType: hostGenerationType || 'normal'
       });

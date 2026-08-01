@@ -67,7 +67,10 @@ const extendedProvenance = buildRunProvenance({
   cardConfigurationHash: 'cards-a',
   promptContractHash: 'prompt-a',
   postProcessMode: 'progressive',
-  postProcessDeckHash: 'post-deck-a'
+  postProcessDeckHash: 'post-deck-a',
+  preprocessTurnKeyHash: 'turn-a',
+  responseIdentityHash: 'response-a',
+  nativeGenerationType: 'swipe'
 });
 assertDeepEqual(extendedProvenance, {
   ...provenance,
@@ -76,7 +79,10 @@ assertDeepEqual(extendedProvenance, {
   cardConfigurationHash: 'cards-a',
   promptContractHash: 'prompt-a',
   postProcessMode: 'progressive',
-  postProcessDeckHash: 'post-deck-a'
+  postProcessDeckHash: 'post-deck-a',
+  preprocessTurnKeyHash: 'turn-a',
+  responseIdentityHash: 'response-a',
+  nativeGenerationType: 'swipe'
 }, 'buildRunProvenance includes every output-relevant contract hash');
 
 assertDeepEqual(compareRunProvenance(provenance, provenance), {

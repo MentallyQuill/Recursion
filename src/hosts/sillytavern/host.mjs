@@ -1111,7 +1111,13 @@ export function createSillyTavernHost({
     const retention = normalizeRetentionSettings(settingsStore.get().retention);
     const rawChat = Array.isArray(context.chat) ? context.chat : [];
     const bounded = selectBoundedSourceWindow(rawChat, retention);
-    const messages = bounded.messages.map((message, index) => normalizeMessage(message, index));
+    let rawSearchIndex = 0;
+    const messages = bounded.messages.map((message) => {
+      const matchedIndex = rawChat.indexOf(message, rawSearchIndex);
+      const rawIndex = matchedIndex >= 0 ? matchedIndex : rawSearchIndex;
+      rawSearchIndex = rawIndex + 1;
+      return normalizeMessage(message, rawIndex);
+    });
     const latestMesId = latestMessageIdFromRawChat(rawChat);
     const sourceRevisionHash = hashJson(sourceRevisionMessages(messages));
     const sceneFingerprint = hashJson({

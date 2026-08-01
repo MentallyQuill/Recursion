@@ -312,6 +312,44 @@ assertEqual(
   assertEqual(placeholderSnapshot.latestMesId, 29, 'blank active swipe placeholder keeps snapshot latest message id aligned');
 }
 
+{
+  const rawWindowContext = {
+    chatId: 'raw-window-message-identity-chat',
+    chat: Array.from({ length: 30 }, (_, index) => ({
+      is_user: index % 2 === 0,
+      mes: `raw visible message ${index}`
+    })),
+    extensionSettings: {
+      recursion: {
+        retention: {
+          sourceWindowMessages: 12,
+          sourceWindowCharacters: 6000,
+          providerVisibleMessages: 4
+        }
+      }
+    }
+  };
+  rawWindowContext.chat[29] = {
+    is_user: false,
+    mes: '',
+    swipe_id: 1,
+    swipes: ['Previous response.', '']
+  };
+  const rawWindowHost = createSillyTavernHost({
+    contextFactory: () => rawWindowContext,
+    fetchImpl: null
+  });
+  const sparseSwipe = rawWindowHost.normalizeMessageEvent({}, { eventName: 'message_swiped' });
+  const rawWindowSnapshot = await rawWindowHost.snapshot();
+  assertEqual(sparseSwipe.messageId, 29, 'sparse swipe event uses the full raw chat index when SillyTavern omits mesid');
+  assertDeepEqual(
+    rawWindowSnapshot.messages.map((message) => message.mesid),
+    [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
+    'bounded host snapshot preserves full raw chat indices when SillyTavern omits mesid'
+  );
+  assertEqual(rawWindowSnapshot.messages.at(-1).mesid, sparseSwipe.messageId, 'bounded snapshot and swipe event share one assistant message identity');
+}
+
 const swipeContext = {
   chatId: 'swipe-chat',
   chat: [

@@ -46,6 +46,8 @@ The entrypoint also subscribes to source mutation events when available: `MESSAG
 
 For swiped assistant messages, the SillyTavern adapter records the active `swipe_id`, swipe count, and active-swipe text hash in the normalized message. The source revision hash includes the active swipe metadata, not inactive swipe bodies. Changing inactive swipe text does not invalidate the source revision until that swipe becomes active.
 
+SillyTavern chat rows commonly omit an explicit `mesid`. The adapter therefore preserves each row's full-chat index before applying the bounded source window; it never renumbers a retained window to `0..N`. This keeps sparse `MESSAGE_SWIPED` identity aligned with the snapshot row that must be excluded from the retry turn basis.
+
 The entrypoint subscribes to SillyTavern's player Stop signal through `event_types.GENERATION_STOPPED`, with `generation_stopped` as a fallback event name. That handler calls `runtime.handleHostGenerationStopped()`. Runtime aborts active Recursion provider signals, prevents stale packet installation, clears Recursion-owned prompt keys, cancels any Post-process trigger belonging to the stopped host generation, and surfaces the progress outcome as skipped rather than warning or failure. It does not automatically retry the primary story generation. Accepted Pre-process checkpoints remain eligible only for a later independently validated send or swipe. Assistant-landed events clear the runtime's host-generation-active state so the Recursion Bar stop affordance disappears when the host turn settles.
 
 ## Generation Interceptor Boundary

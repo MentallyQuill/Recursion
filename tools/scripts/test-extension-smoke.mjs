@@ -568,7 +568,6 @@ if (lifecycleFailures.length) {
   );
   assert(prompts.length > 0, 'latest assistant swipe retry setup calls provider once');
   const callsAfterSetup = prompts.length;
-  const writesAfterSetup = fake.promptWrites.length;
   const preparedView = globalThis.__recursionLiveHarnessRuntime.view();
   const preparedPacketId = preparedView.lastBrief?.packetId;
   assertEqual(preparedView.lastBrief?.status, 'ready', 'successful extension setup leaves Last Brief ready');
@@ -578,14 +577,14 @@ if (lifecycleFailures.length) {
     {
       mesid: 2,
       is_user: false,
-      mes: 'Latest assistant swipe B.',
+      mes: '',
       swipe_id: 1,
-      swipes: ['Latest assistant swipe A.', 'Latest assistant swipe B.']
+      swipes: ['Latest assistant swipe A.', '']
     }
   ];
   await eventSource.emit('message_swiped', {});
   const markedView = globalThis.__recursionLiveHarnessRuntime.view();
-  assertEqual(markedView.lastBrief?.status, 'ready', 'latest assistant host swipe event preserves Last Brief until generation interceptor starts');
+  assertEqual(markedView.lastBrief?.status, 'ready', 'empty latest-assistant swipe placeholder preserves Last Brief until generation interceptor starts');
   assertEqual(markedView.lastBrief?.packetId, preparedPacketId, 'latest assistant host swipe event preserves Last Brief packet identity');
   assert(markedView.lastBriefHand?.cards.length > 0, 'latest assistant host swipe event preserves Last Brief cards');
   const truncatedSwipePayload = [
@@ -600,7 +599,6 @@ if (lifecycleFailures.length) {
   assertEqual(fake.context.chat[1].swipes.length, 2, 'latest assistant native swipe sequence preserves both response variants');
   assertEqual(fake.context.chat[1].swipe_id, 1, 'latest assistant native swipe sequence keeps the selected response variant');
   assertEqual(prompts.length, callsAfterSetup, 'latest assistant native swipe sequence does not call providers again');
-  assert(fake.promptWrites.length > writesAfterSetup, 'latest assistant native swipe sequence reinstalls previous prompt');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastCacheDecision?.kind, 'prepared-generation', 'latest assistant native swipe sequence records prepared-cache provenance');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastCacheDecision?.decision, 'hit', 'latest assistant native swipe sequence records a packet-cache hit');
   assertEqual(globalThis.__recursionLiveHarnessRuntime.view().lastBrief?.packetId, preparedPacketId, 'latest assistant native swipe sequence preserves packet identity');

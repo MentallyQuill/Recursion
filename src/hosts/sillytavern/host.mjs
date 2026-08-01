@@ -212,11 +212,16 @@ function rawChatMessages(context = {}) {
   return [];
 }
 
-function latestAssistantMessage(context = {}) {
+function latestAssistantMessage(context = {}, { allowEmpty = false } = {}) {
   const messages = rawChatMessages(context);
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const normalized = normalizeMessage(messages[index], index);
-    if (normalized.visible === false || normalized.isUser || normalized.isSystem || !normalized.text) continue;
+    if (
+      normalized.visible === false
+      || normalized.isUser
+      || normalized.isSystem
+      || (!allowEmpty && !normalized.text)
+    ) continue;
     return normalized;
   }
   return null;
@@ -486,7 +491,7 @@ function isLatestAssistantEvent(messageId, context = {}, swiped = false) {
   if (explicitLatestId !== undefined && explicitLatestId !== null && explicitLatestId !== '') {
     return stringValue(messageId) === stringValue(explicitLatestId);
   }
-  const latestAssistant = latestAssistantMessage(context.context || context);
+  const latestAssistant = latestAssistantMessage(context.context || context, { allowEmpty: swiped });
   if (!latestAssistant) return false;
   if (messageId === undefined || messageId === null || messageId === '') return Boolean(swiped);
   return stringValue(messageId) === stringValue(latestAssistant.mesid ?? latestAssistant.index);
@@ -498,7 +503,7 @@ export function normalizeSillyTavernMessageEvent(event = {}, context = {}) {
   const payloadShape = eventPayloadShape(event);
   const rawMessageId = eventMessageId(event);
   const swiped = Boolean(source.swiped || eventName === 'message_swiped');
-  const latestAssistant = latestAssistantMessage(context.context || context);
+  const latestAssistant = latestAssistantMessage(context.context || context, { allowEmpty: swiped });
   const payload = eventPayload(event);
   const generationEndedCountPayload = eventName === 'generation_ended'
     && (typeof payload === 'number' || typeof payload === 'string');

@@ -1302,12 +1302,12 @@ function activeSourceRevisionHash(snapshot) {
   return safeText(snapshot?.sourceRevisionHash || sourceWindowFingerprint(snapshot), 180);
 }
 
-function latestVisibleAssistantEntry(snapshot) {
+function latestVisibleAssistantEntry(snapshot, { allowEmpty = false } = {}) {
   const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message?.visible === false) continue;
-    if (!String(message?.text ?? '').trim()) continue;
+    if (!allowEmpty && !String(message?.text ?? '').trim()) continue;
     if (safeProviderRole(message?.role) !== 'assistant') return null;
     return { message, index };
   }
@@ -1360,7 +1360,7 @@ export function generationBasisForSnapshot(snapshot, settings = {}) {
 
 export function generationBasisForLatestAssistantSwipe(snapshot, messageId = null, settings = {}) {
   const normalizedSnapshot = normalizeSnapshot(snapshot);
-  const latestAssistant = latestVisibleAssistantEntry(normalizedSnapshot);
+  const latestAssistant = latestVisibleAssistantEntry(normalizedSnapshot, { allowEmpty: true });
   if (!latestAssistant) return null;
   const latestMessageId = numberOr(latestAssistant.message?.mesid, latestAssistant.index);
   if (messageId !== null && messageId !== latestMessageId) return null;
@@ -7935,7 +7935,7 @@ export function createRecursionRuntime({
     }
     if (nativeGenerationType === 'swipe') {
       const swipeRetry = runState.takeLatestAssistantSwipeRetry();
-      const latestAssistant = latestVisibleAssistantEntry(hostSnapshot);
+      const latestAssistant = latestVisibleAssistantEntry(hostSnapshot, { allowEmpty: true });
       explicitSwipeMessageId = finiteNumberOrNull(swipeRetry?.messageId)
         ?? finiteNumberOrNull(latestAssistant?.message?.mesid);
       if (

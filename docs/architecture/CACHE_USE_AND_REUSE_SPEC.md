@@ -29,6 +29,8 @@ Every intercepted host generation is classified before provider work:
 | Compatible paused Send, Swipe, or Regenerate | Continue saved work only after native SillyTavern generation re-enters the interceptor. |
 | Missing or corrupt required artifact | Reject reuse and recompute rather than trusting incomplete state. |
 
+The unchanged-swipe classifier binds SillyTavern's temporary empty assistant generation placeholder to the latest assistant message id, removes that output row from the turn basis, and validates the same pre-assistant source band before reuse. Empty rows are not treated as assistant identity for ordinary non-swipe host events.
+
 Historical Last Brief data is display-only. It has no generation-facing read API and cannot authorize prompt reuse.
 
 ## Durable Execution

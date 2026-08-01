@@ -117,6 +117,28 @@ assertEqual(
 }
 
 {
+  const emptySwipeHost = createSillyTavernHost({
+    contextFactory: () => ({
+      chatId: 'empty-swipe-event-chat',
+      chat: [
+        { mesid: 1, is_user: true, mes: 'User turn.' },
+        {
+          mesid: 2,
+          is_user: false,
+          mes: '',
+          swipe_id: 1,
+          swipes: ['Previous assistant response.', '']
+        }
+      ]
+    }),
+    settingsRoot: {}
+  });
+  const sparseEmptySwipe = emptySwipeHost.normalizeMessageEvent({}, { eventName: 'message_swiped' });
+  assertEqual(sparseEmptySwipe.messageId, 2, 'sparse swipe binds to the latest assistant while SillyTavern exposes its empty generation placeholder');
+  assertEqual(sparseEmptySwipe.latestAssistant, true, 'empty latest-assistant placeholder remains classified as the swipe target');
+}
+
+{
   const contextProfileService = {
     getSupportedProfiles() {
       return [

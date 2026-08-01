@@ -207,6 +207,18 @@ const preparedGenerationSnapshot = {
   const sourceBeforeAssistant = { ...preparedGenerationSnapshot, sourceRevisionHash: '' };
   const basis = generationBasisForLatestAssistantSwipe(swipeSnapshot, 10, preparedGenerationSettings);
   assertDeepEqual(basis, generationBasisForSnapshot(sourceBeforeAssistant, preparedGenerationSettings), 'swipe basis removes only the latest visible assistant');
+  const emptyPlaceholderSnapshot = {
+    ...swipeSnapshot,
+    messages: [
+      ...preparedGenerationSnapshot.messages,
+      { mesid: 10, role: 'assistant', text: '', swipeId: 1, swipeCount: 2, visible: true }
+    ]
+  };
+  assertDeepEqual(
+    generationBasisForLatestAssistantSwipe(emptyPlaceholderSnapshot, 10, preparedGenerationSettings),
+    generationBasisForSnapshot(sourceBeforeAssistant, preparedGenerationSettings),
+    'swipe basis removes SillyTavern empty assistant generation placeholders'
+  );
   assertEqual(generationBasisForLatestAssistantSwipe(swipeSnapshot, 999, preparedGenerationSettings), null, 'wrong swipe message id rejects reuse');
   assertEqual(generationBasisForLatestAssistantSwipe(preparedGenerationSnapshot, 9, preparedGenerationSettings), null, 'missing latest assistant rejects reuse');
   assertEqual(generationBasisForLatestAssistantSwipe({

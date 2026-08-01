@@ -58,7 +58,7 @@ const payload = buildDiagnosticsPayload({
       operationId: 'operation-safe-id',
       reuseCount: 1,
       invalidationCount: 0,
-      diagnosticCodes: ['queued-reprocess-canceled-edited-band'],
+      diagnosticCodes: ['queued-reprocess-canceled-edited-band', 'host-resume-start-failed'],
       sourceBand: [{ textHash: 'CANARY_SOURCE_TEXT_HASH', text: 'CANARY_SOURCE_TEXT' }]
     },
     activity: { label: 'Working' },
@@ -150,6 +150,7 @@ assertEqual(payload.runtime.turnScope.sourceBandMessageCount, 9, 'turn diagnosti
 assertEqual(payload.runtime.turnScope.generationClassification, 'same-turn-swipe', 'turn diagnostics keep the generation classification');
 assert(payload.runtime.turnScope.diagnosticCodes.includes('same-turn-swipe'), 'turn diagnostics emit the stable swipe classification code');
 assert(payload.runtime.turnScope.diagnosticCodes.includes('queued-reprocess-canceled-edited-band'), 'turn diagnostics keep the bounded queue-cancel reason');
+assert(payload.runtime.turnScope.diagnosticCodes.includes('host-resume-start-failed'), 'turn diagnostics keep the bounded host Resume failure code');
 assertEqual(payload.runtime.queuedReprocess.turnKeyHash, 'turn-safe-hash', 'queued diagnostics keep the bound turn hash');
 assertEqual(payload.runtime.queuedReprocess.stageIds[0], 'preprocess.arbiter', 'queued diagnostics keep bounded stage ids');
 assert(payload.runtime.queuedReprocess.diagnosticCodes.includes('stage-reprocess-queued'), 'queued diagnostics emit a stable queue code');
@@ -159,6 +160,9 @@ assert(!serialized.includes('CANARY_QUEUED_ARTIFACT_BODY'), 'queued diagnostics 
 const executionSummary = summarizeExecutionForDiagnostics({
   operationId: 'operation-safe-id',
   phase: 'postprocess',
+  turnKeyHash: 'turn-safe-hash',
+  hostOwned: true,
+  nativeGenerationType: 'swipe',
   state: 'paused',
   pauseReason: 'user-stop',
   staleChangedFields: ['sourceRevisionHash'],
@@ -190,10 +194,12 @@ const serializedExecution = JSON.stringify(executionSummary);
 assertEqual(executionSummary.operationId, 'operation-safe-id', 'execution diagnostics keep operation id');
 assertEqual(executionSummary.operationPhase, 'postprocess', 'execution diagnostics keep operation phase');
 assertEqual(executionSummary.operationState, 'paused', 'execution diagnostics keep operation state');
+assertEqual(executionSummary.hostOwned, true, 'execution diagnostics identify host-owned operations');
+assertEqual(executionSummary.nativeGenerationType, 'swipe', 'execution diagnostics keep the bounded native generation type');
 assertEqual(executionSummary.stages[0].attemptCount, 2, 'execution diagnostics keep attempt count');
 assertEqual(executionSummary.stages[0].elapsedMs, 12000, 'execution diagnostics derive bounded elapsed time');
 assertEqual(executionSummary.stages[0].artifactBytes, 321, 'execution diagnostics keep artifact byte count');
-assert(serializedExecution.includes('operation-paused:user-stop'), 'execution diagnostics emit stable pause code');
+assert(serializedExecution.includes('operation-paused-user-stop'), 'execution diagnostics emit stable pause code');
 assert(!serializedExecution.includes('CANARY_'), 'execution diagnostics omit all artifact bodies');
 
 const excerptPayload = buildDiagnosticsPayload({

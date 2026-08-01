@@ -147,14 +147,15 @@ export function classifyGeneration({
   const sameTurn = Boolean(currentKey && storedKey && currentKey === storedKey);
   const state = textValue(storedOperationState).trim().toLowerCase();
 
+  if (state === 'paused' && sameTurn) {
+    return { kind: 'compatible-paused-same-turn', sameTurn: true };
+  }
   if (hasPendingUser && generationType === 'normal') {
     return { kind: 'new-user-turn', sameTurn };
   }
   if (state === 'paused') {
     return {
-      kind: sameTurn
-        ? 'compatible-paused-same-turn'
-        : 'incompatible-paused-operation',
+      kind: 'incompatible-paused-operation',
       sameTurn
     };
   }

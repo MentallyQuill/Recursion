@@ -1247,6 +1247,24 @@ assertEqual(quietCalls[0], 'Fallback prompt', 'quiet fallback receives prompt');
 }
 
 {
+  const failedStopHost = createSillyTavernHost({
+    contextFactory: () => ({
+      currentChatId: 'stop-failed-chat',
+      chat: [],
+      async stopGeneration() {
+        throw Object.assign(new Error('native stop rejected'), {
+          code: 'RECURSION_TEST_NATIVE_STOP_REJECTED'
+        });
+      }
+    }),
+    settingsRoot: {}
+  });
+  const stopResult = await failedStopHost.generation.stop({ source: 'recursion-ui' });
+  assertEqual(stopResult.ok, false, 'host stop awaits an asynchronous native rejection');
+  assertEqual(stopResult.error.code, 'RECURSION_TEST_NATIVE_STOP_REJECTED', 'host stop preserves the bounded native error code');
+}
+
+{
   const controlCalls = [];
   const controlHost = createSillyTavernHost({
     contextFactory: () => ({

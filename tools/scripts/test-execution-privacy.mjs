@@ -24,7 +24,7 @@ const secrets = [
 ];
 
 const stableCodes = [
-  'operation-paused:user-stop',
+  'operation-paused-user-stop',
   'operation-paused:chat-changed',
   'operation-stale:source-changed',
   'stage-attempt-exhausted',
@@ -104,6 +104,8 @@ const manifest = {
     phase: 'postprocess',
     turnKeyHash: 'turn-privacy',
     sourceBandHash: 'band-privacy',
+    hostOwned: true,
+    nativeGenerationType: 'swipe',
     pipelineMode: 'segmented',
     sourceIdentity: {
       sourceRevisionHash: 'source-safe-hash',
@@ -147,6 +149,7 @@ for (const [stageId, secret] of stageFixtures.slice(0, 5)) {
 }
 
 const storedManifest = await repository.loadPipelineRun(chatKey);
+assertEqual(storedManifest.nativeGenerationType, 'swipe', 'execution metadata retains only the bounded native generation type');
 const journal = await repository.loadRunJournal(chatKey);
 const queuedIntent = await repository.loadQueuedReprocess(chatKey, 'postprocess');
 assertEqual(queuedIntent.turnKeyHash, 'turn-privacy', 'queued privacy fixture retains only bounded turn metadata');
@@ -204,6 +207,9 @@ const summaryKeys = new Set([
   'operationId',
   'operationPhase',
   'operationState',
+  'turnKeyHash',
+  'hostOwned',
+  'nativeGenerationType',
   'diagnosticCodes',
   'stages',
   'staleFields'

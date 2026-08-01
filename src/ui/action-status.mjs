@@ -79,7 +79,7 @@ export function dispatchProgressAction(runtime, action) {
   const operationId = String(source.operationId || '').trim();
   const stageId = String(source.stageId || '').trim();
   if (source.kind === 'stop') {
-    return runtime?.pauseOperation?.({ reason: 'user' });
+    return runtime?.stopGeneration?.({ source: 'recursion-progress-row' });
   }
   if (source.kind === 'resume') {
     return runtime?.resumeOperation?.({ operationId });

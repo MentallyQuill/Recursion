@@ -2146,6 +2146,7 @@ try {
       },
       stopGeneration: (details = {}) => {
         stopGenerationCalls += 1;
+        pipelineActionCalls.push(['stopGeneration', details]);
         return { ok: true, details };
       },
       queueFullFreshSwipe: (details = {}) => {
@@ -3237,8 +3238,8 @@ try {
   contextualStops[0].click();
   assertDeepEqual(
     pipelineActionCalls.at(-1),
-    ['pauseOperation', { reason: 'user' }],
-    'contextual Stop delegates to the shared pause path'
+    ['stopGeneration', { source: 'recursion-progress-row' }],
+    'contextual Stop delegates to the unified cancellation owner'
   );
 
   view = {

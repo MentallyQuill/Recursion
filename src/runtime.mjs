@@ -2383,6 +2383,7 @@ export function createRecursionRuntime({
     };
   }
   let hostStopCleanupPromise = null;
+  let stopGenerationPromise = null;
   let recursionStopRequest = null;
   let lastPreparedGeneration = null;
   let lastBriefPacket = null;
@@ -5515,17 +5516,18 @@ export function createRecursionRuntime({
   }
 
   async function stopGeneration(details = {}) {
-    postProcessRuntime.cancelPostProcess('stop-generation');
-    cancelPendingProseEnhancement('prose-enhancement-canceled');
-    if (durablePreprocess) {
-      await pauseOperation({ reason: 'user-stop' });
-    }
-    supersedeActiveRun();
-    recursionStopRequest = {
-      source: safeText(details.source || 'recursion-ui', 80),
-      requestedAt: nowIso()
-    };
-    try {
+    if (stopGenerationPromise) return stopGenerationPromise;
+    const task = (async () => {
+      postProcessRuntime.cancelPostProcess('stop-generation');
+      cancelPendingProseEnhancement('prose-enhancement-canceled');
+      if (durablePreprocess) {
+        await pauseOperation({ reason: 'user-stop' });
+      }
+      supersedeActiveRun();
+      recursionStopRequest = {
+        source: safeText(details.source || 'recursion-ui', 80),
+        requestedAt: nowIso()
+      };
       const hostStop = await requestHostGenerationStop(details);
       const cleanup = await handleHostGenerationStopped({
         source: 'recursion-ui',
@@ -5537,9 +5539,12 @@ export function createRecursionRuntime({
         ...asObject(cleanup),
         hostStop
       };
-    } finally {
+    })().finally(() => {
       recursionStopRequest = null;
-    }
+      if (stopGenerationPromise === task) stopGenerationPromise = null;
+    });
+    stopGenerationPromise = task;
+    return task;
   }
 
   function providerTestPrompt(lane) {
@@ -8234,6 +8239,14 @@ export function createRecursionRuntime({
         preprocessContexts.set(storedManifest.operationId, activeContext);
         preprocessGraphs.set(storedManifest.operationId, graph);
         executionView = storedManifest;
+        if (classification.kind === 'compatible-paused-same-turn') {
+          return continuePausedPreprocess({
+            operationId: storedManifest.operationId,
+            graph,
+            context: activeContext,
+            manifest: storedManifest
+          });
+        }
         if (!queuedIntent) {
           if (
             classification.kind === 'same-turn-swipe'
@@ -9322,8 +9335,11 @@ export function createRecursionRuntime({
     return paused ? redact(paused) : null;
   }
 
-  async function resumeOperation({ operationId = executionView?.operationId } = {}) {
-    const id = safeText(operationId || '', 180);
+  async function continuePausedPreprocess({ operationId, graph, context, manifest } = {}) {
+    const id = safeText(operationId || manifest?.operationId || '', 180);
+    if (!id || !graph || !context) {
+      throw new Error('Pre-process operation context is unavailable for Resume.');
+    }
     const resumeStageId = resumeStageIdForExecution(executionView);
     if (resumeStageId) {
       startRuntimeActivity({
@@ -9334,18 +9350,6 @@ export function createRecursionRuntime({
         chips: ['Resume']
       });
     }
-    if (executionView?.phase === 'postprocess') {
-      const result = await postProcessRuntime.resumeOperation({
-        operationId: id
-      });
-      if (result?.execution) executionView = result.execution;
-      return result;
-    }
-    const graph = preprocessGraphs.get(id);
-    const context = preprocessContexts.get(id);
-    if (!id || !graph || !context) {
-      throw new Error('Pre-process operation context is unavailable for Resume.');
-    }
     const result = await executionScheduler.resume({
       operationId: id,
       graph,
@@ -9355,6 +9359,63 @@ export function createRecursionRuntime({
     if (result?.state) executionView = result;
     if (result?.state !== 'completed') return result;
     return advanceDurablePreprocess(context, result);
+  }
+
+  async function resumeOperation({ operationId = executionView?.operationId } = {}) {
+    const id = safeText(operationId || '', 180);
+    if (executionView?.phase === 'postprocess') {
+      const result = await postProcessRuntime.resumeOperation({ operationId: id });
+      if (result?.execution) executionView = result.execution;
+      return result;
+    }
+    const manifest = activeExecutionChatKey
+      ? await storage.loadPipelineRun(activeExecutionChatKey)
+      : null;
+    if (
+      !id
+      || !manifest
+      || manifest.operationId !== id
+      || manifest.state !== 'paused'
+      || manifest.hostOwned !== true
+      || !manifest.turnKeyHash
+      || !['normal', 'swipe', 'regenerate'].includes(manifest.nativeGenerationType)
+    ) {
+      return { ok: false, started: false, reason: 'host-owned-resume-unavailable' };
+    }
+    const started = await requestHostGenerationStart({
+      type: manifest.nativeGenerationType,
+      source: 'recursion-ui',
+      reason: 'resume-operation'
+    });
+    if (started?.ok !== true || started?.started !== true) {
+      updateTurnScope(lastTurnScope, {
+        generationClassification: lastTurnScope?.generationClassification || 'compatible-paused-same-turn',
+        operationId: id,
+        diagnosticCodes: ['host-resume-start-failed']
+      });
+      settleRuntimeActivity({
+        runId: id,
+        outcome: 'warning',
+        phase: 'settled',
+        severity: 'warning',
+        label: 'Resume could not start SillyTavern generation.',
+        chips: ['Resume'],
+        detail: {
+          diagnosticCodes: ['host-resume-start-failed'],
+          errorCode: safeText(started?.error?.code || 'RECURSION_HOST_GENERATION_FAILED', 120)
+        }
+      });
+      return started;
+    }
+    settleRuntimeActivity({
+      runId: id,
+      outcome: 'success',
+      phase: 'settled',
+      severity: 'success',
+      label: 'Resume requested from SillyTavern.',
+      chips: ['Resume']
+    });
+    return { ...started, operationId: id };
   }
 
   async function retryStage({

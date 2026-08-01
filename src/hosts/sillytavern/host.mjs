@@ -1354,7 +1354,7 @@ export function createSillyTavernHost({
       const context = currentContext(contextFactory);
       try {
         if (typeof context.stopGeneration === 'function') {
-          context.stopGeneration(details);
+          await context.stopGeneration(details);
           return {
             ok: true,
             stopped: true,

@@ -946,6 +946,12 @@ export function createExecutionScheduler({
       } else {
         runtime.manifest = normalizePipelineRun(manifestToResume);
         runtime.graph = graph || runtime.graph;
+        runtime.manifest.stageRecords = graphStageRecords(
+          runtime.manifest,
+          runtime.graph,
+          attemptLimit(),
+          now()
+        );
         runtime.context = context;
         runtime.provenance = expectedProvenance;
         runtime.forcedStageIds = new Set(runtime.manifest.queuedStageIds);

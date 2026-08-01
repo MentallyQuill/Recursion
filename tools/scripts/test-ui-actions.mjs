@@ -6,8 +6,8 @@ import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert
 
 const calls = [];
 const runtime = {
-  pauseOperation(input) {
-    calls.push(['pauseOperation', input]);
+  stopGeneration(input) {
+    calls.push(['stopGeneration', input]);
     return Promise.resolve({ ok: true });
   },
   resumeOperation(input) {
@@ -29,7 +29,7 @@ const runtime = {
 };
 
 const actionCases = [
-  ['stop', 'pauseOperation', { reason: 'user' }],
+  ['stop', 'stopGeneration', { source: 'recursion-progress-row' }],
   ['resume', 'resumeOperation', { operationId: 'run-a' }],
   ['retry', 'retryStage', { operationId: 'run-a', stageId: 'stage-a' }],
   ['reprocess', 'queueStageReprocess', { stageId: 'stage-a' }],

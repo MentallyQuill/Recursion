@@ -4,7 +4,7 @@ import { summarizePreparedGenerationArtifact } from './prepared-generation.mjs';
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 const RESUME_BODY_KEY_PATTERN = /(arbiter|card|reference|packet|hand|guidance|draft|prose|prompt|response|artifact).*(body|text|payload|content)|^(body|text|payload|content)$/i;
 const EXECUTION_DIAGNOSTIC_CODE_SET = new Set([
-  'operation-paused:user-stop',
+  'operation-paused-user-stop',
   'operation-paused:chat-changed',
   'operation-stale:source-changed',
   'stage-attempt-exhausted',
@@ -16,6 +16,7 @@ const EXECUTION_DIAGNOSTIC_CODE_SET = new Set([
   'stage-reprocess-inapplicable',
   'queued-reprocess-canceled-new-turn',
   'queued-reprocess-canceled-edited-band',
+  'host-resume-start-failed',
   'resume-checkpoint-restored',
   'resume-artifact-missing',
   'resume-commit-already-applied',
@@ -83,7 +84,7 @@ function executionDiagnosticCodes(manifest, stages) {
   ];
   const pauseReason = safeText(source.pauseReason, 120);
   if (source.state === 'paused' && ['user', 'user-stop'].includes(pauseReason)) {
-    codes.push('operation-paused:user-stop');
+    codes.push('operation-paused-user-stop');
   }
   if (source.state === 'paused' && pauseReason === 'chat-changed') {
     codes.push('operation-paused:chat-changed');
@@ -142,6 +143,11 @@ export function summarizeExecutionForDiagnostics(manifest) {
     operationId: safeText(source.operationId, 180),
     operationPhase: safeText(source.phase, 80),
     operationState: safeText(source.state, 40),
+    turnKeyHash: safeText(source.turnKeyHash, 180),
+    hostOwned: source.hostOwned === true,
+    nativeGenerationType: ['normal', 'swipe', 'regenerate'].includes(source.nativeGenerationType)
+      ? source.nativeGenerationType
+      : 'normal',
     diagnosticCodes: executionDiagnosticCodes(source, stages),
     stages: stages.map(({ attemptLimit: _attemptLimit, diagnosticCodes: _codes, ...stage }) => stage),
     staleFields: asArray(source.staleFields || source.staleChangedFields)

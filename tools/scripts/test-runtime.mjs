@@ -10248,10 +10248,22 @@ for (const scenario of [
   assertEqual(runtime.view().hostGenerationActive, true, 'runtime tracks host generation while interceptor-owned generation is active');
   assertEqual(typeof runtime.stopGeneration, 'function', 'runtime exposes unified stop action');
   const stopped = runtime.stopGeneration({ source: 'recursion-ui' });
+  const duplicateStop = runtime.stopGeneration({ source: 'recursion-progress-row' });
+  const observedStop = runtime.handleHostGenerationStopped({
+    eventName: 'generation_stopped',
+    source: 'host-runtime'
+  });
   releaseArbiter();
-  const [stopResult, pendingResult] = await Promise.all([stopped, pending]);
+  const [stopResult, duplicateResult, observedResult, pendingResult] = await Promise.all([
+    stopped,
+    duplicateStop,
+    observedStop,
+    pending
+  ]);
   assertEqual(pendingResult.superseded, true, 'host generation stop supersedes in-flight generation preparation');
   assertEqual(stopResult.ok, true, 'unified stop cleanup succeeds');
+  assertEqual(duplicateResult.ok, true, 'duplicate Stop shares the unified cancellation owner');
+  assertEqual(observedResult.ok, true, 'host stop event observes the unified cleanup');
   assertEqual(stopResult.hostStop.ok, true, 'unified stop returns host stop result');
   assertEqual(hostStopCalls.length, 1, 'unified stop calls host generation stop once');
   assertEqual(hostStopCalls[0].source, 'recursion-ui', 'unified stop passes UI source to host generation stop');

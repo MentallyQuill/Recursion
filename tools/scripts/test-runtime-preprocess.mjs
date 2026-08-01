@@ -50,6 +50,7 @@ function createHarness({
   provider = null,
   currentSnapshot = snapshot(),
   installPrompt = null,
+  hostGeneration = {},
   settings = {}
 } = {}) {
   const calls = { install: 0, clear: 0 };
@@ -78,7 +79,7 @@ function createHarness({
       }
     },
     messages: {},
-    generation: {}
+    generation: hostGeneration
   };
   const runtime = createRecursionRuntime({
     host,
@@ -204,6 +205,8 @@ function roleCounts(calls = []) {
   const firstCardGate = deferred();
   const resumedCardGate = deferred();
   const calls = [];
+  const hostGenerationStarts = [];
+  const hostGenerationStops = [];
   let cardCalls = 0;
   const provider = {
     async generate(roleId, request = {}) {
@@ -247,10 +250,23 @@ function roleCounts(calls = []) {
       throw new Error(`unexpected provider role ${roleId}`);
     }
   };
-  const { runtime, storage } = createHarness({ provider });
+  const { runtime, storage, calls: hostCalls } = createHarness({
+    provider,
+    hostGeneration: {
+      async start(details = {}) {
+        hostGenerationStarts.push(details);
+        return { ok: true, started: true };
+      },
+      async stop(details = {}) {
+        hostGenerationStops.push(details);
+        return { ok: true, stopped: true, eventEmitted: false };
+      }
+    }
+  });
   const preparing = runtime.prepareForGeneration({
-    userMessage: 'I ask what she remembers.',
-    hostGeneration: true
+    userMessage: null,
+    hostGeneration: true,
+    generationType: 'swipe'
   });
   try {
     await waitUntil(
@@ -264,14 +280,16 @@ function roleCounts(calls = []) {
       manifest: await storage.loadPipelineRun('chat-preprocess')
     })}`);
   }
-  await runtime.pauseOperation({ reason: 'user' });
+  await runtime.stopGeneration({ source: 'recursion-progress-row' });
   const pausedView = runtime.getView();
   assertEqual(pausedView.execution.state, 'paused', 'Stop pauses the durable operation');
   assertEqual(
     pausedView.activity.label,
-    'Operation paused. Completed work was saved.',
-    'Stop confirms that completed work was saved'
+    'Generation canceled. Recursion prompt cleared.',
+    'unified Stop settles only after host cleanup'
   );
+  assertEqual(hostGenerationStops.length, 1, 'contextual Stop requests one native host stop');
+  assertEqual(hostCalls.clear, 1, 'contextual Stop clears the host prompt lane once');
   const manifest = await storage.loadPipelineRun('chat-preprocess');
   assertEqual(manifest.stageRecords['preprocess.arbiter'].state, 'completed', 'Arbiter checkpoint survives Stop');
   assertEqual(
@@ -293,7 +311,20 @@ function roleCounts(calls = []) {
   });
   await preparing;
 
-  const resumed = runtime.resumeOperation({ operationId: manifest.operationId });
+  const callsBeforeResume = cardCalls;
+  const resumeRequest = await runtime.resumeOperation({ operationId: manifest.operationId });
+  assertEqual(resumeRequest.started, true, 'Resume requests native host generation');
+  assertDeepEqual(hostGenerationStarts, [{
+    type: 'swipe',
+    source: 'recursion-ui',
+    reason: 'resume-operation'
+  }], 'Resume preserves the paused native generation type');
+  assertEqual(cardCalls, callsBeforeResume, 'Resume click starts no detached provider work');
+  const resumed = runtime.prepareForGeneration({
+    userMessage: null,
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
   await waitUntil(() => cardCalls === 2, 'Resume did not open a fresh card attempt window');
   assertEqual(
     calls.filter((call) => call.roleId === 'utilityArbiter').length,
@@ -324,6 +355,55 @@ function roleCounts(calls = []) {
     'Resume completes only the interrupted Segmented card'
   );
   assertEqual(resumedRequest.signal.aborted, false, 'Resume uses a fresh non-aborted provider signal');
+}
+
+{
+  const cardGate = deferred();
+  const providerCalls = [];
+  const harness = createHarness({
+    provider: {
+      async generate(roleId, request = {}) {
+        providerCalls.push(roleId);
+        if (roleId === 'utilityArbiter') return arbiterResponse(request);
+        if (roleId === 'sceneFrameCard') return cardGate.promise;
+        throw new Error(`unexpected provider role ${roleId}`);
+      }
+    },
+    hostGeneration: {
+      async start() {
+        return {
+          ok: false,
+          started: false,
+          error: { code: 'RECURSION_TEST_HOST_START_FAILED', message: 'CANARY_HOST_ERROR_BODY' }
+        };
+      }
+    }
+  });
+  const preparing = harness.runtime.prepareForGeneration({
+    userMessage: null,
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
+  await waitUntil(() => providerCalls.includes('sceneFrameCard'), 'host-start failure setup did not reach card stage');
+  await harness.runtime.pauseOperation({ reason: 'user-stop' });
+  cardGate.resolve(cardResponse('sceneFrameCard', { snapshotHash: 'late-paused-result' }));
+  await preparing;
+  const paused = await harness.storage.loadPipelineRun('chat-preprocess');
+  const callsBeforeResume = providerCalls.length;
+  const resume = await harness.runtime.resumeOperation({ operationId: paused.operationId });
+  assertEqual(resume.ok, false, 'failed native Resume start is returned to the UI');
+  assertEqual(resume.started, false, 'failed native Resume never claims a host generation');
+  assertEqual(providerCalls.length, callsBeforeResume, 'failed native Resume starts zero detached provider calls');
+  assertEqual(
+    (await harness.storage.loadPipelineRun('chat-preprocess')).state,
+    'paused',
+    'failed native Resume leaves the manifest paused'
+  );
+  assert(
+    harness.runtime.getView().turnScope.diagnosticCodes.includes('host-resume-start-failed'),
+    'failed native Resume exposes only the bounded failure code'
+  );
+  assert(!JSON.stringify(harness.runtime.getView()).includes('CANARY_HOST_ERROR_BODY'), 'host start error bodies stay out of the runtime view');
 }
 
 {
@@ -369,9 +449,16 @@ function roleCounts(calls = []) {
   });
 
   const restoredCalls = [];
+  const restoredHostStarts = [];
   const restoredRuntime = createHarness({
     storage,
-    provider: immediateProvider(restoredCalls)
+    provider: immediateProvider(restoredCalls),
+    hostGeneration: {
+      async start(details = {}) {
+        restoredHostStarts.push(details);
+        return { ok: true, started: true };
+      }
+    }
   }).runtime;
   const restored = await restoredRuntime.restoreExecutionState();
   assertEqual(restored.state, 'paused', 'restoring a running manifest exposes a paused operation');
@@ -381,8 +468,20 @@ function roleCounts(calls = []) {
     'restore converts an interrupted running stage back to pending'
   );
   assertEqual(restoredCalls.length, 0, 'restore never starts provider work');
-  const resumed = await restoredRuntime.resumeOperation({
+  const started = await restoredRuntime.resumeOperation({
     operationId: restored.operationId
+  });
+  assertEqual(started.started, true, 'reload Resume requests native generation');
+  assertEqual(restoredCalls.length, 0, 'reload Resume starts no provider work outside the interceptor');
+  assertDeepEqual(restoredHostStarts, [{
+    type: 'normal',
+    source: 'recursion-ui',
+    reason: 'resume-operation'
+  }], 'reload Resume preserves the original normal generation type');
+  const resumed = await restoredRuntime.prepareForGeneration({
+    userMessage: { text: 'I ask what she remembers.', mesid: 2 },
+    hostGeneration: true,
+    generationType: 'normal'
   });
   assertEqual(resumed.ok, true, 'a reloaded operation resumes through prompt settlement');
   assertEqual(
@@ -446,13 +545,8 @@ function roleCounts(calls = []) {
     'stale restore identifies the source identity boundary'
   );
   assertEqual(restoredCalls.length, 0, 'stale restore performs no provider work');
-  let resumeError = null;
-  try {
-    await restoredRuntime.resumeOperation({ operationId: restored.operationId });
-  } catch (error) {
-    resumeError = error;
-  }
-  assert(resumeError, 'stale operations do not expose a usable Resume context');
+  const staleResume = await restoredRuntime.resumeOperation({ operationId: restored.operationId });
+  assertEqual(staleResume.ok, false, 'stale operations do not expose a usable Resume context');
 }
 
 {

@@ -64,7 +64,7 @@ const PROGRESS_ACTIONS = Object.freeze({
     icon: 'rotate'
   }),
   reprocess: Object.freeze({
-    label: 'Reprocess from here on the next generation',
+    label: 'Reprocess from here on the next swipe',
     icon: 'branch-refresh'
   }),
   'cancel-reprocess': Object.freeze({
@@ -76,7 +76,7 @@ const EXECUTION_LABELS = Object.freeze({
   'preprocess.snapshot': 'Reading current turn',
   'preprocess.arbiter': 'Planning card pass',
   'preprocess.cards.fused': 'Fused card bundle',
-  'preprocess.deck': 'Updating scene deck',
+  'preprocess.deck': 'Building turn deck',
   'preprocess.hand': 'Selecting turn hand',
   'preprocess.guidance': 'Reasoner guidance',
   'preprocess.packet': 'Composing prompt packet',
@@ -114,10 +114,10 @@ const STEP_ORDER = [
 
 const STEP_DEFINITIONS = Object.freeze({
   'read-turn': { label: 'Reading current turn', providerLane: 'utility' },
-  'checking-scene-shift': { label: 'Checking scene shift', providerLane: 'utility' },
+  'checking-scene-shift': { label: 'Reading current turn', providerLane: 'utility' },
   'planning-card-pass': { label: 'Planning card pass', providerLane: 'utility' },
-  'checking-scene-cache': { label: 'Checking scene cache', providerLane: 'utility' },
-  'reusing-scene-deck': { label: 'Reusing scene deck', providerLane: 'utility' },
+  'checking-scene-cache': { label: 'Checking turn work', providerLane: 'utility' },
+  'reusing-scene-deck': { label: 'Reusing turn work', providerLane: 'utility' },
   'provider-test': { label: 'Provider test', providerLane: 'utility' },
   'generation-review': { label: 'Generation review', currentLabel: 'Reviewing generated response', providerLane: 'utility' },
   'editorial-diagnosis': { label: 'Editorial diagnosis', currentLabel: 'Diagnosing response', providerLane: 'utility' },
@@ -128,9 +128,9 @@ const STEP_DEFINITIONS = Object.freeze({
   'utility-card-batch': { label: 'Utility card batch', providerLane: 'utility' },
   'validating-cards': { label: 'Validating cards', providerLane: 'utility' },
   'repairing-card-json': { label: 'Repairing card JSON', providerLane: 'utility' },
-  'updating-scene-deck': { label: 'Updating scene deck', providerLane: 'utility' },
+  'updating-scene-deck': { label: 'Building turn deck', providerLane: 'utility' },
   'selecting-turn-hand': { label: 'Selecting turn hand', providerLane: 'utility' },
-  'saving-scene-cache': { label: 'Saving scene cache', providerLane: 'utility' },
+  'saving-scene-cache': { label: 'Saving turn checkpoints', providerLane: 'utility' },
   'composing-prompt-packet': { label: 'Composing prompt packet', providerLane: 'utility' },
   'reasoner-guidance': { label: 'Reasoner guidance', providerLane: 'reasoner' },
   'post-process-commit': { label: 'Adding Post-process swipe', providerLane: 'utility' },

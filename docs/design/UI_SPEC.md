@@ -57,9 +57,9 @@ Canonical desktop layout:
 
 The first control is a dedicated icon-only power toggle. It uses the same power icon shape as the mode menu previously used and is the only control that enables or disables Recursion. It must expose matching accessible label and hover tooltip copy (`Turn Recursion off` / `Turn Recursion on`). When disabled, Recursion clears or avoids installed prompt entries and does not inspect chat for prompt compilation.
 
-The Stop button is a separate active-only control, not a second power state. During a Recursion stage, it aborts the current call, pauses the operation, preserves accepted checkpoints, and exposes Resume or Retry Stage in the progress row. During SillyTavern's primary story generation, it follows the native host stop seam, clears Recursion-owned prompt keys, and cancels the pending Post-process trigger. Recursion never automatically retries the primary story generation.
+The Stop button is a separate active-only control, not a second power state. During a Recursion stage, it aborts the current call, pauses the operation, preserves accepted checkpoints, and exposes Resume or Retry Stage in the progress row. Resume requests the matching native SillyTavern Send, Swipe, or Regenerate action; provider work continues only when SillyTavern re-enters Recursion's generation interceptor. During SillyTavern's primary story generation, Stop follows the native host stop seam, clears Recursion-owned prompt keys, and cancels the pending Post-process trigger. Recursion never starts or retries primary story generation through a detached provider path.
 
-When no active run or host generation exists, the same command slot shows an icon-only full-fresh button with accessible label `Queue a full fresh generation`. Clicking it queues a one-shot full-fresh intent for the next send or swipe; it does not start Recursion provider work, install a prompt packet, or call SillyTavern native generation. While selected, its accessible label is `Full fresh generation: Queued`, it remains visible in a pressed state, and a second click cancels the intent. Stop appears only while Recursion preparation or SillyTavern host generation is actually active. The next generation consumes the intent once, bypasses cached cards, Fused bundle reuse, latest-assistant swipe packet reuse, and same-turn packet reinstall, then returns to the selected pipeline. Full fresh is not Reset Scene Cache; it invalidates current reusable work for one generation but does not delete SillyTavern messages.
+When no active run or host generation exists, the same command slot shows an icon-only full-rebuild button with accessible label `Rebuild all Recursion work on the next swipe`. Clicking it queues a one-shot full-rebuild intent for the next swipe only; it does not start Recursion provider work, install a prompt packet, or call SillyTavern native generation. While selected, its accessible label is `Full rebuild on next swipe: Queued`, it remains visible in a pressed state, and a second click cancels the intent. Stop appears only while Recursion preparation or SillyTavern host generation is actually active. The next swipe consumes the intent once, bypasses every active-turn checkpoint, rebuilds Recursion's packet, and then returns to the selected pipeline. A normal new user message always starts a new turn operation and never consumes or inherits this swipe-only intent. Full rebuild is not Reset Turn Cache; it is a queued one-swipe action and does not delete SillyTavern messages.
 
 The pipeline control is a single icon-only button immediately to the left of the Mode button. It is not duplicated in Settings. It opens a compact dropdown with two choices:
 
@@ -234,7 +234,7 @@ Standby phrase defaults:
 
 - Fresh enabled load or newly opened chat with no composed hand: `Ready for Recursion.`
 - Settled prompt install: `Recursion prompt ready.`
-- Idle Segmented or Fused mode with selected cached/generated cards available: `Scene deck standing by.`
+- Idle Segmented or Fused mode with selected generated cards available: `Turn work standing by.`
 - Idle Manual mode: `Manual scope ready.`
 - Disabled: `Recursion off.`
 - Warning or error standby: `Needs attention.`
@@ -284,9 +284,9 @@ Every progress row reserves exactly one fixed 24px action slot after metadata. T
 | Running frontier | Executable owner | `Stop and pause this operation` |
 | Paused frontier | Executable owner | `Resume from saved checkpoint` |
 | Blocking failed | Executable owner | `Retry this step` |
-| Completed or cached | Executable owner | `Reprocess from here on the next generation` |
+| Completed or cached | Executable owner | `Reprocess from here on the next swipe` |
 | Queued | Executable owner | `Cancel queued reprocess` |
-| Stale | Earliest meaningful executable owner | `Reprocess from here on the next generation` |
+| Stale | Earliest meaningful executable owner | `Reprocess from here on the next swipe` |
 | Pending, blocked, or skipped | Any | none |
 | Fused validation child | Non-executable detail | none |
 | Unified Post-process child detail | Non-owner detail | none |
@@ -321,7 +321,7 @@ Successful provider work that required more than one attempt is not plain green 
 
 A SillyTavern Post-process rewrite that succeeds on a later configured attempt retains the prior stable `recoveredFailureCode`. The category and recovered host-rewrite child show fixed copy for empty text, unchanged text, provider-owned timeout, or generic host failure. Because recovery already succeeded, these rows omit `suggestedAction`; they must not tell the user to retry again or copy a code that was not persisted. The code remains diagnostic metadata and is also stored on the successful category in the Post-process marker.
 
-Swipes and other source mutations start a fresh visible run. The new run must not inherit warning or failed row state from the prior generation. If the new run only checks or invalidates stale cache metadata before planning, render that as `Checking scene cache` with neutral completed state. Actual `Reusing scene deck` rows are cache reads and must use `cached` / purple, not amber.
+Swipes and other source mutations start a fresh visible run. The new run must not inherit warning or failed row state from the prior generation. Same-turn swipe reuse may render accepted turn checkpoints as `cached` / purple, not amber. A changed source band starts new turn work instead of trying to infer a scene boundary.
 
 `progressRun.steps[]` shape:
 
@@ -433,7 +433,7 @@ Default progress menu:
 Generating                         2 model calls running
 
 [done] Reading current turn         done
-[done] Checking scene shift         done
+[done] Planning card pass           done
 [warn] Utility card batch           caution
        [run]  Scene Frame           running
        [cache] Scene Constraints   cached
@@ -442,7 +442,7 @@ Generating                         2 model calls running
 [run]  Reasoner guidance            running
 [wait] Composing prompt packet      waiting
 [wait] Installing Recursion prompt  waiting
-[wait] Saving scene cache           queued
+[wait] Building turn deck           queued
 
 Auto - Utility and Reasoner lanes        Live
 ```
@@ -450,19 +450,18 @@ Auto - Utility and Reasoner lanes        Live
 Recommended V1 step labels:
 
 - `Reading current turn`
-- `Checking scene shift`
 - `Planning card pass`
-- `Reusing scene deck`
+- `Reusing turn work`
 - `Generating scene cards`
 - `Utility card batch`
 - `Reasoner guidance`
 - `Validating cards`
 - `Repairing card JSON`
-- `Updating scene deck`
+- `Building turn deck`
 - `Selecting turn hand`
 - `Composing prompt packet`
 - `Installing Recursion prompt`
-- `Saving scene cache`
+- `Saving turn checkpoints`
 - `Recursion prompt ready`
 
 Step states:
@@ -944,7 +943,7 @@ Metachip rules:
 
 - Category is never a chip; category is the icon plus row label.
 - Priority is the only strong color. Show priority chips only when they add signal: `critical` and `strong`. Do not spend chip space on routine `normal`, `light`, or support labels.
-- Compact Last Brief chips are exception-first trust signals, not a raw metadata dump. Show `cached` only when the card was reused from a valid scene cache; show `fallback`, `retried`, `reasoner`, `focus`, `manual`, or `guardrail` only when that condition materially explains why the card was used.
+- Compact Last Brief chips are exception-first trust signals, not a raw metadata dump. Show `cached` only when the card was reused from a valid active-turn checkpoint; show `fallback`, `retried`, `reasoner`, `focus`, `manual`, or `guardrail` only when that condition materially explains why the card was used.
 - Do not show redundant or misleading compact chips such as `active`, routine clean `generated`, `standard`, `compact`, `scene`, generic `turn`, `provider`, or `injected`. Active is implied by Last Brief membership, detail profile is not visible row length, and clean generated cards need no source chip.
 - Compact rows should usually show zero to two chips. If more meaningful metadata exists, collapse extras behind `+N`.
 - Expanded rows may show full card text, but compact metadata should still stay restrained; deeper card metadata belongs in the Full Viewer or Prompt Packet inspector.
@@ -1177,7 +1176,7 @@ The full viewer is an observatory, not a primary play surface. It should open as
 Recommended sections:
 
 - Now: current Auto Control Plan, last run, active hand, prompt packet summary.
-- Deck: scene deck, card states, emphasis, detail profile, provider, updated time.
+- Deck: active turn deck, card states, emphasis, detail profile, provider, updated time.
 - Activity: bounded run journal, Hero Pixel Array timeline, errors, refreshes, reasoner trigger reasons, fallback paths.
 - Prompt Packet: final injected packet, omitted reasons, source card ids.
 - Settings: high-level behavior settings.
@@ -1261,13 +1260,13 @@ Advanced contains low-frequency controls grouped into collapsible sections:
 - Execution: `Attempts per step`, a numeric one-through-five control with default two and helper copy `Total automatic model attempts for each Recursion step. Slow calls are not retried unless they fail.` Production model calls have no Recursion default timeout.
 - UI: Tooltips, Sub-tier Rows, and Progress Rows. Tooltips are enabled by default on first install so new users can discover icon-only controls and compact status surfaces. Turning Tooltips off auto-saves immediately and removes Recursion tooltip and hover-help titles across the compact bar, popovers, card rows, settings, and diagnostics; normal buttons and click-open panels continue to work.
 - Context Windows: Post-process Evidence Messages, Source Freshness Messages, Source Freshness Text Budget, and Provider Analysis Messages. These controls bound Recursion-owned evidence and analysis windows; they do not replace or limit SillyTavern writer context.
-- Storage Retention: Scene Caches / Chat, Scene Caches Total, Swipe Variants / Scene, and Journal Entries. These controls tune Recursion-owned cache files and journals; they do not delete SillyTavern chat.
-- Diagnostics: safe excerpts, Reset Scene Cache, Export Diagnostics, and Clear Run Journal.
+- Storage Retention: Journal Entries only. Generated turn work is scoped to the active turn and prior-turn artifacts are pruned automatically; this control never deletes SillyTavern chat.
+- Diagnostics: safe excerpts, Reset Turn Cache, Export Diagnostics, and Clear Run Journal.
 - Reset Defaults: a confirmed action at the bottom of Advanced that restores Play and Advanced controls to `DEFAULT_RECURSION_SETTINGS`. It preserves provider settings and session-only keys, custom card decks and scope, compact-bar settings, and viewer visibility.
 
 Injection controls apply to the final prompt packet after Utility guidance or Reasoner composition. They do not expose card-level placement, card editing, or per-turn prompt engineering. They exist for preset/model compatibility when a SillyTavern setup needs the Recursion packet to land in a different host lane or depth.
 
-Advanced commands without V1 runtime handlers must render disabled with tooltip copy. They should not appear active until they perform the named action. V1 wires `Reset Scene Cache`, `Export Diagnostics`, and `Clear Run Journal`.
+Advanced commands without V1 runtime handlers must render disabled with tooltip copy. They should not appear active until they perform the named action. V1 wires `Reset Turn Cache`, `Export Diagnostics`, and `Clear Run Journal`. Reset Turn Cache deletes Recursion's generated work for the active turn without changing SillyTavern messages.
 
 UI command failures use the compact bar's existing transient status line. They must not open a modal or create a progress run unless runtime work actually started.
 
@@ -1303,7 +1302,7 @@ Provider cards must not sprawl by rendering profile and OpenAI endpoint fields t
 
 Provider lane controls autosave. Tooltip and helper copy must not mention a Save Provider action; testing a provider is a separate explicit command.
 
-API keys are session-only. They must not be written to extension settings, scene caches, prompt packets, run journals, diagnostics, reports, or artifacts.
+API keys are session-only. They must not be written to extension settings, turn checkpoints, prompt packets, run journals, diagnostics, reports, or artifacts.
 
 Provider capability is derived from route completeness, host support, session
 credentials, and health evidence bound to the current configuration hash:

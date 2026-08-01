@@ -384,7 +384,7 @@ const cachedProgress = createProgressRunModel({
   progressRun: {
     runId: 'cached-progress',
     steps: [
-      { id: 'reusing-scene-deck', label: 'Reusing scene deck', providerLane: 'utility', state: 'cached' }
+      { id: 'reusing-scene-deck', label: 'Reusing turn work', providerLane: 'utility', state: 'cached' }
     ]
   }
 });
@@ -419,7 +419,7 @@ const nestedChildProgress = createProgressRunModel({
       },
       {
         id: 'reusing-scene-deck',
-        label: 'Reusing scene deck',
+        label: 'Reusing turn work',
         providerLane: 'utility',
         state: 'running',
         children: [
@@ -557,9 +557,9 @@ assertEqual(enhancementProviderProgress.steps.some((step) => step.id === 'utilit
 const derivedCachedProgress = createProgressRunModel({
   settings: { mode: 'auto' },
   activityHistory: [
-    { runId: 'run-cache', phase: 'cacheReusing', label: 'Reusing scene deck...', providerLane: 'utility' }
+    { runId: 'run-cache', phase: 'cacheReusing', label: 'Reusing turn work...', providerLane: 'utility' }
   ],
-  activity: { runId: 'run-cache', phase: 'cacheReusing', label: 'Reusing scene deck...', providerLane: 'utility' }
+  activity: { runId: 'run-cache', phase: 'cacheReusing', label: 'Reusing turn work...', providerLane: 'utility' }
 });
 assertEqual(
   derivedCachedProgress.steps.find((step) => step.id === 'reusing-scene-deck')?.state,
@@ -1871,7 +1871,7 @@ try {
   const providerTestGates = [];
   const providerClears = [];
   const providerModelFetches = [];
-  let resetSceneCacheCalls = 0;
+  let resetTurnCacheCalls = 0;
   let clearRunJournalCalls = 0;
   let exportDiagnosticsCalls = 0;
   let stopGenerationCalls = 0;
@@ -2126,8 +2126,8 @@ try {
           ]
         };
       },
-      resetSceneCache: () => {
-        resetSceneCacheCalls += 1;
+      resetTurnCache: () => {
+        resetTurnCacheCalls += 1;
         return { ok: true };
       },
       clearRunJournal: () => {
@@ -3769,7 +3769,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-settings-section-body-injection]').hidden, false, 'Injection section expands');
   assertEqual(root.querySelector('[data-recursion-clear-run-journal]').disabled, false, 'Clear Run Journal is enabled when runtime handler exists');
   assertEqual(root.querySelector('[data-recursion-export-diagnostics]').disabled, false, 'Export Diagnostics is enabled when runtime handler exists');
-  assertEqual(root.querySelector('[data-recursion-reset-scene-cache]').disabled, false, 'Reset Scene Cache is enabled when runtime handler exists');
+  assertEqual(root.querySelector('[data-recursion-reset-turn-cache]').disabled, false, 'Reset Turn Cache is enabled when runtime handler exists');
   assert(root.querySelector('[data-recursion-setting-injection-placement]'), 'Advanced settings render injection placement control');
   assert(root.querySelector('[data-recursion-setting-injection-role]'), 'Advanced settings render injection role control');
   assert(root.querySelector('[data-recursion-setting-injection-depth]'), 'Advanced settings render injection depth control');
@@ -3787,9 +3787,9 @@ try {
   assert(root.querySelector('[data-recursion-setting-source-window-messages]'), 'Context Windows renders source freshness message cap');
   assert(root.querySelector('[data-recursion-setting-source-window-characters]'), 'Context Windows renders source freshness character budget');
   assert(root.querySelector('[data-recursion-setting-provider-visible-messages]'), 'Context Windows renders provider analysis message cap');
-  assert(root.querySelector('[data-recursion-setting-scene-caches-per-chat]'), 'Storage Retention renders per-chat scene cache cap');
-  assert(root.querySelector('[data-recursion-setting-scene-caches-total]'), 'Storage Retention renders total scene cache cap');
-  assert(root.querySelector('[data-recursion-setting-source-variants-per-scene]'), 'Storage Retention renders source variant cap');
+  assertEqual(root.querySelector('[data-recursion-setting-scene-caches-per-chat]'), null, 'Storage Retention omits retired per-chat scene cache cap');
+  assertEqual(root.querySelector('[data-recursion-setting-scene-caches-total]'), null, 'Storage Retention omits retired total scene cache cap');
+  assertEqual(root.querySelector('[data-recursion-setting-source-variants-per-scene]'), null, 'Storage Retention omits retired source variant cap');
   assert(root.querySelector('[data-recursion-setting-run-journal-entries]'), 'Storage Retention renders journal entry cap');
   const typedIntegerSettingSelectors = [
     '[data-recursion-setting-min-cards]',
@@ -3800,9 +3800,6 @@ try {
     '[data-recursion-setting-source-window-messages]',
     '[data-recursion-setting-source-window-characters]',
     '[data-recursion-setting-provider-visible-messages]',
-    '[data-recursion-setting-scene-caches-per-chat]',
-    '[data-recursion-setting-scene-caches-total]',
-    '[data-recursion-setting-source-variants-per-scene]',
     '[data-recursion-setting-run-journal-entries]',
     '[data-recursion-provider-max-tokens-utility]',
     '[data-recursion-provider-max-tokens-reasoner]'
@@ -3847,8 +3844,8 @@ try {
   assertEqual(root.querySelector('[data-recursion-setting-injection-placement]').value, 'in_prompt', 'injection placement defaults to the concrete prompt lane');
   assertEqual(root.querySelector('[data-recursion-setting-injection-role]').value, 'system', 'injection role defaults to system');
   assertEqual(root.querySelector('[data-recursion-setting-injection-depth]').value, '1', 'injection depth defaults to the concrete recommended depth');
-  root.querySelector('[data-recursion-reset-scene-cache]').click();
-  assertEqual(resetSceneCacheCalls, 1, 'Reset Scene Cache action calls runtime');
+  root.querySelector('[data-recursion-reset-turn-cache]').click();
+  assertEqual(resetTurnCacheCalls, 1, 'Reset Turn Cache action calls runtime');
   root.querySelector('[data-recursion-clear-run-journal]').click();
   assertEqual(clearRunJournalCalls, 1, 'Clear Run Journal action calls runtime');
   root.querySelector('[data-recursion-export-diagnostics]').click();
@@ -4002,9 +3999,6 @@ try {
   root.querySelector('[data-recursion-setting-source-window-messages]').value = '64';
   root.querySelector('[data-recursion-setting-source-window-characters]').value = '36000';
   root.querySelector('[data-recursion-setting-provider-visible-messages]').value = '6';
-  root.querySelector('[data-recursion-setting-scene-caches-per-chat]').value = '5';
-  root.querySelector('[data-recursion-setting-scene-caches-total]').value = '20';
-  root.querySelector('[data-recursion-setting-source-variants-per-scene]').value = '6';
   root.querySelector('[data-recursion-setting-run-journal-entries]').value = '120';
   root.querySelector('[data-recursion-setting-include-excerpts]').checked = true;
   root.querySelector('[data-recursion-setting-injection-placement]').value = 'in_chat';
@@ -4039,9 +4033,6 @@ try {
       sourceWindowMessages: 64,
       sourceWindowCharacters: 36000,
       providerVisibleMessages: 6,
-      sceneCachesPerChat: 5,
-      sceneCachesTotal: 20,
-      sourceVariantsPerScene: 6,
       runJournalEntries: 120
     },
     injection: {
@@ -4295,8 +4286,8 @@ try {
   }
   assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, true, 'idle view hides stop generation button');
   assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').hidden, false, 'idle view shows fresh-next generation button in command slot');
-  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-label'), 'Queue a full fresh generation', 'fresh-next button exposes accessible copy');
-  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('title'), 'Queue the next send or swipe to rebuild fresh cards and prompt guidance without using cached cards or same-turn packet reuse.', 'fresh-next button exposes hover tip copy');
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-label'), 'Rebuild all Recursion work on the next swipe', 'fresh-next button exposes accessible copy');
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('title'), 'Rebuild all Recursion work on the next swipe without reusing the active turn checkpoints.', 'fresh-next button exposes hover tip copy');
   assert(root.querySelector('[data-recursion-fresh-next-generation-icon]'), 'fresh-next button renders the Regenerate icon');
   assertEqual(root.querySelector('[data-recursion-fresh-next-generation-icon]').children.length, 0, 'fresh-next icon uses the regenerate.svg asset mask instead of inline SVG');
   assertEqual(fakeDocument.textTree(root.querySelector('[data-recursion-fresh-next-generation]')).includes('Regenerate'), false, 'fresh-next button is icon-only when idle');
@@ -4306,10 +4297,10 @@ try {
   ui.update();
   assertEqual(root.querySelector('[data-recursion-stop-generation]').hidden, true, 'queued fresh-next state does not show Stop while idle');
   assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-pressed'), 'true', 'queued fresh-next state renders selected button state');
-  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-label'), 'Full fresh generation: Queued', 'queued fresh-next button exposes Queued copy');
+  assertEqual(root.querySelector('[data-recursion-fresh-next-generation]').getAttribute('aria-label'), 'Full rebuild on next swipe: Queued', 'queued fresh-next button exposes Queued copy');
   root.querySelector('[data-recursion-hand-toggle]').click();
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-hand-dropdown]')).includes('Door stays blocked and the brass lock remains warped.'), 'queued fresh-next state keeps previous Last Brief cards visible until send or swipe');
-  assert(!fakeDocument.textTree(root.querySelector('[data-recursion-hand-dropdown]')).includes('Next generation will be fresh.'), 'queued fresh-next state does not spend the Last Brief clearing copy before generation');
+  assert(!fakeDocument.textTree(root.querySelector('[data-recursion-hand-dropdown]')).includes('Next swipe will rebuild all Recursion work.'), 'queued fresh-next state does not spend the Last Brief clearing copy before generation');
   root.querySelector('[data-recursion-hand-toggle]').click();
   root.querySelector('[data-recursion-fresh-next-generation]').click();
   assertEqual(clearFreshNextGenerationCalls, 1, 'clicking queued fresh-next button clears the override');

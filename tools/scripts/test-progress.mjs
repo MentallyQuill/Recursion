@@ -70,7 +70,7 @@ const progressActionCases = [
       kind: 'reprocess',
       stageId: 'preprocess.arbiter',
       operationId: 'run-a',
-      label: 'Reprocess from here on the next generation',
+      label: 'Reprocess from here on the next swipe',
       icon: 'branch-refresh'
     }
   },
@@ -100,7 +100,7 @@ const progressActionCases = [
       kind: 'reprocess',
       stageId: 'preprocess.arbiter',
       operationId: 'run-a',
-      label: 'Reprocess from here on the next generation',
+      label: 'Reprocess from here on the next swipe',
       icon: 'branch-refresh'
     }
   }
@@ -969,9 +969,9 @@ assertEqual(swipeCacheCheck.state, 'done', 'stale cache inspection is completed 
 const cacheReuseProgress = createProgressRunModel({
   activityHistory: [
     { runId: 'cache-reuse-purple-run', phase: 'started', label: 'Reading current turn...', recordedAt: '1' },
-    { runId: 'cache-reuse-purple-run', phase: 'cacheReusing', label: 'Reusing scene deck...', providerLane: 'utility', recordedAt: '2' }
+    { runId: 'cache-reuse-purple-run', phase: 'cacheReusing', label: 'Reusing turn work...', providerLane: 'utility', recordedAt: '2' }
   ],
-  activity: { runId: 'cache-reuse-purple-run', phase: 'cacheReusing', label: 'Reusing scene deck...', providerLane: 'utility', recordedAt: '2' }
+  activity: { runId: 'cache-reuse-purple-run', phase: 'cacheReusing', label: 'Reusing turn work...', providerLane: 'utility', recordedAt: '2' }
 });
 const cacheReuseStep = cacheReuseProgress.steps.find((step) => step.id === 'reusing-scene-deck');
 assert(cacheReuseStep, 'cache reuse renders the scene deck reuse row');
@@ -1316,7 +1316,7 @@ const manualSettledWarningProgress = createProgressRunModel({
       recordedAt: '3'
     },
     { runId: 'manual-settled-warning', phase: 'handSelected', label: 'Selecting turn hand', severity: 'success', recordedAt: '4' },
-    { runId: 'manual-settled-warning', phase: 'storageComplete', label: 'Saving scene cache', severity: 'success', recordedAt: '5' },
+    { runId: 'manual-settled-warning', phase: 'storageComplete', label: 'Saving turn checkpoints', severity: 'success', recordedAt: '5' },
     { runId: 'manual-settled-warning', phase: 'settled', label: 'Recursion prompt ready.', severity: 'success', recordedAt: '6' }
   ],
   activity: {

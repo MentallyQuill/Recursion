@@ -225,9 +225,6 @@ const SETTINGS_AUTOSAVE_DATASETS = Object.freeze([
   'recursionSettingSourceWindowMessages',
   'recursionSettingSourceWindowCharacters',
   'recursionSettingProviderVisibleMessages',
-  'recursionSettingSceneCachesPerChat',
-  'recursionSettingSceneCachesTotal',
-  'recursionSettingSourceVariantsPerScene',
   'recursionSettingRunJournalEntries',
   'recursionSettingIncludeExcerpts'
 ]);
@@ -261,18 +258,15 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   tooltips: 'Show hover help across Recursion. Turn off once the controls are familiar; hidden text never affects model calls.',
   progressChildLimit: 'Maximum visible sub-rows under one progress step before that child list scrolls. Useful when many card calls run in one turn.',
   progressListLimit: 'Maximum combined progress rows before the whole progress menu scrolls. Keeps long model-call runs readable without growing over the chat.',
-  storageRetention: 'Operational caps for Recursion-owned cache files and journals. These never delete SillyTavern chat messages.',
+  storageRetention: 'Operational cap for Recursion-owned run journals. This never deletes SillyTavern chat messages.',
   sourceWindowMessages: 'Recent visible messages Recursion reads for source freshness. This does not delete SillyTavern chat.',
   sourceWindowCharacters: 'Character budget for the source freshness window. Lower values make long chats cheaper; higher values keep more local scene evidence.',
   providerVisibleMessages: 'Recent visible messages sent to Recursion analysis calls. This affects Recursion analysis prompts, not the final story model context.',
-  sceneCachesPerChat: 'Recursion scene-cache files retained per chat. Old unprotected caches are disposable and can be rebuilt.',
-  sceneCachesTotal: 'Total Recursion scene-cache files retained across chats. Cleanup never deletes SillyTavern messages or other extension data.',
-  sourceVariantsPerScene: 'Active-source variants retained for swipe A/B/A reuse. Higher values preserve more swipe branches but make scene-cache files larger.',
   runJournalEntries: 'Sanitized Recursion activity entries retained per chat. Higher values help debugging but cost more local storage.',
   diagnostics: 'Local troubleshooting controls. Diagnostics are sanitized by default and are for understanding Recursion behavior, not feeding the model.',
   resetDefaults: 'Reset Play and Advanced settings to their defaults. Provider settings, session keys, custom decks, deck scope, and compact-bar settings are preserved.',
   includeExcerpts: 'Include short sanitized excerpts in exported diagnostics. Leave off for privacy unless a bug report needs bounded text evidence.',
-  resetSceneCache: 'Clear cached scene cards for the current chat so Recursion rebuilds its hand from fresh context.',
+  resetTurnCache: "Delete Recursion's generated work for the active turn without changing SillyTavern messages.",
   clearRunJournal: 'Clear local Recursion activity history for this chat. This does not change cards, settings, or SillyTavern messages.',
   exportDiagnostics: 'Copy sanitized Recursion diagnostics for debugging. API keys, raw provider prompts, and hidden reasoning are excluded.',
   providerSource: 'Choose where this lane sends Recursion model calls. Current Host Model follows the active chat model; Host Connection Profile uses a saved SillyTavern profile; OpenAI-Compatible uses the endpoint fields below. Changes auto-save; hidden alternate-source fields keep their values.',
@@ -284,7 +278,7 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   providerTest: 'Send a small structured test call through this lane to verify routing, credentials, and JSON output before using it in chat.',
   providerClearKey: 'Remove the in-memory session key for this lane. Saved endpoint, model, and profile settings stay unchanged.'
 });
-const FRESH_NEXT_GENERATION_TOOLTIP = 'Queue the next send or swipe to rebuild fresh cards and prompt guidance without using cached cards or same-turn packet reuse.';
+const FRESH_NEXT_GENERATION_TOOLTIP = 'Rebuild all Recursion work on the next swipe without reusing the active turn checkpoints.';
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -1854,8 +1848,8 @@ function clearHandDropdownFadeTimer(panel) {
 function lastBriefEmptyText(model) {
   const status = model.lastBriefStatus;
   if (status === 'clearing' || status === 'preparing') {
-    if (model.lastBriefReason === 'user-fresh-next-generation') return 'Next generation will be fresh.';
-    if (model.lastBriefReason === 'fresh-next-generation-cleared') return 'Fresh generation request cleared.';
+    if (model.lastBriefReason === 'user-fresh-next-generation') return 'Next swipe will rebuild all Recursion work.';
+    if (model.lastBriefReason === 'fresh-next-generation-cleared') return 'Full rebuild request cleared.';
     return 'Preparing next prompt packet.';
   }
   return 'No hand has been composed for this chat.';
@@ -2963,13 +2957,13 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
       SETTINGS_TOOLTIPS.modelAttemptsPerStep
     )
   ], { tooltip: SETTINGS_TOOLTIPS.modelAttemptsPerStep, tooltipsEnabled }));
-  const resetSceneCache = button('Reset Scene Cache', 'recursionResetSceneCache', 'Reset Recursion scene cache');
-  if (asObject(capabilities).resetSceneCache !== true) {
-    resetSceneCache.disabled = true;
-    resetSceneCache.setAttribute('disabled', 'disabled');
-    resetSceneCache.setAttribute('title', 'Planned diagnostic command; not wired in this V1 surface yet.');
+  const resetTurnCache = button('Reset Turn Cache', 'recursionResetTurnCache', 'Reset Turn Cache');
+  if (asObject(capabilities).resetTurnCache !== true) {
+    resetTurnCache.disabled = true;
+    resetTurnCache.setAttribute('disabled', 'disabled');
+    resetTurnCache.setAttribute('title', 'Planned diagnostic command; not wired in this V1 surface yet.');
   } else {
-    setTooltip(resetSceneCache, tooltipsEnabled, SETTINGS_TOOLTIPS.resetSceneCache);
+    setTooltip(resetTurnCache, tooltipsEnabled, SETTINGS_TOOLTIPS.resetTurnCache);
   }
   group.appendChild(settingsDisclosureSection('injection', 'Injection', [
     settingsSelectRow(
@@ -3052,12 +3046,6 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
   setTooltip(sourceCharactersControl, tooltipsEnabled, SETTINGS_TOOLTIPS.sourceWindowCharacters);
   const providerMessagesControl = retentionNumberControl('providerVisibleMessages', 'recursionSettingProviderVisibleMessages', 'Provider visible message cap');
   setTooltip(providerMessagesControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerVisibleMessages);
-  const perChatCacheControl = retentionNumberControl('sceneCachesPerChat', 'recursionSettingSceneCachesPerChat', 'Scene caches retained per chat');
-  setTooltip(perChatCacheControl, tooltipsEnabled, SETTINGS_TOOLTIPS.sceneCachesPerChat);
-  const totalCacheControl = retentionNumberControl('sceneCachesTotal', 'recursionSettingSceneCachesTotal', 'Total scene caches retained');
-  setTooltip(totalCacheControl, tooltipsEnabled, SETTINGS_TOOLTIPS.sceneCachesTotal);
-  const variantControl = retentionNumberControl('sourceVariantsPerScene', 'recursionSettingSourceVariantsPerScene', 'Swipe variants retained per scene');
-  setTooltip(variantControl, tooltipsEnabled, SETTINGS_TOOLTIPS.sourceVariantsPerScene);
   const journalEntriesControl = retentionNumberControl('runJournalEntries', 'recursionSettingRunJournalEntries', 'Maximum diagnostic journal entries');
   setTooltip(journalEntriesControl, tooltipsEnabled, SETTINGS_TOOLTIPS.runJournalEntries);
   group.appendChild(settingsDisclosureSection('context-windows', 'Context Windows', [
@@ -3067,9 +3055,6 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
     controlRow('Provider Analysis Messages', providerMessagesControl)
   ], { tooltip: SETTINGS_TOOLTIPS.contextWindows, tooltipsEnabled }));
   group.appendChild(settingsDisclosureSection('storage-retention', 'Storage Retention', [
-    controlRow('Scene Caches / Chat', perChatCacheControl),
-    controlRow('Scene Caches Total', totalCacheControl),
-    controlRow('Swipe Variants / Scene', variantControl),
     controlRow('Journal Entries', journalEntriesControl)
   ], { tooltip: SETTINGS_TOOLTIPS.storageRetention, tooltipsEnabled }));
   const excerptsControl = checkboxControl({
@@ -3081,7 +3066,7 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
   group.appendChild(settingsDisclosureSection('diagnostics', 'Diagnostics', [
     controlRow('Include Excerpts', excerptsControl),
     el('div', { className: 'recursion-provider-actions' }, [
-      resetSceneCache,
+      resetTurnCache,
       button('Clear Run Journal', 'recursionClearRunJournal', SETTINGS_TOOLTIPS.clearRunJournal),
       button('Export Diagnostics', 'recursionExportDiagnostics', SETTINGS_TOOLTIPS.exportDiagnostics)
     ])
@@ -3650,7 +3635,7 @@ function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null, pr
     connectionProfiles
   });
   renderAdvancedSettings(advancedPane, settings, {
-    resetSceneCache: typeof runtime?.resetSceneCache === 'function'
+    resetTurnCache: typeof runtime?.resetTurnCache === 'function'
   });
   playPane.hidden = activeTab !== 'play';
   providersPane.hidden = activeTab !== 'providers';
@@ -4050,7 +4035,7 @@ function buildRoot() {
     ]),
     el('button', {
       className: 'recursion-fresh-next-generation',
-      attrs: { type: 'button', 'aria-label': 'Force next generation fresh', title: FRESH_NEXT_GENERATION_TOOLTIP, 'aria-pressed': 'false' },
+      attrs: { type: 'button', 'aria-label': 'Rebuild all Recursion work on the next swipe', title: FRESH_NEXT_GENERATION_TOOLTIP, 'aria-pressed': 'false' },
       dataset: { recursionFreshNextGeneration: '' }
     }, [
       el('span', { className: 'recursion-fresh-next-generation-icon', attrs: { 'aria-hidden': 'true' }, dataset: { recursionFreshNextGenerationIcon: '' } })
@@ -6723,8 +6708,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       providerUiState.disclosureOpen[lane] = open;
       setDisclosureOpen(providerDisclosure, body, section, open);
     }
-    if (control('recursionResetSceneCache')) {
-      runAction(runtime?.resetSceneCache?.(), () => {
+    if (control('recursionResetTurnCache')) {
+      runAction(runtime?.resetTurnCache?.(), () => {
         settingsPanelRendered = false;
         update();
       });
@@ -7405,24 +7390,6 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
           RETENTION_LIMITS.providerVisibleMessages.min,
           RETENTION_LIMITS.providerVisibleMessages.max
         ),
-        sceneCachesPerChat: integerInRange(
-          controlNumber(sourceRoot, '[data-recursion-setting-scene-caches-per-chat]', defaultRetention.sceneCachesPerChat),
-          defaultRetention.sceneCachesPerChat,
-          RETENTION_LIMITS.sceneCachesPerChat.min,
-          RETENTION_LIMITS.sceneCachesPerChat.max
-        ),
-        sceneCachesTotal: integerInRange(
-          controlNumber(sourceRoot, '[data-recursion-setting-scene-caches-total]', defaultRetention.sceneCachesTotal),
-          defaultRetention.sceneCachesTotal,
-          RETENTION_LIMITS.sceneCachesTotal.min,
-          RETENTION_LIMITS.sceneCachesTotal.max
-        ),
-        sourceVariantsPerScene: integerInRange(
-          controlNumber(sourceRoot, '[data-recursion-setting-source-variants-per-scene]', defaultRetention.sourceVariantsPerScene),
-          defaultRetention.sourceVariantsPerScene,
-          RETENTION_LIMITS.sourceVariantsPerScene.min,
-          RETENTION_LIMITS.sourceVariantsPerScene.max
-        ),
         runJournalEntries: integerInRange(
           controlNumber(sourceRoot, '[data-recursion-setting-run-journal-entries]', defaultRetention.runJournalEntries),
           defaultRetention.runJournalEntries,
@@ -7559,7 +7526,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       freshNextGenerationButton.setAttribute('aria-hidden', visible ? 'false' : 'true');
       freshNextGenerationButton.setAttribute('tabindex', visible ? '0' : '-1');
       freshNextGenerationButton.setAttribute('aria-pressed', pending ? 'true' : 'false');
-      freshNextGenerationButton.setAttribute('aria-label', pending ? 'Full fresh generation: Queued' : 'Queue a full fresh generation');
+      freshNextGenerationButton.setAttribute('aria-label', pending ? 'Full rebuild on next swipe: Queued' : 'Rebuild all Recursion work on the next swipe');
       setTooltip(freshNextGenerationButton, model.tooltipsEnabled, FRESH_NEXT_GENERATION_TOOLTIP);
     }
     renderPipelineMenuSelection(model.pipelineMode);

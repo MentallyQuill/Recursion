@@ -3,8 +3,8 @@ import {
   normalizeExecutionProvenance
 } from './provenance.mjs';
 
-export const PIPELINE_RUN_SCHEMA = 'recursion.pipelineRun.v1';
-export const CHECKPOINT_SCHEMA = 'recursion.stageCheckpoint.v1';
+export const PIPELINE_RUN_SCHEMA = 'recursion.pipelineRun.v2';
+export const CHECKPOINT_SCHEMA = 'recursion.stageCheckpoint.v2';
 
 export const OPERATION_STATES = Object.freeze([
   'running',
@@ -287,7 +287,11 @@ export function createPipelineRun({
   pipelineMode,
   createdAt,
   sourceIdentity,
-  provenance
+  provenance,
+  turnKeyHash,
+  sourceBandHash,
+  hostOwned = false,
+  nativeGenerationType = 'normal'
 }) {
   return {
     schema: PIPELINE_RUN_SCHEMA,
@@ -296,6 +300,12 @@ export function createPipelineRun({
     phase: cleanText(phase),
     pipelineMode: cleanText(pipelineMode),
     chatKey: cleanText(chatKey),
+    turnKeyHash: cleanText(turnKeyHash),
+    sourceBandHash: cleanText(sourceBandHash),
+    hostOwned: hostOwned === true,
+    nativeGenerationType: ['normal', 'swipe', 'regenerate'].includes(nativeGenerationType)
+      ? nativeGenerationType
+      : 'normal',
     sourceIdentity: normalizeSourceIdentity(sourceIdentity),
     provenance: normalizeExecutionProvenance(provenance),
     revision: 0,
@@ -323,6 +333,12 @@ export function normalizePipelineRun(value) {
     phase: cleanText(value.phase),
     pipelineMode: cleanText(value.pipelineMode),
     chatKey: cleanText(value.chatKey),
+    turnKeyHash: cleanText(value.turnKeyHash),
+    sourceBandHash: cleanText(value.sourceBandHash),
+    hostOwned: value.hostOwned === true,
+    nativeGenerationType: ['normal', 'swipe', 'regenerate'].includes(value.nativeGenerationType)
+      ? value.nativeGenerationType
+      : 'normal',
     sourceIdentity: normalizeSourceIdentity(value.sourceIdentity),
     provenance: normalizeExecutionProvenance(value.provenance),
     revision: nonNegativeInteger(value.revision),

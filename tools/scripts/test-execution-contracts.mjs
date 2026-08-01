@@ -17,6 +17,9 @@ import {
 } from '../../src/execution/checkpoints.mjs';
 import { assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
+assertEqual(PIPELINE_RUN_SCHEMA, 'recursion.pipelineRun.v2', 'pipeline manifests use the turn-scoped V2 schema');
+assertEqual(CHECKPOINT_SCHEMA, 'recursion.stageCheckpoint.v2', 'stage checkpoints use the turn-scoped V2 schema');
+
 const left = await stableHash({ b: 2, a: 1 });
 const right = await stableHash({ a: 1, b: 2 });
 
@@ -24,6 +27,8 @@ assertEqual(left, right, 'stableHash ignores plain-object key insertion order');
 
 const provenance = buildRunProvenance({
   chatKey: 'chat-a',
+  turnKeyHash: 'turn-a',
+  sourceBandHash: 'source-band-a',
   sourceIdentity: {
     sourceRevisionHash: 'source-a',
     latestMessageId: 'message-7',
@@ -40,6 +45,8 @@ const provenance = buildRunProvenance({
 
 assertDeepEqual(provenance, {
   chatKey: 'chat-a',
+  turnKeyHash: 'turn-a',
+  sourceBandHash: 'source-band-a',
   sourceIdentity: {
     sourceRevisionHash: 'source-a',
     latestMessageId: 'message-7',
@@ -90,7 +97,11 @@ const run = createPipelineRun({
   pipelineMode: 'segmented',
   createdAt: '2026-07-29T12:00:00.000Z',
   sourceIdentity: provenance.sourceIdentity,
-  provenance
+  provenance,
+  turnKeyHash: 'turn-a',
+  sourceBandHash: 'source-band-a',
+  hostOwned: true,
+  nativeGenerationType: 'swipe'
 });
 
 assertDeepEqual(run, {
@@ -100,6 +111,10 @@ assertDeepEqual(run, {
   phase: 'preprocess',
   pipelineMode: 'segmented',
   chatKey: 'chat-a',
+  turnKeyHash: 'turn-a',
+  sourceBandHash: 'source-band-a',
+  hostOwned: true,
+  nativeGenerationType: 'swipe',
   sourceIdentity: provenance.sourceIdentity,
   provenance,
   revision: 0,
@@ -111,7 +126,13 @@ assertDeepEqual(run, {
   stageRecords: {},
   createdAt: '2026-07-29T12:00:00.000Z',
   updatedAt: '2026-07-29T12:00:00.000Z'
-}, 'createPipelineRun creates the canonical paused V1 manifest');
+}, 'createPipelineRun creates the canonical paused V2 manifest');
+
+assertEqual(
+  normalizePipelineRun({ ...run, schema: 'recursion.pipelineRun.v1' }),
+  null,
+  'normalizePipelineRun rejects V1 manifests instead of adapting them'
+);
 
 assertDeepEqual(
   normalizePipelineRun({ ...run, artifactBody: 'must-not-survive' }),
@@ -187,6 +208,12 @@ assertDeepEqual(
   normalizeCheckpoint({ ...checkpoint, artifactBody: 'must-not-survive' }),
   checkpoint,
   'normalizeCheckpoint drops unknown artifact fields'
+);
+
+assertEqual(
+  normalizeCheckpoint({ ...checkpoint, schema: 'recursion.stageCheckpoint.v1' }),
+  null,
+  'normalizeCheckpoint rejects V1 checkpoints instead of adapting them'
 );
 
 assertDeepEqual(

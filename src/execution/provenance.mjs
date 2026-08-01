@@ -40,6 +40,8 @@ export function normalizeExecutionProvenance(value = {}) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   const normalized = {};
   if (cleanText(source.chatKey)) normalized.chatKey = cleanText(source.chatKey);
+  if (cleanText(source.turnKeyHash)) normalized.turnKeyHash = cleanText(source.turnKeyHash);
+  if (cleanText(source.sourceBandHash)) normalized.sourceBandHash = cleanText(source.sourceBandHash);
   if (source.sourceIdentity && typeof source.sourceIdentity === 'object') {
     normalized.sourceIdentity = normalizeSourceIdentity(source.sourceIdentity);
   }

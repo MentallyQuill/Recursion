@@ -1340,6 +1340,17 @@ export function createSillyTavernHost({
       const type = nativeGenerationType(details?.type);
       const options = asObject(details?.options);
       try {
+        if (type === 'swipe') {
+          if (typeof context.swipe?.right !== 'function') return startUnavailableResult();
+          await context.swipe.right();
+          return {
+            ok: true,
+            started: true,
+            completed: true,
+            type,
+            source: 'context.swipe.right'
+          };
+        }
         if (typeof context.generate === 'function') {
           await context.generate(type, options);
           return {

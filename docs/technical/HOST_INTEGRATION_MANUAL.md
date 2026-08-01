@@ -52,6 +52,8 @@ The entrypoint subscribes to SillyTavern's player Stop signal through `event_typ
 
 The generation interceptor calls `runtime.prepareForGeneration({ hostGeneration: true })` before returning the chat to SillyTavern. It catches and logs sanitized failures so the host generation can continue. While that intercepted turn is active, `runtime.view().hostGenerationActive` allows the UI to expose the active-only Stop generation button.
 
+A host-owned Resume re-enters SillyTavern before continuing saved Recursion work. Normal and regenerate resumes call the native `Generate` surface. Swipe resumes call SillyTavern's native right-swipe lifecycle, which allocates the new swipe slot, emits `MESSAGE_SWIPED`, displays the generation placeholder, and then enters `Generate('swipe')`; calling `Generate('swipe')` directly would overwrite the selected slot instead of performing a native swipe.
+
 ```mermaid
 sequenceDiagram
     participant ST as SillyTavern

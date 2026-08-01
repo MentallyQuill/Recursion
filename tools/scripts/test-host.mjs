@@ -1233,6 +1233,31 @@ assertEqual(quietCalls[0], 'Fallback prompt', 'quiet fallback receives prompt');
 }
 
 {
+  const nativeCalls = [];
+  const swipeStartHost = createSillyTavernHost({
+    contextFactory: () => ({
+      currentChatId: 'swipe-start-chat',
+      chat: [{ mesid: 1, is_user: false, mes: 'Existing assistant response.' }],
+      generate: async (type) => {
+        nativeCalls.push(`generate:${type}`);
+      },
+      swipe: {
+        right: async () => {
+          nativeCalls.push('swipe:right');
+        }
+      }
+    }),
+    settingsRoot: {}
+  });
+  const startResult = await swipeStartHost.generation.start({ type: 'swipe', source: 'recursion-ui' });
+  assertEqual(startResult.ok, true, 'host native swipe start succeeds');
+  assertEqual(startResult.started, true, 'host native swipe start reports started');
+  assertEqual(startResult.type, 'swipe', 'host native swipe start reports swipe type');
+  assertEqual(startResult.source, 'context.swipe.right', 'host native swipe start uses SillyTavern swipe lifecycle');
+  assertDeepEqual(nativeCalls, ['swipe:right'], 'host native swipe start does not call Generate directly against the selected swipe');
+}
+
+{
   const unavailableStartHost = createSillyTavernHost({
     contextFactory: () => ({
       currentChatId: 'start-unavailable-chat',

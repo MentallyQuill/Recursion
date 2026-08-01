@@ -37,6 +37,8 @@ export function createRuntimeRunState() {
         runId: String(attempt.runId || ''),
         kind: ['normal', 'swipe', 'fresh'].includes(attempt.kind) ? attempt.kind : 'normal',
         sourceRevisionHash: String(attempt.sourceRevisionHash || ''),
+        turnKeyHash: String(attempt.turnKeyHash || ''),
+        generationClassification: String(attempt.generationClassification || ''),
         packetId: String(attempt.packetId || ''),
         startedAt: String(attempt.startedAt || new Date().toISOString()),
         canceled: false

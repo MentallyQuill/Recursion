@@ -2438,6 +2438,19 @@ function immediateDurableCardRouter() {
   assertEqual(installed.length, 1, 'auto mode installs one prompt');
   assert(view.lastPreparedGeneration, 'successful preparation commits a prepared generation artifact');
   assert(preparedGenerationIntegrityIsValid(view.lastPreparedGeneration), 'committed prepared generation artifact passes integrity');
+  assertEqual(view.lastPreparedGeneration.schema, 'recursion.preparedGeneration.v2', 'prepared generation uses the V2 turn-scoped schema');
+  assert(view.lastPreparedGeneration.basis.turnKeyHash, 'prepared generation records a turn key');
+  assert(view.lastPreparedGeneration.basis.sourceBandHash, 'prepared generation records a source-band hash');
+  assertEqual(
+    view.lastPreparedGeneration.basis.packetId,
+    view.lastPreparedGeneration.packet.packetId,
+    'prepared basis binds the installed packet identity'
+  );
+  assertEqual(
+    view.lastPreparedGeneration.basis.handId,
+    view.lastPreparedGeneration.hand.handId,
+    'prepared basis binds the selected hand identity'
+  );
   assertEqual(view.lastPreparedGeneration.packet.packetId, view.lastPacket.packetId, 'packet view derives from committed artifact');
   assertEqual(view.lastPreparedGeneration.hand.handId, view.lastHand.handId, 'hand view derives from committed artifact');
   assert(view.lastHand.cards.length > 0, 'hand available in view');

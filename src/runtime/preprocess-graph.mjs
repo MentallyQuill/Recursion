@@ -68,6 +68,13 @@ export function createSegmentedCardStages({
       checkpoint: 'durable',
       failurePolicy: 'continue',
       selectedCard,
+      buildInputFingerprint(context, dependencies) {
+        return {
+          turnKeyHash: String(context?.turnIdentity?.turnKeyHash || ''),
+          sourceBandHash: String(context?.turnIdentity?.sourceBandHash || ''),
+          dependencies
+        };
+      },
       buildRequest(context, dependencies) {
         return build(selectedCard, { context, dependencies });
       },
@@ -148,6 +155,13 @@ export function createFusedCardStages({
     checkpoint: 'durable',
     failurePolicy: 'fallback',
     outcomeChildren: fusedOutcomes(cards),
+    buildInputFingerprint(context, dependencies) {
+      return {
+        turnKeyHash: String(context?.turnIdentity?.turnKeyHash || ''),
+        sourceBandHash: String(context?.turnIdentity?.sourceBandHash || ''),
+        dependencies
+      };
+    },
     buildRequest(context, dependencies) {
       return build({
         selectedCards: cards,

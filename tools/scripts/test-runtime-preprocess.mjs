@@ -5,7 +5,7 @@ import {
   createMemoryStorageAdapter,
   createStorageRepository
 } from '../../src/storage.mjs';
-import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
+import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
@@ -53,6 +53,7 @@ function createHarness({
   settings = {}
 } = {}) {
   const calls = { install: 0, clear: 0 };
+  let hostSnapshot = clone(currentSnapshot);
   const settingsStore = createSettingsStore({ root: {} });
   settingsStore.update({
     pipelineMode: 'segmented',
@@ -63,7 +64,7 @@ function createHarness({
   });
   const host = {
     async snapshot() {
-      return clone(currentSnapshot);
+      return clone(hostSnapshot);
     },
     prompt: {
       async install(packet) {
@@ -87,7 +88,14 @@ function createHarness({
     generationRouter: provider,
     durablePreprocess: true
   });
-  return { runtime, storage, calls };
+  return {
+    runtime,
+    storage,
+    calls,
+    setSnapshot(value) {
+      hostSnapshot = clone(value);
+    }
+  };
 }
 
 function arbiterResponse(request, cardJobs = [{
@@ -162,6 +170,13 @@ function immediateProvider(calls = []) {
       throw new Error(`unexpected provider role ${roleId}`);
     }
   };
+}
+
+function roleCounts(calls = []) {
+  return calls.reduce((counts, call) => {
+    counts[call.roleId] = (counts[call.roleId] || 0) + 1;
+    return counts;
+  }, {});
 }
 
 {
@@ -411,7 +426,12 @@ function immediateProvider(calls = []) {
 
   const editedSnapshot = {
     ...snapshot(),
-    sourceRevisionHash: 'source-preprocess-revision-edited'
+    sourceRevisionHash: 'source-preprocess-revision-edited',
+    messages: snapshot().messages.map((message) => (
+      message.mesid === 1
+        ? { ...message, text: 'Mara now waits somewhere else beside the archive.' }
+        : message
+    ))
   };
   const restoredCalls = [];
   const restoredRuntime = createHarness({
@@ -619,6 +639,231 @@ function immediateProvider(calls = []) {
   }
   assertEqual(manifest.stageRecords['preprocess.deck'].attempts.total, 0, 'deck bookkeeping consumes no model attempts');
   assertEqual(manifest.stageRecords['preprocess.packet'].attempts.total, 0, 'packet bookkeeping consumes no model attempts');
+}
+
+{
+  const providerCalls = [];
+  const harness = createHarness({ provider: immediateProvider(providerCalls) });
+  const { runtime, storage, setSnapshot } = harness;
+  await runtime.prepareForGeneration({
+    userMessage: { text: 'I ask what she remembers.', mesid: 2 },
+    hostGeneration: true,
+    generationType: 'normal'
+  });
+  const firstManifest = await storage.loadPipelineRun('chat-preprocess');
+  const firstCounts = roleCounts(providerCalls);
+  assert(firstManifest.turnKeyHash, 'durable manifest records the authoritative turn key');
+  assert(firstManifest.sourceBandHash, 'durable manifest records the bounded source-band hash');
+  assertEqual(firstManifest.hostOwned, true, 'host interception marks the operation host-owned');
+  assertEqual(firstManifest.nativeGenerationType, 'normal', 'manifest records the native generation type');
+  assertEqual(
+    (await storage.loadLastBrief('chat-preprocess')).turnKeyHash,
+    firstManifest.turnKeyHash,
+    'successful prompt installation stores an isolated Last Brief for the turn'
+  );
+
+  const assistantSnapshot = {
+    ...snapshot(),
+    latestMesId: 3,
+    messages: [
+      ...snapshot().messages,
+      { mesid: 3, role: 'assistant', text: 'Mara begins answering beside the archive.', visible: true }
+    ]
+  };
+  setSnapshot(assistantSnapshot);
+  runtime.getView().lastPreparedGeneration.packet.sections.guidance = 'corrupted in-memory packet';
+  await runtime.handleLatestAssistantSwipeRetry({ messageId: 3 });
+  await runtime.prepareForGeneration({
+    userMessage: null,
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
+  assertDeepEqual(
+    roleCounts(providerCalls),
+    firstCounts,
+    'unchanged same-turn swipe performs zero Recursion model calls'
+  );
+  assertEqual(
+    runtime.getView().execution.operationId,
+    firstManifest.operationId,
+    'same-turn swipe retains the durable operation'
+  );
+
+  await storage.saveQueuedReprocess('chat-preprocess', {
+    schema: 'recursion.queued-reprocess.v1',
+    mode: 'stage',
+    stageIds: ['preprocess.cards.segmented.scene-frame']
+  });
+  await runtime.prepareForGeneration({
+    userMessage: { text: 'I ask what she remembers.', mesid: 4 },
+    hostGeneration: true,
+    generationType: 'normal'
+  });
+  const secondManifest = await storage.loadPipelineRun('chat-preprocess');
+  const secondCounts = roleCounts(providerCalls);
+  assertEqual(
+    secondCounts.utilityArbiter,
+    firstCounts.utilityArbiter + 1,
+    'a new user message id reruns Arbiter despite repeated text'
+  );
+  assert(secondManifest.operationId !== firstManifest.operationId, 'new turn creates a new operation');
+  assert(secondManifest.turnKeyHash !== firstManifest.turnKeyHash, 'new user message id changes the turn key');
+  assertEqual(await storage.loadQueuedReprocess('chat-preprocess'), null, 'new turn cancels prior queued intent');
+  assertEqual(
+    (await storage.loadLastBrief('chat-preprocess')).turnKeyHash,
+    secondManifest.turnKeyHash,
+    'new turn replaces Last Brief only after its packet installs'
+  );
+}
+
+{
+  const bandMessages = Array.from({ length: 14 }, (_, index) => ({
+    mesid: index + 1,
+    role: (index + 1) % 2 === 0 ? 'user' : 'assistant',
+    text: index === 13 ? 'Hold the same source band.' : `band-message-${index + 1}`,
+    visible: true
+  }));
+  const bandSnapshot = {
+    chatId: 'band-chat',
+    chatKey: 'band-chat',
+    sceneKey: 'band-scene',
+    sceneFingerprint: 'band-scene-fingerprint',
+    turnFingerprint: 'band-turn-fingerprint',
+    latestMesId: 14,
+    messages: bandMessages
+  };
+  const providerCalls = [];
+  const harness = createHarness({
+    currentSnapshot: bandSnapshot,
+    provider: immediateProvider(providerCalls),
+    settings: {
+      retention: {
+        sourceWindowMessages: 12,
+        sourceWindowCharacters: 12000
+      }
+    }
+  });
+  await harness.runtime.prepareForGeneration({
+    userMessage: { text: 'Hold the same source band.', mesid: 14 },
+    hostGeneration: true,
+    generationType: 'normal'
+  });
+  const firstManifest = await harness.storage.loadPipelineRun('band-chat');
+  const firstCounts = roleCounts(providerCalls);
+  const assistant = { mesid: 15, role: 'assistant', text: 'First roll.', visible: true };
+  harness.setSnapshot({
+    ...bandSnapshot,
+    latestMesId: 15,
+    messages: [
+      { ...bandMessages[0], text: 'edited outside selected band' },
+      ...bandMessages.slice(1),
+      assistant
+    ]
+  });
+  await harness.runtime.handleLatestAssistantSwipeRetry({ messageId: 15 });
+  await harness.runtime.prepareForGeneration({
+    userMessage: null,
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
+  assertDeepEqual(
+    roleCounts(providerCalls),
+    firstCounts,
+    'an edit outside the configured source band preserves same-turn swipe reuse'
+  );
+  assertEqual(
+    (await harness.storage.loadPipelineRun('band-chat')).operationId,
+    firstManifest.operationId,
+    'outside-band edit preserves the durable operation'
+  );
+
+  harness.setSnapshot({
+    ...bandSnapshot,
+    latestMesId: 15,
+    messages: [
+      ...bandMessages.map((message) => (
+        message.mesid === 5 ? { ...message, text: 'edited inside selected band' } : message
+      )),
+      assistant
+    ]
+  });
+  await harness.runtime.handleLatestAssistantSwipeRetry({ messageId: 15 });
+  await harness.runtime.prepareForGeneration({
+    userMessage: null,
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
+  const editedManifest = await harness.storage.loadPipelineRun('band-chat');
+  assertEqual(
+    roleCounts(providerCalls).utilityArbiter,
+    firstCounts.utilityArbiter + 1,
+    'an edit inside the configured source band starts a fresh Arbiter pass'
+  );
+  assert(editedManifest.operationId !== firstManifest.operationId, 'inside-band edit replaces the prior operation');
+  assertEqual(
+    harness.runtime.getView().turnScope.generationClassification,
+    'source-band-edited',
+    'inside-band edit exposes the bounded invalidation code'
+  );
+}
+
+{
+  const storage = createStorageRepository({ storage: createMemoryStorageAdapter() });
+  const initial = createHarness({ storage, provider: immediateProvider() });
+  await initial.runtime.prepareForGeneration({
+    userMessage: { text: 'I ask what she remembers.', mesid: 2 },
+    hostGeneration: true,
+    generationType: 'normal'
+  });
+  const mismatchedSnapshot = {
+    ...snapshot(),
+    messages: snapshot().messages.map((message) => (
+      message.mesid === 1 ? { ...message, text: 'Edited within the restored source band.' } : message
+    ))
+  };
+  const restored = createHarness({
+    storage,
+    currentSnapshot: mismatchedSnapshot,
+    provider: immediateProvider()
+  }).runtime;
+  const restoredManifest = await restored.restoreExecutionState();
+  assertEqual(restoredManifest.state, 'stale', 'reload rejects a manifest whose stored turn key no longer matches');
+  assert(
+    restoredManifest.staleChangedFields.includes('turnKeyHash')
+      || restoredManifest.staleChangedFields.includes('sourceBandHash'),
+    'reload identifies the turn-scope mismatch without provider work'
+  );
+}
+
+{
+  const storage = createStorageRepository({ storage: createMemoryStorageAdapter() });
+  const initial = createHarness({ storage, provider: immediateProvider() });
+  await initial.runtime.prepareForGeneration({
+    userMessage: { text: 'I ask what she remembers.', mesid: 2 },
+    hostGeneration: true,
+    generationType: 'normal'
+  });
+  const assistantSnapshot = {
+    ...snapshot(),
+    latestMesId: 3,
+    messages: [
+      ...snapshot().messages,
+      { mesid: 3, role: 'assistant', text: 'The completed host response.', visible: true }
+    ]
+  };
+  const restoredCalls = [];
+  const restored = createHarness({
+    storage,
+    currentSnapshot: assistantSnapshot,
+    provider: immediateProvider(restoredCalls)
+  }).runtime;
+  const restoredManifest = await restored.restoreExecutionState();
+  assertEqual(
+    restoredManifest.state,
+    'completed',
+    `reload recognizes the generated assistant as part of the same completed turn (${JSON.stringify(restoredManifest.staleChangedFields)})`
+  );
+  assertEqual(restoredCalls.length, 0, 'same-turn reload performs no provider work');
 }
 
 {
@@ -1094,9 +1339,9 @@ function immediateProvider(calls = []) {
     hostGeneration: true
   });
   assertEqual(
-    (await storage.loadQueuedReprocess('chat-preprocess')).stageIds.join(','),
-    'postprocess.unified.guidance',
-    'Pre-process defers a queued Post-process stage for the eligible phase'
+    await storage.loadQueuedReprocess('chat-preprocess'),
+    null,
+    'a normal new turn cancels queued work from the prior turn'
   );
   await storage.clearQueuedReprocess('chat-preprocess');
 

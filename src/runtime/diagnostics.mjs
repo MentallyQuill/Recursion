@@ -17,7 +17,15 @@ const EXECUTION_DIAGNOSTIC_CODE_SET = new Set([
   'resume-checkpoint-restored',
   'resume-artifact-missing',
   'resume-commit-already-applied',
-  'fused-fallback-segmented'
+  'fused-fallback-segmented',
+  'new-user-turn',
+  'same-turn-swipe',
+  'source-band-edited'
+]);
+const TURN_CLASSIFICATION_CODES = new Set([
+  'new-user-turn',
+  'same-turn-swipe',
+  'source-band-edited'
 ]);
 
 function asObject(value) {
@@ -330,6 +338,27 @@ function mapCacheDecision(decision) {
   }, 500);
 }
 
+function mapTurnScope(value) {
+  const source = asObject(value);
+  if (!source.turnKeyHash && !source.sourceBandHash && !source.generationClassification) return null;
+  const generationClassification = safeText(source.generationClassification, 80);
+  return safeDiagnosticValue({
+    turnKeyHash: safeText(source.turnKeyHash, 180),
+    sourceBandHash: safeText(source.sourceBandHash, 180),
+    sourceBandLimit: boundedInteger(source.sourceBandLimit, 1000),
+    sourceBandMessageCount: boundedInteger(source.sourceBandMessageCount, 1000),
+    sourceWindowFirstMesId: safeText(source.sourceWindowFirstMesId, 180),
+    sourceWindowLastMesId: safeText(source.sourceWindowLastMesId, 180),
+    generationClassification,
+    operationId: safeText(source.operationId, 180),
+    reuseCount: boundedInteger(source.reuseCount, 100000),
+    invalidationCount: boundedInteger(source.invalidationCount, 100000),
+    diagnosticCodes: TURN_CLASSIFICATION_CODES.has(generationClassification)
+      ? [generationClassification]
+      : []
+  }, 500);
+}
+
 export function buildDiagnosticsPayload({
   view,
   settings,
@@ -352,6 +381,7 @@ export function buildDiagnosticsPayload({
       activity: mapActivityEntry(runtime.activity),
       activityHistory: asArray(runtime.activityHistory).slice(-20).map(mapActivityEntry).filter(Boolean),
       freshNextGeneration: runtime.freshNextGeneration || null,
+      turnScope: mapTurnScope(runtime.turnScope),
       execution: summarizeExecutionForDiagnostics(runtime.execution),
       cacheDecision: mapCacheDecision(runtime.lastCacheDecision),
       preparedGeneration: runtime.lastPreparedGeneration

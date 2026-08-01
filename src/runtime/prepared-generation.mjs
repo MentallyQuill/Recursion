@@ -1,9 +1,9 @@
 import { hashJson, nowIso } from '../core.mjs';
 import { validatePromptPacket } from '../prompt.mjs';
 
-export const PREPARED_GENERATION_VERSION = 1;
+export const PREPARED_GENERATION_VERSION = 2;
 
-const PREPARED_GENERATION_SCHEMA = 'recursion.preparedGeneration.v1';
+const PREPARED_GENERATION_SCHEMA = 'recursion.preparedGeneration.v2';
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -44,7 +44,13 @@ function basisMetadataIsValid(basis) {
     && isNonEmptyString(basis.sceneFingerprint)
     && isNonEmptyString(basis.sourceRevisionHash)
     && Number.isFinite(basis.latestMesId)
-    && isNonEmptyString(basis.sourceWindowContractHash);
+    && isNonEmptyString(basis.sourceWindowContractHash)
+    && isNonEmptyString(basis.turnKeyHash)
+    && isNonEmptyString(basis.sourceBandHash)
+    && isNonEmptyString(basis.originatingUserMessageId)
+    && isNonEmptyString(basis.packetId)
+    && isNonEmptyString(basis.handId)
+    && isNonEmptyString(basis.contractHash);
 }
 
 function basisIsValid(basis) {
@@ -61,7 +67,13 @@ function basisMetadataMatches(expected, current) {
     && expected.sceneKey === current.sceneKey
     && expected.sceneFingerprint === current.sceneFingerprint
     && expected.latestMesId === current.latestMesId
-    && expected.sourceWindowContractHash === current.sourceWindowContractHash;
+    && expected.sourceWindowContractHash === current.sourceWindowContractHash
+    && expected.turnKeyHash === current.turnKeyHash
+    && expected.sourceBandHash === current.sourceBandHash
+    && expected.originatingUserMessageId === current.originatingUserMessageId
+    && expected.packetId === current.packetId
+    && expected.handId === current.handId
+    && expected.contractHash === current.contractHash;
 }
 
 function contractIsValid(contract) {
@@ -227,6 +239,15 @@ export function summarizePreparedGenerationArtifact(artifact) {
       omittedCount: Array.isArray(artifact?.hand?.omitted) ? artifact.hand.omitted.length : 0
     },
     basis: {
+      turnKeyHash: typeof artifact?.basis?.turnKeyHash === 'string'
+        ? artifact.basis.turnKeyHash
+        : '',
+      sourceBandHash: typeof artifact?.basis?.sourceBandHash === 'string'
+        ? artifact.basis.sourceBandHash
+        : '',
+      originatingUserMessageId: typeof artifact?.basis?.originatingUserMessageId === 'string'
+        ? artifact.basis.originatingUserMessageId
+        : '',
       sourceRevisionHash: typeof artifact?.basis?.sourceRevisionHash === 'string'
         ? artifact.basis.sourceRevisionHash
         : '',

@@ -37,6 +37,19 @@ const payload = buildDiagnosticsPayload({
   view: {
     activeRunId: 'run-1',
     hostGenerationActive: true,
+    turnScope: {
+      turnKeyHash: 'turn-safe-hash',
+      sourceBandHash: 'band-safe-hash',
+      sourceBandLimit: 12,
+      sourceBandMessageCount: 9,
+      sourceWindowFirstMesId: '14',
+      sourceWindowLastMesId: '22',
+      generationClassification: 'same-turn-swipe',
+      operationId: 'operation-safe-id',
+      reuseCount: 1,
+      invalidationCount: 0,
+      sourceBand: [{ textHash: 'CANARY_SOURCE_TEXT_HASH', text: 'CANARY_SOURCE_TEXT' }]
+    },
     activity: { label: 'Working' },
     lastCacheDecision: {
       sequence: 7,
@@ -49,8 +62,8 @@ const payload = buildDiagnosticsPayload({
       providerCallsSkipped: ['utilityArbiter', 'standardCardCalls']
     },
     lastPreparedGeneration: {
-      schema: 'recursion.preparedGeneration.v1',
-      version: 1,
+      schema: 'recursion.preparedGeneration.v2',
+      version: 2,
       artifactHash: 'artifact-safe-hash',
       preparedAt: '2026-07-04T00:00:00.000Z',
       packet: {
@@ -62,6 +75,12 @@ const payload = buildDiagnosticsPayload({
         omitted: []
       },
       basis: {
+        turnKeyHash: 'turn-safe-hash',
+        sourceBandHash: 'band-safe-hash',
+        originatingUserMessageId: '22',
+        packetId: 'packet-safe-id',
+        handId: 'hand-safe-id',
+        contractHash: 'contract-safe-hash',
         sourceRevisionHash: 'source-safe-hash',
         sourceWindowContractHash: 'window-safe-hash',
         sourceWindowMessageHashes: ['message-safe-hash'],
@@ -115,6 +134,11 @@ assertEqual(payload.runtime.preparedGeneration.hand.cardCount, 1, 'prepared gene
 assert(!serialized.includes('prepared packet transcript leak'), 'prepared generation diagnostics omit packet text');
 assert(!serialized.includes('prepared card prompt leak'), 'prepared generation diagnostics omit card prompts');
 assert(!serialized.includes('prepared basis transcript leak'), 'prepared generation diagnostics omit source text');
+assertEqual(payload.runtime.turnScope.turnKeyHash, 'turn-safe-hash', 'turn diagnostics keep the bounded turn key');
+assertEqual(payload.runtime.turnScope.sourceBandMessageCount, 9, 'turn diagnostics keep the bounded source count');
+assertEqual(payload.runtime.turnScope.generationClassification, 'same-turn-swipe', 'turn diagnostics keep the generation classification');
+assert(payload.runtime.turnScope.diagnosticCodes.includes('same-turn-swipe'), 'turn diagnostics emit the stable swipe classification code');
+assert(!serialized.includes('CANARY_SOURCE_TEXT'), 'turn diagnostics never export the source-band array or text hashes');
 
 const executionSummary = summarizeExecutionForDiagnostics({
   operationId: 'operation-safe-id',

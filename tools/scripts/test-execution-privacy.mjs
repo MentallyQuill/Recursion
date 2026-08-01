@@ -37,7 +37,10 @@ const stableCodes = [
   'resume-checkpoint-restored',
   'resume-artifact-missing',
   'resume-commit-already-applied',
-  'fused-fallback-segmented'
+  'fused-fallback-segmented',
+  'new-user-turn',
+  'same-turn-swipe',
+  'source-band-edited'
 ];
 
 const adapter = createMemoryStorageAdapter();

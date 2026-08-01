@@ -120,6 +120,11 @@ import {
   validatePreparedGenerationArtifact
 } from './runtime/prepared-generation.mjs';
 import { createRuntimeRunState } from './runtime/run-state.mjs';
+import {
+  classifyGeneration,
+  createTurnIdentity,
+  normalizeNativeGenerationType
+} from './runtime/turn-scope.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
 const PROVIDER_TEST_SCHEMA = 'recursion.providerTest.v1';
@@ -1455,6 +1460,68 @@ export function preparedGenerationContract(settings = {}) {
   };
 }
 
+function durableTurnContracts(settings = {}) {
+  const prepared = preparedGenerationContract(settings);
+  return {
+    pipelineMode: settings.pipelineMode === 'fused' ? 'fused' : 'segmented',
+    modelAttemptsPerStep: Math.max(1, Math.round(Number(settings.modelAttemptsPerStep) || 1)),
+    deckRevisionHash: activeDeckRevisionHash(settings),
+    providerContractHash: prepared.providerContractHash,
+    promptContractHash: prepared.promptContractHash,
+    packetInputHash: prepared.packetInputHash,
+    schemaVersions: {
+      pipelineRun: 2,
+      checkpoint: 2,
+      preparedGeneration: PREPARED_GENERATION_VERSION,
+      promptPacket: PROMPT_PACKET_VERSION
+    }
+  };
+}
+
+function preparedTurnBasis({
+  basis,
+  packet,
+  hand,
+  contract,
+  turnIdentity = null
+} = {}) {
+  const source = asObject(basis);
+  const turn = asObject(turnIdentity);
+  const originatingUserMessageId = safeText(
+    turn.pendingUserMessageId || source.originatingUserMessageId || source.latestMesId || '',
+    180
+  );
+  const sourceBandHash = safeText(
+    turn.sourceBandHash || source.sourceBandHash || hashJson({
+      chatKey: source.chatKey,
+      sourceWindowContractHash: source.sourceWindowContractHash,
+      compatibility: 'observable-source-window'
+    }),
+    180
+  );
+  const contractHash = safeText(
+    turn.contractHash || source.contractHash || hashJson(contract || {}),
+    180
+  );
+  return {
+    ...source,
+    turnKeyHash: safeText(
+      turn.turnKeyHash || source.turnKeyHash || hashJson({
+        chatKey: source.chatKey,
+        sourceBandHash,
+        originatingUserMessageId,
+        contractHash
+      }),
+      180
+    ),
+    sourceBandHash,
+    originatingUserMessageId,
+    packetId: safeText(packet?.packetId || source.packetId || '', 180),
+    handId: safeText(hand?.handId || source.handId || '', 180),
+    contractHash
+  };
+}
+
 function cloneCacheVariants(cache) {
   const source = asObject(cache);
   const variants = asObject(source.variants);
@@ -2323,6 +2390,7 @@ export function createRecursionRuntime({
   let lastPlan = null;
   let lastSnapshot = null;
   let lastCacheDecision = null;
+  let lastTurnScope = null;
   let lastBrief = {
     status: 'empty',
     reason: 'initial',
@@ -2406,14 +2474,22 @@ export function createRecursionRuntime({
       : null
   });
 
-  function createPreparedGenerationCandidate(packet, hand, snapshot, settings) {
-    const basis = generationBasisForSnapshot(snapshot, settings);
-    if (!basis) return null;
+  function createPreparedGenerationCandidate(packet, hand, snapshot, settings, turnIdentity = null) {
+    const snapshotBasis = generationBasisForSnapshot(snapshot, settings);
+    if (!snapshotBasis) return null;
+    const contract = preparedGenerationContract(settings);
+    const basis = preparedTurnBasis({
+      basis: snapshotBasis,
+      packet,
+      hand,
+      contract,
+      turnIdentity
+    });
     return createPreparedGenerationArtifact({
       packet,
       hand,
       basis,
-      contract: preparedGenerationContract(settings)
+      contract
     });
   }
 
@@ -2842,6 +2918,32 @@ export function createRecursionRuntime({
       missingSourceCardCount: 0,
       updatedAt: nowIso()
     };
+  }
+
+  function updateTurnScope(identity, {
+    generationClassification = '',
+    operationId = '',
+    reused = false,
+    invalidated = false
+  } = {}) {
+    const source = asObject(identity);
+    const sameIdentity = Boolean(
+      lastTurnScope?.turnKeyHash
+      && lastTurnScope.turnKeyHash === source.turnKeyHash
+    );
+    lastTurnScope = {
+      turnKeyHash: safeText(source.turnKeyHash || '', 180),
+      sourceBandHash: safeText(source.sourceBandHash || '', 180),
+      sourceBandLimit: Math.max(0, Math.round(Number(source.sourceBandLimit) || 0)),
+      sourceBandMessageCount: Math.max(0, Math.round(Number(source.sourceBandMessageCount) || 0)),
+      sourceWindowFirstMesId: safeText(source.sourceWindowFirstMesId || '', 180),
+      sourceWindowLastMesId: safeText(source.sourceWindowLastMesId || '', 180),
+      generationClassification: safeText(generationClassification, 80),
+      operationId: safeText(operationId, 180),
+      reuseCount: (sameIdentity ? Number(lastTurnScope?.reuseCount || 0) : 0) + (reused ? 1 : 0),
+      invalidationCount: Number(lastTurnScope?.invalidationCount || 0) + (invalidated ? 1 : 0)
+    };
+    return lastTurnScope;
   }
 
   function markLatestAssistantSwipeRetry(details = {}) {
@@ -3320,6 +3422,7 @@ export function createRecursionRuntime({
       lastPlan,
       lastCacheDecision,
       lastSnapshot: viewSnapshot(lastSnapshot),
+      turnScope: lastTurnScope ? { ...lastTurnScope } : null,
       lastBrief: { ...lastBrief },
       freshNextGeneration: freshNextGenerationView(),
       execution: executionView
@@ -6259,14 +6362,25 @@ export function createRecursionRuntime({
     swipe = false,
     swipeMessageId = null,
     pendingUserMessage = null,
-    settings
+    settings,
+    packet = null,
+    hand = null,
+    turnIdentity = null
   } = {}) {
-    return swipe
+    const snapshotBasis = swipe
       ? generationBasisForLatestAssistantSwipe(snapshot, swipeMessageId, settings)
       : generationBasisForSnapshot(
           snapshotWithPendingUserMessage(snapshot, pendingUserMessage),
           settings
         );
+    if (!snapshotBasis) return null;
+    return preparedTurnBasis({
+      basis: snapshotBasis,
+      packet,
+      hand,
+      contract: preparedGenerationContract(settings),
+      turnIdentity
+    });
   }
 
   async function reinstallPreparedGeneration(runId, {
@@ -6275,7 +6389,8 @@ export function createRecursionRuntime({
     swipe = false,
     swipeMessageId = null,
     pendingUserMessage = null,
-    basisMode = 'exact'
+    basisMode = 'exact',
+    turnIdentity = null
   } = {}) {
     const packet = artifact.packet;
     const hand = artifact.hand;
@@ -6301,7 +6416,10 @@ export function createRecursionRuntime({
           swipe,
           swipeMessageId,
           pendingUserMessage,
-          settings
+          settings,
+          packet,
+          hand,
+          turnIdentity
         });
       } catch (error) {
         recordCacheDecision(runId, {
@@ -6464,11 +6582,21 @@ export function createRecursionRuntime({
     swipe = false,
     swipeMessageId = null,
     pendingUserMessage = null,
-    forceFresh = false
+    forceFresh = false,
+    turnIdentity = null
   } = {}) {
     const contract = preparedGenerationContract(settings);
+    const currentBasis = lastPreparedGeneration
+      ? preparedTurnBasis({
+          basis,
+          packet: lastPreparedGeneration.packet,
+          hand: lastPreparedGeneration.hand,
+          contract,
+          turnIdentity
+        })
+      : basis;
     const decision = validatePreparedGenerationArtifact(lastPreparedGeneration, {
-      basis,
+      basis: currentBasis,
       packetInputHash: contract.packetInputHash,
       forceFresh,
       allowBoundedSuffix: swipe
@@ -6489,7 +6617,8 @@ export function createRecursionRuntime({
       swipe,
       swipeMessageId,
       pendingUserMessage,
-      basisMode: decision.basisMode
+      basisMode: decision.basisMode,
+      turnIdentity
     });
   }
 
@@ -6504,10 +6633,13 @@ export function createRecursionRuntime({
     };
   }
 
-  function executionProvenance(snapshot, settings) {
+  function executionProvenance(snapshot, settings, turnIdentity = null) {
     const utility = settings?.providers?.utility || {};
+    const turn = asObject(turnIdentity);
     return buildRunProvenance({
       chatKey: safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID,
+      turnKeyHash: safeText(turn.turnKeyHash || '', 180),
+      sourceBandHash: safeText(turn.sourceBandHash || '', 180),
       sourceIdentity: executionSourceIdentity(snapshot),
       settingsHash: hashJson(preparedGenerationSettingsSignature(settings)),
       provider: {
@@ -6557,6 +6689,8 @@ export function createRecursionRuntime({
       failurePolicy: 'blocking',
       buildInputFingerprint() {
         return {
+          turnKeyHash: context.turnIdentity?.turnKeyHash || '',
+          sourceBandHash: context.turnIdentity?.sourceBandHash || '',
           sourceIdentity: context.provenance.sourceIdentity,
           pendingUserMessageHash: context.pendingUserMessage.textHash
         };
@@ -6565,7 +6699,7 @@ export function createRecursionRuntime({
         return {
           snapshot: context.snapshot,
           pendingUserMessage: context.pendingUserMessage,
-          initialCache: context.initialCache
+          turnIdentity: context.turnIdentity
         };
       },
       validate(artifact) {
@@ -7611,12 +7745,10 @@ export function createRecursionRuntime({
     const [
       packet,
       hand,
-      deckArtifact,
       installSettlement
     ] = await Promise.all([
       loadExecutionArtifact(manifest, 'preprocess.packet'),
       loadExecutionArtifact(manifest, 'preprocess.hand'),
-      loadExecutionArtifact(manifest, 'preprocess.deck'),
       loadExecutionArtifact(manifest, 'preprocess.install')
     ]);
     if (!packet || !hand) {
@@ -7631,7 +7763,8 @@ export function createRecursionRuntime({
       packet,
       hand,
       context.snapshot,
-      context.settings
+      context.settings,
+      context.turnIdentity
     );
     if (candidate) commitPreparedGeneration(candidate);
     lastPlan = plan;
@@ -7639,27 +7772,26 @@ export function createRecursionRuntime({
     const installed = installSettlement?.installed === true;
     if (installed) {
       readyLastBrief({ runId: context.runId, reason: 'packet-installed' });
+      try {
+        await runStorageSaveSection(context.runId, () => storage.saveLastBrief(
+          context.chatKey,
+          {
+            turnKeyHash: context.turnIdentity?.turnKeyHash || manifest.turnKeyHash,
+            status: 'ready',
+            packet,
+            hand,
+            committedAt: nowIso()
+          }
+        ));
+      } catch (error) {
+        reportStorageWarning(context.runId, 'saveLastBrief', error);
+      }
     } else {
       clearLastBrief({
         status: 'empty',
         reason: installSettlement?.failureClass || 'prompt-install-failed',
         runId: context.runId
       });
-    }
-    if (deckArtifact?.deck) {
-      await runStorageSaveSection(context.runId, () => saveSceneCacheSafe(
-        context.runId,
-        context.snapshot,
-        sceneCachePayload(
-          context.snapshot,
-          deckArtifact.deck,
-          hand,
-          plan,
-          packet,
-          context.settings,
-          context.initialCache
-        )
-      ));
     }
     settleRuntimeActivity({
       runId: context.runId,
@@ -7687,16 +7819,15 @@ export function createRecursionRuntime({
     snapshot,
     settings,
     pendingUserMessage = normalizePendingUserMessage(''),
-    initialCache: initialCacheValue = undefined,
     runId = makeId('preprocess'),
     hostGeneration = false,
-    generationType = ''
+    generationType = '',
+    turnIdentity = null,
+    generationClassification = null
   } = {}) {
     const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180)
       || DEFAULT_CHAT_ID;
-    const initialCache = initialCacheValue === undefined
-      ? await loadSceneCacheSafe(runId, snapshot, settings)
-      : initialCacheValue;
+    const initialCache = null;
     const fallbackPlan = localFallbackPlan(snapshot, settings);
     fallbackPlan.source = {
       ...fallbackPlan.source,
@@ -7714,14 +7845,21 @@ export function createRecursionRuntime({
       pendingUserMessage,
       settings,
       initialCache,
+      turnIdentity,
+      generationClassification,
       fallbackPlan,
-      provenance: executionProvenance(snapshot, settings),
+      provenance: executionProvenance(snapshot, settings, turnIdentity),
       hostGeneration,
       generationType: safeText(generationType, 40)
     };
   }
 
-  async function restoreDurablePreprocessContext(manifest, currentSnapshot) {
+  async function restoreDurablePreprocessContext(
+    manifest,
+    currentSnapshot,
+    turnIdentity = null,
+    generationClassification = null
+  ) {
     const snapshotArtifact = await loadExecutionArtifact(
       manifest,
       'preprocess.snapshot'
@@ -7734,10 +7872,9 @@ export function createRecursionRuntime({
       snapshot: restoredSnapshot,
       settings: settingsStore.get(),
       pendingUserMessage,
-      initialCache: snapshotArtifact
-        ? (snapshotArtifact.initialCache ?? null)
-        : undefined,
-      runId: safeIdentifier(manifest.operationId, 'preprocess', 180)
+      runId: safeIdentifier(manifest.operationId, 'preprocess', 180),
+      turnIdentity,
+      generationClassification
     });
   }
 
@@ -7755,6 +7892,187 @@ export function createRecursionRuntime({
     return durableFullGraph(context, plan, { segmentedFallback });
   }
 
+  async function markLastBriefHistorical(chatKey, reason = 'new-user-turn') {
+    if (lastBriefPacket || (lastBriefHand?.cards?.length || 0) > 0) {
+      lastBrief = {
+        ...lastBrief,
+        status: 'historical',
+        reason: safeText(reason, 120),
+        updatedAt: nowIso()
+      };
+    }
+    try {
+      const storedBrief = await storage.loadLastBrief?.(chatKey);
+      if (storedBrief && storedBrief.status !== 'historical') {
+        await storage.saveLastBrief(chatKey, {
+          ...storedBrief,
+          status: 'historical'
+        });
+      }
+    } catch {
+      // Historical Last Brief state is inspection-only and never blocks generation.
+    }
+  }
+
+  async function revokePreviousTurn({
+    chatKey,
+    storedManifest,
+    reason = 'new-user-turn'
+  } = {}) {
+    await markLastBriefHistorical(chatKey, reason);
+    clearPreparedGeneration();
+    clearPendingLatestAssistantSwipeRetry();
+    try {
+      await clearPromptBestEffort(host);
+    } catch {
+      // The durable manifest is still revoked even if host prompt cleanup fails.
+    }
+    const revoked = storedManifest
+      ? await storage.revokeTurnExecution(chatKey, {
+          operationId: storedManifest.operationId,
+          reason
+        })
+      : { ok: true, revoked: false, eligibilityRevoked: true, cleanupFailures: [] };
+    if (!storedManifest) {
+      try {
+        await storage.clearQueuedReprocess(chatKey);
+      } catch {
+        // Orphaned queued intent cleanup is best-effort at a new-turn boundary.
+      }
+    }
+    if (storedManifest?.operationId) {
+      preprocessContexts.delete(storedManifest.operationId);
+      preprocessGraphs.delete(storedManifest.operationId);
+    }
+    executionView = null;
+    queuedReprocessView = null;
+    return revoked;
+  }
+
+  async function reuseCompletedDurableTurn({
+    context,
+    manifest,
+    plan,
+    swipeMessageId
+  } = {}) {
+    const [packet, hand] = await Promise.all([
+      loadExecutionArtifact(manifest, 'preprocess.packet'),
+      loadExecutionArtifact(manifest, 'preprocess.hand')
+    ]);
+    if (!packet || !hand || !plan) return null;
+    const candidate = createPreparedGenerationCandidate(
+      packet,
+      hand,
+      context.snapshot,
+      context.settings,
+      context.turnIdentity
+    );
+    if (!candidate || !preparedGenerationIntegrityIsValid(candidate)) return null;
+    commitPreparedGeneration(candidate);
+    executionView = manifest;
+    startRun(context.runId);
+    runState.beginAttempt?.({
+      runId: context.runId,
+      kind: 'swipe',
+      sourceRevisionHash: activeSourceRevisionHash(context.snapshot),
+      turnKeyHash: context.turnIdentity?.turnKeyHash,
+      generationClassification: 'same-turn-swipe',
+      packetId: packet.packetId
+    });
+    startRuntimeActivity({
+      runId: context.runId,
+      label: 'Reusing Recursion prompt for swipe...',
+      chips: ['Prompt', 'Swipe']
+    });
+    const basis = generationBasisForSnapshot(context.snapshot, context.settings);
+    const reuse = await tryPreparedGenerationReuse(context.runId, {
+      basis,
+      settings: context.settings,
+      swipe: true,
+      swipeMessageId,
+      turnIdentity: context.turnIdentity
+    });
+    return {
+      ...reuse,
+      execution: manifest,
+      plan,
+      continuePrimaryGeneration: true,
+      recursionPromptInstalled: reuse.ok !== false
+    };
+  }
+
+  async function startFreshDurablePreprocess(context, {
+    queuedIntent = null,
+    hostGeneration = false,
+    nativeGenerationType = 'normal',
+    diagnosticClassification = 'new-user-turn'
+  } = {}) {
+    const {
+      chatKey,
+      settings,
+      turnIdentity,
+      provenance,
+      runId
+    } = context;
+    const operationId = makeId('operation');
+    let manifest = createPipelineRun({
+      operationId,
+      chatKey,
+      phase: 'preprocess',
+      pipelineMode: settings.pipelineMode === 'fused' ? 'fused' : 'segmented',
+      createdAt: nowIso(),
+      sourceIdentity: provenance.sourceIdentity,
+      provenance,
+      turnKeyHash: turnIdentity.turnKeyHash,
+      sourceBandHash: turnIdentity.sourceBandHash,
+      hostOwned: hostGeneration === true,
+      nativeGenerationType
+    });
+    updateTurnScope(turnIdentity, {
+      generationClassification: diagnosticClassification,
+      operationId,
+      invalidated: false
+    });
+    preprocessContexts.set(operationId, context);
+    let graph = durableBaseGraph(context);
+    preprocessGraphs.set(operationId, graph);
+    startRuntimeActivity({ runId, label: 'Reading current turn...', chips: ['Pre-process'] });
+    if (
+      queuedIntent?.mode === 'full-fresh'
+      || queuedIntent?.stageIds?.some((stageId) => (
+        stageId === 'preprocess.snapshot'
+        || stageId === 'preprocess.arbiter'
+      ))
+    ) {
+      const bound = await bindDurableQueuedIntent(
+        context,
+        manifest,
+        graph,
+        queuedIntent
+      );
+      manifest = bound.manifest;
+    }
+    manifest = await startDurableGraph(context, manifest, graph);
+    if (manifest.state !== 'completed') {
+      return { ok: false, paused: manifest.state === 'paused', execution: manifest };
+    }
+    const remainingIntent = normalizeQueuedReprocess(
+      await storage.loadQueuedReprocess(chatKey)
+    );
+    if (remainingIntent) {
+      const plan = await loadExecutionArtifact(manifest, 'preprocess.arbiter');
+      if (!plan) throw new Error('Durable Arbiter checkpoint artifact is unavailable.');
+      const bound = await bindDurableQueuedIntent(
+        context,
+        manifest,
+        durableFullGraph(context, plan),
+        remainingIntent
+      );
+      manifest = bound.manifest;
+    }
+    return advanceDurablePreprocess(context, manifest);
+  }
+
   async function prepareForGenerationDurable({
     userMessage = '',
     hostGeneration = false,
@@ -7762,8 +8080,45 @@ export function createRecursionRuntime({
   } = {}) {
     const settings = settingsStore.get();
     const hostSnapshot = await readSnapshot();
+    const nativeGenerationType = normalizeNativeGenerationType(generationType);
     let pendingUserMessage = normalizePendingUserMessage(userMessage);
-    if (!pendingUserMessage.text && hostGeneration === true) {
+    let explicitSwipeMessageId = null;
+    let snapshot = hostSnapshot;
+    if (
+      nativeGenerationType !== 'swipe'
+      && pendingUserMessage.text
+      && !Number.isFinite(pendingUserMessage.mesid)
+    ) {
+      const visibleUser = latestVisibleUserMessage(hostSnapshot);
+      if (
+        visibleUser
+        && safeText(visibleUser.text || '', PROVIDER_MESSAGE_TEXT_LIMIT) === pendingUserMessage.text
+      ) {
+        pendingUserMessage = normalizePendingUserMessage({
+          text: pendingUserMessage.rawText,
+          mesid: visibleUser.mesid
+        });
+      }
+    }
+    if (nativeGenerationType === 'swipe') {
+      const swipeRetry = runState.takeLatestAssistantSwipeRetry();
+      const latestAssistant = latestVisibleAssistantEntry(hostSnapshot);
+      explicitSwipeMessageId = finiteNumberOrNull(swipeRetry?.messageId)
+        ?? finiteNumberOrNull(latestAssistant?.message?.mesid);
+      if (
+        latestAssistant
+        && (
+          explicitSwipeMessageId === null
+          || finiteNumberOrNull(latestAssistant.message?.mesid) === explicitSwipeMessageId
+        )
+      ) {
+        snapshot = snapshotWithoutLatestAssistant(hostSnapshot, latestAssistant) || hostSnapshot;
+      }
+      const sourceUser = latestVisibleUserMessage(snapshot);
+      pendingUserMessage = sourceUser
+        ? normalizePendingUserMessage({ text: sourceUser.text, mesid: sourceUser.mesid })
+        : normalizePendingUserMessage('');
+    } else if (!pendingUserMessage.text && hostGeneration === true) {
       const latest = latestVisibleMessage(hostSnapshot);
       if (latest?.role === 'user') {
         pendingUserMessage = normalizePendingUserMessage({
@@ -7772,42 +8127,97 @@ export function createRecursionRuntime({
         });
       }
     }
-    const snapshot = snapshotWithPendingUserMessage(hostSnapshot, pendingUserMessage);
+    if (nativeGenerationType !== 'swipe') {
+      snapshot = snapshotWithPendingUserMessage(hostSnapshot, pendingUserMessage);
+    }
+    const turnIdentity = await createTurnIdentity({
+      snapshot: nativeGenerationType === 'swipe' ? hostSnapshot : snapshot,
+      pendingUserMessage,
+      generationType: nativeGenerationType,
+      swipeMessageId: explicitSwipeMessageId,
+      retention: settings.retention,
+      contracts: durableTurnContracts(settings)
+    });
     lastSnapshot = snapshot;
     const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;
     activeExecutionChatKey = chatKey;
     const existingPromise = durablePreparePromises.get(chatKey);
     if (existingPromise) return existingPromise;
     const run = (async () => {
+      const storedManifest = await storage.loadPipelineRun(chatKey);
+      const classification = classifyGeneration({
+        nativeGenerationType,
+        pendingUserMessage,
+        currentTurnKeyHash: turnIdentity.turnKeyHash,
+        storedTurnKeyHash: storedManifest?.turnKeyHash,
+        storedOperationState: storedManifest?.state
+      });
+      let queuedIntent = normalizeQueuedReprocess(
+        await storage.loadQueuedReprocess(chatKey)
+      );
+      const shouldRevokeStored = Boolean(storedManifest) && (
+        classification.kind === 'new-user-turn'
+        || classification.kind === 'new-host-generation'
+        || classification.kind === 'edited-band-swipe'
+        || classification.kind === 'incompatible-paused-operation'
+        || storedManifest.turnKeyHash !== turnIdentity.turnKeyHash
+      );
+      const diagnosticClassification = classification.kind === 'edited-band-swipe'
+        ? 'source-band-edited'
+        : classification.kind;
+      updateTurnScope(turnIdentity, {
+        generationClassification: diagnosticClassification,
+        operationId: shouldRevokeStored ? '' : storedManifest?.operationId,
+        reused: classification.kind === 'same-turn-swipe' && !shouldRevokeStored,
+        invalidated: shouldRevokeStored
+      });
+      if (shouldRevokeStored) {
+        const reason = classification.kind === 'edited-band-swipe'
+          ? 'source-band-edited'
+          : 'new-user-turn';
+        await revokePreviousTurn({ chatKey, storedManifest, reason });
+        queuedIntent = null;
+      } else if (!storedManifest && classification.kind === 'new-user-turn' && queuedIntent) {
+        await storage.clearQueuedReprocess(chatKey);
+        queuedIntent = null;
+      }
       const context = await createDurablePreprocessContext({
         snapshot,
         pendingUserMessage,
         settings,
         hostGeneration,
-        generationType
+        generationType: nativeGenerationType,
+        turnIdentity,
+        generationClassification: classification.kind
       });
       let activeContext = context;
       let { runId, provenance } = activeContext;
-      const queuedIntent = normalizeQueuedReprocess(
-        await storage.loadQueuedReprocess(chatKey)
-      );
       queuedReprocessView = queuedIntent;
-      const storedManifest = await storage.loadPipelineRun(chatKey);
-      const storedStatus = storedManifest
-        ? compareRunProvenance(provenance, storedManifest.provenance)
-        : { reusable: false };
+      startRun(runId);
+      runState.beginAttempt?.({
+        runId,
+        kind: nativeGenerationType === 'swipe' ? 'swipe' : 'normal',
+        sourceRevisionHash: activeSourceRevisionHash(snapshot),
+        turnKeyHash: turnIdentity.turnKeyHash,
+        generationClassification: diagnosticClassification,
+        packetId: preparedPacket()?.packetId
+      });
       if (
         storedManifest
-        && storedStatus.reusable
+        && !shouldRevokeStored
+        && storedManifest.turnKeyHash === turnIdentity.turnKeyHash
         && !['stale', 'abandoned'].includes(storedManifest.state)
       ) {
         activeContext = await restoreDurablePreprocessContext(
           storedManifest,
-          snapshot
+          snapshot,
+          turnIdentity,
+          classification.kind
         );
         activeContext.hostGeneration = hostGeneration;
         activeContext.generationType = safeText(generationType, 40);
         ({ runId, provenance } = activeContext);
+        startRun(runId);
         const plan = await loadExecutionArtifact(
           storedManifest,
           'preprocess.arbiter'
@@ -7821,6 +8231,30 @@ export function createRecursionRuntime({
         executionView = storedManifest;
         if (!queuedIntent) {
           if (
+            classification.kind === 'same-turn-swipe'
+            && storedManifest.state === 'completed'
+          ) {
+            const reuse = plan && storedManifest.stageRecords?.['preprocess.install']
+              ? await reuseCompletedDurableTurn({
+                  context: activeContext,
+                  manifest: storedManifest,
+                  plan,
+                  swipeMessageId: explicitSwipeMessageId
+                })
+              : null;
+            if (reuse) return reuse;
+            await revokePreviousTurn({
+              chatKey,
+              storedManifest,
+              reason: 'prepared-generation-corrupt'
+            });
+            return startFreshDurablePreprocess(context, {
+              queuedIntent: null,
+              hostGeneration,
+              nativeGenerationType,
+              diagnosticClassification: 'same-turn-swipe'
+            });
+          } else if (
             storedManifest.state === 'completed'
             && plan
             && storedManifest.stageRecords?.['preprocess.install']
@@ -7876,54 +8310,12 @@ export function createRecursionRuntime({
         );
       }
 
-      const operationId = makeId('operation');
-      let manifest = createPipelineRun({
-        operationId,
-        chatKey,
-        phase: 'preprocess',
-        pipelineMode: settings.pipelineMode === 'fused' ? 'fused' : 'segmented',
-        createdAt: nowIso(),
-        sourceIdentity: provenance.sourceIdentity,
-        provenance
+      return startFreshDurablePreprocess(activeContext, {
+        queuedIntent,
+        hostGeneration,
+        nativeGenerationType,
+        diagnosticClassification
       });
-      preprocessContexts.set(operationId, activeContext);
-      let graph = durableBaseGraph(activeContext);
-      preprocessGraphs.set(operationId, graph);
-      startRuntimeActivity({ runId, label: 'Reading current turn...', chips: ['Pre-process'] });
-      if (
-        queuedIntent?.mode === 'full-fresh'
-        || queuedIntent?.stageIds?.some((stageId) => (
-          stageId === 'preprocess.snapshot'
-          || stageId === 'preprocess.arbiter'
-        ))
-      ) {
-        const bound = await bindDurableQueuedIntent(
-          activeContext,
-          manifest,
-          graph,
-          queuedIntent
-        );
-        manifest = bound.manifest;
-      }
-      manifest = await startDurableGraph(activeContext, manifest, graph);
-      if (manifest.state !== 'completed') {
-        return { ok: false, paused: manifest.state === 'paused', execution: manifest };
-      }
-      const remainingIntent = normalizeQueuedReprocess(
-        await storage.loadQueuedReprocess(chatKey)
-      );
-      if (remainingIntent) {
-        const plan = await loadExecutionArtifact(manifest, 'preprocess.arbiter');
-        if (!plan) throw new Error('Durable Arbiter checkpoint artifact is unavailable.');
-        const bound = await bindDurableQueuedIntent(
-          activeContext,
-          manifest,
-          durableFullGraph(activeContext, plan),
-          remainingIntent
-        );
-        manifest = bound.manifest;
-      }
-      return advanceDurablePreprocess(activeContext, manifest);
     })().finally(() => {
       durablePreparePromises.delete(chatKey);
     });
@@ -7963,39 +8355,8 @@ export function createRecursionRuntime({
         postProcessRuntime.cancelPostProcess('not-host-generation');
         clearPendingProseEnhancement();
       }
-      if (explicitSwipe && lastPreparedGeneration) {
-        if (!runState.current().pendingLatestAssistantSwipeRetry) {
-          markLatestAssistantSwipeRetry({ eventName: 'host-generation-swipe' });
-        }
-        const swipeRetry = runState.takeLatestAssistantSwipeRetry();
-        const hostSnapshot = await readSnapshot();
-        const swipeMessageId = finiteNumberOrNull(swipeRetry?.messageId);
-        const swipeBasis = generationBasisForLatestAssistantSwipe(
-          hostSnapshot,
-          swipeMessageId,
-          settings
-        );
-        if (swipeBasis) {
-          startRun(runId);
-          runState.beginAttempt?.({
-            runId,
-            kind: 'swipe',
-            sourceRevisionHash: activeSourceRevisionHash(hostSnapshot),
-            packetId: preparedPacket()?.packetId
-          });
-          startRuntimeActivity({
-            runId,
-            label: 'Reusing Recursion prompt for swipe...',
-            chips: ['Prompt', 'Swipe']
-          });
-          const reuse = await tryPreparedGenerationReuse(runId, {
-            basis: swipeBasis,
-            settings,
-            swipe: true,
-            swipeMessageId
-          });
-          if (reuse.reused || reuse.preparedMatch) return reuse;
-        }
+      if (explicitSwipe && !runState.current().pendingLatestAssistantSwipeRetry) {
+        markLatestAssistantSwipeRetry({ eventName: 'host-generation-swipe' });
       }
       return prepareForGenerationDurable({
         userMessage: explicitSwipe ? '' : userMessage,
@@ -8831,7 +9192,45 @@ export function createRecursionRuntime({
       executionView = manifest;
       return redact(manifest);
     }
-    const provenance = executionProvenance(snapshot, settingsStore.get());
+    const restoreSettings = settingsStore.get();
+    const restoreUser = latestVisibleUserMessage(snapshot);
+    const restoreAssistant = latestVisibleAssistantEntry(snapshot);
+    const restoreSwipeMessageId = (
+      restoreAssistant
+      && numberOr(restoreAssistant.message?.mesid, -1) > numberOr(restoreUser?.mesid, -1)
+    )
+      ? finiteNumberOrNull(restoreAssistant.message?.mesid)
+      : null;
+    const restoreTurnIdentity = await createTurnIdentity({
+      snapshot,
+      pendingUserMessage: restoreUser
+        ? { text: restoreUser.text, mesid: restoreUser.mesid }
+        : null,
+      generationType: restoreSwipeMessageId === null ? 'normal' : 'swipe',
+      swipeMessageId: restoreSwipeMessageId,
+      retention: restoreSettings.retention,
+      contracts: durableTurnContracts(restoreSettings)
+    });
+    updateTurnScope(restoreTurnIdentity, {
+      generationClassification: restoreSwipeMessageId === null
+        ? 'compatible-paused-same-turn'
+        : 'same-turn-swipe',
+      operationId: manifest.operationId
+    });
+    const restoreSourceSnapshot = restoreSwipeMessageId === null
+      ? snapshot
+      : (snapshotWithoutLatestAssistant(snapshot, restoreAssistant) || snapshot);
+    const observedProvenance = executionProvenance(
+      restoreSourceSnapshot,
+      restoreSettings,
+      restoreTurnIdentity
+    );
+    const provenance = manifest.turnKeyHash === restoreTurnIdentity.turnKeyHash
+      ? {
+          ...observedProvenance,
+          sourceIdentity: manifest.provenance?.sourceIdentity || observedProvenance.sourceIdentity
+        }
+      : observedProvenance;
     const status = compareRunProvenance(provenance, manifest.provenance);
     if (!status.reusable && manifest.state !== 'stale' && manifest.state !== 'abandoned') {
       manifest = await storage.savePipelineRun(chatKey, {
@@ -8846,7 +9245,12 @@ export function createRecursionRuntime({
     }
     executionView = manifest;
     if (status.reusable && manifest.state !== 'stale' && manifest.state !== 'abandoned') {
-      const context = await restoreDurablePreprocessContext(manifest, snapshot);
+      const context = await restoreDurablePreprocessContext(
+        manifest,
+        snapshot,
+        restoreTurnIdentity,
+        manifest.state === 'paused' ? 'compatible-paused-same-turn' : 'same-turn-swipe'
+      );
       const graph = await restoreDurablePreprocessGraph(manifest, context);
       preprocessContexts.set(manifest.operationId, context);
       preprocessGraphs.set(manifest.operationId, graph);

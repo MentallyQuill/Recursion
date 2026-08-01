@@ -69,6 +69,12 @@ function baseBasis(overrides = {}) {
       sourceIdentity(42, 'hash-42')
     ],
     sourceWindowContractHash: 'window-contract-1',
+    turnKeyHash: 'turn-key-1',
+    sourceBandHash: 'source-band-1',
+    originatingUserMessageId: '42',
+    packetId: 'prepared-packet-1',
+    handId: 'prepared-hand-1',
+    contractHash: 'prepared-contract-1',
     ...overrides
   };
 }
@@ -99,8 +105,8 @@ const basis = baseBasis();
 const contract = baseContract();
 const artifact = createPreparedGenerationArtifact({ packet, hand, basis, contract });
 
-assertEqual(artifact.schema, 'recursion.preparedGeneration.v1', 'artifact uses the V1 schema');
-assertEqual(artifact.version, PREPARED_GENERATION_VERSION, 'artifact uses the V1 version');
+assertEqual(artifact.schema, 'recursion.preparedGeneration.v2', 'artifact uses the V2 schema');
+assertEqual(artifact.version, PREPARED_GENERATION_VERSION, 'artifact uses the V2 version');
 assert(typeof artifact.preparedAt === 'string' && artifact.preparedAt.length > 0, 'artifact records preparation time');
 assert(preparedGenerationIntegrityIsValid(artifact), 'fresh artifact integrity is valid');
 
@@ -143,6 +149,12 @@ for (const [field, invalidValue] of [
   ['sceneFingerprint', ''],
   ['sourceRevisionHash', ''],
   ['sourceWindowContractHash', ''],
+  ['turnKeyHash', ''],
+  ['sourceBandHash', ''],
+  ['originatingUserMessageId', ''],
+  ['packetId', ''],
+  ['handId', ''],
+  ['contractHash', ''],
   ['latestMesId', Number.NaN]
 ]) {
   await assertRejects(
@@ -248,6 +260,8 @@ assertEqual(compareGenerationBasis(basis, equalLengthChanged, { allowBoundedSuff
 assertEqual(compareGenerationBasis(basis, baseBasis({ sourceWindow: [] })).reason, 'basis-window-empty', 'empty current windows miss');
 assertEqual(compareGenerationBasis(baseBasis({ sourceWindow: [] }), basis).reason, 'basis-window-empty', 'empty expected windows miss');
 assertEqual(compareGenerationBasis(basis, baseBasis({ chatKey: 'other-chat' })).reason, 'basis-metadata-mismatch', 'metadata differences miss');
+assertEqual(compareGenerationBasis(basis, baseBasis({ turnKeyHash: 'other-turn' })).reason, 'basis-metadata-mismatch', 'turn-key differences miss');
+assertEqual(compareGenerationBasis(basis, baseBasis({ sourceBandHash: 'edited-band' })).reason, 'basis-metadata-mismatch', 'source-band differences miss');
 for (const [name, invalidBasis] of [
   ['missing source revision hash', baseBasis({ sourceRevisionHash: '' })],
   ['malformed source identity', baseBasis({ sourceWindow: [{ mesid: 40, role: 'tool', textHash: 'hash-40' }] })]
@@ -324,7 +338,7 @@ for (const canary of [
 ]) {
   assert(!serializedSummary.includes(canary), `safe summary excludes ${canary}`);
 }
-assertEqual(summary.schema, 'recursion.preparedGeneration.v1', 'safe summary retains schema identity');
+assertEqual(summary.schema, 'recursion.preparedGeneration.v2', 'safe summary retains schema identity');
 assertEqual(summary.integrityValid, false, 'safe summary reports integrity without leaking body content');
 
 console.log('prepared generation contract tests passed');

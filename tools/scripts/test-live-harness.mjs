@@ -964,6 +964,7 @@ async function createSillyTavernSmokeFixtureServer({
     'src/runtime/preprocess-graph.mjs',
     'src/runtime/prompt-install.mjs',
     'src/runtime/run-state.mjs',
+    'src/runtime/turn-scope.mjs',
     'src/runtime.mjs',
     'src/dialogue-enhancement.mjs',
     'src/editorial-transform.mjs',

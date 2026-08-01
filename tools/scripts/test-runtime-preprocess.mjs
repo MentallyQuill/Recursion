@@ -1603,6 +1603,78 @@ function roleCounts(calls = []) {
 }
 
 {
+  const queuedCardGate = deferred();
+  const providerCalls = [];
+  const hostGenerationStarts = [];
+  let deferQueuedCard = false;
+  const { runtime, storage, setSnapshot } = createHarness({
+    provider: {
+      async generate(roleId, request = {}) {
+        providerCalls.push({ roleId, request });
+        if (roleId === 'utilityArbiter') return arbiterResponse(request);
+        if (roleId === 'sceneFrameCard') {
+          if (deferQueuedCard) return queuedCardGate.promise;
+          return cardResponse(roleId, request);
+        }
+        if (roleId === 'guidanceComposer') return guidanceResponse(request);
+        throw new Error(`unexpected provider role ${roleId}`);
+      }
+    },
+    hostGeneration: {
+      async start(details = {}) {
+        hostGenerationStarts.push(details);
+        return { ok: true, started: true };
+      },
+      async stop() {
+        return { ok: true, stopped: true, eventEmitted: false };
+      }
+    }
+  });
+  await runtime.prepareForGeneration({
+    userMessage: 'I ask what she remembers.',
+    hostGeneration: true,
+    generationType: 'normal'
+  });
+  setSnapshot({
+    ...snapshot(),
+    latestMesId: 3,
+    messages: [
+      ...snapshot().messages,
+      { mesid: 3, role: 'assistant', text: 'Mara says the archive remembers every oath.', visible: true }
+    ]
+  });
+  deferQueuedCard = true;
+  await runtime.queueFullFreshSwipe({ source: 'test' });
+  const rebuilding = runtime.prepareForGeneration({
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
+  await waitUntil(
+    () => providerCalls.filter((entry) => entry.roleId === 'sceneFrameCard').length === 2,
+    'queued full-fresh swipe did not reach the card stage'
+  );
+  await runtime.stopGeneration({ source: 'recursion-progress-row' });
+  const paused = await storage.loadPipelineRun('chat-preprocess');
+  assertEqual(paused.state, 'paused', 'Stop pauses queued full-fresh reprocessing');
+  assertEqual(
+    paused.nativeGenerationType,
+    'swipe',
+    'queued reprocessing adopts the native generation action that owns the paused work'
+  );
+  queuedCardGate.resolve(cardResponse('sceneFrameCard', {
+    snapshotHash: runtime.getView().lastPlan.snapshotHash
+  }));
+  await rebuilding;
+  const resumed = await runtime.resumeOperation({ operationId: paused.operationId });
+  assertEqual(resumed.started, true, 'queued reprocessing Resume requests native host generation');
+  assertDeepEqual(hostGenerationStarts, [{
+    type: 'swipe',
+    source: 'recursion-ui',
+    reason: 'resume-operation'
+  }], 'queued reprocessing Resume preserves the owning swipe action');
+}
+
+{
   const { runtime, storage, calls } = createHarness({
     provider: immediateProvider(),
     installPrompt: async () => {

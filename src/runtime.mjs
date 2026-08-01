@@ -8140,9 +8140,25 @@ export function createRecursionRuntime({
           return durableOperationResult(storedManifest, plan);
         }
 
+        const queuedManifest = (
+          hostGeneration === true
+          && (
+            storedManifest.hostOwned !== true
+            || storedManifest.nativeGenerationType !== nativeGenerationType
+          )
+        )
+          ? await storage.savePipelineRun(chatKey, {
+              ...storedManifest,
+              hostOwned: true,
+              nativeGenerationType,
+              revision: Number(storedManifest.revision || 0) + 1,
+              updatedAt: nowIso()
+            })
+          : storedManifest;
+        executionView = queuedManifest;
         let bound = await bindDurableQueuedIntent(
           activeContext,
-          storedManifest,
+          queuedManifest,
           graph,
           queuedIntent
         );

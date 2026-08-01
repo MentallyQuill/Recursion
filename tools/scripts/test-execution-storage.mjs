@@ -16,12 +16,12 @@ import {
 
 assertEqual(
   pipelineRunKey('Chat One'),
-  'recursion-pipeline-run-Chat-One.v1.json',
+  'recursion-pipeline-run-Chat-One.v2.json',
   'pipeline run key is chat scoped and sanitized'
 );
 assertEqual(
   pipelineArtifactKey('Chat One', 'Run/One', 'preprocess.arbiter'),
-  'recursion-pipeline-artifact-Chat-One-Run-One-preprocess.arbiter-v1.json',
+  'recursion-pipeline-artifact-Chat-One-Run-One-preprocess.arbiter.v2.json',
   'pipeline artifact key includes sanitized chat, operation, and artifact ids'
 );
 assertEqual(

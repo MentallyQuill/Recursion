@@ -1670,4 +1670,43 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   );
 }
 
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  await repo.saveSceneCache('Turn Storage Chat', 'Retired Scene', { cards: [] });
+  await repo.appendJournal('Turn Storage Chat', {
+    event: 'runtime.started',
+    severity: 'info',
+    summary: 'durable journal entry'
+  });
+  await repo.saveLastBrief('Turn Storage Chat', {
+    turnKeyHash: 'turn-storage-a',
+    status: 'historical',
+    packet: { packetId: 'packet-a', prompt: 'display-only packet' },
+    hand: { cards: [{ id: 'card-a', promptText: 'display-only card' }] },
+    committedAt: '2026-08-01T12:00:00.000Z'
+  });
+  const retired = await repo.pruneRetiredGeneratedRecords();
+  assertEqual(retired.ok, true, 'retired generated cleanup succeeds');
+  assertEqual(
+    await repo.loadSceneCache('Turn Storage Chat', 'Retired Scene'),
+    null,
+    'retired generated cleanup removes legacy scene authority'
+  );
+  assertEqual(
+    (await repo.loadRunJournal('Turn Storage Chat')).entries.length,
+    1,
+    'retired generated cleanup preserves the run journal'
+  );
+  assertEqual(
+    (await repo.loadLastBrief('Turn Storage Chat')).turnKeyHash,
+    'turn-storage-a',
+    'retired generated cleanup preserves isolated Last Brief data'
+  );
+  assert(
+    !Object.values((await repo.readIndex()).records).some((record) => record.kind === 'sceneCache'),
+    'retired generated cleanup removes scene-cache index authority'
+  );
+}
+
 console.log('[pass] storage');

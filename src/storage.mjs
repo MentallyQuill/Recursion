@@ -8,6 +8,17 @@ import {
   QUEUED_REPROCESS_SCHEMA,
   normalizeQueuedReprocess
 } from './execution/queued-reprocess.mjs';
+import {
+  LAST_BRIEF_SCHEMA,
+  lastBriefKey,
+  normalizeLastBriefRecord
+} from './storage/last-brief.mjs';
+
+export {
+  LAST_BRIEF_SCHEMA,
+  lastBriefKey,
+  normalizeLastBriefRecord
+};
 
 const RECURSION_VERSION = '0.2.0-alpha.1';
 const MAX_JOURNAL_ENTRIES = 500;
@@ -15,15 +26,18 @@ const DEFAULT_MAX_SCENE_CACHES_PER_CHAT = 3;
 const DEFAULT_MAX_SCENE_CACHES_TOTAL = 24;
 const SCENE_CACHE_KEY_PATTERN = /^recursion-scene-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v1\.json$/;
 const RUN_JOURNAL_KEY_PATTERN = /^recursion-run-journal-[A-Za-z0-9_.-]+\.v1\.json$/;
-const PIPELINE_RUN_KEY_PATTERN = /^recursion-pipeline-run-[A-Za-z0-9_.-]+\.v1\.json$/;
-const PIPELINE_ARTIFACT_KEY_PATTERN = /^recursion-pipeline-artifact-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+-v1\.json$/;
+const PIPELINE_RUN_KEY_PATTERN = /^recursion-pipeline-run-[A-Za-z0-9_.-]+\.v2\.json$/;
+const PIPELINE_ARTIFACT_KEY_PATTERN = /^recursion-pipeline-artifact-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v2\.json$/;
 const QUEUED_REPROCESS_KEY_PATTERN = /^recursion-queued-reprocess-[A-Za-z0-9_.-]+\.v1\.json$/;
+const LAST_BRIEF_KEY_PATTERN = /^recursion-last-brief-[A-Za-z0-9_.-]+\.v1\.json$/;
+const RETIRED_GENERATED_KEY_PATTERN = /^recursion-scene-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v1\.json$/;
 const INDEX_KINDS = new Set([
   'sceneCache',
   'runJournal',
   'pipelineRun',
   'pipelineArtifact',
-  'queuedReprocess'
+  'queuedReprocess',
+  'lastBrief'
 ]);
 const DEFAULT_JOURNAL_EVENT = 'activity.stage_changed';
 const UNSAFE_JOURNAL_TEXT_PATTERN = /\b(raw[-_\s]*prompt|rawPrompt|raw[-_\s]*response|rawResponse|provider[-_\s]*prompt|providerPrompt|provider[-_\s]*response|providerResponse|hidden[-_\s]*reasoning|hiddenReasoning|reasoning[-_\s]*(?:content|details)|reasoningContent|reasoningDetails|private[-_\s]*story[-_\s]*plan|privateStoryPlan|private[-_\s]*plan|privatePlan|session[-_\s]*id|sessionId|session[-_\s]*key\s*[:=]|sessionKey\s*[:=]|session[-_\s]*token|credentials?|password\s*[:=]|token\s*[:=]|api[-_\s]*key\s*[:=]|apiKey\s*[:=]|authorization\s*[:=]|set-cookie\s*[:=]|cookie\s*[:=]|bearer\s+[A-Za-z0-9._-]+|sk-[A-Za-z0-9_-]+)/i;
@@ -101,7 +115,7 @@ export function runJournalKey(chatKey) {
 }
 
 export function pipelineRunKey(chatKey) {
-  return `recursion-pipeline-run-${safeId(chatKey, 'chat')}.v1.json`;
+  return `recursion-pipeline-run-${safeId(chatKey, 'chat')}.v2.json`;
 }
 
 export function pipelineArtifactKey(chatKey, operationId, artifactId) {
@@ -109,9 +123,8 @@ export function pipelineArtifactKey(chatKey, operationId, artifactId) {
     'recursion-pipeline-artifact',
     safeId(chatKey, 'chat'),
     safeId(operationId, 'operation'),
-    safeId(artifactId, 'artifact'),
-    'v1.json'
-  ].join('-');
+    safeId(artifactId, 'artifact')
+  ].join('-') + '.v2.json';
 }
 
 export function queuedReprocessKey(chatKey) {
@@ -753,6 +766,7 @@ function normalizeIndexKey(kind, value) {
   if (kind === 'pipelineRun') return PIPELINE_RUN_KEY_PATTERN.test(value) ? value : null;
   if (kind === 'pipelineArtifact') return PIPELINE_ARTIFACT_KEY_PATTERN.test(value) ? value : null;
   if (kind === 'queuedReprocess') return QUEUED_REPROCESS_KEY_PATTERN.test(value) ? value : null;
+  if (kind === 'lastBrief') return LAST_BRIEF_KEY_PATTERN.test(value) ? value : null;
   return null;
 }
 
@@ -762,6 +776,7 @@ function indexKindForKey(key) {
   if (PIPELINE_RUN_KEY_PATTERN.test(key)) return 'pipelineRun';
   if (PIPELINE_ARTIFACT_KEY_PATTERN.test(key)) return 'pipelineArtifact';
   if (QUEUED_REPROCESS_KEY_PATTERN.test(key)) return 'queuedReprocess';
+  if (LAST_BRIEF_KEY_PATTERN.test(key)) return 'lastBrief';
   return null;
 }
 
@@ -843,6 +858,23 @@ function indexRecordFromStoredRecord(key, value) {
     }
     const chatKey = safeIdentifier(value.chatKey, '');
     if (!chatKey) return null;
+    return {
+      key,
+      kind,
+      chatKey,
+      updatedAt: timestampValue(value.updatedAt)
+    };
+  }
+  if (kind === 'lastBrief') {
+    if (
+      value.recordType !== 'recursion.lastBrief'
+      || value.schema !== LAST_BRIEF_SCHEMA
+    ) {
+      return null;
+    }
+    const brief = normalizeLastBriefRecord(value);
+    const chatKey = safeIdentifier(value.chatKey, '');
+    if (!brief || !chatKey || brief.chatKey !== chatKey) return null;
     return {
       key,
       kind,
@@ -1379,6 +1411,52 @@ export function createStorageRepository({
     return clean;
   }
 
+  async function loadLastBrief(chatKey) {
+    const key = lastBriefKey(chatKey);
+    const record = await storage.readJson(key);
+    if (
+      !isStorageObject(record)
+      || record.recordType !== 'recursion.lastBrief'
+      || record.schema !== LAST_BRIEF_SCHEMA
+      || record.schemaVersion !== 1
+      || record.chatKey !== safeId(chatKey, 'chat')
+    ) {
+      return null;
+    }
+    return normalizeLastBriefRecord(record);
+  }
+
+  async function saveLastBrief(chatKey, value) {
+    const normalized = normalizeLastBriefRecord({
+      ...(isStorageObject(value) ? value : {}),
+      chatKey: safeId(chatKey, 'chat')
+    });
+    if (!normalized) throw new TypeError('Last Brief record requires a turn key.');
+    const key = lastBriefKey(chatKey);
+    const record = baseRecord('recursion.lastBrief', normalized);
+    const writeResult = await storage.writeJson(key, record);
+    if (storageWriteStatus(writeResult).persisted === false) {
+      throw new Error('Last Brief write failed.');
+    }
+    const persisted = normalizeLastBriefRecord(await storage.readJson(key));
+    if (!persisted || await stableHash(persisted) !== await stableHash(normalized)) {
+      throw new Error('Last Brief write verification failed.');
+    }
+    await writeAuxiliaryIndexEntry(key, 'lastBrief', safeId(chatKey, 'chat'));
+    return normalized;
+  }
+
+  async function clearLastBrief(chatKey) {
+    const key = lastBriefKey(chatKey);
+    const deleted = await storage.deleteJson(key);
+    if (deleted?.ok !== false) await removeIndexEntry(key);
+    return {
+      ok: deleted?.ok !== false,
+      key,
+      deleted: deleted?.ok !== false
+    };
+  }
+
   async function loadPipelineArtifact(chatKey, operationId, artifactId) {
     const key = pipelineArtifactKey(chatKey, operationId, artifactId);
     const record = await storage.readJson(key);
@@ -1576,6 +1654,148 @@ export function createStorageRepository({
     };
   }
 
+  async function revokeTurnExecution(chatKey, options = {}) {
+    const source = isStorageObject(options) ? options : {};
+    const safeChatKey = safeId(chatKey, 'chat');
+    const operationId = safeId(source.operationId, 'operation');
+    const manifest = await loadPipelineRun(chatKey);
+    if (!manifest) {
+      return {
+        ok: false,
+        revoked: false,
+        eligibilityRevoked: false,
+        reason: 'missing-manifest',
+        cleanupFailures: []
+      };
+    }
+    if (safeId(manifest.operationId, 'operation') !== operationId) {
+      return {
+        ok: false,
+        revoked: false,
+        eligibilityRevoked: false,
+        reason: 'operation-mismatch',
+        cleanupFailures: []
+      };
+    }
+
+    await repairIndex();
+    const index = normalizeIndex(await storage.readJson(SYSTEM_INDEX_KEY));
+    const artifactTargets = Object.values(index.records)
+      .filter((record) => (
+        record.kind === 'pipelineArtifact'
+        && record.chatKey === safeChatKey
+        && record.operationId === operationId
+      ))
+      .map((record) => ({ key: record.key, kind: 'pipelineArtifact' }));
+    const reason = safeMetadataText(source.reason, 120, 'revoked');
+    try {
+      await savePipelineRun(chatKey, {
+        ...manifest,
+        revision: normalizeNonNegativeInteger(manifest.revision) + 1,
+        state: 'abandoned',
+        pauseReason: `revoked:${reason}`.slice(0, 180),
+        updatedAt: nowIso()
+      });
+    } catch {
+      return {
+        ok: false,
+        revoked: false,
+        eligibilityRevoked: false,
+        reason: 'revoke-write-failed',
+        cleanupFailures: [{ kind: 'pipelineRun', reason: 'revoke-write-failed' }]
+      };
+    }
+
+    const targets = [
+      ...artifactTargets,
+      { key: pipelineRunKey(chatKey), kind: 'pipelineRun' },
+      { key: queuedReprocessKey(chatKey), kind: 'queuedReprocess' }
+    ];
+    const cleanupFailures = [];
+    const deletedKeys = [];
+    for (const target of targets) {
+      try {
+        const deleted = await storage.deleteJson(target.key);
+        if (deleted?.ok === false) {
+          cleanupFailures.push({ kind: target.kind, reason: 'delete-failed' });
+          continue;
+        }
+        deletedKeys.push(target.key);
+        delete index.records[target.key];
+      } catch {
+        cleanupFailures.push({ kind: target.kind, reason: 'delete-failed' });
+      }
+    }
+    if (deletedKeys.length > 0) {
+      index.updatedAt = nowIso();
+      try {
+        const indexWrite = await storage.writeJson(SYSTEM_INDEX_KEY, index);
+        if (storageWriteStatus(indexWrite).persisted === false) {
+          cleanupFailures.push({ kind: 'systemIndex', reason: 'write-failed' });
+        }
+      } catch {
+        cleanupFailures.push({ kind: 'systemIndex', reason: 'write-failed' });
+      }
+    }
+    const boundedFailures = cleanupFailures.slice(0, 3);
+    return {
+      ok: cleanupFailures.length === 0,
+      revoked: true,
+      eligibilityRevoked: true,
+      operationId,
+      reason,
+      deletedKeys,
+      cleanupFailures: boundedFailures,
+      cleanupFailureCount: cleanupFailures.length
+    };
+  }
+
+  async function pruneRetiredGeneratedRecords() {
+    const repair = await repairIndex();
+    const index = normalizeIndex(await storage.readJson(SYSTEM_INDEX_KEY));
+    const discoveredKeys = await discoverStorageKeys(storage);
+    const retiredKeys = new Set([
+      ...Object.values(index.records)
+        .filter((record) => record.kind === 'sceneCache')
+        .map((record) => record.key),
+      ...(discoveredKeys || []).filter((key) => RETIRED_GENERATED_KEY_PATTERN.test(key))
+    ]);
+    const deletedKeys = [];
+    const cleanupFailures = [];
+    for (const key of [...retiredKeys].sort()) {
+      try {
+        const deleted = await storage.deleteJson(key);
+        if (deleted?.ok === false) {
+          cleanupFailures.push({ kind: 'sceneCache', reason: 'delete-failed' });
+          continue;
+        }
+        deletedKeys.push(key);
+        delete index.records[key];
+      } catch {
+        cleanupFailures.push({ kind: 'sceneCache', reason: 'delete-failed' });
+      }
+    }
+    if (deletedKeys.length > 0) {
+      index.updatedAt = nowIso();
+      try {
+        const indexWrite = await storage.writeJson(SYSTEM_INDEX_KEY, index);
+        if (storageWriteStatus(indexWrite).persisted === false) {
+          cleanupFailures.push({ kind: 'systemIndex', reason: 'write-failed' });
+        }
+      } catch {
+        cleanupFailures.push({ kind: 'systemIndex', reason: 'write-failed' });
+      }
+    }
+    return {
+      ok: cleanupFailures.length === 0,
+      deletedKeys,
+      cleanupFailures: cleanupFailures.slice(0, 3),
+      cleanupFailureCount: cleanupFailures.length,
+      repaired: repair.repaired,
+      skipped: repair.skipped
+    };
+  }
+
   async function prunePipelineExecution() {
     const repair = await repairIndex();
     const index = normalizeIndex(await storage.readJson(SYSTEM_INDEX_KEY));
@@ -1711,6 +1931,9 @@ export function createStorageRepository({
       return { ok: deleted?.ok !== false, key, deleted: deleted?.ok !== false };
     },
     appendJournal,
+    loadLastBrief,
+    saveLastBrief,
+    clearLastBrief,
     loadPipelineArtifact,
     savePipelineArtifact,
     loadPipelineRun,
@@ -1722,6 +1945,8 @@ export function createStorageRepository({
     deletePipelineArtifact,
     clearQueuedReprocess,
     clearPipelineExecution,
+    revokeTurnExecution,
+    pruneRetiredGeneratedRecords,
     prunePipelineExecution,
     repairIndex,
     pruneSceneCaches,

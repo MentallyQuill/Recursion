@@ -425,7 +425,7 @@ Allowlisted lifecycle evidence includes:
 - operation id, phase, state, and native generation type;
 - queued Reprocess/Full Fresh stage ids and bound turn-key hash;
 - checkpoint reuse and invalidation counts;
-- stable reasons such as `new-user-turn`, `same-turn-swipe`,
+- stable reasons such as `new-user-turn`, `same-turn-host-retry`, `same-turn-swipe`,
   `source-band-edited`, `queued-reprocess-consumed`,
   `queued-reprocess-canceled-new-turn`, `operation-paused-user-stop`, and
   `host-resume-start-failed`.

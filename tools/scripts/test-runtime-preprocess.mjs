@@ -504,6 +504,34 @@ function roleCounts(calls = []) {
     1,
     'reload Resume reruns only the interrupted card'
   );
+  const callsAfterResumeSettlement = restoredCalls.length;
+  const completedOperationId = (await storage.loadPipelineRun('chat-preprocess')).operationId;
+  const repeatedHostCallback = await restoredRuntime.prepareForGeneration({
+    userMessage: { text: 'I ask what she remembers.', mesid: 2 },
+    hostGeneration: true,
+    generationType: 'normal'
+  });
+  assertEqual(repeatedHostCallback.ok, true, 'a repeated native callback for the resumed turn remains usable');
+  assertEqual(
+    (await storage.loadPipelineRun('chat-preprocess')).operationId,
+    completedOperationId,
+    'a repeated native callback keeps the completed resumed operation'
+  );
+  assertEqual(
+    restoredCalls.length,
+    callsAfterResumeSettlement,
+    'a repeated native callback after Resume starts zero duplicate provider calls'
+  );
+  assertEqual(
+    restoredRuntime.getView().turnScope.generationClassification,
+    'same-turn-host-retry',
+    'the repeated native callback is diagnosed as an exact-turn host retry'
+  );
+  assertEqual(
+    restoredRuntime.getView().turnScope.reuseCount,
+    1,
+    'the repeated native callback records one exact-turn reuse'
+  );
 }
 
 {

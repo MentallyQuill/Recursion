@@ -55,6 +55,7 @@ Every node is a V2 stage. Model stages have bounded attempt windows. Local and h
 
 - New user turn: revoke prior authority, cancel queued swipe intents, create a new operation, and run a new Arbiter.
 - Same-turn unchanged swipe: validate the completed manifest and packet, reinstall it with zero Recursion model calls, and continue native story generation.
+- Same-turn native host retry after Resume: finalize the completed host-owned operation and reinstall its packet with zero duplicate Recursion model calls.
 - Edited-band swipe: reject reuse, cancel queued intent, and rebuild.
 - Compatible paused operation: continue only after native host generation re-enters the interceptor.
 - Incompatible or corrupt operation: mark stale or revoke, then recompute safely.

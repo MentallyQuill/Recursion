@@ -136,6 +136,14 @@ assertEqual(classifyGeneration({
 
 assertEqual(classifyGeneration({
   nativeGenerationType: 'normal',
+  pendingUserMessage: { mesid: 12, text: 'message-11' },
+  currentTurnKeyHash: first.turnKeyHash,
+  storedTurnKeyHash: first.turnKeyHash,
+  storedOperationState: 'completed'
+}).kind, 'same-turn-host-retry');
+
+assertEqual(classifyGeneration({
+  nativeGenerationType: 'normal',
   pendingUserMessage: { mesid: 15, text: 'message-13' },
   currentTurnKeyHash: repeatedTextNewId.turnKeyHash,
   storedTurnKeyHash: first.turnKeyHash,

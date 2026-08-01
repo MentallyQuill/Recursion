@@ -8018,7 +8018,8 @@ export function createRecursionRuntime({
       updateTurnScope(turnIdentity, {
         generationClassification: diagnosticClassification,
         operationId: shouldRevokeStored ? '' : storedManifest?.operationId,
-        reused: classification.kind === 'same-turn-swipe' && !shouldRevokeStored,
+        reused: ['same-turn-swipe', 'same-turn-host-retry'].includes(classification.kind)
+          && !shouldRevokeStored,
         invalidated: shouldRevokeStored,
         diagnosticCodes: queueCancellationCode ? [queueCancellationCode] : []
       });

@@ -39,6 +39,7 @@ const stableCodes = [
   'resume-commit-already-applied',
   'fused-fallback-segmented',
   'new-user-turn',
+  'same-turn-host-retry',
   'same-turn-swipe',
   'source-band-edited'
 ];

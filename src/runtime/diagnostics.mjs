@@ -22,11 +22,13 @@ const EXECUTION_DIAGNOSTIC_CODE_SET = new Set([
   'resume-commit-already-applied',
   'fused-fallback-segmented',
   'new-user-turn',
+  'same-turn-host-retry',
   'same-turn-swipe',
   'source-band-edited'
 ]);
 const TURN_CLASSIFICATION_CODES = new Set([
   'new-user-turn',
+  'same-turn-host-retry',
   'same-turn-swipe',
   'source-band-edited'
 ]);

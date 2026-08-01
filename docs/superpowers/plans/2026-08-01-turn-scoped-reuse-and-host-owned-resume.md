@@ -72,7 +72,7 @@ export function classifyGeneration({
 });
 ```
 
-`classifyGeneration()` returns one of `new-user-turn`, `same-turn-swipe`,
+`classifyGeneration()` returns one of `new-user-turn`, `same-turn-host-retry`, `same-turn-swipe`,
 `edited-band-swipe`, `compatible-paused-same-turn`,
 `incompatible-paused-operation`, or `new-host-generation`. Quiet requests are
 filtered by the extension before classification.

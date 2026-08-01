@@ -150,6 +150,9 @@ export function classifyGeneration({
   if (state === 'paused' && sameTurn) {
     return { kind: 'compatible-paused-same-turn', sameTurn: true };
   }
+  if (hasPendingUser && generationType === 'normal' && state === 'completed' && sameTurn) {
+    return { kind: 'same-turn-host-retry', sameTurn: true };
+  }
   if (hasPendingUser && generationType === 'normal') {
     return { kind: 'new-user-turn', sameTurn };
   }

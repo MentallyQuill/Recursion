@@ -334,4 +334,3 @@ git status -sb
 
 Expected: the merge succeeds, every verification command exits `0`, and
 `refactor` is clean with the new commit(s) ahead of `origin/refactor`.
-

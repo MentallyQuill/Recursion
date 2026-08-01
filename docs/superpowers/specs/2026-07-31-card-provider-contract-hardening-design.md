@@ -161,4 +161,3 @@ persisted reason and suggested action.
 - Focused suites run after each red/green cycle, followed by `npm.cmd test`,
   `npm.cmd run test:alpha`, and `git diff --check` on the merged `refactor`
   result.
-

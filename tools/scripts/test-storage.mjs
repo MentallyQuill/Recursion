@@ -479,6 +479,9 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
   const adapter = createMemoryStorageAdapter();
   const repo = createStorageRepository({ storage: adapter });
   const retiredKey = 'recursion-scene-Turn-Storage-Chat-Retired-Scene.v1.json';
+  const retiredRunKey = 'recursion-pipeline-run-Turn-Storage-Chat.v1.json';
+  const retiredArtifactKey = 'recursion-pipeline-artifact-Turn-Storage-Chat-operation-old-preprocess.packet.stage-old-v1.json';
+  const retiredQueueKey = 'recursion-queued-reprocess-Turn-Storage-Chat.v1.json';
   await adapter.writeJson(retiredKey, {
     recordType: 'recursion.sceneCache',
     schemaVersion: 1,
@@ -486,6 +489,9 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
     sceneKey: 'Retired-Scene',
     cards: []
   });
+  await adapter.writeJson(retiredRunKey, { manifest: { schema: 'recursion.pipelineRun.v1' } });
+  await adapter.writeJson(retiredArtifactKey, { artifact: { body: 'retired pipeline body' } });
+  await adapter.writeJson(retiredQueueKey, { schema: 'recursion.queuedReprocess.v1' });
   await repo.appendJournal('Turn Storage Chat', {
     event: 'runtime.started',
     severity: 'info',
@@ -505,6 +511,9 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
     null,
     'retired generated cleanup removes legacy scene authority'
   );
+  assertEqual(await adapter.readJson(retiredRunKey), null, 'retired cleanup removes V1 pipeline manifests');
+  assertEqual(await adapter.readJson(retiredArtifactKey), null, 'retired cleanup removes V1 pipeline artifacts');
+  assertEqual(await adapter.readJson(retiredQueueKey), null, 'retired cleanup removes V1 queued intents');
   assertEqual(
     (await repo.loadRunJournal('Turn Storage Chat')).entries.length,
     1,

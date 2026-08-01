@@ -8459,6 +8459,11 @@ export function createRecursionRuntime({
   }
 
   async function restoreExecutionState() {
+    try {
+      await storage.pruneRetiredGeneratedRecords?.();
+    } catch {
+      // Retired-record cleanup is best effort and must not block host startup.
+    }
     const snapshot = await readSnapshot();
     lastSnapshot = snapshot;
     const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;

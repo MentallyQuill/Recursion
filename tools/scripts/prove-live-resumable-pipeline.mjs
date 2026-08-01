@@ -79,7 +79,6 @@ function lifecycleProofScript() {
       sceneKey: `${chatKey}-scene`,
       sceneFingerprint: `${chatKey}-scene-fingerprint`,
       turnFingerprint: `${chatKey}-turn-fingerprint`,
-      sourceRevisionHash: `${chatKey}-source-revision`,
       latestMesId: 2,
       messages: [
         { mesid: 1, role: 'assistant', text: 'The archive door remains sealed.', visible: true },
@@ -227,11 +226,19 @@ function lifecycleProofScript() {
     };
     base.setSnapshot(withAssistant);
     await base.runtime.handleLatestAssistantSwipeRetry({ messageId: 3 });
-    await base.runtime.prepareForGeneration({ hostGeneration: true, generationType: 'swipe' });
+    const swipeResult = await base.runtime.prepareForGeneration({ hostGeneration: true, generationType: 'swipe' });
+    const swipeInstallDelta = base.installs.length - installsBeforeSwipe;
     const unchangedSwipe = {
       recursionModelCalls: baseCalls.length - callsBeforeSwipe,
-      packetReinstalled: base.installs.length === installsBeforeSwipe + 1
-        && base.installs.at(-1)?.packetId === firstPacketId
+      packetReinstalled: swipeInstallDelta === 1 && swipeResult?.reused === true,
+      installDelta: swipeInstallDelta,
+      runtimeReused: swipeResult?.reused === true,
+      packetIdStable: base.installs.at(-1)?.packetId === firstPacketId,
+      resultReason: String(swipeResult?.reason || ''),
+      preparedMatch: swipeResult?.preparedMatch === true,
+      executionState: String(swipeResult?.execution?.state || ''),
+      classification: String(base.runtime.getView()?.turnScope?.generationClassification || ''),
+      decision: base.runtime.getView()?.lastCacheDecision || null
     };
 
     const callsBeforeNewTurn = roleCounts(baseCalls);
@@ -528,7 +535,11 @@ async function main() {
     const page = await context.newPage();
     await page.goto(env.SILLYTAVERN_BASE_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     const proof = await page.evaluate(lifecycleProofScript(), servedRoot);
-    assertLifecycleProof(proof);
+    try {
+      assertLifecycleProof(proof);
+    } catch (error) {
+      fail('live-lifecycle-contract-failed', error.message, { proof });
+    }
     const report = {
       status: 'pass',
       result: 'live-resumable-pipeline-pass',

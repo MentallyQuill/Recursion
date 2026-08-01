@@ -180,7 +180,13 @@ function roleCounts(calls = []) {
 }
 
 {
-  const { runtime } = createHarness();
+  const activationAdapter = createMemoryStorageAdapter();
+  await activationAdapter.writeJson('recursion-scene-chat-preprocess-retired.v1.json', {
+    recordType: 'recursion.sceneCache',
+    schemaVersion: 1
+  });
+  const activationStorage = createStorageRepository({ storage: activationAdapter });
+  const { runtime } = createHarness({ storage: activationStorage });
   for (const method of [
     'restoreExecutionState',
     'pauseOperation',
@@ -196,6 +202,11 @@ function roleCounts(calls = []) {
   }
   const restored = await runtime.restoreExecutionState();
   assertEqual(restored, null, 'empty chat has no durable operation to restore');
+  assertEqual(
+    await activationAdapter.readJson('recursion-scene-chat-preprocess-retired.v1.json'),
+    null,
+    'runtime activation prunes retired generated records before restore'
+  );
   assertEqual(runtime.getView().execution, null, 'empty restore does not manufacture execution state');
   assertEqual(runtime.getView().queuedReprocess, null, 'empty restore has no queued reprocess intent');
 }

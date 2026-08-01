@@ -28,7 +28,12 @@ const PIPELINE_RUN_KEY_PATTERN = /^recursion-pipeline-run-[A-Za-z0-9_.-]+\.v2\.j
 const PIPELINE_ARTIFACT_KEY_PATTERN = /^recursion-pipeline-artifact-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v2\.json$/;
 const QUEUED_REPROCESS_KEY_PATTERN = /^recursion-queued-reprocess-[A-Za-z0-9_.-]+\.v2\.json$/;
 const LAST_BRIEF_KEY_PATTERN = /^recursion-last-brief-[A-Za-z0-9_.-]+\.v1\.json$/;
-const RETIRED_GENERATED_KEY_PATTERN = /^recursion-scene-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v1\.json$/;
+const RETIRED_GENERATED_KEY_PATTERNS = Object.freeze([
+  /^recursion-scene-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+\.v1\.json$/,
+  /^recursion-pipeline-run-[A-Za-z0-9_.-]+\.v1\.json$/,
+  /^recursion-pipeline-artifact-[A-Za-z0-9_.-]+-v1\.json$/,
+  /^recursion-queued-reprocess-[A-Za-z0-9_.-]+\.v1\.json$/
+]);
 const INDEX_KINDS = new Set([
   'runJournal',
   'pipelineRun',
@@ -142,6 +147,10 @@ function resumeArtifactReferences(manifest) {
       };
     })
     .filter(Boolean);
+}
+
+function retiredGeneratedKey(key) {
+  return RETIRED_GENERATED_KEY_PATTERNS.some((pattern) => pattern.test(String(key || '')));
 }
 
 export function collectResumeArtifactReferences(manifest) {
@@ -1411,7 +1420,7 @@ export function createStorageRepository({
       ...Object.values(index.records)
         .filter((record) => record.kind === 'sceneCache')
         .map((record) => record.key),
-      ...(discoveredKeys || []).filter((key) => RETIRED_GENERATED_KEY_PATTERN.test(key))
+      ...(discoveredKeys || []).filter(retiredGeneratedKey)
     ]);
     const deletedKeys = [];
     const cleanupFailures = [];

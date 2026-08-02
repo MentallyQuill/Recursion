@@ -1315,8 +1315,9 @@ function providerStatusText(provider, capability = {}) {
     unconfigured: 'Configure',
     untested: 'Untested'
   }[state] || 'Untested';
-  const model = cleanText(source.openAICompatible?.model);
-  const key = source.openAICompatible?.sessionApiKeyPresent ? 'session key loaded' : '';
+  const directSourceSelected = normalizeProviderSource(source.source) === 'openai-compatible';
+  const model = directSourceSelected ? cleanText(source.openAICompatible?.model) : '';
+  const key = directSourceSelected && source.openAICompatible?.sessionApiKeyPresent ? 'session key loaded' : '';
   return [status, model, key].filter(Boolean).join(' - ');
 }
 

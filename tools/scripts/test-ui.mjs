@@ -1765,6 +1765,11 @@ try {
               ...DEFAULT_RECURSION_SETTINGS.providers.reasoner,
               source: 'host-connection-profile',
               hostConnectionProfileId: 'deepseek-profile',
+              openAICompatible: {
+                ...DEFAULT_RECURSION_SETTINGS.providers.reasoner.openAICompatible,
+                model: 'google/gemini-3.5-flash-lite',
+                sessionApiKeyPresent: true
+              },
               configRevision: 4,
               health: { status: 'pass', configHash: 'reasoner-ready' },
               resolvedModelLabel: 'deepseek-v4-pro'

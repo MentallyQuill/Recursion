@@ -166,7 +166,7 @@ Every operation checks source identity, stale-state boundaries, guidance shape, 
 - Progress States: live pass status, fallback paths, repair work, install state, and readiness.
 - Post-process Results: guidance status, category outcomes, retries, host-writer settlement, swipe/replace behavior, and explicit failure reasons.
 - Tense & PoV: Auto story-form detection or a forced past/present first-, second-, third-person, or mixed POV form for the next prompt contract.
-- Provider Health: Utility and Reasoner tests, session-only direct keys, fallback visibility, and lane status.
+- Provider Health: Utility and Reasoner profile tests, certification state, fallback visibility, and lane status.
 
 ## Fast Start
 
@@ -196,7 +196,7 @@ For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_
 
 ## Security And Privacy
 
-Recursion treats provider secrets and raw model I/O as sensitive. OpenAI-compatible direct keys are session-only and do not persist to settings, turn artifacts, prompt packets, run journals, diagnostics, browser local storage, SillyTavern file storage, or test artifacts.
+Recursion treats provider secrets and raw model I/O as sensitive. Provider credentials and endpoints remain owned by SillyTavern Connection Profiles; Recursion stores only profile selection and policy state.
 
 Normal diagnostics use hashes, compact statuses, bounded metadata, and sanitized activity instead of raw prompts, raw provider responses, hidden reasoning, or full transcript text. Resume-only prompts, cards, guidance, packets, and drafts live in isolated artifact records; manifests contain only checkpoint metadata. Successful Post-process settlement removes intermediate guidance and drafts, stale or abandoned work loses unusable artifacts, and Reset Turn Cache clears Recursion-generated work for the active turn without changing SillyTavern messages.
 

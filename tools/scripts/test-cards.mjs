@@ -258,9 +258,9 @@ assertEqual(requests[0].snapshotHash, 'hash', 'snapshot hash included');
 assertEqual(requests[0].metadata.family, 'Scene Frame', 'request metadata includes family');
 assertEqual(requests[1].metadata.reason, '', 'missing request reason defaults empty');
 assert(requests[0].prompt.includes('Return one JSON object'), 'request prompt asks for JSON-only output');
-assert(requests[0].prompt.includes('Envelope role must be "sceneFrameCard"'), 'request prompt requires envelope role echo');
-assert(requests[0].prompt.includes('Envelope family must be "Scene Frame"'), 'request prompt requires envelope family echo');
-assert(requests[0].prompt.includes('Envelope snapshotHash must be "hash"'), 'request prompt requires envelope snapshot hash echo');
+assert(requests[0].prompt.includes('{"promptText":"Track the immediate objective and obstruction.","evidenceRefs":["message:12"]}'), 'request prompt shows the compact model-owned card payload');
+assert(requests[0].prompt.includes('Do not repeat schema names, role names, family names, or snapshot hashes.'), 'request prompt forbids protocol identity echoes');
+assert(!requests[0].prompt.includes('Envelope role must be'), 'request prompt does not require role echo');
 assert(requests[0].prompt.includes('promptText must be instruction-shaped private evidence'), 'card request prompt requires instruction-shaped promptText');
 assert(requests[0].prompt.includes('Do not write narrative prose'), 'card request prompt forbids prose-shaped promptText');
 const fusedPlan = {
@@ -304,7 +304,8 @@ assertEqual(fusedRequest.requestedCards.length, 2, 'Fused request carries all re
 assertDeepEqual(fusedRequest.requestedCards[0].sourceCardIds, ['scene-location', 'scene-direction', 'scene-beat'], 'Fused request preserves source card ids');
 assert(fusedRequest.prompt.includes('location/situation'), 'Fused prompt names source cards');
 assert(fusedRequest.prompt.includes('Return one JSON object only.'), 'Fused prompt requires one JSON object');
-assert(fusedRequest.prompt.includes('schema "recursion.cardBundle.v1"'), 'Fused prompt names bundle schema');
+assert(fusedRequest.prompt.includes('{"items":[{"family":"Scene Frame"'), 'Fused prompt shows the compact bundle payload');
+assert(!fusedRequest.prompt.includes('recursion.cardBundle.v1'), 'Fused prompt does not require internal schema identifiers');
 assert(fusedRequest.prompt.includes('Character Motivation'), 'Fused prompt includes requested family blocks');
 assert(fusedRequest.prompt.includes('Do not include first-person internal monologue'), 'Fused prompt includes family safety instructions');
 assert(fusedRequest.prompt.includes('promptText must be instruction-shaped private evidence'), 'Fused prompt requires instruction-shaped promptText');
@@ -365,7 +366,7 @@ assertEqual(fusedParsed.cards[0].providerLane, 'reasoner', 'Fused cards retain p
 assertEqual(fusedParsed.cards[0].sourceCoverage, 'included', 'Fused cards treat absent coverage metadata as included');
 assertEqual(fusedParsed.cards[0].inclusionEvidence, 'generation-contract', 'Fused cards explain contract-based inclusion when provider coverage is absent');
 assert(fusedParsed.diagnostics.includes('fused-item-rejected:Items'), 'Fused validator records rejected unrequested item');
-assertDeepEqual(fusedParsed.omissions, [{ family: 'Items', role: 'possessionsItemsCard', reason: 'provider-skipped' }], 'Fused validator keeps provider omissions');
+assertDeepEqual(fusedParsed.omissions, [], 'Fused validator ignores provider-owned omission bookkeeping');
 const fusedMixedEvidence = cardsFromFusedProviderResult({
   ok: true,
   data: {
@@ -419,7 +420,7 @@ const fusedPartialCoverage = cardsFromFusedProviderResult({
 assertEqual(fusedPartialCoverage.cards[0].sourceCoverage, 'included', 'Partial coverage still treats requested source cards as included');
 assertEqual(fusedPartialCoverage.cards[0].inclusionEvidence, 'generation-contract', 'Partial coverage falls back to contract inclusion');
 assert(!fusedPartialCoverage.cards[0].omittedSourceCardIds, 'Partial coverage does not invent explicit source omissions');
-assert(fusedPartialCoverage.diagnostics.some((entry) => entry.includes('fused-source-coverage-incomplete')), 'Partial coverage retains a diagnostic without failing source cards');
+assert(!fusedPartialCoverage.diagnostics.some((entry) => entry.includes('fused-source-coverage-incomplete')), 'Partial coverage does not persist model-owned coverage diagnostics');
 const fusedExplicitOmission = cardsFromFusedProviderResult({
   ok: true,
   data: {
@@ -435,13 +436,13 @@ const fusedExplicitOmission = cardsFromFusedProviderResult({
     }]
   }
 }, fusedCardContext);
-assertDeepEqual(fusedExplicitOmission.cards[0].omittedSourceCardIds, ['scene-beat'], 'Explicit source omissions are preserved');
+assertEqual(Object.hasOwn(fusedExplicitOmission.cards[0], 'omittedSourceCardIds'), false, 'model-supplied omission bookkeeping is ignored');
 const fusedMismatch = cardsFromFusedProviderResult({
   ok: true,
   data: { schema: 'recursion.cardBundle.v1', snapshotHash: 'wrong', items: [] }
 }, fusedCardContext);
-assertEqual(fusedMismatch.cards.length, 0, 'Fused snapshot mismatch accepts no cards');
-assert(fusedMismatch.diagnostics.includes('fused-bundle-snapshot-mismatch'), 'Fused snapshot mismatch records diagnostic');
+assertEqual(fusedMismatch.cards.length, 0, 'empty Fused payload accepts no cards');
+assert(fusedMismatch.diagnostics.includes('fused-item-missing:Scene Frame'), 'empty Fused payload reports request-owned missing families');
 const fusedInvalidUnsafeText = cardsFromFusedProviderResult({
   ok: true,
   data: {
@@ -458,14 +459,14 @@ const fusedInvalidUnsafeText = cardsFromFusedProviderResult({
   }
 }, fusedCardContext);
 assert(
-  fusedInvalidUnsafeText.diagnostics.includes('fused-item-invalid:Scene Frame:Card-promptText-contains-unsafe-hidden-reasoning-wording'),
-  'Fused validator records the concrete invalid-item reason'
+  fusedInvalidUnsafeText.diagnostics.includes('fused-item-invalid:Scene Frame'),
+  'Fused validator records the invalid requested family without persisting raw model text'
 );
 assertDeepEqual(fusedParsed.acceptedFamilies, ['Scene Frame', 'Character Motivation'], 'Fused parser reports accepted families');
 assertDeepEqual(fusedParsed.missingFamilies, [], 'Fused parser reports no missing families when requested siblings are accepted');
 assertDeepEqual(fusedInvalidUnsafeText.acceptedFamilies, [], 'Fused parser reports no accepted families for invalid-only bundle');
 assertDeepEqual(fusedInvalidUnsafeText.invalidFamilies, ['Scene Frame'], 'Fused parser reports invalid families for targeted repair');
-assertDeepEqual(fusedInvalidUnsafeText.missingFamilies, ['Character Motivation'], 'Fused parser reports requested siblings absent from damaged bundle');
+assertDeepEqual(fusedInvalidUnsafeText.missingFamilies, ['Scene Frame', 'Character Motivation'], 'Fused parser reports all unresolved requested families');
 const fusedDamagedEnvelope = cardsFromFusedProviderResult({
   ok: true,
   roleId: 'fusedCardBundle',
@@ -484,7 +485,7 @@ const fusedDamagedEnvelope = cardsFromFusedProviderResult({
   }
 }, fusedCardContext);
 assertEqual(fusedDamagedEnvelope.cards.length, 1, 'Fused validator salvages valid requested item from damaged envelope schema');
-assert(fusedDamagedEnvelope.diagnostics.includes('fused-bundle-envelope-damaged'), 'damaged envelope salvage records diagnostic');
+assert(!fusedDamagedEnvelope.diagnostics.includes('fused-bundle-envelope-damaged'), 'legacy envelope metadata is ignored rather than validated');
 assertDeepEqual(fusedDamagedEnvelope.acceptedFamilies, ['Scene Frame'], 'damaged envelope salvage reports accepted family');
 assertDeepEqual(fusedDamagedEnvelope.missingFamilies, ['Character Motivation'], 'damaged envelope salvage reports missing sibling');
 
@@ -503,8 +504,8 @@ const fusedWrongSnapshotEnvelope = cardsFromFusedProviderResult({
     }]
   }
 }, fusedCardContext);
-assertEqual(fusedWrongSnapshotEnvelope.cards.length, 0, 'Fused validator never salvages wrong-snapshot envelope');
-assert(fusedWrongSnapshotEnvelope.diagnostics.includes('fused-bundle-snapshot-mismatch'), 'wrong snapshot still records mismatch diagnostic');
+assertEqual(fusedWrongSnapshotEnvelope.cards.length, 1, 'request-owned snapshot identity ignores model-supplied snapshot fields');
+assertEqual(fusedWrongSnapshotEnvelope.cards[0].snapshotHash, 'snapshot-fused-1', 'Fused card receives the request-owned snapshot hash');
 const fusedRecoveredFragment = cardsFromFusedProviderResult({
   ok: false,
   roleId: 'fusedCardBundle',
@@ -904,7 +905,7 @@ const redactedRequest = buildCardRequests({
 assert(redactedRequest.snapshotHash, 'provider-facing request snapshotHash survives after sanitization');
 assert(redactedRequest.snapshotHash !== rawProviderUnsafeSnapshotHashWithQualified, 'provider-facing request snapshotHash is sanitized when source hash contains unsafe text');
 assert(redactedRequest.runId !== 'run-redacted Bearer run/token+value= apiKeyValue=raw-run-api-key', 'provider-facing request runId is sanitized');
-assert(redactedRequest.prompt.includes(`Envelope snapshotHash must be "${redactedRequest.snapshotHash}"`), 'provider prompt asks for sanitized snapshot hash echo');
+assert(redactedRequest.prompt.includes(`Snapshot hash: ${redactedRequest.snapshotHash}`), 'provider prompt carries sanitized snapshot context without requiring an echo');
 assert(!redactedRequest.snapshotHash.includes('Bearer hash-token'), 'request snapshotHash redacts bearer token');
 assert(!redactedRequest.snapshotHash.includes('sk-card-hash'), 'request snapshotHash redacts sk token');
 assert(!redactedRequest.snapshotHash.includes('raw-authentication-value'), 'request snapshotHash redacts authentication assignment');
@@ -1155,7 +1156,7 @@ assertEqual(cardsFromProviderResult({
     snapshotHash: 'wrong-provider-hash',
     items: [{ promptText: 'Wrong snapshot hash should be ignored.', evidenceRefs: ['message:8'] }]
   }
-}, { snapshotHash: 'hash-provider', expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 0, 'provider envelope with mismatched snapshot hash ignored');
+}, { snapshotHash: 'hash-provider', expectedRole: 'sceneFrameCard', expectedFamily: 'Scene Frame' }).length, 1, 'request-owned snapshot identity ignores model-supplied snapshot fields');
 assertEqual(cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',

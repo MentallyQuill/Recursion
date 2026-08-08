@@ -1,6 +1,5 @@
 import {
   DEFAULT_RECURSION_SETTINGS,
-  createSessionSecretStore,
   createSettingsStore,
   normalizeProviderSettings,
   normalizeSettings,
@@ -28,6 +27,7 @@ import {
 } from '../../src/card-scope.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
+
 function assertThrows(fn, pattern, message) {
   try {
     fn();
@@ -46,8 +46,11 @@ const normalized = normalizeSettings({
   reasoningLevel: 'ultra',
   reasonerUse: 'auto',
   providers: {
-    utility: { source: 'openai-compatible', openAICompatible: { baseUrl: 'http://localhost:1234/v1', model: 'fast' }, temperature: 0.3 },
-    reasoner: { enabled: true, source: 'host-current-model' }
+    utility: {
+      connectionProfileId: 'utility-profile',
+      samplerOverrides: { temperature: 0.3, topP: 0.9 }
+    },
+    reasoner: { enabled: true, connectionProfileId: 'reasoner-profile' }
   }
 });
 assertEqual(normalizeSettings({ mode: 'manual' }).mode, 'manual', 'manual mode is valid');
@@ -166,52 +169,106 @@ assertEqual(normalizeSettings({ injection: { depth: {} } }).injection.depth, 1, 
 assertEqual(normalized.mode, 'auto', 'mode preserved');
 assertEqual(normalized.reasoningLevel, 'ultra', 'reasoning level preserved');
 assertEqual(normalized.reasonerUse, 'always', 'ultra reasoning derives always-on reasoner routing');
-assertEqual(normalized.providers.utility.openAICompatible.model, 'fast', 'utility model preserved');
+assertEqual(normalized.providers.utility.connectionProfileId, 'utility-profile', 'utility profile preserved');
 assertEqual(normalized.providers.reasoner.enabled, undefined, 'legacy reasoner enabled state is removed');
 
-const migratedEnabledReasoner = normalizeSettings({
+const providerWithUnknownFields = normalizeSettings({
   providers: {
     reasoner: {
       enabled: true,
-      source: 'host-connection-profile',
-      hostConnectionProfileId: 'reasoner-profile'
+      unexpectedProviderField: 'must-not-survive',
+      nestedUnexpectedProviderField: { value: 'must-not-survive' },
+      connectionProfileId: 'reasoner-profile'
     }
   }
 }).providers.reasoner;
-const migratedDisabledReasoner = normalizeSettings({
+const providerWithoutUnknownFields = normalizeSettings({
   providers: {
     reasoner: {
-      enabled: false,
-      source: 'host-connection-profile',
-      hostConnectionProfileId: 'reasoner-profile'
+      connectionProfileId: 'reasoner-profile'
     }
   }
 }).providers.reasoner;
-assertDeepEqual(migratedEnabledReasoner, migratedDisabledReasoner, 'legacy enabled values migrate to one provider contract');
-assertEqual(Object.prototype.hasOwnProperty.call(migratedEnabledReasoner, 'enabled'), false, 'migrated provider omits enabled');
-assertDeepEqual(
-  normalizeSettings({
-    providers: {
-      reasoner: {
-        source: 'host-connection-profile',
-        hostConnectionProfileId: 'reasoner-profile',
-        lastTest: { status: 'pass', checkedAt: '2026-07-01T00:00:00.000Z' }
-      }
-    }
-  }).providers.reasoner.health,
-  { status: 'not-run' },
-  'legacy unbound test health migrates to not-run'
-);
+assertDeepEqual(providerWithUnknownFields, providerWithoutUnknownFields, 'unknown provider fields are discarded rather than persisted');
+assertDeepEqual(Object.keys(providerWithUnknownFields).sort(), [
+  'certification',
+  'configRevision',
+  'connectionProfileId',
+  'generationPolicy',
+  'lane',
+  'outputTokenCeiling',
+  'samplerOverrides'
+].sort(), 'normalized provider emits only the profile-only contract');
 
-const clamped = normalizeProviderSettings('utility', { temperature: 99, topP: -1, maxTokens: 9999999 });
-assertEqual(clamped.temperature, 2, 'temperature clamped');
-assertEqual(clamped.topP, 0, 'topP clamped');
-assertEqual(clamped.maxTokens, 131072, 'maxTokens clamped');
+const providerContract = normalizeProviderSettings('utility', {
+  unexpectedProviderField: 'must-not-survive',
+  nestedUnexpectedProviderField: { value: 'must-not-survive' },
+  connectionProfileId: 'profile-local-text',
+  generationPolicy: {
+    presetMode: 'isolated',
+    instructMode: 'auto',
+    samplerMode: 'profile',
+    structuredOutputMode: 'auto'
+  },
+  samplerOverrides: { temperature: 0.25, topP: 0.82 },
+  outputTokenCeiling: 4096
+});
+assertEqual(providerContract.connectionProfileId, 'profile-local-text', 'profile id survives');
+assertEqual(providerContract.generationPolicy.samplerMode, 'profile', 'profile samplers are defaultable');
+assertEqual(providerContract.samplerOverrides.temperature, 0.25, 'temperature override is bounded');
+assertEqual(providerContract.outputTokenCeiling, 4096, 'output ceiling survives');
+assertDeepEqual(Object.keys(providerContract).sort(), [
+  'certification',
+  'configRevision',
+  'connectionProfileId',
+  'generationPolicy',
+  'lane',
+  'outputTokenCeiling',
+  'samplerOverrides'
+].sort(), 'provider contract excludes unknown fields');
 
-const blankNumbers = normalizeProviderSettings('utility', { temperature: '', topP: '', maxTokens: '' });
-assertEqual(blankNumbers.temperature, DEFAULT_RECURSION_SETTINGS.providers.utility.temperature, 'blank temperature falls back');
-assertEqual(blankNumbers.topP, DEFAULT_RECURSION_SETTINGS.providers.utility.topP, 'blank topP falls back');
-assertEqual(blankNumbers.maxTokens, DEFAULT_RECURSION_SETTINGS.providers.utility.maxTokens, 'blank maxTokens falls back');
+const clamped = normalizeProviderSettings('utility', {
+  samplerOverrides: { temperature: 99, topP: -1 },
+  outputTokenCeiling: 9999999
+});
+assertEqual(clamped.samplerOverrides.temperature, 2, 'temperature override clamps');
+assertEqual(clamped.samplerOverrides.topP, 0, 'top-p override clamps');
+assertEqual(clamped.outputTokenCeiling, 32768, 'output token ceiling clamps');
+
+const blankNumbers = normalizeProviderSettings('utility', {
+  samplerOverrides: { temperature: '', topP: '' },
+  outputTokenCeiling: ''
+});
+assertEqual(blankNumbers.samplerOverrides.temperature, DEFAULT_RECURSION_SETTINGS.providers.utility.samplerOverrides.temperature, 'blank temperature falls back');
+assertEqual(blankNumbers.samplerOverrides.topP, DEFAULT_RECURSION_SETTINGS.providers.utility.samplerOverrides.topP, 'blank top-p falls back');
+assertEqual(blankNumbers.outputTokenCeiling, DEFAULT_RECURSION_SETTINGS.providers.utility.outputTokenCeiling, 'blank output ceiling falls back');
+
+const boundCertificationProvider = normalizeProviderSettings('utility', {
+  connectionProfileId: 'profile-a',
+  configRevision: 2,
+  certification: {
+    status: 'pass',
+    configHash: providerConfigHash({
+      ...DEFAULT_RECURSION_SETTINGS.providers.utility,
+      connectionProfileId: 'profile-a',
+      configRevision: 2
+    }),
+    checkedAt: '2026-08-06T00:00:00.000Z',
+    completionMode: 'text',
+    structuredOutput: 'prompt-json',
+    checks: { connectivity: 'pass', singleCard: 'pass', fusedCards: 'pass' },
+    safeConcurrency: 99,
+    diagnosticCodes: ['structured-output-downgraded'],
+    compactError: ''
+  }
+});
+assertEqual(boundCertificationProvider.certification.status, 'pass', 'matching certification survives normalization');
+assertEqual(boundCertificationProvider.certification.safeConcurrency, 1, 'certification concurrency is fixed at one');
+const staleCertificationProvider = normalizeProviderSettings('utility', {
+  ...boundCertificationProvider,
+  generationPolicy: { ...boundCertificationProvider.generationPolicy, instructMode: 'off' }
+});
+assertDeepEqual(staleCertificationProvider.certification, { status: 'not-run' }, 'changed generation policy invalidates certification');
 
 const diagnosticsOnly = normalizeSettings({ diagnostics: { maxJournalEntries: 250, includeExcerpts: true } });
 assertDeepEqual(diagnosticsOnly.diagnostics, { includeExcerpts: true }, 'diagnostics only retains excerpt toggle');
@@ -252,8 +309,8 @@ assertEqual(defaultUi.enabled, true, 'power toggle defaults on');
 assertEqual(defaultUi.mode, 'auto', 'mode defaults to auto');
 assertEqual(defaultUi.reasoningLevel, 'medium', 'reasoning level defaults to medium');
 assertEqual(defaultUi.promptFootprint, 'compact', 'prompt footprint defaults to compact');
-assertEqual(defaultUi.providers.utility.maxTokens, 8192, 'utility provider max tokens default to 8192');
-assertEqual(defaultUi.providers.reasoner.maxTokens, 8192, 'reasoner provider max tokens default to 8192');
+assertEqual(defaultUi.providers.utility.outputTokenCeiling, 8192, 'utility provider output ceiling defaults to 8192');
+assertEqual(defaultUi.providers.reasoner.outputTokenCeiling, 8192, 'reasoner provider output ceiling defaults to 8192');
 assertEqual(defaultUi.minCards, 3, 'minimum cards defaults to low reasoning card budget');
 assertEqual(defaultUi.maxCards, 10, 'maximum cards defaults to ultra reasoning card budget');
 assertEqual(defaultUi.ui.progressChildVisibleLimit, 5, 'sub-tier visible item default is five');
@@ -287,8 +344,7 @@ assertEqual(clampedUi.ui.progressChildVisibleLimit, 20, 'sub-tier visible item l
 assertEqual(clampedUi.ui.progressListVisibleLimit, 5, 'whole progress list visible item limit clamps low');
 
 const root = {};
-const secrets = createSessionSecretStore();
-const store = createSettingsStore({ root, secretStore: secrets });
+const store = createSettingsStore({ root, save: () => {} });
 assertEqual(store.get().ui.tooltipsEnabled, true, 'fresh settings store enables tooltip hover help');
 assertEqual(root.recursion.ui.tooltipsEnabled, true, 'fresh settings root persists tooltip hover help enabled');
 const invalidPipelineRoot = { recursion: { pipelineMode: 'rapid' } };
@@ -301,226 +357,195 @@ invalidPipelineStore.update({ mode: 'manual' });
 assertEqual(invalidPipelineRoot.recursion.pipelineMode, 'segmented', 'next settings save writes only the canonical pipeline value');
 store.update({ mode: 'auto' });
 const firstProviderUpdate = store.updateProviderConfig('utility', {
-  source: 'openai-compatible',
-  apiKey: 'secret-key'
+  connectionProfileId: 'profile-a'
 }, {
   expectedRevision: 0
 });
 assertEqual(firstProviderUpdate.ok, true, 'provider configuration update succeeds');
 assertEqual(firstProviderUpdate.provider.configRevision, 1, 'provider configuration update increments revision');
 assertEqual(root.recursion.mode, 'auto', 'settings update persisted into root');
-assertEqual(root.recursion.providers.utility.apiKey, undefined, 'api key is not persisted');
-assertEqual(secrets.get('utility'), 'secret-key', 'api key stored in session secret store');
-assertEqual(store.get().providers.utility.openAICompatible.sessionApiKeyPresent, true, 'secret presence reflected');
-const clearedKey = store.clearApiKey('utility', { expectedRevision: 1 });
-assertEqual(clearedKey.ok, true, 'session key clear uses configuration transaction');
-assertEqual(clearedKey.provider.configRevision, 2, 'session key clear increments revision');
-assertEqual(secrets.get('utility'), '', 'secret cleared');
-assertEqual(store.get().providers.utility.openAICompatible.sessionApiKeyPresent, false, 'secret absence reflected');
-assertEqual(root.recursion.providers.utility.openAICompatible.sessionApiKeyPresent, false, 'secret absence persisted');
+assertEqual(Object.hasOwn(root.recursion.providers.utility, 'apiKey'), false, 'api keys are not part of provider settings');
 
-store.updateProviderConfig('utility', {
-  openAICompatible: { baseUrl: 'http://localhost:1234/v1', model: 'fast' }
-});
-store.updateProviderConfig('utility', { openAICompatible: { model: 'new-model' } });
-assertEqual(root.recursion.providers.utility.openAICompatible.baseUrl, 'http://localhost:1234/v1', 'partial provider update preserves baseUrl');
-assertEqual(root.recursion.providers.utility.openAICompatible.model, 'new-model', 'partial provider update changes model');
-
-function markUtilityProviderTestPass() {
-  const provider = store.get().providers.utility;
-  return store.recordProviderHealth('utility', {
+function passingCertification(overrides = {}) {
+  return {
     status: 'pass',
-    checkedAt: '2026-07-01T00:00:00.000Z',
-    source: 'provider-test'
-  }, {
+    checkedAt: '2026-08-06T00:00:00.000Z',
+    completionMode: 'text',
+    structuredOutput: 'prompt-json',
+    checks: { connectivity: 'pass', singleCard: 'pass', fusedCards: 'pass' },
+    safeConcurrency: 1,
+    diagnosticCodes: [],
+    compactError: '',
+    ...overrides
+  };
+}
+
+function markUtilityProviderCertified(overrides = {}) {
+  const provider = store.get().providers.utility;
+  return store.recordProviderCertification('utility', passingCertification(overrides), {
     configHash: providerConfigHash(provider),
     configRevision: provider.configRevision
   });
 }
 
-function assertUtilityProviderHealthReset(message) {
+function assertUtilityCertificationReset(message) {
   const provider = store.get().providers.utility;
-  assertDeepEqual(provider.health, { status: 'not-run' }, `${message}: health reset`);
+  assertDeepEqual(provider.certification, { status: 'not-run' }, `${message}: certification reset`);
 }
 
-store.updateProviderConfig('utility', { source: 'openai-compatible', apiKey: 'test-key' });
-markUtilityProviderTestPass();
-store.clearApiKey('utility');
-assertUtilityProviderHealthReset('clearing provider session key');
+markUtilityProviderCertified();
+store.updateProviderConfig('utility', { connectionProfileId: 'profile-b' });
+assertUtilityCertificationReset('changing connection profile');
 
-store.updateProviderConfig('utility', { source: 'openai-compatible', apiKey: 'test-key', openAICompatible: { baseUrl: 'http://localhost:1234/v1', model: 'fast' } });
-markUtilityProviderTestPass();
-store.updateProviderConfig('utility', { openAICompatible: { baseUrl: 'http://localhost:4321/v1' } });
-assertUtilityProviderHealthReset('changing provider base URL');
-
-store.updateProviderConfig('utility', { source: 'openai-compatible', apiKey: 'test-key', openAICompatible: { baseUrl: 'http://localhost:1234/v1', model: 'fast' } });
-markUtilityProviderTestPass();
-store.updateProviderConfig('utility', { openAICompatible: { model: 'slower' } });
-assertUtilityProviderHealthReset('changing provider model');
-
-store.updateProviderConfig('utility', { source: 'openai-compatible', apiKey: 'test-key', openAICompatible: { baseUrl: 'http://localhost:1234/v1', model: 'fast' } });
-markUtilityProviderTestPass();
-store.updateProviderConfig('utility', { source: 'host-current-model' });
-assertUtilityProviderHealthReset('changing provider source');
-
-store.updateProviderConfig('utility', { source: 'host-connection-profile', hostConnectionProfileId: 'profile-a' });
-markUtilityProviderTestPass();
-store.updateProviderConfig('utility', { hostConnectionProfileId: 'profile-b' });
-assertUtilityProviderHealthReset('changing host connection profile');
-
-store.updateProviderConfig('utility', { source: 'openai-compatible', apiKey: 'test-key', openAICompatible: { baseUrl: 'http://localhost:1234/v1', model: 'fast' }, maxTokens: 4096 });
-markUtilityProviderTestPass();
+store.updateProviderConfig('utility', {
+  generationPolicy: {
+    presetMode: 'isolated',
+    instructMode: 'auto',
+    samplerMode: 'profile',
+    structuredOutputMode: 'auto'
+  },
+  samplerOverrides: { temperature: 0.2, topP: 0.9 },
+  outputTokenCeiling: 4096
+});
+markUtilityProviderCertified();
 const beforeTokenChange = store.get().providers.utility;
-const tokenChange = store.updateProviderConfig('utility', { maxTokens: 8192 }, {
+const tokenChange = store.updateProviderConfig('utility', { outputTokenCeiling: 8192 }, {
   expectedRevision: beforeTokenChange.configRevision
 });
 assertEqual(tokenChange.ok, true, 'field-scoped provider update succeeds');
 assertEqual(tokenChange.provider.configRevision, beforeTokenChange.configRevision + 1, 'field-scoped update increments revision once');
-assertEqual(tokenChange.provider.openAICompatible.model, beforeTokenChange.openAICompatible.model, 'field-scoped update preserves unrelated model');
-assertEqual(tokenChange.provider.temperature, beforeTokenChange.temperature, 'field-scoped update preserves unrelated temperature');
-assertDeepEqual(tokenChange.changedKeys, ['maxTokens'], 'field-scoped update reports only changed key');
-assertUtilityProviderHealthReset('changing provider token limit');
+assertEqual(tokenChange.provider.connectionProfileId, beforeTokenChange.connectionProfileId, 'field-scoped update preserves profile');
+assertEqual(tokenChange.provider.samplerOverrides.temperature, beforeTokenChange.samplerOverrides.temperature, 'field-scoped update preserves sampler overrides');
+assertDeepEqual(tokenChange.changedKeys, ['outputTokenCeiling'], 'field-scoped update reports only changed key');
+assertUtilityCertificationReset('changing provider output ceiling');
 
-for (const patch of [{ temperature: 0.6 }, { topP: 0.8 }]) {
-  markUtilityProviderTestPass();
+for (const patch of [
+  { samplerOverrides: { temperature: 0.6 } },
+  { samplerOverrides: { topP: 0.8 } },
+  { generationPolicy: { instructMode: 'off' } }
+]) {
+  markUtilityProviderCertified();
   const before = store.get().providers.utility;
   const update = store.updateProviderConfig('utility', patch, {
     expectedRevision: before.configRevision
   });
-  assertEqual(update.ok, true, 'sampling configuration update succeeds');
-  assertEqual(update.provider.configRevision, before.configRevision + 1, 'sampling configuration increments revision');
-  assertUtilityProviderHealthReset('changing provider sampling configuration');
+  assertEqual(update.ok, true, 'provider policy update succeeds');
+  assertEqual(update.provider.configRevision, before.configRevision + 1, 'provider policy update increments revision');
+  assertUtilityCertificationReset('changing provider generation policy');
 }
 
 const beforeStaleEdit = store.get().providers.utility;
-const secretBeforeStaleEdit = secrets.get('utility');
 const staleEdit = store.updateProviderConfig('utility', {
-  maxTokens: 2048,
-  apiKey: 'must-not-be-stored'
+  outputTokenCeiling: 2048,
+  unexpectedProviderField: 'must-not-be-stored'
 }, {
   expectedRevision: beforeStaleEdit.configRevision - 1
 });
 assertEqual(staleEdit.ok, false, 'stale provider edit is rejected');
 assertEqual(staleEdit.error.code, 'RECURSION_PROVIDER_CONFIG_STALE', 'stale provider edit has stable code');
 assertDeepEqual(store.get().providers.utility, beforeStaleEdit, 'stale provider edit does not persist');
-assertEqual(secrets.get('utility'), secretBeforeStaleEdit, 'stale provider edit does not mutate session secret');
 
 for (const expectedRevision of [-1, -0.5, 0.5, '0', null]) {
-  const isolatedSecrets = createSessionSecretStore();
-  const isolatedStore = createSettingsStore({
-    root: {},
-    secretStore: isolatedSecrets,
-    save: () => {}
-  });
+  const isolatedStore = createSettingsStore({ root: {}, save: () => {} });
   const rejected = isolatedStore.updateProviderConfig('utility', {
-    apiKey: 'must-not-be-stored',
-    maxTokens: 4096
+    connectionProfileId: 'must-not-be-stored',
+    outputTokenCeiling: 4096
   }, {
     expectedRevision
   });
   assertEqual(rejected.ok, false, `invalid revision ${String(expectedRevision)} is rejected`);
   assertEqual(rejected.error.code, 'RECURSION_PROVIDER_CONFIG_STALE', 'invalid revision uses stable stale code');
   assertEqual(isolatedStore.get().providers.utility.configRevision, 0, 'invalid revision preserves revision zero');
-  assertEqual(isolatedSecrets.get('utility'), '', 'invalid revision cannot mutate session secret');
+  assertEqual(isolatedStore.get().providers.utility.connectionProfileId, '', 'invalid revision cannot mutate profile settings');
 }
 
-const beforeHealth = store.get().providers.utility;
-const configurationBeforeHealth = {
-  ...beforeHealth,
-  health: undefined
+const beforeCertification = store.get().providers.utility;
+const configurationBeforeCertification = {
+  ...beforeCertification,
+  certification: undefined
 };
-const failedHealth = store.recordProviderHealth('utility', {
+const failedCertification = store.recordProviderCertification('utility', passingCertification({
   status: 'fail',
-  checkedAt: '2026-07-17T21:00:39.857Z',
-  compactError: 'Provider response reached its token ceiling.',
-  source: 'provider-test'
-}, {
-  configHash: providerConfigHash(beforeHealth),
-  configRevision: beforeHealth.configRevision
+  structuredOutput: 'unknown',
+  checks: { connectivity: 'fail', singleCard: 'not-run', fusedCards: 'not-run' },
+  compactError: 'RECURSION_PROVIDER_FAILED: The selected profile request failed.'
+}), {
+  configHash: providerConfigHash(beforeCertification),
+  configRevision: beforeCertification.configRevision
 });
-assertEqual(failedHealth.ok, true, 'failed provider health is recorded');
-assertEqual(failedHealth.provider.health.status, 'fail', 'failed provider health remains a health state');
-assertEqual(failedHealth.provider.configRevision, beforeHealth.configRevision, 'health write does not increment configuration revision');
+assertEqual(failedCertification.ok, true, 'failed provider certification is recorded');
+assertEqual(failedCertification.provider.certification.status, 'fail', 'failed provider certification remains a certification state');
+assertEqual(failedCertification.provider.configRevision, beforeCertification.configRevision, 'certification write does not increment configuration revision');
 assertDeepEqual(
-  { ...failedHealth.provider, health: undefined },
-  configurationBeforeHealth,
+  { ...failedCertification.provider, certification: undefined },
+  configurationBeforeCertification,
   'failed provider test cannot mutate provider configuration'
 );
 
-const beforePassHealth = store.get().providers.utility;
-const passedHealth = store.recordProviderHealth('utility', {
-  status: 'pass',
-  checkedAt: '2026-07-17T21:00:59.857Z',
-  source: 'provider-test'
-}, {
-  configHash: providerConfigHash(beforePassHealth),
-  configRevision: beforePassHealth.configRevision
+const beforePassCertification = store.get().providers.utility;
+const passedCertification = store.recordProviderCertification('utility', passingCertification(), {
+  configHash: providerConfigHash(beforePassCertification),
+  configRevision: beforePassCertification.configRevision
 });
-assertEqual(passedHealth.ok, true, 'passing provider health is recorded');
-assertEqual(passedHealth.provider.health.status, 'pass', 'passing provider health remains a health state');
+assertEqual(passedCertification.ok, true, 'passing provider certification is recorded');
+assertEqual(passedCertification.provider.certification.status, 'pass', 'passing provider certification remains a certification state');
 assertDeepEqual(
-  { ...passedHealth.provider, health: undefined },
-  { ...beforePassHealth, health: undefined },
+  { ...passedCertification.provider, certification: undefined },
+  { ...beforePassCertification, certification: undefined },
   'passing provider test cannot mutate provider configuration'
 );
 
 const beforeNoOp = store.get().providers.utility;
 const noOp = store.updateProviderConfig('utility', {
-  maxTokens: beforeNoOp.maxTokens
+  outputTokenCeiling: beforeNoOp.outputTokenCeiling
 }, {
   expectedRevision: beforeNoOp.configRevision
 });
 assertEqual(noOp.ok, true, 'matching no-op provider edit succeeds');
 assertDeepEqual(noOp.changedKeys, [], 'matching no-op provider edit has no changed keys');
 assertEqual(noOp.provider.configRevision, beforeNoOp.configRevision, 'no-op provider edit preserves revision');
-assertDeepEqual(noOp.provider.health, beforeNoOp.health, 'no-op provider edit preserves bound health');
+assertDeepEqual(noOp.provider.certification, beforeNoOp.certification, 'no-op provider edit preserves bound certification');
 
-const staleHealth = store.recordProviderHealth('utility', {
-  status: 'pass',
-  checkedAt: '2026-07-17T21:01:00.000Z'
-}, {
+const staleCertification = store.recordProviderCertification('utility', passingCertification(), {
   configHash: 'stale-config',
   configRevision: store.get().providers.utility.configRevision
 });
-assertEqual(staleHealth.ok, false, 'stale health write is rejected');
-assertEqual(staleHealth.stale, true, 'stale health write is marked stale');
-assertEqual(staleHealth.error.code, 'RECURSION_PROVIDER_TEST_STALE', 'stale health write has stable code');
-assertEqual(store.get().providers.utility.health.status, 'pass', 'stale health write preserves current health');
+assertEqual(staleCertification.ok, false, 'stale certification write is rejected');
+assertEqual(staleCertification.stale, true, 'stale certification write is marked stale');
+assertEqual(staleCertification.error.code, 'RECURSION_PROVIDER_TEST_STALE', 'stale certification write has stable code');
+assertEqual(store.get().providers.utility.certification.status, 'pass', 'stale certification write preserves current certification');
 
-const currentHealthProvider = store.get().providers.utility;
-const staleRevisionHealth = store.recordProviderHealth('utility', {
-  status: 'fail',
-  checkedAt: '2026-07-17T21:01:01.000Z'
-}, {
-  configHash: providerConfigHash(currentHealthProvider),
-  configRevision: currentHealthProvider.configRevision - 1
+const currentCertificationProvider = store.get().providers.utility;
+const staleRevisionCertification = store.recordProviderCertification('utility', passingCertification(), {
+  configHash: providerConfigHash(currentCertificationProvider),
+  configRevision: currentCertificationProvider.configRevision - 1
 });
-assertEqual(staleRevisionHealth.ok, false, 'matching hash with stale revision is rejected');
-assertEqual(staleRevisionHealth.stale, true, 'stale revision health write is marked stale');
+assertEqual(staleRevisionCertification.ok, false, 'matching hash with stale revision is rejected');
+assertEqual(staleRevisionCertification.stale, true, 'stale revision certification write is marked stale');
 
-const invalidHealth = store.recordProviderHealth('utility', {
-  status: 'pass',
-  maxTokens: 64
+const invalidCertification = store.recordProviderCertification('utility', {
+  ...passingCertification(),
+  outputTokenCeiling: 64
 }, {
   configHash: providerConfigHash(store.get().providers.utility),
   configRevision: store.get().providers.utility.configRevision
 });
-assertEqual(invalidHealth.ok, false, 'health write containing configuration is rejected');
-assertEqual(invalidHealth.error.code, 'RECURSION_PROVIDER_HEALTH_INVALID', 'mixed health/configuration write has stable code');
+assertEqual(invalidCertification.ok, false, 'certification write containing configuration is rejected');
+assertEqual(invalidCertification.error.code, 'RECURSION_PROVIDER_CERTIFICATION_INVALID', 'mixed certification/configuration write has stable code');
 
-for (const malformedHealth of [
+for (const malformedCertification of [
   null,
   {},
   { status: 'not-run' },
   { status: 'maybe' },
-  { status: 'pass', openAICompatible: { model: 'injected-model' } }
+  { ...passingCertification(), unexpectedConfiguration: { value: 'injected' } }
 ]) {
-  const rejected = store.recordProviderHealth('utility', malformedHealth, {
+  const rejected = store.recordProviderCertification('utility', malformedCertification, {
     configHash: providerConfigHash(store.get().providers.utility),
     configRevision: store.get().providers.utility.configRevision
   });
-  assertEqual(rejected.ok, false, 'malformed or mixed provider health is rejected');
-  assertEqual(rejected.error.code, 'RECURSION_PROVIDER_HEALTH_INVALID', 'malformed provider health uses stable code');
+  assertEqual(rejected.ok, false, 'malformed or mixed provider certification is rejected');
+  assertEqual(rejected.error.code, 'RECURSION_PROVIDER_CERTIFICATION_INVALID', 'malformed certification uses stable code');
 }
 
 store.update({ diagnostics: { includeExcerpts: true } });
@@ -587,10 +612,10 @@ store.update({
   diagnostics: { includeExcerpts: true }
 });
 store.updateProviderConfig('utility', {
-  source: 'openai-compatible',
-  hostConnectionProfileId: 'profile-preserved',
-  openAICompatible: { baseUrl: 'http://localhost:1234/v1', model: 'preserved-model' },
-  apiKey: 'preserved-secret'
+  connectionProfileId: 'profile-preserved',
+  generationPolicy: { presetMode: 'isolated', instructMode: 'auto', samplerMode: 'profile', structuredOutputMode: 'auto' },
+  samplerOverrides: { temperature: 0.25, topP: 0.88 },
+  outputTokenCeiling: 4096
 });
 const beforeMenuReset = store.get();
 const resetSettings = store.resetSettingsMenu();
@@ -612,26 +637,24 @@ assertDeepEqual(resetSettings.ui, { ...DEFAULT_RECURSION_SETTINGS.ui, viewerOpen
 assertDeepEqual(resetSettings.postProcess, DEFAULT_RECURSION_SETTINGS.postProcess, 'menu reset restores post-process settings');
 assertDeepEqual(resetSettings.retention, DEFAULT_RECURSION_SETTINGS.retention, 'menu reset restores retention settings');
 assertDeepEqual(resetSettings.diagnostics, DEFAULT_RECURSION_SETTINGS.diagnostics, 'menu reset restores diagnostic settings');
-assertEqual(secrets.get('utility'), 'preserved-secret', 'menu reset preserves provider session secret');
 
 assertThrows(
-  () => store.updateProviderConfig('bad-lane', { apiKey: 'x' }),
+  () => store.updateProviderConfig('bad-lane', { connectionProfileId: 'x' }),
   /Invalid provider lane/,
   'invalid provider lane is rejected'
 );
 assertThrows(
-  () => store.recordProviderHealth('bad-lane', { status: 'pass' }, { configHash: 'x' }),
+  () => store.recordProviderCertification('bad-lane', passingCertification(), { configHash: 'x' }),
   /Invalid provider lane/,
-  'invalid provider health lane is rejected'
+  'invalid provider certification lane is rejected'
 );
-assertEqual(secrets.get('bad-lane'), '', 'invalid provider lane does not store a secret');
 
 try {
-  DEFAULT_RECURSION_SETTINGS.providers.utility.maxTokens = 64;
+  DEFAULT_RECURSION_SETTINGS.providers.utility.outputTokenCeiling = 64;
 } catch {
   // Strict ESM may throw when the nested default is frozen.
 }
-assertEqual(DEFAULT_RECURSION_SETTINGS.providers.utility.maxTokens, 8192, 'utility default max tokens is frozen at 8192');
+assertEqual(DEFAULT_RECURSION_SETTINGS.providers.utility.outputTokenCeiling, 8192, 'utility default output ceiling is frozen at 8192');
 assertEqual(Object.prototype.hasOwnProperty.call(DEFAULT_RECURSION_SETTINGS.providers.utility, 'enabled'), false, 'utility default omits enabled');
 assertEqual(Object.prototype.hasOwnProperty.call(DEFAULT_RECURSION_SETTINGS.providers.reasoner, 'enabled'), false, 'reasoner default omits enabled');
 console.log('[pass] settings');

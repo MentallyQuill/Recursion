@@ -4,13 +4,15 @@ Recursion compiles bounded, turn-local guidance for SillyTavern's native generat
 
 ## 1. Configure Utility
 
-1. Open a SillyTavern chat and turn Recursion on.
-2. Open Options, then Providers.
-3. Configure Utility with Current Host Model, a Host Connection Profile, or an OpenAI-Compatible Endpoint.
-4. For a direct endpoint, enter the session-only API key.
-5. Run Test Provider and confirm Utility is Ready.
+1. Create a SillyTavern Connection Profile for the model Recursion should use.
+2. Open a SillyTavern chat and turn Recursion on.
+3. Open Options, then Providers.
+4. Select the profile for Utility.
+5. Keep Behavioral Preset on Isolated, Instruct Formatting on Auto, Samplers on Connection Profile, and Structured Output on Auto.
+6. Run Test Profile.
+7. Confirm Utility reports Segmented or Fused.
 
-Provider Test has a bounded diagnostic deadline. Normal model stages may remain pending until the provider returns, fails, or you stop the operation.
+Test Profile has a bounded diagnostic deadline. Normal model stages may remain pending until the Connection Profile returns, fails, or you stop the operation.
 
 ## 2. Start With Segmented Auto
 
@@ -77,7 +79,7 @@ Advanced Execution exposes `Attempts per step`:
 
 Local validation, persistence, packet composition, and host mutations do not consume attempts. Recursion never automatically retries SillyTavern's story generation.
 
-Try Manual mode to restrict runnable cards to your selected family/sub-item scope. Try Fused only after Segmented works with the chosen provider.
+Try Manual mode to restrict runnable cards to your selected family/sub-item scope. Try Fused only after the selected profile reports Fused certification.
 
 ## 8. Enable Post-process Carefully
 
@@ -99,7 +101,7 @@ Storage Retention exposes Journal Entries only. Generated prior-turn artifacts a
 
 ## First-Run Success Checklist
 
-- Utility reports Ready.
+- Utility reports Segmented or Fused.
 - A new user message performs fresh Arbiter/card work.
 - An unchanged swipe can reuse the packet without Recursion model calls.
 - An edit inside the configured source band rejects reuse.
@@ -107,4 +109,4 @@ Storage Retention exposes Journal Entries only. Generated prior-turn artifacts a
 - Stop leaves a coherent paused state and requests native host Stop once.
 - Resume requests native host Start and makes no detached provider call.
 - Last Brief remains inspectable but does not authorize reuse.
-- Session keys do not persist.
+- Diagnostics contain no profile id, endpoint, credential, raw prompt, raw response, or hidden reasoning.

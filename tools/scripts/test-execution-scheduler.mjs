@@ -834,7 +834,7 @@ function createIds() {
       calls += 1;
       if (calls <= 2) {
         throw Object.assign(new Error('retry me'), {
-          code: 'RECURSION_TEST_RETRY',
+          code: 'ECONNRESET',
           retryable: true
         });
       }
@@ -851,6 +851,10 @@ function createIds() {
   let saved = await repository.loadPipelineRun('chat-a');
   assertEqual(saved.stageRecords.root.attempts.used, 2, 'failed stage exhausts its first attempt window');
   assertEqual(saved.stageRecords.root.attempts.total, 2, 'first attempt window records monotonic total');
+  assert(saved.stageRecords.root.diagnosticCodes.includes('provider-transient-retry'), 'scheduler persists safe retry diagnostic code');
+  assertEqual(saved.stageRecords.root.lastAttemptAction, 'stop', 'scheduler records the final bounded retry action');
+  assert(saved.stageRecords.root.diagnosticCodes.includes('provider-transient-retry'), 'retry diagnostic persists without request data');
+  assertEqual(saved.stageRecords.root.lastAttemptAction, 'stop', 'final attempt action persists as a fixed value');
   await scheduler.retry({
     operationId: 'retry-run',
     stageId: 'root',
@@ -863,6 +867,12 @@ function createIds() {
   assertEqual(saved.stageRecords.root.attempts.window, 2, 'manual Retry increments attempt window');
   assertEqual(saved.stageRecords.root.attempts.used, 1, 'manual Retry resets used attempts for the new window');
   assertEqual(saved.stageRecords.root.attempts.total, 3, 'manual Retry preserves monotonic total');
+  assert(
+    saved.stageRecords.root.checkpoint.diagnosticCodes.includes('provider-transient-retry'),
+    'completed checkpoint preserves allowlisted retry diagnostics'
+  );
+  assertEqual(saved.stageRecords.root.checkpoint.lastAttemptAction, 'stop', 'completed checkpoint preserves the final bounded attempt action');
+  assertEqual(JSON.stringify(saved.stageRecords.root.checkpoint).includes('retry me'), false, 'checkpoint excludes raw error text');
 }
 
 {
@@ -901,6 +911,72 @@ function createIds() {
   assertEqual(saved.stageRecords.deck.attempts.total, 0, 'local bookkeeping does not consume model attempts');
   assertEqual(deckDependencies['card.character'].state, 'failed', 'local descendant receives failed optional dependency state');
   assertEqual(deckDependencies['card.character'].artifact, null, 'failed optional dependency has no fabricated artifact');
+}
+
+{
+  const repository = createRepository();
+  let settleCalls = 0;
+  const fallbackStage = {
+    id: 'model-stage',
+    version: 1,
+    kind: 'model',
+    executable: true,
+    dependencies: [],
+    checkpoint: 'durable',
+    failurePolicy: 'fallback',
+    buildInputFingerprint() {
+      return { marker: 'settle-exhausted' };
+    },
+    buildRequest() {
+      return { roleId: 'sceneFrameCard' };
+    },
+    async run() {
+      return { marker: 'last-response' };
+    },
+    async validate(artifact, { reuse = false } = {}) {
+      if (reuse && artifact?.recovered === true) return { ok: true, value: artifact };
+      return {
+        ok: false,
+        error: {
+          kind: 'validation',
+          code: 'RECURSION_MODEL_OUTPUT_INVALID',
+          category: 'validation',
+          message: 'Invalid model output.',
+          retryable: true
+        }
+      };
+    },
+    async settleExhausted({ lastArtifact, failure, attempts }) {
+      settleCalls += 1;
+      assertEqual(lastArtifact.marker, 'last-response', 'last response reaches settlement');
+      assertEqual(failure.code, 'RECURSION_MODEL_OUTPUT_INVALID', 'final failure reaches settlement');
+      assertEqual(attempts.length, 2, 'settlement receives the exhausted attempt history');
+      return { ok: true, value: { recovered: true } };
+    },
+    summarizeArtifact(artifact) {
+      return { recovered: artifact?.recovered === true };
+    }
+  };
+  const graph = createExecutionGraph({ stages: [fallbackStage] });
+  const scheduler = createExecutionScheduler({
+    repository,
+    now: createClock(),
+    createId: createIds(),
+    attemptsPerStep: 2
+  });
+
+  await scheduler.start({
+    manifest: manifest({ operationId: 'settle-exhausted' }),
+    graph,
+    context: {}
+  });
+
+  const saved = await repository.loadPipelineRun('chat-a');
+  assertEqual(settleCalls, 1, 'exhausted seam runs exactly once');
+  assertEqual(saved.stageRecords['model-stage'].state, 'completed', 'fallback artifact checkpoints');
+  const artifactId = saved.stageRecords['model-stage'].checkpoint.artifactRef.artifactId;
+  const artifact = await repository.loadPipelineArtifact('chat-a', 'settle-exhausted', artifactId);
+  assertDeepEqual(artifact, { recovered: true }, 'settled fallback artifact is durable');
 }
 
 await assertRejects(

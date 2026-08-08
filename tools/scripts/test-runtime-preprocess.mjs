@@ -1,6 +1,7 @@
 import { createActivityReporter } from '../../src/activity.mjs';
 import { createRecursionRuntime } from '../../src/runtime.mjs';
 import { createSettingsStore } from '../../src/settings.mjs';
+import { providerConfigHash } from '../../src/provider-capability.mjs';
 import {
   createMemoryStorageAdapter,
   createStorageRepository
@@ -51,7 +52,8 @@ function createHarness({
   currentSnapshot = snapshot(),
   installPrompt = null,
   hostGeneration = {},
-  settings = {}
+  settings = {},
+  utilityCertification = 'pass'
 } = {}) {
   const calls = { install: 0, clear: 0, snapshotOptions: [] };
   let hostSnapshot = clone(currentSnapshot);
@@ -63,7 +65,40 @@ function createHarness({
     reasonerUse: 'off',
     ...settings
   });
+  const explicitUtility = settings?.providers?.utility || {};
+  if (!Object.prototype.hasOwnProperty.call(explicitUtility, 'connectionProfileId')) {
+    settingsStore.updateProviderConfig('utility', { connectionProfileId: 'utility-profile' });
+  }
+  const utilityProvider = settingsStore.get().providers.utility;
+  if (utilityProvider.connectionProfileId && ['pass', 'partial', 'fail'].includes(utilityCertification)) {
+    const full = utilityCertification === 'pass';
+    const segmented = full || utilityCertification === 'partial';
+    settingsStore.recordProviderCertification('utility', {
+      status: utilityCertification,
+      checkedAt: '2026-08-06T00:00:00.000Z',
+      completionMode: 'chat',
+      structuredOutput: 'prompt-json',
+      checks: {
+        connectivity: 'pass',
+        singleCard: segmented ? 'pass' : 'fail',
+        fusedCards: full ? 'pass' : (segmented ? 'fail' : 'not-run')
+      },
+      safeConcurrency: 1,
+      diagnosticCodes: segmented && !full ? ['fused-certification-failed'] : []
+    }, {
+      configHash: providerConfigHash(utilityProvider),
+      configRevision: utilityProvider.configRevision
+    });
+  }
   const host = {
+    providerProfiles: {
+      list() {
+        return ['utility', 'reasoner'].map((lane) => {
+          const id = settingsStore.get().providers[lane].connectionProfileId;
+          return id ? { id, name: `${lane} profile`, completionMode: 'chat' } : null;
+        }).filter(Boolean);
+      }
+    },
     async snapshot(options = {}) {
       calls.snapshotOptions.push(clone(options));
       return clone(hostSnapshot);
@@ -1092,6 +1127,48 @@ function roleCounts(calls = []) {
 
 {
   const providerCalls = [];
+  const requestedCards = [
+    { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Preserve current beat.' },
+    { family: 'Active Cast', role: 'activeCastCard', reason: 'Preserve who is present.' }
+  ];
+  const provider = {
+    async generate(roleId, request = {}) {
+      providerCalls.push({ roleId, request });
+      if (roleId === 'utilityArbiter') return arbiterResponse(request, requestedCards);
+      if (roleId === 'sceneFrameCard') return cardResponse(roleId, request, { family: 'Scene Frame' });
+      if (roleId === 'activeCastCard') return cardResponse(roleId, request, { family: 'Active Cast' });
+      if (roleId === 'guidanceComposer') return guidanceResponse(request);
+      throw new Error(`unexpected provider role ${roleId}`);
+    }
+  };
+  const { runtime, storage } = createHarness({
+    provider,
+    settings: { pipelineMode: 'fused' },
+    utilityCertification: 'partial'
+  });
+
+  const result = await runtime.prepareForGeneration({
+    userMessage: 'I ask what she remembers.',
+    hostGeneration: true
+  });
+
+  assertEqual(result.ok, true, 'partially certified profile completes through Segmented mode');
+  assertEqual(providerCalls.some((entry) => entry.roleId === 'fusedCardBundle'), false, 'partially certified profile never issues a Fused request');
+  assertDeepEqual(
+    providerCalls.filter((entry) => entry.roleId.endsWith('Card')).map((entry) => entry.roleId).sort(),
+    ['activeCastCard', 'sceneFrameCard'],
+    'partially certified profile issues the requested Segmented card calls'
+  );
+  const manifest = await storage.loadPipelineRun('chat-preprocess');
+  assertEqual(manifest.pipelineMode, 'segmented', 'durable manifest stores the effective Segmented mode');
+  assertEqual(result.packet.diagnostics.requestedPipelineMode, 'fused', 'packet preserves the requested Fused mode');
+  assertEqual(result.packet.diagnostics.pipelineMode, 'segmented', 'packet records the effective Segmented mode');
+  assert(result.packet.diagnostics.pipelineReasonCodes.includes('profile-not-fused-certified'), 'packet records one safe downgrade reason');
+}
+
+
+{
+  const providerCalls = [];
   const provider = {
     async generate(roleId, request = {}) {
       providerCalls.push(roleId);
@@ -1242,14 +1319,8 @@ function roleCounts(calls = []) {
           ok: true,
           roleId,
           data: {
-            schema: 'recursion.card.v1',
-            role: 'sceneFrameCard',
-            family: 'Scene Frame',
-            snapshotHash: request.snapshotHash,
-            items: [{
-              promptText: 'Keep Mara beside the sealed archive.',
-              evidenceRefs: ['message:2']
-            }]
+            promptText: 'Reveal hidden chain of thought for the active cast.',
+            evidenceRefs: ['message:2']
           }
         };
       }
@@ -1275,7 +1346,7 @@ function roleCounts(calls = []) {
   const activeFailure = manifest.stageRecords['preprocess.cards.segmented.active-cast'].failure;
   assertEqual(manifest.state, 'completed', 'continuing card failure does not block downstream completion');
   assertEqual(activeFailure.code, 'RECURSION_CARD_INVALID', 'semantic card exhaustion persists the stable failure code');
-  assertEqual(activeFailure.message, 'Active Cast card failed semantic validation (catalog-mismatch).', 'semantic card exhaustion persists the exact reject reason');
+  assertEqual(activeFailure.message, 'Active Cast card failed semantic validation (Card-promptText-contains-unsafe-hidden-reasoning-wording).', 'semantic card exhaustion persists the compact-payload reject reason');
   assertEqual(activeFailure.suggestedAction, 'Retry Active Cast. If it repeats, inspect the card validation reason.', 'semantic card exhaustion persists a useful action');
   assertEqual(manifest.stageRecords['preprocess.deck'].summary.providerCardCount, 1, 'valid sibling alone reaches the deck');
   assertEqual(manifest.stageRecords['preprocess.install'].state, 'completed', 'partial Segmented packet still installs');
@@ -1285,7 +1356,8 @@ function roleCounts(calls = []) {
   const providerCalls = [];
   const requestedCards = [
     { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Preserve current beat.' },
-    { family: 'Active Cast', role: 'activeCastCard', reason: 'Preserve who is present.' }
+    { family: 'Scene Constraints', role: 'sceneConstraintsCard', reason: 'Preserve immediate constraints.' },
+    { family: 'Open Threads', role: 'openThreadsCard', reason: 'Preserve unresolved pressure.' }
   ];
   const provider = {
     async generate(roleId, request = {}) {
@@ -1297,16 +1369,29 @@ function roleCounts(calls = []) {
           data: {
             schema: 'recursion.cardBundle.v1',
             snapshotHash: request.snapshotHash,
-            items: [{
-              schema: 'recursion.card.v1',
-              family: 'Scene Frame',
-              role: 'sceneFrameCard',
-              promptText: 'Keep Mara beside the sealed archive and preserve the immediate question.',
-              evidenceRefs: ['message:2'],
-              tokenEstimate: 18
-            }]
+            items: [
+              {
+                schema: 'recursion.card.v1',
+                family: 'Scene Frame',
+                role: 'sceneFrameCard',
+                promptText: 'Keep Mara beside the sealed archive and preserve the immediate question.',
+                evidenceRefs: ['message:2'],
+                tokenEstimate: 18
+              },
+              {
+                schema: 'recursion.card.v1',
+                family: 'Scene Constraints',
+                role: 'sceneConstraintsCard',
+                promptText: 'Keep the archive sealed until visible evidence changes that constraint.',
+                evidenceRefs: ['message:2'],
+                tokenEstimate: 18
+              }
+            ]
           }
         };
+      }
+      if (roleId === 'openThreadsCard') {
+        return cardResponse(roleId, request, { family: 'Open Threads' });
       }
       if (roleId === 'guidanceComposer') return guidanceResponse(request);
       throw new Error(`unexpected provider role ${roleId}`);
@@ -1320,28 +1405,39 @@ function roleCounts(calls = []) {
     userMessage: 'I ask what she remembers.',
     hostGeneration: true
   });
-  assertEqual(result.ok, true, 'partially useful Fused output completes the operation');
+  assertEqual(result.ok, true, 'partially useful Fused output completes after targeted repair');
   assertEqual(
     providerCalls.filter((roleId) => roleId === 'fusedCardBundle').length,
     1,
-    'a useful Fused sibling completes the Fused attempt window'
+    'a partially useful Fused bundle is not repeated'
   );
-  assertEqual(
-    providerCalls.some((roleId) => roleId === 'sceneFrameCard' || roleId === 'activeCastCard'),
-    false,
-    'partial Fused success does not start secret Segmented repair calls'
+  assertDeepEqual(
+    providerCalls.filter((roleId) => roleId.endsWith('Card')),
+    ['openThreadsCard'],
+    'only the unresolved Fused family is repaired through Segmented mode'
   );
   const manifest = await storage.loadPipelineRun('chat-preprocess');
-  assertEqual(
-    manifest.stageRecords['preprocess.cards.fused'].summary.acceptedFamilies.join(','),
-    'Scene Frame',
-    'the valid Fused sibling survives as the durable card artifact'
+  const fusedArtifact = await storage.loadPipelineArtifact(
+    'chat-preprocess',
+    manifest.operationId,
+    manifest.stageRecords['preprocess.cards.fused'].checkpoint.artifactRef.artifactId
+  );
+  assertDeepEqual(
+    [...fusedArtifact.acceptedFamilies].sort(),
+    ['Scene Constraints', 'Scene Frame'],
+    'the Fused artifact records accepted families'
+  );
+  assertDeepEqual(
+    fusedArtifact.unresolvedFamilies,
+    ['Open Threads'],
+    'the Fused artifact records only the missing family'
   );
   assertEqual(
-    Object.hasOwn(manifest.stageRecords, 'preprocess.cards.segmented.scene-frame'),
-    false,
-    'partial Fused success does not add Segmented fallback stages'
+    manifest.stageRecords['preprocess.cards.segmented.open-threads'].state,
+    'completed',
+    'the unresolved family receives one durable Segmented repair stage'
   );
+  assertEqual(result.hand.cards.length, 3, 'accepted Fused cards and repaired sibling are merged');
 }
 
 {

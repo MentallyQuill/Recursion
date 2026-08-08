@@ -45,7 +45,7 @@ Recursion repairs its system index, deletes orphan stage artifacts, prunes prior
 
 The run journal records bounded lifecycle codes, ids, hashes, counts, stage states, attempts, and prompt/host mutation outcomes. Diagnostics can export the same safe operational evidence plus normalized settings and provider capability summaries.
 
-API keys are session-only. Raw chat text, provider prompts and responses, hidden reasoning, credentials, cookies, and stack traces do not belong in manifests, journals, reports, or verification artifacts.
+Recursion stores no endpoint or credential for model access. Raw chat text, provider prompts and responses, Connection Profile ids, hidden reasoning, credentials, cookies, and stack traces do not belong in manifests, journals, reports, or verification artifacts.
 
 When storage persistence fails, Recursion can continue in memory and surfaces a warning. A memory fallback is never presented as durable storage.
 

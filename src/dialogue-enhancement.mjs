@@ -324,7 +324,6 @@ export function buildDialogueEnhancementRequest({
     ...(lane ? { lane } : {}),
     reasoningCategory,
     reasoningIntent,
-    machineJson: true,
     characterContext: {
       name: safeText(characterContext?.name || 'unknown', 120),
       description: safeText(characterContext?.description || '', 1600),

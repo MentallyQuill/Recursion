@@ -99,7 +99,7 @@ Required execution cases:
 Provider tests prove:
 
 - Utility/Reasoner routing and capability states;
-- current-host-model, connection-profile, and direct OpenAI-compatible request shapes;
+- Connection Profile routing and profile-backed request shapes;
 - session-only secret handling;
 - structured response extraction, safe JSON repair, and semantic rejection;
 - stable failure classes and sanitized messages;

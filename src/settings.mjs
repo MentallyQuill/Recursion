@@ -17,8 +17,15 @@ const STRENGTHS = new Set(['light', 'balanced', 'strong']);
 const REASONING_LEVELS = new Set(['low', 'medium', 'high', 'ultra']);
 const FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
 const FOCUS = new Set(['balanced', 'character', 'constraints', 'scene', 'plot']);
-const SOURCES = new Set(['host-current-model', 'host-connection-profile', 'openai-compatible']);
 const LANES = new Set(['utility', 'reasoner']);
+const PROVIDER_PRESET_MODES = new Set(['isolated', 'full-profile']);
+const PROVIDER_INSTRUCT_MODES = new Set(['auto', 'on', 'off']);
+const PROVIDER_SAMPLER_MODES = new Set(['profile', 'recursion']);
+const PROVIDER_STRUCTURED_OUTPUT_MODES = new Set(['auto', 'native-schema', 'prompt-json']);
+const CERTIFICATION_STATUS = new Set(['not-run', 'pass', 'partial', 'fail']);
+const CHECK_STATUS = new Set(['not-run', 'pass', 'fail']);
+const COMPLETION_MODES = new Set(['unknown', 'chat', 'text']);
+const STRUCTURED_METHODS = new Set(['unknown', 'native-schema', 'prompt-json']);
 const INJECTION_PLACEMENTS = new Set(['in_prompt', 'in_chat']);
 const INJECTION_ROLES = new Set(['system', 'user', 'assistant']);
 const UI_PROGRESS_CHILD_MIN = 1;
@@ -81,25 +88,31 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   providers: {
     utility: {
       lane: 'utility',
-      source: 'host-current-model',
-      hostConnectionProfileId: '',
-      openAICompatible: { baseUrl: '', model: '', sessionApiKeyPresent: false },
-      temperature: 0.1,
-      topP: 0.95,
-      maxTokens: 8192,
+      connectionProfileId: '',
+      generationPolicy: {
+        presetMode: 'isolated',
+        instructMode: 'auto',
+        samplerMode: 'profile',
+        structuredOutputMode: 'auto'
+      },
+      samplerOverrides: { temperature: 0.1, topP: 0.95 },
+      outputTokenCeiling: 8192,
       configRevision: 0,
-      health: { status: 'not-run' }
+      certification: { status: 'not-run' }
     },
     reasoner: {
       lane: 'reasoner',
-      source: 'host-current-model',
-      hostConnectionProfileId: '',
-      openAICompatible: { baseUrl: '', model: '', sessionApiKeyPresent: false },
-      temperature: 0.4,
-      topP: 0.95,
-      maxTokens: 8192,
+      connectionProfileId: '',
+      generationPolicy: {
+        presetMode: 'isolated',
+        instructMode: 'auto',
+        samplerMode: 'profile',
+        structuredOutputMode: 'auto'
+      },
+      samplerOverrides: { temperature: 0.4, topP: 0.95 },
+      outputTokenCeiling: 8192,
       configRevision: 0,
-      health: { status: 'not-run' }
+      certification: { status: 'not-run' }
     }
   },
   ui: {
@@ -256,109 +269,136 @@ function nonNegativeInteger(value, fallback = 0) {
   return Number.isFinite(number) ? Math.max(0, Math.trunc(number)) : fallback;
 }
 
-function normalizeProviderHealth(value = {}) {
+function normalizeProviderCertification(value = {}) {
   const source = isPlainObject(value) ? value : {};
-  const status = enumValue(source.status, new Set(['pass', 'fail', 'not-run']), 'not-run');
+  const status = enumValue(source.status, CERTIFICATION_STATUS, 'not-run');
   if (status === 'not-run') return { status };
   return {
     status,
     configHash: String(source.configHash || '').slice(0, 16),
-    checkedAt: source.checkedAt ? String(source.checkedAt).slice(0, 80) : undefined,
-    source: source.source ? String(source.source).slice(0, 80) : undefined,
-    compactError: status === 'fail' && source.compactError
-      ? String(source.compactError).slice(0, 300)
-      : undefined
+    checkedAt: String(source.checkedAt || '').slice(0, 80),
+    completionMode: enumValue(source.completionMode, COMPLETION_MODES, 'unknown'),
+    structuredOutput: enumValue(source.structuredOutput, STRUCTURED_METHODS, 'unknown'),
+    checks: {
+      connectivity: enumValue(source.checks?.connectivity, CHECK_STATUS, 'not-run'),
+      singleCard: enumValue(source.checks?.singleCard, CHECK_STATUS, 'not-run'),
+      fusedCards: enumValue(source.checks?.fusedCards, CHECK_STATUS, 'not-run')
+    },
+    safeConcurrency: 1,
+    diagnosticCodes: [...new Set(
+      (Array.isArray(source.diagnosticCodes) ? source.diagnosticCodes : [])
+        .map((code) => String(code || '').slice(0, 120))
+        .filter(Boolean)
+    )].slice(0, 12),
+    compactError: String(source.compactError || '').slice(0, 300)
   };
 }
 
 function providerConfiguration(provider = {}) {
   return {
-    source: String(provider.source || ''),
-    hostConnectionProfileId: String(provider.hostConnectionProfileId || ''),
-    openAICompatible: {
-      baseUrl: String(provider.openAICompatible?.baseUrl || ''),
-      model: String(provider.openAICompatible?.model || ''),
-      sessionApiKeyPresent: provider.openAICompatible?.sessionApiKeyPresent === true
+    connectionProfileId: String(provider.connectionProfileId || ''),
+    generationPolicy: {
+      presetMode: String(provider.generationPolicy?.presetMode || ''),
+      instructMode: String(provider.generationPolicy?.instructMode || ''),
+      samplerMode: String(provider.generationPolicy?.samplerMode || ''),
+      structuredOutputMode: String(provider.generationPolicy?.structuredOutputMode || '')
     },
-    temperature: Number(provider.temperature),
-    topP: Number(provider.topP),
-    maxTokens: Number(provider.maxTokens),
+    samplerOverrides: {
+      temperature: Number(provider.samplerOverrides?.temperature),
+      topP: Number(provider.samplerOverrides?.topP)
+    },
+    outputTokenCeiling: Number(provider.outputTokenCeiling),
     configRevision: nonNegativeInteger(provider.configRevision)
   };
 }
 
-function changedProviderConfigKeys(current = {}, next = {}, { secretChanged = false } = {}) {
+function changedProviderConfigKeys(current = {}, next = {}) {
   const before = providerConfiguration(current);
   const after = providerConfiguration(next);
   const changed = [];
-  if (before.source !== after.source) changed.push('source');
-  if (before.hostConnectionProfileId !== after.hostConnectionProfileId) changed.push('hostConnectionProfileId');
-  if (before.openAICompatible.baseUrl !== after.openAICompatible.baseUrl) changed.push('openAICompatible.baseUrl');
-  if (before.openAICompatible.model !== after.openAICompatible.model) changed.push('openAICompatible.model');
-  if (before.openAICompatible.sessionApiKeyPresent !== after.openAICompatible.sessionApiKeyPresent || secretChanged) changed.push('apiKey');
-  if (before.temperature !== after.temperature) changed.push('temperature');
-  if (before.topP !== after.topP) changed.push('topP');
-  if (before.maxTokens !== after.maxTokens) changed.push('maxTokens');
+  if (before.connectionProfileId !== after.connectionProfileId) changed.push('connectionProfileId');
+  for (const key of ['presetMode', 'instructMode', 'samplerMode', 'structuredOutputMode']) {
+    if (before.generationPolicy[key] !== after.generationPolicy[key]) changed.push(`generationPolicy.${key}`);
+  }
+  if (before.samplerOverrides.temperature !== after.samplerOverrides.temperature) changed.push('samplerOverrides.temperature');
+  if (before.samplerOverrides.topP !== after.samplerOverrides.topP) changed.push('samplerOverrides.topP');
+  if (before.outputTokenCeiling !== after.outputTokenCeiling) changed.push('outputTokenCeiling');
   return changed;
 }
 
 function pickProviderConfigPatch(patch = {}) {
   const source = isPlainObject(patch) ? patch : {};
   const result = {};
-  if (Object.prototype.hasOwnProperty.call(source, 'source')) result.source = source.source;
-  if (Object.prototype.hasOwnProperty.call(source, 'hostConnectionProfileId')) {
-    result.hostConnectionProfileId = source.hostConnectionProfileId;
+  if (Object.prototype.hasOwnProperty.call(source, 'connectionProfileId')) {
+    result.connectionProfileId = source.connectionProfileId;
   }
-  if (Object.prototype.hasOwnProperty.call(source, 'temperature')) result.temperature = source.temperature;
-  if (Object.prototype.hasOwnProperty.call(source, 'topP')) result.topP = source.topP;
-  if (Object.prototype.hasOwnProperty.call(source, 'maxTokens')) result.maxTokens = source.maxTokens;
-  if (isPlainObject(source.openAICompatible)) {
-    result.openAICompatible = {};
-    if (Object.prototype.hasOwnProperty.call(source.openAICompatible, 'baseUrl')) {
-      result.openAICompatible.baseUrl = source.openAICompatible.baseUrl;
+  if (isPlainObject(source.generationPolicy)) {
+    result.generationPolicy = {};
+    for (const key of ['presetMode', 'instructMode', 'samplerMode', 'structuredOutputMode']) {
+      if (Object.prototype.hasOwnProperty.call(source.generationPolicy, key)) {
+        result.generationPolicy[key] = source.generationPolicy[key];
+      }
     }
-    if (Object.prototype.hasOwnProperty.call(source.openAICompatible, 'model')) {
-      result.openAICompatible.model = source.openAICompatible.model;
+  }
+  if (isPlainObject(source.samplerOverrides)) {
+    result.samplerOverrides = {};
+    if (Object.prototype.hasOwnProperty.call(source.samplerOverrides, 'temperature')) {
+      result.samplerOverrides.temperature = source.samplerOverrides.temperature;
     }
+    if (Object.prototype.hasOwnProperty.call(source.samplerOverrides, 'topP')) {
+      result.samplerOverrides.topP = source.samplerOverrides.topP;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(source, 'outputTokenCeiling')) {
+    result.outputTokenCeiling = source.outputTokenCeiling;
   }
   return result;
 }
 
-export function normalizeProviderSettings(lane, value = {}, secretStore = null) {
+export function normalizeProviderSettings(lane, value = {}) {
   const resolvedLane = LANES.has(lane) ? lane : 'utility';
   const defaults = DEFAULT_RECURSION_SETTINGS.providers[resolvedLane];
-  const source = value && typeof value === 'object' ? value : {};
-  const openAICompatible = source.openAICompatible && typeof source.openAICompatible === 'object'
-    ? source.openAICompatible
-    : {};
-  const hasSecret = Boolean(secretStore?.get?.(resolvedLane));
+  const source = isPlainObject(value) ? value : {};
+  const policy = isPlainObject(source.generationPolicy) ? source.generationPolicy : {};
+  const samplerOverrides = isPlainObject(source.samplerOverrides) ? source.samplerOverrides : {};
   const normalized = {
     lane: resolvedLane,
-    source: enumValue(source.source, SOURCES, defaults.source),
-    hostConnectionProfileId: String(source.hostConnectionProfileId ?? defaults.hostConnectionProfileId).trim(),
-    openAICompatible: {
-      baseUrl: String(openAICompatible.baseUrl ?? defaults.openAICompatible.baseUrl).trim(),
-      model: String(openAICompatible.model ?? defaults.openAICompatible.model).trim(),
-      sessionApiKeyPresent: hasSecret
+    connectionProfileId: String(source.connectionProfileId ?? '').trim(),
+    generationPolicy: {
+      presetMode: enumValue(policy.presetMode, PROVIDER_PRESET_MODES, defaults.generationPolicy.presetMode),
+      instructMode: enumValue(policy.instructMode, PROVIDER_INSTRUCT_MODES, defaults.generationPolicy.instructMode),
+      samplerMode: enumValue(policy.samplerMode, PROVIDER_SAMPLER_MODES, defaults.generationPolicy.samplerMode),
+      structuredOutputMode: enumValue(
+        policy.structuredOutputMode,
+        PROVIDER_STRUCTURED_OUTPUT_MODES,
+        defaults.generationPolicy.structuredOutputMode
+      )
     },
-    temperature: numberInRange(source.temperature, defaults.temperature, 0, 2),
-    topP: numberInRange(source.topP, defaults.topP, 0, 1),
-    maxTokens: Math.round(numberInRange(source.maxTokens, defaults.maxTokens, 64, 131072)),
+    samplerOverrides: {
+      temperature: numberInRange(
+        samplerOverrides.temperature,
+        defaults.samplerOverrides.temperature,
+        0,
+        2
+      ),
+      topP: numberInRange(samplerOverrides.topP, defaults.samplerOverrides.topP, 0, 1)
+    },
+    outputTokenCeiling: Math.round(numberInRange(source.outputTokenCeiling, defaults.outputTokenCeiling, 128, 32768)),
     configRevision: nonNegativeInteger(source.configRevision),
-    health: { status: 'not-run' }
+    certification: { status: 'not-run' }
   };
-  const health = normalizeProviderHealth(source.health);
+  const certification = normalizeProviderCertification(source.certification);
   if (
-    health.status !== 'not-run'
-    && health.configHash
-    && health.configHash === providerConfigHash(normalized)
+    certification.status !== 'not-run'
+    && certification.configHash
+    && certification.configHash === providerConfigHash(normalized)
   ) {
-    normalized.health = health;
+    normalized.certification = certification;
   }
   return normalized;
 }
 
-export function normalizeSettings(value = {}, secretStore = null) {
+export function normalizeSettings(value = {}) {
   const source = value && typeof value === 'object' ? value : {};
   const reasoningLevel = enumValue(source.reasoningLevel, REASONING_LEVELS, DEFAULT_RECURSION_SETTINGS.reasoningLevel);
   const cardBudget = normalizeCardBudgetSettings(source);
@@ -385,8 +425,8 @@ export function normalizeSettings(value = {}, secretStore = null) {
     },
     retention: normalizeRetentionSettings(source.retention),
     providers: {
-      utility: normalizeProviderSettings('utility', source.providers?.utility, secretStore),
-      reasoner: normalizeProviderSettings('reasoner', source.providers?.reasoner, secretStore)
+      utility: normalizeProviderSettings('utility', source.providers?.utility),
+      reasoner: normalizeProviderSettings('reasoner', source.providers?.reasoner)
     },
     ui: {
       viewerOpen: source.ui?.viewerOpen === true,
@@ -407,8 +447,8 @@ export function normalizeSettings(value = {}, secretStore = null) {
   };
 }
 
-export function resetSettingsMenuValue(value = {}, secretStore = null) {
-  const current = normalizeSettings(value, secretStore);
+export function resetSettingsMenuValue(value = {}) {
+  const current = normalizeSettings(value);
   const defaults = cloneJson(DEFAULT_RECURSION_SETTINGS);
   return normalizeSettings({
     ...defaults,
@@ -424,34 +464,15 @@ export function resetSettingsMenuValue(value = {}, secretStore = null) {
       ...defaults.ui,
       viewerOpen: current.ui.viewerOpen
     }
-  }, secretStore);
+  });
 }
 
-export function createSessionSecretStore() {
-  const memory = new Map();
-  return {
-    get(lane) {
-      return memory.get(String(lane || '')) || '';
-    },
-    set(lane, value) {
-      const key = String(lane || '');
-      const secret = String(value || '');
-      if (secret) memory.set(key, secret);
-      else memory.delete(key);
-      return Boolean(secret);
-    },
-    clear(lane) {
-      memory.delete(String(lane || ''));
-    }
-  };
-}
-
-export function createSettingsStore({ root = globalThis.extension_settings || {}, secretStore = createSessionSecretStore(), save = null } = {}) {
+export function createSettingsStore({ root = globalThis.extension_settings || {}, save = null } = {}) {
   if (!root.recursion || typeof root.recursion !== 'object') root.recursion = cloneJson(DEFAULT_RECURSION_SETTINGS);
-  root.recursion = normalizeSettings(root.recursion, secretStore);
+  root.recursion = normalizeSettings(root.recursion);
 
   function persist(next) {
-    root.recursion = normalizeSettings(next, secretStore);
+    root.recursion = normalizeSettings(next);
     if (typeof save === 'function') save();
     else if (typeof globalThis.saveSettingsDebounced === 'function') globalThis.saveSettingsDebounced();
     return cloneJson(root.recursion);
@@ -459,14 +480,14 @@ export function createSettingsStore({ root = globalThis.extension_settings || {}
 
   return {
     get() {
-      root.recursion = normalizeSettings(root.recursion, secretStore);
+      root.recursion = normalizeSettings(root.recursion);
       return cloneJson(root.recursion);
     },
     update(patch = {}) {
       return persist(mergeSettingsPatch(root.recursion, patch));
     },
     resetSettingsMenu() {
-      return persist(resetSettingsMenuValue(root.recursion, secretStore));
+      return persist(resetSettingsMenuValue(root.recursion));
     },
     updateProviderConfig(lane, patch = {}, options = {}) {
       const resolvedLane = requireProviderLane(lane);
@@ -491,27 +512,18 @@ export function createSettingsStore({ root = globalThis.extension_settings || {}
         };
       }
 
-      const apiKeyPatched = Object.prototype.hasOwnProperty.call(patch, 'apiKey');
-      const nextApiKey = apiKeyPatched ? String(patch.apiKey || '') : secretStore.get(resolvedLane);
-      const secretChanged = apiKeyPatched && nextApiKey !== secretStore.get(resolvedLane);
       const configPatch = pickProviderConfigPatch(patch);
       const merged = mergePlainObjects(currentProvider, configPatch);
-      const previewSecretStore = {
-        get(candidateLane) {
-          return candidateLane === resolvedLane ? nextApiKey : secretStore.get(candidateLane);
-        }
-      };
-      const previewProvider = normalizeProviderSettings(resolvedLane, merged, previewSecretStore);
-      const changedKeys = changedProviderConfigKeys(currentProvider, previewProvider, { secretChanged });
+      const previewProvider = normalizeProviderSettings(resolvedLane, merged);
+      const changedKeys = changedProviderConfigKeys(currentProvider, previewProvider);
       if (changedKeys.length === 0) {
         return { ok: true, provider: currentProvider, changedKeys };
       }
 
-      if (apiKeyPatched) secretStore.set(resolvedLane, nextApiKey);
       const nextProvider = {
         ...merged,
         configRevision: currentProvider.configRevision + 1,
-        health: { status: 'not-run' }
+        certification: { status: 'not-run' }
       };
       const provider = persist({
         ...current,
@@ -522,33 +534,30 @@ export function createSettingsStore({ root = globalThis.extension_settings || {}
       }).providers[resolvedLane];
       return { ok: true, provider, changedKeys };
     },
-    recordProviderHealth(lane, result = {}, { configHash = '', configRevision = -1 } = {}) {
+    recordProviderCertification(lane, result = {}, { configHash = '', configRevision = -1 } = {}) {
       const resolvedLane = requireProviderLane(lane);
       const current = this.get();
       const provider = current.providers[resolvedLane];
-      const forbiddenKeys = [
-        'lane',
-        'enabled',
-        'hostConnectionProfileId',
-        'openAICompatible',
-        'temperature',
-        'topP',
-        'maxTokens',
-        'configRevision',
-        'health',
-        'lastTest',
-        'apiKey'
-      ];
+      const allowedResultKeys = new Set([
+        'status',
+        'checkedAt',
+        'completionMode',
+        'structuredOutput',
+        'checks',
+        'safeConcurrency',
+        'diagnosticCodes',
+        'compactError'
+      ]);
       if (
         !isPlainObject(result)
-        || !new Set(['pass', 'fail']).has(result.status)
-        || forbiddenKeys.some((key) => Object.prototype.hasOwnProperty.call(result, key))
+        || !new Set(['pass', 'partial', 'fail']).has(result.status)
+        || Object.keys(result).some((key) => !allowedResultKeys.has(key))
       ) {
         return {
           ok: false,
           error: {
-            code: 'RECURSION_PROVIDER_HEALTH_INVALID',
-            message: 'Provider health results cannot change provider configuration.'
+            code: 'RECURSION_PROVIDER_CERTIFICATION_INVALID',
+            message: 'Provider certification results cannot change provider configuration.'
           }
         };
       }
@@ -567,11 +576,8 @@ export function createSettingsStore({ root = globalThis.extension_settings || {}
           }
         };
       }
-      const health = normalizeProviderHealth({
-        status: result.status,
-        checkedAt: result.checkedAt,
-        source: result.source,
-        compactError: result.compactError,
+      const certification = normalizeProviderCertification({
+        ...result,
         configHash: currentHash
       });
       const persistedProvider = persist({
@@ -580,18 +586,11 @@ export function createSettingsStore({ root = globalThis.extension_settings || {}
           ...current.providers,
           [resolvedLane]: {
             ...provider,
-            health
+            certification
           }
         }
       }).providers[resolvedLane];
       return { ok: true, provider: persistedProvider };
-    },
-    getApiKey(lane) {
-      return secretStore.get(requireProviderLane(lane));
-    },
-    clearApiKey(lane, options = {}) {
-      const resolvedLane = requireProviderLane(lane);
-      return this.updateProviderConfig(resolvedLane, { apiKey: '' }, options);
     }
   };
 }

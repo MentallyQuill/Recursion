@@ -1,6 +1,6 @@
 # Prompt Privacy And Safety
 
-Recursion prepares a bounded prompt packet for the next SillyTavern generation. This guide explains what can appear in that packet, what Recursion should not store, how diagnostics are redacted, and how Recursion coexists with other context extensions.
+Recursion prepares a bounded prompt packet for the next SillyTavern generation. Utility and Reasoner access models only through selected SillyTavern Connection Profiles. This guide explains what can appear in the packet, what Recursion does not store, how diagnostics are redacted, and how Recursion coexists with other context extensions.
 
 ## Prompt Packet Contents
 
@@ -51,6 +51,9 @@ Runtime safety rules:
 
 ## What Recursion Does Not Store
 
+Recursion does not store endpoint URLs, model credentials, authorization headers, or secret references for its model lanes. Those remain owned by SillyTavern's Connection Profiles. The selected profile id is used only for routing and must be hashed or omitted from diagnostics, checkpoints, reports, and UI inspection surfaces.
+
+
 Recursion does not store:
 
 - API keys;
@@ -72,7 +75,7 @@ Recursion does not store:
 Recursion may store bounded cache and diagnostics:
 
 - compact settings without secrets;
-- provider preferences without API keys;
+- selected lane policy and sanitized capability state;
 - exact-turn manifest metadata;
 - current-turn card summaries and refs;
 - latest hand metadata;
@@ -87,7 +90,7 @@ Recursion diagnostics should prove what happened without leaking sensitive data.
 Allowed by default:
 
 - schema and contract versions;
-- provider lane and source type;
+- provider lane and capability state;
 - resolved model label;
 - status categories;
 - duration and token counts;
@@ -158,7 +161,7 @@ Normal operation should not create raw diagnostic archives. Diagnostic artifacts
 A safe diagnostic artifact can include:
 
 - settings without secrets;
-- provider source and model labels without keys;
+- completion mode, structured-output method, and sanitized capability labels;
 - system index summary;
 - selected exact-turn checkpoint metadata;
 - recent sanitized journal events;
@@ -175,21 +178,21 @@ A safe diagnostic artifact should not include:
 - external extension databases;
 - unbounded message excerpts.
 
-Screenshots are allowed as visual evidence, but do not capture provider setup while secret fields are visible.
+Screenshots are allowed as visual evidence, but do not capture credential-bearing SillyTavern profile details.
 
 ## Operator Safety Checks
 
 Before using Auto:
 
-1. Confirm Utility is healthy.
-2. Confirm Reasoner capability is intentionally `Ready`, `Untested`, `Unhealthy`, or `Configure`.
+1. Confirm Utility is `Segmented` or `Fused`.
+2. Confirm Reasoner capability is intentionally `Fused`, `Segmented`, `Untested`, `Issue`, or `Configure`.
 3. Inspect Last Brief and Prompt Packet after a safe Auto or Manual pass if you are unsure what Recursion compiled.
 4. Inspect Prompt Packet when output quality or privacy matters.
 5. Confirm the packet is current-scene guidance, not lore, memory, or hidden planning.
 
 Before sharing diagnostics or screenshots:
 
-1. Clear or hide session API key fields.
+1. Keep SillyTavern Connection Profile credential details outside the capture.
 2. Prefer sanitized diagnostics over raw browser logs.
 3. Check that no raw provider prompt or response is present.
 4. Check that no full transcript text is present unless you intentionally captured a visible screenshot.
@@ -199,7 +202,7 @@ Before disabling Recursion:
 
 1. Turn the power toggle off or disable the extension.
 2. Confirm Recursion prompt lanes are cleared or skipped.
-3. Clear session keys if direct endpoint testing is finished.
+3. Confirm the Recursion provider view contains only profile policy and capability status.
 
 Related docs:
 

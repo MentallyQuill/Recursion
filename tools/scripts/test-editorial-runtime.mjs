@@ -857,7 +857,7 @@ function createRedirectHarness({
           }]
         };
         if (mutateReasonerAfterDiagnosis) {
-          settingsStore.updateProviderConfig('reasoner', { maxTokens: 4096 });
+          settingsStore.updateProviderConfig('reasoner', { outputTokenCeiling: 4096 });
         }
         return {
           ok: true,
@@ -932,23 +932,37 @@ function createRedirectHarness({
     }
   };
   settingsStore = createLegacyEnhancementSettingsStore();
-  if (reasonerCapability === 'unconfigured') {
-    settingsStore.updateProviderConfig('reasoner', {
-      source: 'host-connection-profile',
-      hostConnectionProfileId: ''
-    });
-  } else if (reasonerCapability === 'ready' || reasonerCapability === 'unhealthy') {
+  const reasonerProfileId = 'reasoner-profile';
+  if (reasonerCapability !== 'unconfigured') {
+    settingsStore.updateProviderConfig('reasoner', { connectionProfileId: reasonerProfileId });
+  }
+  if (reasonerCapability === 'ready' || reasonerCapability === 'unhealthy') {
     const reasoner = settingsStore.get().providers.reasoner;
-    settingsStore.recordProviderHealth('reasoner', {
+    settingsStore.recordProviderCertification('reasoner', {
       status: reasonerCapability === 'ready' ? 'pass' : 'fail',
       checkedAt: new Date().toISOString(),
-      errorCode: reasonerCapability === 'unhealthy' ? 'RECURSION_TEST_PROVIDER_FAILED' : '',
-      message: reasonerCapability === 'unhealthy' ? 'Reasoner health check failed.' : ''
+      completionMode: 'chat',
+      structuredOutput: 'prompt-json',
+      checks: {
+        connectivity: reasonerCapability === 'ready' ? 'pass' : 'fail',
+        singleCard: reasonerCapability === 'ready' ? 'pass' : 'fail',
+        fusedCards: reasonerCapability === 'ready' ? 'pass' : 'not-run'
+      },
+      safeConcurrency: 1,
+      diagnosticCodes: reasonerCapability === 'unhealthy' ? ['profile-certification-failed'] : [],
+      compactError: reasonerCapability === 'unhealthy' ? 'RECURSION_TEST_PROVIDER_FAILED' : ''
     }, {
       configHash: providerConfigHash(reasoner),
       configRevision: reasoner.configRevision
     });
   }
+  host.providerProfiles = {
+    list() {
+      return reasonerCapability === 'unconfigured'
+        ? []
+        : [{ id: reasonerProfileId, name: 'Reasoner Profile', completionMode: 'chat' }];
+    }
+  };
   const runtime = createRecursionRuntime({
     host,
     settingsStore,
@@ -1023,7 +1037,7 @@ assertEqual(
   'Redirect verification prefers a healthy independent Reasoner'
 );
 
-const lowUtilityRedirect = createRedirectHarness({ reasonerCapability: 'untested' });
+const lowUtilityRedirect = createRedirectHarness({ reasonerCapability: 'uncertified' });
 await lowUtilityRedirect.runtime.updateSettings({ reasoningLevel: 'low', enhancements: { mode: 'redirect', applyMode: 'as-swipe' } });
 const lowUtilityResult = await lowUtilityRedirect.runtime.enhanceLatestAssistantMessage({ reason: 'redirect-low-utility-writer-test' });
 assertEqual(lowUtilityResult.ok, true, 'Low Redirect succeeds with a Utility writer');
@@ -1034,7 +1048,7 @@ assertEqual(
 );
 
 {
-  const cautionedMediumRedirect = createRedirectHarness({ reasonerCapability: 'untested' });
+  const cautionedMediumRedirect = createRedirectHarness({ reasonerCapability: 'uncertified' });
   await cautionedMediumRedirect.runtime.updateSettings({
     reasoningLevel: 'medium',
     enhancements: { mode: 'redirect', applyMode: 'as-swipe' }
@@ -1043,10 +1057,10 @@ assertEqual(
     userMessage: 'Carter wants to test the transport method now.',
     hostGeneration: true
   });
-  assertEqual(setup.ok, true, 'Medium Redirect with an untested Reasoner preserves host generation');
+  assertEqual(setup.ok, true, 'Medium Redirect with an uncertified Reasoner preserves host generation');
   assertEqual(
     cautionedMediumRedirect.runtime.providerCapability('reasoner', 'redirect').state,
-    'untested',
+    'uncertified',
     'Medium Redirect caution fixture exposes the intended provider state'
   );
   const providerCaution = cautionedMediumRedirect.state.activityEvents.find((event) => (
@@ -1054,16 +1068,16 @@ assertEqual(
     && event.severity === 'warning'
     && event.outcome === 'warning'
   ));
-  assertEqual(Boolean(providerCaution), true, 'Medium Redirect exposes untested Reasoner as a status caution');
-  assertEqual(providerCaution?.detail?.state, 'untested', 'Medium Redirect caution names the provider state');
+  assertEqual(Boolean(providerCaution), true, 'Medium Redirect exposes uncertified Reasoner as a status caution');
+  assertEqual(providerCaution?.detail?.state, 'uncertified', 'Medium Redirect caution names the provider state');
   const cautionedResult = await cautionedMediumRedirect.runtime.enhanceLatestAssistantMessage({
     reason: 'assistant-message-landed'
   });
   assertEqual(cautionedResult.ok, true, 'Medium Redirect proceeds through an untested configured Reasoner');
-  assertEqual(cautionedMediumRedirect.state.appended.length, 1, 'Medium Redirect with an untested Reasoner appends its swipe');
+  assertEqual(cautionedMediumRedirect.state.appended.length, 1, 'Medium Redirect with an uncertified Reasoner appends its swipe');
   assert(
     cautionedMediumRedirect.state.calls.some((call) => call.roleId === 'editorialTransformer'),
-    'Medium Redirect with an untested Reasoner reaches Editorial generation'
+    'Medium Redirect with an uncertified Reasoner reaches Editorial generation'
   );
 }
 
@@ -1244,7 +1258,7 @@ assert(reasonerCorrectedRedirect.state.calls.filter((call) => call.roleId === 'e
 assertEqual(reasonerCorrectedRedirect.state.appended.length, 1, 'Reasoner-corrected Redirect appends one verified swipe');
 
 const utilityCorrectedRedirect = createRedirectHarness({
-  reasonerCapability: 'untested',
+  reasonerCapability: 'uncertified',
   diagnosisOverride: (value, attempt) => attempt === 1
     ? {
         schema: value.schema,
@@ -1455,17 +1469,30 @@ assertEqual(missingDirectionRedirect.state.appended.length, 0, 'missing Redirect
 
 const effectivenessCalls = [];
 const effectivenessSettings = createLegacyEnhancementSettingsStore();
-effectivenessSettings.updateProviderConfig('reasoner', { source: 'host-current-model' });
+const effectivenessProfileId = 'effectiveness-reasoner-profile';
+effectivenessSettings.updateProviderConfig('reasoner', { connectionProfileId: effectivenessProfileId });
 const effectivenessReasoner = effectivenessSettings.get().providers.reasoner;
-effectivenessSettings.recordProviderHealth('reasoner', {
+effectivenessSettings.recordProviderCertification('reasoner', {
   status: 'pass',
-  checkedAt: new Date().toISOString()
+  checkedAt: new Date().toISOString(),
+  completionMode: 'chat',
+  structuredOutput: 'prompt-json',
+  checks: { connectivity: 'pass', singleCard: 'pass', fusedCards: 'pass' },
+  safeConcurrency: 1,
+  diagnosticCodes: [],
+  compactError: ''
 }, {
   configHash: providerConfigHash(effectivenessReasoner),
   configRevision: effectivenessReasoner.configRevision
 });
 const effectivenessRuntime = createRecursionRuntime({
-  host: {},
+  host: {
+    providerProfiles: {
+      list() {
+        return [{ id: effectivenessProfileId, name: 'Effectiveness Reasoner', completionMode: 'chat' }];
+      }
+    }
+  },
   settingsStore: effectivenessSettings,
   storage: createStorageRepository({ storage: createMemoryStorageAdapter() }),
   activity: createActivityReporter(),

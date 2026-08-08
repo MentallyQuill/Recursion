@@ -7,7 +7,6 @@ import {
 } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { chromium } from 'playwright';
 import { DEFAULT_PRE_PROCESS_DECK_ID } from '../../src/pre-process-decks.mjs';
 import { assertVisualBaselineBuffer } from './lib/visual-regression.mjs';
 import { runWithRetainedTrace } from './lib/trace-lifecycle.mjs';
@@ -1096,6 +1095,7 @@ async function main() {
 
   let browser;
   try {
+    const { chromium } = await import('playwright');
     const session = createSillyTavernHttpSession({
       baseUrl,
       user,

@@ -1,213 +1,179 @@
 # Provider Setup
 
-Recursion uses two provider lanes:
+Recursion uses SillyTavern Connection Profiles for all Utility and Reasoner model work. It does not contain a separate endpoint or credential setup surface.
 
-- Utility: required, default, and used for Arbiter planning, scene/card extraction, card generation, lifecycle support, structured diagnostics, guidance composition, and fail-soft fallback guidance.
-- Reasoner: optional, used by Medium/High/Ultra Reasoning Level routing when its configured capability is `ready` or `untested`, with Utility fallback for ordinary work when unavailable.
+## Before Opening Recursion
 
-Reasoner is not a better default Utility. Utility remains the required path and the fallback path. The compact-bar Reasoning Level chain controls how much Recursion tries to use Reasoner: Low is Utility-only, Medium uses a configured Reasoner for guidance composition, High adds Reasoner for Arbiter, priority card families, and Fused bundles, and Ultra is Reasoner-heavy. An untested configured lane remains routable and shows a caution until Test Provider records health.
+Create one or two Connection Profiles in SillyTavern:
 
-![Utility and Reasoner provider controls with session-only key state](../../assets/documentation/renders/recursion-provider-controls-utility-reasoner.png)
+- one profile can serve both Utility and Reasoner;
+- separate profiles can use different models or generation presets;
+- text-completion profiles should have the intended instruct template selected;
+- sampler values should be stored in the profile generation preset when you want Recursion to inherit them.
 
-![Reasoner Provider stays open while its Test Provider button shows the lane-local Testing state](../../assets/documentation/renders/recursion-provider-test-busy-state.png)
+SillyTavern owns provider routing, model selection, endpoint configuration, credentials, generation presets, and instruct presets. Recursion stores only the selected profile id and its own policy choices.
 
-## Source Options
+## Recommended Setup
 
-Each lane can use one provider source when the host supports it.
+Apply these settings to each Recursion lane:
 
-| Source | Use When | Notes |
+1. Select a SillyTavern Connection Profile.
+2. Keep `Behavioral Preset` on `Isolated` unless the complete profile preset is intentionally trusted for structured analysis calls.
+3. Keep `Instruct Formatting` on `Auto` for text-completion compatibility.
+4. Keep `Samplers` on `Connection Profile` to inherit sampler tuning without importing prompt fields.
+5. Keep `Structured Output` on `Auto` so certification can choose native schema or prompt-only JSON.
+6. Leave the output-token ceiling at its default until a specific model requires a lower hard cap.
+7. Run `Test Profile`.
+
+These defaults solve two different problems independently: behavioral preset isolation protects structured output, while instruct formatting and sampler inheritance keep local text-completion models usable.
+
+## Utility And Reasoner
+
+| Lane | Required | Typical work |
 | --- | --- | --- |
-| Current Host Model | You want Recursion to use the model currently active in SillyTavern. | Smallest setup surface. Availability depends on host APIs. |
-| Host Connection Profile | You want Recursion to use a saved SillyTavern connection profile. | Recursion lists detected host profiles from SillyTavern profile/connection seams without scanning character cards or Recursion cards. Type in the Profile box to filter long profile lists, then choose a listed profile to save it. If the host cannot expose profiles, the Profile box should be unavailable with a clear status. |
-| OpenAI-Compatible Endpoint | You want a direct endpoint with base URL, model, and session API key. | Use `Fetch Models` to query `/models`. Session key is memory-only and must be re-entered after session loss. |
+| Utility | Yes | Arbiter, ordinary cards, validation support, normal guidance, and fallback. |
+| Reasoner | No | Policy-selected synthesis, high-priority cards, Fused bundles, and difficult editorial work. |
 
-## Utility Setup
+Reasoning Level controls broad lane preference:
 
-1. Open the Recursion options menu from the ellipsis.
-2. Select the `Providers` tab, or open the Full Viewer Providers section.
-3. Select the `Utility` provider card.
-4. Choose a provider source.
-5. Fill the required fields for that source.
-6. For Host Connection Profile, type in the Profile box to filter saved SillyTavern profiles, then select one of the listed profiles.
-7. For OpenAI-compatible endpoints, enter base URL and session API key, then use `Fetch Models` if the endpoint exposes a model list.
-8. Select a fetched model or type the model id manually.
-9. Adjust temperature, top-p, and max tokens only when needed. Utility and Reasoner default to `8192` max tokens.
-10. Run `Test Provider`.
+- Low: Utility-only.
+- Medium: Utility planning/cards, Reasoner guidance when eligible.
+- High: Reasoner planning and priority work when eligible.
+- Ultra: Reasoner-heavy routing when eligible.
 
-Utility is healthy when the test passes and the bar or provider card shows a ready state. If Utility is missing or unhealthy, Recursion may reuse valid cache, skip injection, or continue without Recursion guidance.
+Ordinary Pre-process work falls back to Utility if Reasoner is unavailable. Post-process operations that explicitly require Reasoner remain lane-sticky and fail soft rather than silently switching models.
 
-## Reasoner Setup
+## Generation Policy Controls
 
-1. Open the Reasoner provider card.
-2. Choose a provider source.
-3. Fill the required fields.
-4. Run `Test Provider`.
-5. Use the compact-bar Reasoning Level chain for broad provider bias; Low forces Utility-only behavior, while Medium, High, and Ultra keep their selected level and use Reasoner when it is configured and either Ready or Untested.
+### Behavioral Preset
 
-There is no Reasoner enable switch. Its provider card shows one derived state:
-`Configure` when the selected route is incomplete, `Untested` when configuration
-is complete but lacks current health evidence, `Ready` after a passing test for
-the current configuration hash, or `Unhealthy` after a matching failed test.
-Reasoner is eligible when `Ready` or `Untested` and selected by Reasoning Level
-plus runtime policy. `Untested` remains a visible caution until health evidence
-is recorded.
+`Isolated` excludes the selected profile's complete generation preset from Recursion prompts. This is the default and safest mode for JSON-oriented work.
 
-Reasoning Level also sets the amount of provider-side reasoning Recursion requests for Reasoner work:
+`Full Profile` imports the complete preset. Use it only when the preset is known not to add roleplay instructions, prose requirements, wrappers, or other behavior that conflicts with structured output.
 
-| Level | Guidance augmentation | Other Reasoner work |
-| --- | --- | --- |
-| Low | minimal | minimal |
-| Medium | medium | minimal |
-| High | medium | Post-process guidance medium, Arbiter medium, cards and Fused bundles minimal |
-| Ultra | high | Post-process guidance high, Arbiter medium, cards and Fused bundles medium |
+### Instruct Formatting
 
-Post-process guidance routing is lane-sticky: Low and Medium use Utility, while High and Ultra require a configured Reasoner that is `Ready` or `Untested`. If the required lane is unconfigured, unhealthy, or fails its routed call, the operation or category fails soft without crossing lanes. Pre-process work may use Utility fallback according to the selected Reasoning Level policy.
+`Auto` enables instruct formatting for text-completion profiles and disables it for chat-completion profiles.
 
-Post-process uses the configured Evidence Messages count to build a bounded, sender-aware frozen operation snapshot. Recent visible transcript messages, character evidence, the generation-time Pre-process Prompt Packet, ordered Post-process cards, pipeline provenance, and the current writable draft become evidence for guidance synthesis. The guidance response is structured and never replaces prose; SillyTavern's native quiet-generation path writes the draft.
+Use `On` only when a profile requires instruct framing despite incomplete completion-mode metadata. Use `Off` only when the backend or preset already performs framing and a second template would be harmful.
 
-The router may repair common JSON formatting damage. A known malformed, stale, overlapping, or otherwise invalid result may consume another attempt only when the model stage remains current and has attempts remaining. Repair card audits return only dynamic `failedCardIds`; Recursion derives the complete ledger locally, preserving resolved rows even when the audit rejects. A safe local patch with unresolved card coverage produces explicit `partial-failed`; unsafe patches are rejected and never applied.
+### Samplers
 
-Provider tests always use minimal reasoning. Direct OpenAI-compatible endpoints receive native reasoning fields only when Recursion knows the dialect. OpenRouter and OpenAI use an effort field, GLM/Z.AI uses thinking plus `reasoning_effort`, MiniMax M3 uses its thinking mode, and unsupported/unknown endpoints are left alone. SillyTavern connection profiles receive compact reasoning metadata so profile-backed Claude, Gemini, OpenRouter, and other integrations can apply their own native controls.
+`Connection Profile` materializes the selected generation preset through SillyTavern and copies only safe sampler controls. Prompt/messages, model routing, stop strings, token limits, reasoning fields, endpoint data, and credentials are excluded.
 
-## Session-Only API Keys
+`Recursion Override` uses the lane's Temperature and Top P controls. These controls appear only in override mode.
 
-OpenAI-compatible API keys are session-only secrets.
+If profile sampler projection fails, Recursion falls back to its Temperature and Top P values and records a fixed diagnostic code. It does not import the complete preset as a fallback.
 
-Recursion may persist:
+### Structured Output
 
-- provider source;
-- base URL;
-- model;
-- temperature;
-- top-p;
-- max tokens;
-- whether a session key is currently present.
+`Auto` uses the method established by current profile certification.
 
-Recursion must not persist:
+- Native schema is used only when the profile has demonstrated support.
+- Prompt JSON is used when native schema is unavailable or rejected.
 
-- API keys;
-- bearer tokens;
-- authorization headers;
-- raw provider prompts;
-- raw provider responses;
-- full transcript text;
-- hidden reasoning;
-- secrets in errors, diagnostics, journals, prompt packets, cache records, browser local storage, SillyTavern file storage, reports, or test artifacts.
+The explicit modes exist for diagnosis. `Auto` is the normal operator choice.
 
-Clear Session Key appears only when the lane source is OpenAI-Compatible Endpoint. Clearing a session key should immediately mark that lane untestable until a key is re-entered.
+## Test Profile
 
-Provider field changes auto-save on commit. Source, profile, base URL, model, fetched-model selection, and max-token changes apply immediately. Open provider cards stay open while autosave refreshes the settings panel, so expanding Reasoner and editing fields should not collapse the Reasoner section. Session keys are accepted into browser-session memory only and are not written to persisted settings. Hidden alternate-source fields keep their values when the selected source changes, but only the selected source participates in readiness, tests, and generation.
+`Test Profile` is staged certification, not a simple connectivity ping.
 
-Each committed field sends only its own patch with the displayed
-`configRevision`. A newer saved revision wins over a stale panel edit. A
-material configuration change increments the revision and invalidates previous
-health because the old pass/fail result belongs to a different configuration
-hash; a no-op does neither.
+1. Connectivity check: a small JSON object.
+2. Single-card check: the compact card contract used by Segmented.
+3. Fused check: a representative two-family bundle.
 
-## Test Provider Flow
+The provider header displays one capability:
 
-Use `Test Provider` after setup and after changing source, model, base URL, key, or token settings.
+| Label | Meaning |
+| --- | --- |
+| Configure | No selected available profile. |
+| Untested | Profile is configured but has no current certification. |
+| Segmented | Connectivity and single-card checks passed. |
+| Fused | All three checks passed. |
+| Issue | Connectivity or single-card compatibility failed. |
 
-Recursion clears stale provider health after source, profile, base URL, model, max token, or session key changes. A previous pass badge should not be treated as current until `Test Provider` passes again.
+A partial certification is useful: a model may be reliable for Segmented even when it cannot return a valid Fused bundle.
 
-A safe provider test should:
+Profile certification is bound to the selected profile and generation policy. Changing the profile, preset policy, instruct policy, sampler policy, structured-output policy, sampler overrides, or output ceiling invalidates the previous result.
 
-1. Send a structured request using the lane max-token setting configured by the operator.
-2. Validate the response schema.
-3. Record pass or fail health bound to the tested configuration hash.
-4. Show resolved provider and model labels when available.
-5. Store only compact sanitized diagnostics.
-6. Show a lane-local `Testing...` state and disable that lane's `Test Provider` button while the request is pending.
+## Pipeline Eligibility
 
-Provider tests should not store raw prompt bodies, raw responses, API keys, or unbounded error text. Test requests use the configured lane max-token budget and a bounded timeout; the test does not silently impose a smaller response cap than the operator selected.
+Segmented makes one narrow card request per unresolved family. Requests are logically independent but physically serialized when they share a Connection Profile.
 
-That bounded deadline belongs only to the explicit diagnostic test. Production
-Pre-process and Post-process calls have no Recursion default generation
-timeout. A slow call remains pending until it returns, its provider fails it,
-or the user stops the operation.
+Fused asks one model call for the requested card bundle. It is dispatched only when the selected lane is Fused-certified.
 
-Utility and Reasoner default to `8192`, so an untouched provider test uses an
-`8192` max-token ceiling. Provider Test is single-flight per lane: duplicate
-same-lane clicks share the in-flight test, and a test requested while production
-work is using that lane returns a busy result without canceling the active work.
-A test result can update health only; it cannot change source, profile, endpoint,
-model, generation parameters, or `configRevision`.
+When Fused is selected but the profile is uncertified or only Segmented-certified, Recursion automatically uses Segmented before sending a model request. It records one sanitized downgrade code; it does not first waste a Fused attempt.
 
-```mermaid
-flowchart LR
-    Configure["Configure provider source"] --> Test["Run Test Provider"]
-    Test --> Schema["Validate structured response"]
-    Schema --> Status["Show pass or fail status"]
-    Status --> Diagnostics["Store compact sanitized diagnostics"]
-    Secrets["Session key and raw response"] -. "not persisted" .-> Diagnostics
-```
+When a certified Fused response contains some valid items:
 
-## Fallback Behavior
+- valid requested families are retained;
+- only unresolved families receive Segmented repair calls;
+- accepted Fused cards are not regenerated.
 
-Fallbacks should be visible in the Recursion Bar, Hero Pixel Array progress menu, and Full Viewer Activity section.
+When no useful item survives, the Fused attempt window settles once and Recursion starts the complete Segmented card path.
 
-```mermaid
-flowchart TD
-    Failure["Provider failure"] --> Kind{"Where did it fail?"}
-    Kind -- "Utility unavailable" --> Reuse["Reuse safe cache or skip Recursion guidance"]
-    Kind -- "Invalid Utility output" --> Conservative["Reject output and use conservative fallback"]
-    Kind -- "Reasoner unavailable" --> Utility["Compose with Utility"]
-    Kind -- "Prompt install failure" --> Continue["Continue host generation without trusted packet"]
-```
+## Local Model Traffic
 
-Expected fallback behavior:
+Every Connection Profile has a FIFO request queue with concurrency one.
 
-- Utility auth failure: mark Utility unhealthy and pause, skip, or reuse a valid checkpoint/cache entry as the affected stage permits.
-- Utility provider or transport failure: use the next `Attempts per step` attempt only if the stage remains current and has attempts remaining; otherwise preserve accepted checkpoints and expose stage recovery.
-- Utility invalid structured output: repair safe JSON syntax when possible, then reject any output that still misses the required schema or snapshot hash and use conservative local behavior.
-- Card job failure: omit failed card and keep valid sibling cards.
-- Reasoner unconfigured: Utility composes for ordinary work. A configured Untested Reasoner remains routable with caution status.
-- Reasoner missing key: Utility composes.
-- Reasoner provider failure or invalid output: Utility composes where that fallback is allowed and the fallback is recorded.
-- Prompt install failure after provider success: generation continues without Recursion guidance.
+- Ten Segmented card stages using one profile produce one physical model request at a time.
+- Utility and Reasoner may overlap only when they select different profiles.
+- Stop removes queued requests before they start and aborts the active request where supported.
 
-Provider failures should degrade Recursion, not block normal SillyTavern generation.
+This protects local backends from request bursts while preserving durable stage checkpoints.
 
-Only model stages consume the configurable attempt window, which ranges from one through five total attempts per stage and defaults to two. Stop pauses the active operation and preserves accepted checkpoints. Resume continues the earliest incomplete stage; Retry Stage resets only the failed stage's attempt window. Recursion never automatically retries SillyTavern's primary story generation.
+## Output Budgets
 
-Post-process checkpoints guidance before native host rewriting, so a failed rewrite may resume with accepted guidance instead of repeating synthesis. Unified failure preserves the original. Progressive records the failed category and keeps the last valid draft; partial output settles only as a swipe.
+The lane Output Token Ceiling is a hard maximum. Individual stages use smaller role-specific budgets, such as 128 tokens for connectivity certification and 900 tokens for a card.
 
-![Provider failure surface with normalized reason, Utility fallback, and redacted status](../../assets/documentation/renders/recursion-provider-failure-reason-inline.png)
+A context-limit retry lowers only the stage output budget. It does not change the profile, samplers, or prompt policy at the same time.
 
 ## Common Failures
 
-| Symptom | Likely Cause | Operator Action |
+| Symptom | Likely cause | Action |
 | --- | --- | --- |
-| Utility not ready | Missing source, model, profile, or session key. | Open Utility provider card, complete setup, run Test Provider. |
-| Provider test failed | Bad key, base URL, model name, network, or incompatible response. | Re-enter session key, verify endpoint/model, test again. |
-| Reasoner never runs | Unconfigured, unhealthy, or not selected by policy. | Complete its configuration, run Test Provider, and choose an appropriate Reasoning Level. |
-| High/Ultra Post-process guidance is unavailable | Reasoner is unconfigured or unhealthy. | Complete or repair Reasoner, or choose Low/Medium so guidance uses Utility. |
-| Reasoner failed but generation continued | Expected fallback path. | Inspect Activity and Prompt Packet to confirm Utility guidance plus raw selected Card Evidence. |
-| Prompt not installed | Power is off, Utility unavailable, stale run, or injection failure. | Check power state, mode, Activity, Provider status, and Prompt Packet metadata. |
-| Session key disappeared | Browser session reset or Clear Session Key used. | Re-enter key and run Test Provider. |
-| Provider returned messy JSON | Recursion can strip wrappers and repair common JSON syntax, but cannot invent missing contract fields. | Inspect sanitized Activity details; fix provider prompt/model settings if schema or snapshot errors repeat. |
-| Error text looks too vague | Redaction removed sensitive details. | Use sanitized diagnostics and provider-side logs if you need endpoint details. |
+| Configure | No profile selected, profile deleted, or profile unsupported. | Repair or select the profile in SillyTavern, then reopen Recursion settings. |
+| Untested | Profile or policy changed after the last test. | Run Test Profile. Segmented can still run with a visible caution. |
+| Issue after connectivity | Connection/profile failure or invalid small JSON. | Test the profile directly in SillyTavern and verify its instruct/preset configuration. |
+| Segmented but not Fused | Single-card contract passes; bundle contract does not. | Keep Segmented, or tune the profile/model and retest. |
+| Text model emits wrappers or roleplay prose | Instruct template missing or behavioral preset contaminating the request. | Use Instruct Auto and Behavioral Preset Isolated. |
+| Samplers appear ignored | Profile preset materialization unavailable or unsupported field name. | Inspect sanitized diagnostics for `profile-sampler-projection-failed`; use Recursion Override if needed. |
+| Context-limit failures | Output ceiling or prompt footprint is too large for the model context. | Reduce the lane ceiling or prompt footprint; stage retries already reduce output allowance within safe floors. |
+| Requests stall behind each other | Same profile selected for multiple active stages. | This is expected serialization. Use different profiles only when the backend can safely serve them concurrently. |
+| Fused selection runs Segmented | Profile is not Fused-certified. | Run Test Profile and inspect whether the Fused check passes. |
 
-## Safe Verification
+## Privacy And Security
 
-For manual verification:
+Recursion stores no endpoint or credential for model access. Diagnostics and checkpoints must not contain:
 
-1. Do not show provider secret fields in screenshots.
-2. Run Utility Test Provider.
-3. Run Reasoner Test Provider when you want High/Ultra Post-process guidance or Reasoner-heavy Pre-process routing.
-4. Turn power off and confirm no prompt is installed.
-5. Set Auto only when you intend Recursion to affect the next prompt.
-6. Inspect Activity for route and fallback details.
-7. Inspect Prompt Packet metadata, not raw provider payloads.
-8. Clear session keys after testing direct endpoints.
+- Connection Profile ids;
+- endpoint or server addresses;
+- credentials, cookies, or authorization headers;
+- raw Recursion prompts;
+- raw model output;
+- hidden reasoning;
+- full transcript text;
+- stack traces.
 
-Automated live provider evidence should use dedicated `recursion-soak-*` users
-and the guarded live smoke flow described in [Live Smoke Test Plan](../testing/LIVE_SMOKE_TEST_PLAN.md).
-Before navigation or provider calls, run the installed-copy SHA-256 verifier and
-require repository, installed user copy, and served public copy to match.
+The Connection Manager request uses `extractData: false`; structured recovery remains inside Recursion. Only fixed codes, capability state, effective policy, bounded token/finish metadata, and attempt actions are retained.
 
-Related docs:
+## Verification Checklist
 
+Before relying on a profile:
+
+1. Confirm the Connection Profile works in SillyTavern.
+2. Select it for Utility.
+3. Keep Isolated, Auto instruct, Connection Profile samplers, and Auto structured output.
+4. Run Test Profile.
+5. Confirm the lane reports Segmented or Fused.
+6. Run a Segmented turn and verify one physical request at a time for the profile.
+7. Try Fused only after the lane reports Fused.
+8. Press Stop during a queued multi-card run and verify queued calls do not start.
+9. Export diagnostics and confirm they contain no prompt, output, profile id, endpoint, credential, or hidden reasoning.
+
+Related documents:
+
+- [First Run Workflow](FIRST_RUN_WORKFLOW.md)
 - [Operator Manual](RECURSION_OPERATOR_MANUAL.md)
 - [Prompt Privacy And Safety](PROMPT_PRIVACY_AND_SAFETY.md)
 - [Provider And Generation Spec](../architecture/PROVIDER_AND_GENERATION_SPEC.md)

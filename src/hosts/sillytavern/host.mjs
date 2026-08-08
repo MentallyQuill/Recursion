@@ -1,13 +1,18 @@
 import { hashJson, safeId } from '../../core.mjs';
 import { packetToPromptBlocks } from '../../prompt.mjs';
-import { createProviderClient, machineJsonSchemaForRequest } from '../../providers.mjs';
-import { normalizeReasoningCategory, normalizeReasoningIntent } from '../../reasoning-policy.mjs';
+import { createProviderClient, jsonSchemaForRequest } from '../../providers.mjs';
 import { normalizeRetentionSettings, selectBoundedSourceWindow } from '../../retention-policy.mjs';
 import { asObject } from '../../safe-values.mjs';
 import { createSettingsStore } from '../../settings.mjs';
 import { createMemoryStorageAdapter } from '../../storage.mjs';
 import { createSillyTavernUserFileStorageAdapter } from './storage.mjs';
-import { listSillyTavernConnectionProfiles } from './provider-profiles.mjs';
+import {
+  completionModeFromApiMap,
+  listSillyTavernConnectionProfiles,
+  requireConnectionManagerService
+} from './provider-profiles.mjs';
+import { projectProfileSamplerPayload } from './profile-samplers.mjs';
+import { resolveGenerationPolicy } from '../../providers/generation-policy.mjs';
 
 const KNOWN_RECURSION_PROMPT_KEYS = Object.freeze([
   'recursion.guidance',
@@ -901,41 +906,26 @@ function notifyBatchSlotSettled(onSlotSettled, slot) {
   }
 }
 
-function requestProviderSource(request = {}) {
-  return stringValue(request.providerSource ?? request.providerConfig?.source).trim();
-}
-
-function requestHostConnectionProfileId(request = {}) {
-  return request.hostConnectionProfileId ?? request.providerConfig?.hostConnectionProfileId;
-}
-
-function profileGenerationRequested(request = {}) {
-  const source = requestProviderSource(request);
-  if (source) return source === 'host-connection-profile';
-  return Boolean(requestHostConnectionProfileId(request));
+function requestConnectionProfileId(request = {}) {
+  return stringValue(
+    request.connectionProfileId
+      ?? request.providerConfig?.connectionProfileId
+  ).trim();
 }
 
 function requestMaxTokens(request = {}) {
   const positive = (value) => {
     const number = Number(value);
-    return Number.isFinite(number) && number > 0 ? number : undefined;
+    return Number.isFinite(number) && number > 0 ? Math.round(number) : undefined;
   };
-  const configured = positive(request.providerConfig?.maxTokens);
+  const configured = positive(request.providerConfig?.outputTokenCeiling);
   const requested = positive(request.responseLength) ?? positive(request.maxTokens);
   if (configured && requested) return Math.min(configured, requested);
   return configured ?? requested;
 }
 
-function requestTemperature(request = {}) {
-  return request.temperature ?? request.providerConfig?.temperature;
-}
-
-function requestTopP(request = {}) {
-  return request.topP ?? request.providerConfig?.topP;
-}
-
 function requestJsonSchema(request = {}) {
-  const jsonSchema = machineJsonSchemaForRequest(request);
+  const jsonSchema = jsonSchemaForRequest(request);
   return jsonSchema ? { name: jsonSchema.name, value: jsonSchema.schema } : null;
 }
 
@@ -951,106 +941,102 @@ function requestMessages(request = {}) {
       .filter((message) => message.content.trim());
   }
   return [
-    ...(stringValue(request.systemPrompt).trim() ? [{ role: 'system', content: stringValue(request.systemPrompt) }] : []),
+    ...(stringValue(request.systemPrompt).trim()
+      ? [{ role: 'system', content: stringValue(request.systemPrompt) }]
+      : []),
     { role: 'user', content: stringValue(request.prompt) }
   ];
 }
 
-function requestConnectionProfileDetails(context, request = {}) {
-  const profileId = stringValue(requestHostConnectionProfileId(request)).trim();
-  const profile = profileId
-    ? listSillyTavernConnectionProfiles({ context }).find((entry) => entry.id === profileId)
-    : null;
-  return {
-    model: stringValue(profile?.model || request.providerConfig?.resolvedModelLabel).trim(),
-    api: stringValue(profile?.raw?.api).trim().toLowerCase()
-  };
-}
-
-function connectionProfileReasoningEffort(intent, profile = {}) {
-  const normalizedModel = stringValue(profile.model).trim().toLowerCase();
-  if (profile.api === 'nanogpt' && normalizedModel.includes('nemotron') && normalizedModel.includes('thinking')) {
-    // Nemotron can spend the entire structured-output budget on hidden reasoning,
-    // including at low effort. Recursion requires the visible machine JSON instead.
-    return 'min';
-  }
-  if (profile.api === 'nanogpt' && normalizedModel.includes('deepseek') && normalizedModel.includes('thinking')) {
-    // SillyTavern's NanoGPT adapter maps min -> none and max -> high.
-    // DeepSeek thinking models reject the adapter's low/minimal outputs.
-    return intent === 'minimal' ? 'min' : 'max';
-  }
-  if (profile.api === 'nanogpt') {
-    // Recursion uses provider-facing intents; SillyTavern expects UI effort
-    // controls and maps low/high/max -> minimal/medium/high for NanoGPT.
-    if (intent === 'high') return 'max';
-    if (intent === 'medium') return 'high';
-    return 'low';
-  }
-  return intent;
-}
-
-function requestReasoning(request = {}) {
-  const intent = normalizeReasoningIntent(request.reasoningIntent);
-  if (!intent) return null;
-  const category = normalizeReasoningCategory(request.reasoningCategory);
-  return {
-    intent,
-    ...(category ? { category } : {}),
-    exclude: true
-  };
-}
-
-function connectionProfileService(context) {
-  const service = context.ConnectionManagerRequestService || globalThis.ConnectionManagerRequestService;
-  return typeof service?.sendRequest === 'function' ? service : null;
+function profileError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  error.retryable = false;
+  return error;
 }
 
 async function sendViaConnectionProfile(context, request = {}) {
-  const profileId = stringValue(requestHostConnectionProfileId(request)).trim();
+  const service = requireConnectionManagerService(context);
+  const profileId = requestConnectionProfileId(request);
   if (!profileId) {
-    const error = new Error('Host connection profile id is missing.');
-    error.code = 'RECURSION_HOST_PROFILE_MISSING';
-    error.retryable = false;
-    throw error;
+    throw profileError('RECURSION_PROFILE_MISSING', 'Select a SillyTavern Connection Profile.');
   }
-  const service = connectionProfileService(context);
-  if (!service) throw hostProfileUnsupportedError();
-  const reasoning = requestReasoning(request);
-  const reasoningEffort = reasoning
-    ? connectionProfileReasoningEffort(reasoning.intent, requestConnectionProfileDetails(context, request))
-    : '';
-  return normalizeGenerationResponse(await service.sendRequest(
+  const profile = service.getProfile(profileId);
+  if (!profile) {
+    throw profileError('RECURSION_PROFILE_UNAVAILABLE', 'The selected SillyTavern Connection Profile is unavailable.');
+  }
+  const apiMap = service.validateProfile(profile) || {};
+  const completionMode = completionModeFromApiMap(apiMap);
+  if (completionMode === 'unknown') {
+    throw profileError('RECURSION_PROFILE_UNAVAILABLE', 'The selected SillyTavern Connection Profile is unsupported.');
+  }
+
+  const provider = request.providerConfig || {};
+  const policy = resolveGenerationPolicy({ provider, completionMode, request });
+  let samplerPayload = {};
+  let samplerSource = policy.samplerMode;
+  let samplerDiagnosticCode = '';
+
+  if (policy.samplerMode === 'profile' && !policy.includePreset) {
+    try {
+      samplerPayload = await projectProfileSamplerPayload({ context, profile, apiMap });
+    } catch {
+      samplerSource = 'recursion-fallback';
+      samplerDiagnosticCode = 'profile-sampler-projection-failed';
+      samplerPayload = {
+        temperature: provider?.samplerOverrides?.temperature,
+        top_p: provider?.samplerOverrides?.topP
+      };
+    }
+  } else if (policy.samplerMode === 'recursion') {
+    samplerPayload = {
+      temperature: provider?.samplerOverrides?.temperature,
+      top_p: provider?.samplerOverrides?.topP
+    };
+  }
+
+  const schema = requestJsonSchema(request);
+  const overridePayload = {
+    ...samplerPayload,
+    ...(policy.structuredOutputMethod === 'native-schema' && schema
+      ? { json_schema: schema }
+      : {})
+  };
+  for (const [key, value] of Object.entries(overridePayload)) {
+    if (value === undefined) delete overridePayload[key];
+  }
+
+  const raw = await service.sendRequest(
     profileId,
     requestMessages(request),
     requestMaxTokens(request),
     {
       stream: false,
-      // Connection Manager collapses a malformed structured reply to `{}` when it
-      // extracts it itself. Keep the raw provider envelope so Recursion's parser
-      // can apply its bounded recovery policy.
-      extractData: request.machineJson !== true,
-      includePreset: request.machineJson === true ? false : true,
-      includeInstruct: request.machineJson === true ? false : true
+      signal: request.signal ?? null,
+      extractData: false,
+      includePreset: policy.includePreset,
+      includeInstruct: policy.includeInstruct
     },
-    {
-      temperature: requestTemperature(request),
-      top_p: requestTopP(request),
-      ...(requestJsonSchema(request) ? { json_schema: requestJsonSchema(request) } : {}),
-      ...(reasoning ? {
-        reasoning,
-        reasoning_effort: reasoningEffort,
-        include_reasoning: !reasoning.exclude
-      } : {}),
-      signal: request.signal
+    overridePayload
+  );
+  return {
+    raw,
+    providerId: 'sillytavern-connection-profile',
+    model: stringValue(profile.model).trim(),
+    completionMode,
+    profile: {
+      id: profileId,
+      model: stringValue(profile.model).trim(),
+      completionMode
+    },
+    generationPolicy: {
+      includePreset: policy.includePreset,
+      includeInstruct: policy.includeInstruct,
+      samplerSource,
+      structuredOutputMethod: policy.structuredOutputMethod,
+      diagnosticCodes: samplerDiagnosticCode ? [samplerDiagnosticCode] : []
     }
-  ));
-}
-
-function hostProfileUnsupportedError() {
-  const error = new Error('Host connection profile generation requires the SillyTavern raw generation API.');
-  error.code = 'RECURSION_HOST_PROFILE_UNSUPPORTED';
-  error.retryable = false;
-  return error;
+  };
 }
 
 function createLiveSettingsRoot(resolveRoot) {
@@ -1412,64 +1398,10 @@ export function createSillyTavernHost({
     },
     async generate(request = {}) {
       const context = currentContext(contextFactory);
-      if (profileGenerationRequested(request) && connectionProfileService(context)) {
-        return sendViaConnectionProfile(context, request);
-      }
-      if (typeof context.generateRaw === 'function') {
-        const reasoning = requestReasoning(request);
-        const rawRequest = {
-          prompt: stringValue(request.prompt),
-          systemPrompt: request.systemPrompt,
-          responseLength: requestMaxTokens(request),
-          temperature: requestTemperature(request),
-          topP: requestTopP(request),
-          providerSource: request.providerSource,
-          jsonSchema: requestJsonSchema(request) ?? request.jsonSchema,
-          ...(reasoning
-            ? {
-                reasoning,
-                reasoningIntent: reasoning.intent,
-                ...(reasoning.category ? { reasoningCategory: reasoning.category } : {})
-              }
-            : {}),
-          signal: request.signal
-        };
-        if (profileGenerationRequested(request)) {
-          rawRequest.hostConnectionProfileId = requestHostConnectionProfileId(request);
-        }
-        return normalizeGenerationResponse(await context.generateRaw(rawRequest));
-      }
-      if (typeof context.generateQuietPrompt === 'function') {
-        if (profileGenerationRequested(request)) {
-          throw hostProfileUnsupportedError();
-        }
-        return normalizeGenerationResponse(await context.generateQuietPrompt(stringValue(request.prompt)));
-      }
-      throw new Error('SillyTavern generation API is unavailable.');
-    },
-    async batch(requests = [], options = {}) {
-      const onSlotSettled = typeof options?.onSlotSettled === 'function' ? options.onSlotSettled : null;
-      const slots = requests.map((request, index) => Promise.resolve()
-        .then(() => this.generate(request))
-        .then((response) => {
-          notifyBatchSlotSettled(onSlotSettled, { index, request, response });
-          return response;
-        }, (error) => {
-          const response = normalizeGenerationFailure(error);
-          notifyBatchSlotSettled(onSlotSettled, { index, request, response, error: response.error });
-          return response;
-        }));
-      return Promise.all(slots);
+      return sendViaConnectionProfile(context, request);
     }
   };
   generation.capabilities = {
-    batch: {
-      mode: 'concurrent',
-      maxConcurrency: 4,
-      slotIsolation: true,
-      supportsAbortSignal: true,
-      source: 'sillytavern-host-adapter'
-    },
     stop: {
       source: 'sillytavern-host-adapter',
       event: 'generation_stopped'

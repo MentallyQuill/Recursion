@@ -228,6 +228,33 @@ assertEqual(completedPartialFailure.reason, 'Active Cast provider output did not
 assertEqual(completedPartialFailure.failureCode, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'completed partial card exposes its stable failure code');
 assertEqual(completedPartialFailure.suggestedAction, 'Retry Active Cast. If it repeats, use a model with reliable JSON Schema output.', 'completed partial card exposes its suggested action');
 
+const diagnosticProgress = progressFromExecution({
+  operationId: 'run-diagnostics',
+  phase: 'preprocess',
+  state: 'completed',
+  frontierStageIds: [],
+  stages: [{
+    stageId: 'preprocess.arbiter',
+    state: 'completed',
+    executable: true,
+    kind: 'model',
+    diagnosticCodes: [
+      'structured-output-downgraded',
+      'provider-transient-retry',
+      'PROMPT_CONTENT_MUST_NOT_LEAK'
+    ],
+    lastAttemptAction: 'downgrade-structured-output'
+  }]
+});
+const diagnosticStep = diagnosticProgress.steps.find((step) => step.id === 'preprocess.arbiter');
+assertDeepEqual(
+  diagnosticStep.diagnosticCodes,
+  ['structured-output-downgraded', 'provider-transient-retry'],
+  'progress exposes only allowlisted diagnostic codes'
+);
+assertEqual(diagnosticStep.lastAttemptAction, 'downgrade-structured-output', 'progress exposes a fixed attempt action');
+assertEqual(JSON.stringify(diagnosticStep).includes('PROMPT_CONTENT_MUST_NOT_LEAK'), false, 'progress omits arbitrary diagnostic content');
+
 const ownershipProgress = progressFromExecution({
   operationId: 'run-owners',
   phase: 'postprocess',

@@ -232,25 +232,23 @@ export function isProviderResponseTokenLimitFinishReason(reason) {
     || normalized.includes('output_limit');
 }
 
-export function describeProviderResponse(value = '', options = {}) {
+export function describeProviderResponse(value = '') {
   const text = extractProviderResponseText(value);
   const reasoning = extractProviderResponseReasoning(value);
   const finishReasons = collectProviderResponseFinishReasons(value);
-  const sampleLimit = Math.max(0, Math.min(1000, Number(options.sampleLimit ?? 160) || 160));
   return {
     resultType: value === null ? 'null' : (Array.isArray(value) ? 'array' : typeof value),
     model: cleanText(value?.model || '', 180),
     finishReason: finishReasons[0] || '',
     visibleContentLength: text.length,
     reasoningLength: reasoning.length,
-    ...describeProviderUsage(value),
-    sample: sampleLimit ? text.slice(0, sampleLimit) : ''
+    ...describeProviderUsage(value)
   };
 }
 
 export function getProviderResponseFailure(value = '', options = {}) {
   const providerTitle = cleanProviderTitle(options.providerTitle || options.title || options.provider || '');
-  const description = describeProviderResponse(value, { sampleLimit: options.sampleLimit ?? 160 });
+  const description = describeProviderResponse(value);
   const tokenReason = collectProviderResponseFinishReasons(value).find(isProviderResponseTokenLimitFinishReason) || '';
   if (tokenReason) {
     const maxTokens = Math.max(0, Number(options.maxTokens || 0) || 0);
@@ -300,4 +298,65 @@ export function assertProviderResponseText(value = '', options = {}) {
   const failure = getProviderResponseFailure(value, options);
   if (failure) throw createProviderResponseError(failure);
   return extractProviderResponseText(value);
+}
+
+
+function parseArguments(value) {
+  if (isObject(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return isObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeStructuredPayload(value) {
+  if (!isObject(value)) return false;
+  return ['schema', 'ok', 'promptText', 'items', 'action', 'verdict']
+    .some((key) => Object.hasOwn(value, key));
+}
+
+function structuredToolInput(content) {
+  if (!Array.isArray(content)) return null;
+  for (const part of content) {
+    if (!isObject(part)) continue;
+    if (isObject(part.input)) return part.input;
+    if (isObject(part.parsed)) return part.parsed;
+    const nested = structuredToolInput(part.content);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function directStructuredValue(value = {}) {
+  const choice = Array.isArray(value?.choices) ? value.choices[0] : null;
+  const message = choice?.message || value?.message || {};
+  const toolArguments = message?.tool_calls?.[0]?.function?.arguments;
+  return [
+    structuredToolInput(value?.content),
+    structuredToolInput(message?.content),
+    structuredToolInput(choice?.content),
+    value?.parsed,
+    message?.parsed,
+    choice?.parsed,
+    parseArguments(toolArguments),
+    parseArguments(message?.function_call?.arguments),
+    looksLikeStructuredPayload(value) ? value : null
+  ].find((candidate) => isObject(candidate)) || null;
+}
+
+export function normalizeProviderEnvelope(value = {}) {
+  const source = value?.raw ?? value;
+  return Object.freeze({
+    text: extractProviderResponseText(source),
+    structured: directStructuredValue(source),
+    reasoning: extractProviderResponseReasoning(source),
+    finishReasons: collectProviderResponseFinishReasons(source),
+    usage: describeProviderUsage(source),
+    model: String(value?.model || source?.model || '').slice(0, 200),
+    responseId: String(value?.responseId || source?.id || '').slice(0, 200),
+    source: String(value?.providerId || 'sillytavern-connection-profile').slice(0, 200)
+  });
 }

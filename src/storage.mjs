@@ -21,7 +21,7 @@ export {
   normalizeLastBriefRecord
 };
 
-const RECURSION_VERSION = '0.2.0-alpha.1';
+const RECURSION_VERSION = '0.2.0-alpha.2';
 const MAX_JOURNAL_ENTRIES = 500;
 const RUN_JOURNAL_KEY_PATTERN = /^recursion-run-journal-[A-Za-z0-9_.-]+\.v1\.json$/;
 const PIPELINE_RUN_KEY_PATTERN = /^recursion-pipeline-run-[A-Za-z0-9_.-]+\.v2\.json$/;

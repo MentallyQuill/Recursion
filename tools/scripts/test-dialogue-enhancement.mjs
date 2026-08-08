@@ -44,7 +44,6 @@ assert(request.prompt.includes('What does the character want right now?'), 'prom
 assert(request.prompt.includes('<text_to_transform>'), 'prompt marks transform text');
 assert(request.prompt.includes('Mara hides concern behind practical commands.'), 'prompt includes safe card context');
 assertEqual(request.responseSchema, DIALOGUE_ENHANCER_SCHEMA, 'request carries response schema');
-assertEqual(request.machineJson, true, 'request requires machine JSON');
 assertEqual(request.contextMessages.length, 2, 'request respects bounded context');
 assert(request.prompt.includes('If any intervention-required pattern appears, do not return the original text unchanged.'), 'dialogue prompt explicitly forbids no-op when slop is detected');
 assert(request.prompt.includes('Make meaningful, minimal changes when a safe improvement exists.'), 'dialogue prompt permits safe minimal changes');

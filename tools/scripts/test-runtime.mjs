@@ -46,7 +46,7 @@ function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
-async function waitUntil(predicate, message, { attempts = 50, delayMs = 0 } = {}) {
+async function waitUntil(predicate, message, { attempts = 100, delayMs = 1 } = {}) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -111,32 +111,32 @@ const preparedGenerationSettings = {
   },
   providers: {
     utility: {
-      source: 'openai-compatible',
-      hostConnectionProfileId: 'utility-profile',
-      openAICompatible: {
-        baseUrl: 'https://utility.example.test/v1',
-        model: 'utility-model',
-        sessionApiKeyPresent: true
+      lane: 'utility',
+      connectionProfileId: 'utility-profile',
+      generationPolicy: {
+        presetMode: 'isolated',
+        instructMode: 'auto',
+        samplerMode: 'profile',
+        structuredOutputMode: 'auto'
       },
-      temperature: 0.2,
-      topP: 0.8,
-      maxTokens: 4096,
+      samplerOverrides: { temperature: 0.2, topP: 0.8 },
+      outputTokenCeiling: 4096,
       configRevision: 2,
-      health: { status: 'healthy' }
+      certification: { status: 'partial' }
     },
     reasoner: {
-      source: 'host-connection-profile',
-      hostConnectionProfileId: 'reasoner-profile',
-      openAICompatible: {
-        baseUrl: 'https://reasoner.example.test/v1',
-        model: 'reasoner-model',
-        sessionApiKeyPresent: false
+      lane: 'reasoner',
+      connectionProfileId: 'reasoner-profile',
+      generationPolicy: {
+        presetMode: 'full-profile',
+        instructMode: 'off',
+        samplerMode: 'recursion',
+        structuredOutputMode: 'prompt-json'
       },
-      temperature: 0.4,
-      topP: 0.9,
-      maxTokens: 8192,
+      samplerOverrides: { temperature: 0.4, topP: 0.9 },
+      outputTokenCeiling: 8192,
       configRevision: 4,
-      health: { status: 'unhealthy' }
+      certification: { status: 'fail' }
     }
   },
   postProcess: { enabled: true, applyMode: 'replace', rewriteFlow: 'progressive', contextMessages: 21 },
@@ -285,14 +285,14 @@ const preparedGenerationSnapshot = {
     ['retention.sourceWindowCharacters', (settings) => { settings.retention.sourceWindowCharacters = 11000; }],
     ['retention.providerVisibleMessages', (settings) => { settings.retention.providerVisibleMessages = 17; }],
     ...['utility', 'reasoner'].flatMap((lane) => [
-      [`providers.${lane}.source`, (settings) => { settings.providers[lane].source = 'host-current-model'; }],
-      [`providers.${lane}.hostConnectionProfileId`, (settings) => { settings.providers[lane].hostConnectionProfileId = `${lane}-profile-next`; }],
-      [`providers.${lane}.openAICompatible.baseUrl`, (settings) => { settings.providers[lane].openAICompatible.baseUrl = `https://${lane}-next.example.test/v1`; }],
-      [`providers.${lane}.openAICompatible.model`, (settings) => { settings.providers[lane].openAICompatible.model = `${lane}-model-next`; }],
-      [`providers.${lane}.openAICompatible.sessionApiKeyPresent`, (settings) => { settings.providers[lane].openAICompatible.sessionApiKeyPresent = !settings.providers[lane].openAICompatible.sessionApiKeyPresent; }],
-      [`providers.${lane}.temperature`, (settings) => { settings.providers[lane].temperature += 0.1; }],
-      [`providers.${lane}.topP`, (settings) => { settings.providers[lane].topP -= 0.1; }],
-      [`providers.${lane}.maxTokens`, (settings) => { settings.providers[lane].maxTokens -= 1; }],
+      [`providers.${lane}.connectionProfileId`, (settings) => { settings.providers[lane].connectionProfileId = `${lane}-profile-next`; }],
+      [`providers.${lane}.generationPolicy.presetMode`, (settings) => { settings.providers[lane].generationPolicy.presetMode = settings.providers[lane].generationPolicy.presetMode === 'isolated' ? 'full-profile' : 'isolated'; }],
+      [`providers.${lane}.generationPolicy.instructMode`, (settings) => { settings.providers[lane].generationPolicy.instructMode = 'on'; }],
+      [`providers.${lane}.generationPolicy.samplerMode`, (settings) => { settings.providers[lane].generationPolicy.samplerMode = settings.providers[lane].generationPolicy.samplerMode === 'profile' ? 'recursion' : 'profile'; }],
+      [`providers.${lane}.generationPolicy.structuredOutputMode`, (settings) => { settings.providers[lane].generationPolicy.structuredOutputMode = 'native-schema'; }],
+      [`providers.${lane}.samplerOverrides.temperature`, (settings) => { settings.providers[lane].samplerOverrides.temperature += 0.1; }],
+      [`providers.${lane}.samplerOverrides.topP`, (settings) => { settings.providers[lane].samplerOverrides.topP -= 0.1; }],
+      [`providers.${lane}.outputTokenCeiling`, (settings) => { settings.providers[lane].outputTokenCeiling -= 1; }],
       [`providers.${lane}.configRevision`, (settings) => { settings.providers[lane].configRevision += 1; }]
     ])
   ];
@@ -351,8 +351,8 @@ const preparedGenerationSnapshot = {
     ['post-process context', (settings) => { settings.postProcess.contextMessages = 7; }],
     ['diagnostics', (settings) => { settings.diagnostics.includeExcerpts = false; }],
     ['ui', (settings) => { settings.ui.viewerOpen = false; }],
-    ['utility health', (settings) => { settings.providers.utility.health.status = 'timeout'; }],
-    ['reasoner health', (settings) => { settings.providers.reasoner.health.status = 'healthy'; }]
+    ['utility certification', (settings) => { settings.providers.utility.certification.status = 'fail'; }],
+    ['reasoner certification', (settings) => { settings.providers.reasoner.certification.status = 'pass'; }]
   ];
   for (const [label, mutate] of neutralMutations) {
     const changed = clone(preparedGenerationSettings);
@@ -505,25 +505,36 @@ function parseReasonerPromptSnapshotHash(prompt) {
   return match[1].trim();
 }
 
-function providerHealthSettings(settings = {}, lane = 'reasoner', status = 'pass') {
+function providerCertificationSettings(settings = {}, lane = 'reasoner', status = 'pass') {
   const store = createSettingsStore({ root: {} });
   store.update(settings);
-  const provider = store.get().providers[lane];
-  const health = store.recordProviderHealth(lane, {
-    status,
+  let provider = store.get().providers[lane];
+  if (!provider.connectionProfileId) {
+    store.updateProviderConfig(lane, { connectionProfileId: `${lane}-profile` });
+    provider = store.get().providers[lane];
+  }
+  const passed = status === 'pass';
+  const certification = store.recordProviderCertification(lane, {
+    status: passed ? 'pass' : 'fail',
     checkedAt: '2026-07-17T00:00:00.000Z',
-    source: 'unit-fixture',
-    ...(status === 'fail' ? { compactError: 'Provider test failed.' } : {})
+    completionMode: 'chat',
+    structuredOutput: 'prompt-json',
+    checks: passed
+      ? { connectivity: 'pass', singleCard: 'pass', fusedCards: 'pass' }
+      : { connectivity: 'pass', singleCard: 'fail', fusedCards: 'not-run' },
+    safeConcurrency: 1,
+    diagnosticCodes: passed ? [] : ['unit-certification-failed'],
+    ...(passed ? {} : { compactError: 'RECURSION_PROVIDER_FAILED: Profile certification failed.' })
   }, {
     configHash: providerConfigHash(provider),
     configRevision: provider.configRevision
   });
-  assertEqual(health.ok, true, `${lane} fixture records hash-bound ${status} health`);
+  assertEqual(certification.ok, true, `${lane} fixture records hash-bound ${status} certification`);
   return store.get();
 }
 
-function healthyReasonerSettings(settings = {}) {
-  return providerHealthSettings(settings, 'reasoner', 'pass');
+function fusedReadyReasonerSettings(settings = {}) {
+  return providerCertificationSettings(settings, 'reasoner', 'pass');
 }
 
 function cardProviderResponse(roleId, request = {}) {
@@ -543,6 +554,41 @@ function cardProviderResponse(roleId, request = {}) {
       }]
     }
   };
+}
+
+function profileCertificationResponse(roleId) {
+  if (roleId === 'providerTest') {
+    return { ok: true, data: { schema: 'recursion.providerTest.v1', ok: true } };
+  }
+  if (roleId === 'sceneFrameCard') {
+    return {
+      ok: true,
+      data: {
+        promptText: 'Track the immediate objective and obstruction.',
+        evidenceRefs: ['message:0']
+      }
+    };
+  }
+  if (roleId === 'fusedCardBundle') {
+    return {
+      ok: true,
+      data: {
+        items: [
+          {
+            family: 'Scene Frame',
+            promptText: 'Track the immediate objective and obstruction.',
+            evidenceRefs: ['message:0']
+          },
+          {
+            family: 'Scene Constraints',
+            promptText: 'Preserve the immediate boundary.',
+            evidenceRefs: ['message:0']
+          }
+        ]
+      }
+    };
+  }
+  throw new Error(`unexpected profile certification role ${roleId}`);
 }
 
 function sourceFingerprintForMessages(messages = [], firstMesId = null, lastMesId = null) {
@@ -778,17 +824,32 @@ function createRuntimeHarness({
       return { ...canonicalUpdate(canonicalPatch), enhancements: clone(legacyEnhancements) };
     };
   }
-  const utility = settingsStore.get().providers.utility;
-  if (!['pass', 'fail'].includes(utility.health?.status)) {
-    const health = settingsStore.recordProviderHealth('utility', {
+  const explicitProviders = settings.providers && typeof settings.providers === 'object'
+    ? settings.providers
+    : {};
+  const profileDefaults = {};
+  for (const lane of ['utility', 'reasoner']) {
+    if (!Object.prototype.hasOwnProperty.call(explicitProviders?.[lane] || {}, 'connectionProfileId')) {
+      profileDefaults[lane] = { connectionProfileId: `${lane}-profile` };
+    }
+  }
+  if (Object.keys(profileDefaults).length) settingsStore.update({ providers: profileDefaults });
+  for (const lane of ['utility', 'reasoner']) {
+    const provider = settingsStore.get().providers[lane];
+    if (!provider.connectionProfileId || provider.certification?.status !== 'not-run') continue;
+    const certification = settingsStore.recordProviderCertification(lane, {
       status: 'pass',
       checkedAt: '2026-07-17T00:00:00.000Z',
-      source: 'unit-harness'
+      completionMode: 'chat',
+      structuredOutput: 'prompt-json',
+      checks: { connectivity: 'pass', singleCard: 'pass', fusedCards: 'pass' },
+      safeConcurrency: 1,
+      diagnosticCodes: []
     }, {
-      configHash: providerConfigHash(utility),
-      configRevision: utility.configRevision
+      configHash: providerConfigHash(provider),
+      configRevision: provider.configRevision
     });
-    assertEqual(health.ok, true, 'runtime harness records hash-bound Utility health');
+    assertEqual(certification.ok, true, `runtime harness records hash-bound ${lane} certification`);
   }
   const rawGenerationRouter = generationRouter === undefined ? localFallbackCardRouter() : generationRouter;
   const resolvedGenerationRouter = rawGenerationRouter && typeof rawGenerationRouter.batch === 'function'
@@ -808,6 +869,14 @@ function createRuntimeHarness({
       }
     : rawGenerationRouter;
   const host = {
+    providerProfiles: {
+      list() {
+        return ['utility', 'reasoner'].map((lane) => {
+          const id = settingsStore.get().providers[lane].connectionProfileId;
+          return id ? { id, name: `${lane} profile`, label: `${lane} profile`, completionMode: 'chat' } : null;
+        }).filter(Boolean);
+      }
+    },
     async snapshot() {
       calls.snapshot += 1;
       if (typeof snapshot === 'function') return clone(await snapshot());
@@ -1770,7 +1839,7 @@ assertNotEqual(
   const proseHost = createProseMessageHarness();
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: healthyReasonerSettings({
+    settings: fusedReadyReasonerSettings({
       reasoningLevel: 'high',
       enhancements: { target: 'prose', applyMode: 'as-swipe', contextMessages: 13 }
     }),
@@ -1829,7 +1898,7 @@ assertNotEqual(
   const proseHost = createProseMessageHarness('Mara set the cup down. "So that is what we are calling it now?"');
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: healthyReasonerSettings({
+    settings: fusedReadyReasonerSettings({
       reasoningLevel: 'high',
       enhancements: { target: 'dialogue', applyMode: 'as-swipe', contextMessages: 13 }
     }),
@@ -1867,7 +1936,7 @@ assertNotEqual(
   const proseHost = createProseMessageHarness('Mara set the cup down. "What do you want to do next?"');
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: healthyReasonerSettings({
+    settings: fusedReadyReasonerSettings({
       reasoningLevel: 'ultra',
       enhancements: { target: 'prose-dialogue', applyMode: 'replace', contextMessages: 3 }
     }),
@@ -2228,38 +2297,7 @@ for (const pipelineMode of ['segmented', 'fused']) {
   }
 }
 
-const modelFetchSettingsStore = createSettingsStore({ root: {} });
-modelFetchSettingsStore.updateProviderConfig('utility', {
-  source: 'openai-compatible',
-  openAICompatible: { baseUrl: 'https://runtime-models.example/v1', model: '' },
-  apiKey: 'sk-live-secret'
-});
-const modelFetchCalls = [];
-const modelFetchRuntime = createRecursionRuntime({
-  settingsStore: modelFetchSettingsStore,
-  fetchImpl: async (url, init = {}) => {
-    modelFetchCalls.push({ url, init });
-    return {
-      ok: true,
-      status: 200,
-      async json() {
-        return { data: [{ id: 'runtime-alpha' }, { id: 'runtime-beta', name: 'Runtime Beta' }] };
-      }
-    };
-  }
-});
-const runtimeModels = await modelFetchRuntime.fetchProviderModels('utility');
-assertEqual(runtimeModels.ok, true, 'runtime exposes provider model fetch');
-assertDeepEqual(
-  runtimeModels.models.map((entry) => [entry.id, entry.label]),
-  [
-    ['runtime-alpha', 'runtime-alpha'],
-    ['runtime-beta', 'Runtime Beta']
-  ],
-  'runtime provider model fetch returns normalized model list'
-);
-assertEqual(modelFetchCalls[0].url, 'https://runtime-models.example/v1/models', 'runtime model fetch uses shared /models endpoint');
-assert(!JSON.stringify(runtimeModels).includes('sk-live-secret'), 'runtime model fetch result does not expose session key');
+// Direct endpoint model discovery was removed; Connection Profiles own model selection.
 
 function immediateDurableCardRouter() {
   return {
@@ -3096,9 +3134,13 @@ function immediateDurableCardRouter() {
     }
   });
   settingsStore.updateProviderConfig('utility', {
-    source: 'openai-compatible',
-    openAICompatible: { model: 'preserved-model' },
-    apiKey: 'preserved-secret'
+    connectionProfileId: 'preserved-profile',
+    generationPolicy: {
+      presetMode: 'isolated',
+      instructMode: 'auto',
+      samplerMode: 'profile',
+      structuredOutputMode: 'prompt-json'
+    }
   });
   const reset = runtime.resetSettingsMenu();
   await waitUntil(() => typeof releaseClear === 'function', 'settings reset did not start prompt clear');
@@ -3106,14 +3148,14 @@ function immediateDurableCardRouter() {
   assertEqual(runtime.view().settings.injection.depth, 1, 'settings reset restores Advanced settings immediately');
   assertEqual(runtime.view().settings.enabled, false, 'settings reset preserves compact-bar enabled state');
   assertEqual(runtime.view().settings.mode, 'manual', 'settings reset preserves compact-bar mode');
-  assertEqual(runtime.view().settings.providers.utility.openAICompatible.model, 'preserved-model', 'settings reset preserves provider fields');
+  assertEqual(runtime.view().settings.providers.utility.connectionProfileId, 'preserved-profile', 'settings reset preserves provider profile');
+  assertEqual(runtime.view().settings.providers.utility.generationPolicy.structuredOutputMode, 'prompt-json', 'settings reset preserves provider generation policy');
   releaseClear();
   const result = await reset;
   assertEqual(result.ok, true, 'settings reset returns success after prompt clear');
   assertEqual(result.reset, true, 'settings reset reports that values changed');
   assertEqual(result.clear.ok, true, 'settings reset returns prompt clear result');
   assertEqual(calls.clear, 1, 'settings reset clears host prompt once');
-  assertEqual(settingsStore.getApiKey('utility'), 'preserved-secret', 'settings reset preserves provider session key');
   assertEqual(runtime.view().activity.label, 'Recursion settings reset to defaults. Providers and decks were preserved.', 'settings reset surfaces success label');
 }
 
@@ -3268,23 +3310,30 @@ function immediateDurableCardRouter() {
     }
   });
   const update = Promise.resolve(runtime.updateProviderConfig('utility', {
-    source: 'openai-compatible',
-    apiKey: 'sk-runtime-secret',
-    openAICompatible: { baseUrl: 'https://provider-change.test/v1', model: 'provider-change-model' }
+    connectionProfileId: 'provider-change-profile',
+    generationPolicy: {
+      presetMode: 'isolated',
+      instructMode: 'auto',
+      samplerMode: 'recursion',
+      structuredOutputMode: 'prompt-json'
+    },
+    samplerOverrides: { temperature: 0.25, topP: 0.85 },
+    outputTokenCeiling: 4096
   }));
   update.then(() => {
     updateResolved = true;
   });
   await waitUntil(() => typeof releaseClear === 'function', 'provider settings change did not start prompt clear');
   assertEqual(updateResolved, false, 'provider settings change waits for prompt clear before resolving');
-  assertEqual(settingsStore.getApiKey('utility'), 'sk-runtime-secret', 'provider settings change stores key immediately');
-  assertEqual(runtime.view().settings.providers.utility.openAICompatible.model, 'provider-change-model', 'provider settings change updates provider immediately');
+  assertEqual(settingsStore.get().providers.utility.connectionProfileId, 'provider-change-profile', 'provider settings change stores profile immediately');
+  assertEqual(runtime.view().settings.providers.utility.generationPolicy.samplerMode, 'recursion', 'provider settings change updates policy immediately');
   assertEqual(runtime.view().activity.phase, 'promptClearing', 'provider settings change surfaces prompt clear activity');
   releaseClear();
   const result = await update;
   const view = runtime.view();
   assertEqual(result.ok, true, 'provider settings change returns success when prompt clear succeeds');
-  assertEqual(result.provider.openAICompatible.sessionApiKeyPresent, true, 'provider settings change returns updated provider');
+  assertEqual(result.provider.connectionProfileId, 'provider-change-profile', 'provider settings change returns updated profile');
+  assertEqual(result.provider.certification.status, 'not-run', 'provider settings change invalidates certification');
   assertEqual(result.clear.ok, true, 'provider settings change returns clear result');
   assertEqual(calls.clear, 1, 'provider settings change clears host prompt');
   assertEqual(view.activity.severity, 'success', 'provider settings change surfaces success activity');
@@ -3315,11 +3364,11 @@ function immediateDurableCardRouter() {
     }
   });
   const first = runtime.updateProviderConfig('utility', {
-    openAICompatible: { baseUrl: 'https://first-provider.test/v1', model: 'first-provider-model' }
+    connectionProfileId: 'first-provider-profile'
   });
   await waitUntil(() => typeof releaseFirstClear === 'function', 'first provider clear did not start');
   const second = runtime.updateProviderConfig('utility', {
-    openAICompatible: { baseUrl: 'https://second-provider.test/v1', model: 'second-provider-model' }
+    connectionProfileId: 'second-provider-profile'
   });
   assertEqual(runtime.view().activity.label, 'Clearing Recursion prompt...', 'newer provider change owns visible prompt clear activity');
   releaseFirstClear();
@@ -3342,14 +3391,13 @@ function immediateDurableCardRouter() {
     }
   });
   const result = await runtime.updateProviderConfig('utility', {
-    source: 'openai-compatible',
-    apiKey: 'sk-runtime-secret',
-    openAICompatible: { baseUrl: 'https://provider-fail.test/v1', model: 'provider-fail-model' }
+    connectionProfileId: 'provider-fail-profile',
+    generationPolicy: { instructMode: 'on' }
   });
   const view = runtime.view();
   assertEqual(result.ok, false, 'provider settings change returns non-ok when prompt clear fails');
-  assertEqual(result.provider.openAICompatible.model, 'provider-fail-model', 'provider settings still applies when prompt clear fails');
-  assertEqual(settingsStore.getApiKey('utility'), 'sk-runtime-secret', 'provider key still applies when prompt clear fails');
+  assertEqual(result.provider.connectionProfileId, 'provider-fail-profile', 'provider settings still apply when prompt clear fails');
+  assertEqual(settingsStore.get().providers.utility.generationPolicy.instructMode, 'on', 'provider policy still applies when prompt clear fails');
   assertEqual(result.clear.ok, false, 'provider settings change returns failed clear result');
   assertEqual(calls.clear, 1, 'provider settings clear failure still calls host prompt clear');
   assertEqual(view.activity.severity, 'warning', 'provider settings clear failure surfaces warning activity');
@@ -3372,55 +3420,15 @@ function immediateDurableCardRouter() {
     }
   });
   const update = runtime.updateProviderConfig('utility', {
-    openAICompatible: { baseUrl: 'https://provider-test-race.test/v1', model: 'provider-test-race-model' }
+    connectionProfileId: 'provider-test-race-profile'
   });
   await waitUntil(() => typeof releaseClear === 'function', 'provider test race clear did not start');
   const providerTest = await runtime.testProvider('utility');
   assertEqual(providerTest.ok, false, 'provider test without router fails for activity ownership regression');
-  assertEqual(runtime.view().activity.label, 'Utility provider test failed.', 'newer provider test owns visible activity before older clear resolves');
+  assertEqual(runtime.view().activity.label, 'Utility profile certification failed.', 'newer profile certification owns visible activity before older clear resolves');
   releaseClear();
   await update;
-  assertEqual(runtime.view().activity.label, 'Utility provider test failed.', 'older provider clear cannot overwrite newer provider test activity');
-}
-
-{
-  let releaseClear;
-  let clearResolved = false;
-  const { runtime, calls, settingsStore } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
-    hostPrompt: {
-      async clear() {
-        await new Promise((resolve) => {
-          releaseClear = resolve;
-        });
-        return { ok: true, cleared: true };
-      }
-    }
-  });
-  settingsStore.updateProviderConfig('utility', {
-    source: 'openai-compatible',
-    apiKey: 'sk-runtime-secret',
-    openAICompatible: { baseUrl: 'https://provider-key.test/v1', model: 'provider-key-model' }
-  });
-  const clear = Promise.resolve(runtime.clearProviderKey('utility'));
-  clear.then(() => {
-    clearResolved = true;
-  });
-  await waitUntil(() => typeof releaseClear === 'function', 'provider key clear did not start prompt clear');
-  assertEqual(clearResolved, false, 'provider key clear waits for prompt clear before resolving');
-  assertEqual(settingsStore.getApiKey('utility'), '', 'provider key clear removes session secret immediately');
-  assertEqual(runtime.view().settings.providers.utility.openAICompatible.sessionApiKeyPresent, false, 'provider key clear updates provider immediately');
-  assertEqual(runtime.view().activity.phase, 'promptClearing', 'provider key clear surfaces prompt clear activity');
-  releaseClear();
-  const result = await clear;
-  const view = runtime.view();
-  assertEqual(result.ok, true, 'provider key clear returns success when prompt clear succeeds');
-  assertEqual(result.provider.openAICompatible.sessionApiKeyPresent, false, 'provider key clear returns updated provider');
-  assertEqual(result.clear.ok, true, 'provider key clear returns clear result');
-  assertEqual(calls.clear, 1, 'provider key clear clears host prompt');
-  assertEqual(view.activity.severity, 'success', 'provider key clear surfaces success activity');
-  assertEqual(view.activity.label, 'Recursion prompt cleared after provider key change.', 'provider key clear has visible success label');
-  assertNoSecretText(result, 'provider key clear result');
+  assertEqual(runtime.view().activity.label, 'Utility profile certification failed.', 'older provider clear cannot overwrite newer profile certification activity');
 }
 
 {
@@ -3677,7 +3685,7 @@ function immediateDurableCardRouter() {
 {
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'rich', reasoningLevel: 'low' }),
+    settings: fusedReadyReasonerSettings({ mode: 'auto', promptFootprint: 'rich', reasoningLevel: 'low' }),
     generationRouter: {
       async generate(roleId, request) {
         routerCalls.push({ roleId, request });
@@ -3741,7 +3749,7 @@ function immediateDurableCardRouter() {
 {
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: healthyReasonerSettings({ mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'low' }),
+    settings: fusedReadyReasonerSettings({ mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'low' }),
     generationRouter: {
       async generate(roleId, request = {}) {
         routerCalls.push({ roleId, lane: request.lane || 'utility' });
@@ -3785,7 +3793,7 @@ for (const scenario of [
 ]) {
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: healthyReasonerSettings({
+    settings: fusedReadyReasonerSettings({
       mode: 'auto',
       promptFootprint: 'rich',
       reasoningLevel: scenario.level,
@@ -3843,7 +3851,7 @@ for (const scenario of [
 
 {
   const { runtime } = createRuntimeHarness({
-    settings: healthyReasonerSettings({
+    settings: fusedReadyReasonerSettings({
       mode: 'auto',
       strength: 'light',
       focus: 'character',
@@ -3933,25 +3941,11 @@ for (const scenario of [
 for (const scenario of [
   {
     label: 'failed reasoner test',
-    settings: providerHealthSettings({
+    settings: providerCertificationSettings({
       mode: 'auto',
       promptFootprint: 'rich'
     }, 'reasoner', 'fail'),
     expectedReason: 'reasoner-unhealthy'
-  },
-  {
-    label: 'missing direct reasoner key',
-    settings: {
-      mode: 'auto',
-      promptFootprint: 'rich',
-      providers: {
-        reasoner: {
-          source: 'openai-compatible',
-          openAICompatible: { baseUrl: 'https://reasoner.test/v1', model: 'reasoner-model' }
-        }
-      }
-    },
-    expectedReason: 'provider-session-key-missing'
   },
   {
     label: 'missing profile reasoner id',
@@ -3960,8 +3954,7 @@ for (const scenario of [
       promptFootprint: 'rich',
       providers: {
         reasoner: {
-          source: 'host-connection-profile',
-          hostConnectionProfileId: ''
+          connectionProfileId: ''
         }
       }
     },
@@ -4253,17 +4246,13 @@ for (const scenario of [
 {
   const arbiterPrompts = [];
   const { runtime } = createRuntimeHarness({
-    settings: providerHealthSettings({
+    settings: providerCertificationSettings({
       mode: 'auto',
       strength: 'strong',
       focus: 'character',
       reasoningLevel: 'medium',
       promptFootprint: 'normal',
-      reasonerUse: 'auto',
-      providers: {
-        utility: { source: 'host-current-model' },
-        reasoner: { source: 'openai-compatible' }
-      }
+      reasonerUse: 'auto'
     }, 'utility', 'fail'),
     generationRouter: {
       async generate(roleId, request) {
@@ -4314,24 +4303,22 @@ for (const scenario of [
     'Arbiter prompt forbids common invalid alternate fields'
   );
   assert(!arbiterPrompts[0].includes('"health"'), 'arbiter prompt omits provider test diagnostics');
-  assert(!arbiterPrompts[0].includes('openAICompatible'), 'arbiter prompt omits endpoint settings');
+  assert(!arbiterPrompts[0].includes('connectionProfileId'), 'arbiter prompt omits provider configuration');
   assert(!arbiterPrompts[0].includes('compactError'), 'arbiter prompt omits provider compact errors');
   assert(!arbiterPrompts[0].includes('checkedAt'), 'arbiter prompt omits provider test timestamps');
   const providerHealth = parsePromptJsonSection(arbiterPrompts[0], 'Provider health');
   assertDeepEqual(providerHealth, {
-    utility: { source: 'host-current-model', status: 'unhealthy' },
-    reasoner: { source: 'openai-compatible', status: 'unconfigured' }
-  }, 'arbiter provider health prompt exposes only lane, source, and status');
+    utility: { status: 'unhealthy', completionMode: 'chat', structuredOutput: 'prompt-json' },
+    reasoner: { status: 'unconfigured', completionMode: 'unknown', structuredOutput: 'unknown' }
+  }, 'arbiter provider capability prompt exposes only safe capability fields');
   assertNoSecretText(arbiterPrompts[0], 'arbiter settings prompt');
   assertNoSecretText(runtime.view().settings, 'runtime view settings');
   assertEqual(runtime.view().settings.reasoningLevel, 'medium', 'runtime view keeps reasoning level');
   assertEqual(Object.hasOwn(runtime.view().settings.providers.utility, 'enabled'), false, 'view omits retired provider enabled flag');
-  assertEqual(runtime.view().settings.providers.utility.source, 'host-current-model', 'view keeps utility provider source');
-  assertDeepEqual(
-    runtime.view().settings.providers.reasoner.openAICompatible,
-    { baseUrl: '', model: '', sessionApiKeyPresent: false },
-    'view keeps safe endpoint settings without secrets'
-  );
+  assertEqual(runtime.view().settings.providers.utility.connectionProfileId, 'utility-profile', 'view keeps selected Utility profile');
+  assertEqual(runtime.view().settings.providers.reasoner.connectionProfileId, '', 'view keeps unconfigured Reasoner profile empty');
+  assertEqual(Object.hasOwn(runtime.view().settings.providers.utility, 'source'), false, 'view omits retired provider source');
+  assertEqual(Object.hasOwn(runtime.view().settings.providers.reasoner, 'endpoint'), false, 'view omits transport configuration');
 }
 
 {
@@ -4731,6 +4718,17 @@ for (const scenario of [
             }
           };
         }
+        if (roleId === 'sceneConstraintsCard') {
+          return {
+            ok: true,
+            roleId,
+            lane: request.lane,
+            data: {
+              promptText: 'SEGMENTED_PARTIAL_REPAIR: keep the archive sealed until visible evidence changes it.',
+              evidenceRefs: ['message:2']
+            }
+          };
+        }
         if (roleId === 'guidanceComposer') {
           return {
             ok: true,
@@ -4758,9 +4756,14 @@ for (const scenario of [
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Keep useful partial fused output.' });
   assertEqual(result.ok, true, 'Partial Fused output installs prompt');
-  assertDeepEqual(roleCalls, ['utilityArbiter', 'fusedCardBundle', 'guidanceComposer'], 'Partial Fused output does not trigger Segmented repair calls');
+  assertDeepEqual(
+    roleCalls,
+    ['utilityArbiter', 'fusedCardBundle', 'sceneConstraintsCard', 'guidanceComposer'],
+    'Partial Fused output repairs only its unresolved family'
+  );
   assert(result.packet.sections.cardEvidence.includes('FUSED_PARTIAL_VALID_SCENE'), 'valid fused sibling reaches packet');
-  assert(!result.plan.diagnostics.includes('fused-fallback-segmented'), 'useful partial Fused output does not trigger full Segmented fallback');
+  assert(result.packet.sections.cardEvidence.includes('SEGMENTED_PARTIAL_REPAIR'), 'targeted Segmented repair reaches packet');
+  assertEqual(roleCalls.filter((roleId) => roleId === 'fusedCardBundle').length, 1, 'partial Fused output is not repeated');
 }
 
 {
@@ -5581,7 +5584,7 @@ for (const scenario of [
   const view = runtime.view();
   assertEqual(result.ok, false, 'arbiter exception does not complete durable preprocessing');
   assertEqual(result.paused, true, 'arbiter exception pauses the operation for retry');
-  assertEqual(routerCalls.length, 2, 'arbiter exception consumes the bounded attempt window');
+  assertEqual(routerCalls.length, 1, 'unclassified arbiter failure stops without blind retry');
   assertEqual(result.execution.pauseReason, 'stage-failed:preprocess.arbiter', 'arbiter exception exposes the failed stage');
   assertEqual(view.lastPlan, null, 'failed Arbiter work never becomes the committed last plan');
   assertEqual(view.lastHand.cards.length, 0, 'transport failure without cache selects no hand');
@@ -6230,12 +6233,10 @@ for (const scenario of [
     generationRouter: {
       async generate(roleId, request, options) {
         routerCalls.push({ roleId, request, options });
-        if (roleId !== 'providerTest') return fallbackRouter.generate(roleId, request, options);
-        return {
-          ok: true,
-          diagnostics: { providerId: 'host-current-model', model: 'utility-test-model' },
-          data: { schema: 'recursion.providerTest.v1', ok: true }
-        };
+        if (['providerTest', 'sceneFrameCard', 'fusedCardBundle'].includes(roleId)) {
+          return profileCertificationResponse(roleId);
+        }
+        return fallbackRouter.generate(roleId, request, options);
       }
     }
   });
@@ -6257,62 +6258,68 @@ for (const scenario of [
   assertEqual(prepared.ok, true, 'provider capability journal test establishes a saved scene context');
 
   const utilityResult = await runtime.updateProviderConfig('utility', {
-    source: 'openai-compatible',
-    apiKey: 'sk-runtime-secret',
-    openAICompatible: { baseUrl: 'https://example.test/v1', model: 'utility-model' },
-    temperature: 0.2,
-    topP: 0.8,
-    maxTokens: 8192
+    connectionProfileId: 'utility-profile-v2',
+    generationPolicy: {
+      presetMode: 'isolated',
+      instructMode: 'auto',
+      samplerMode: 'recursion',
+      structuredOutputMode: 'prompt-json'
+    },
+    samplerOverrides: { temperature: 0.2, topP: 0.8 },
+    outputTokenCeiling: 4096
   });
   assertEqual(utilityResult.ok, true, 'runtime provider update returns success result');
   assertEqual(utilityResult.clear.ok, true, 'runtime provider update returns prompt clear result');
   const utility = utilityResult.provider;
-  assertEqual(utility.openAICompatible.sessionApiKeyPresent, true, 'runtime provider update accepts session key');
-  assertEqual(settingsStore.getApiKey('utility'), 'sk-runtime-secret', 'runtime provider update stores key in session store');
-  assert(!JSON.stringify(settingsStore.get()).includes('sk-runtime-secret'), 'runtime provider update does not persist api key');
+  assertEqual(utility.connectionProfileId, 'utility-profile-v2', 'runtime provider update selects a Connection Profile');
+  assertEqual(utility.generationPolicy.samplerMode, 'recursion', 'runtime provider update stores the sampler policy');
+  assertEqual(utility.samplerOverrides.temperature, 0.2, 'runtime provider update stores the Utility temperature override');
+  assertEqual(utility.outputTokenCeiling, 4096, 'runtime provider update stores the output ceiling');
   const viewProvider = runtime.view().settings.providers.utility;
-  assertEqual(viewProvider.openAICompatible.baseUrl, 'https://example.test/v1', 'runtime view exposes safe provider base URL for UI round-trip');
-  assertEqual(viewProvider.openAICompatible.model, 'utility-model', 'runtime view exposes safe provider model for UI round-trip');
-  assertEqual(viewProvider.openAICompatible.sessionApiKeyPresent, true, 'runtime view exposes safe session key presence flag');
-  assertEqual(viewProvider.temperature, 0.2, 'runtime view exposes provider temperature for UI round-trip');
-  assertEqual(viewProvider.topP, 0.8, 'runtime view exposes provider topP for UI round-trip');
-  assertEqual(viewProvider.maxTokens, 8192, 'runtime view exposes provider maxTokens for UI round-trip');
+  assertEqual(viewProvider.connectionProfileId, 'utility-profile-v2', 'runtime view exposes the selected profile for UI round-trip');
+  assertEqual(viewProvider.generationPolicy.structuredOutputMode, 'prompt-json', 'runtime view exposes structured-output policy');
+  assertEqual(viewProvider.samplerOverrides.topP, 0.8, 'runtime view exposes the sampler override');
+  assertEqual(viewProvider.outputTokenCeiling, 4096, 'runtime view exposes the output ceiling');
+  assertEqual(Object.hasOwn(viewProvider, 'endpoint'), false, 'runtime view omits transport endpoint state');
   assertNoSecretText(runtime.view().settings, 'runtime provider settings view');
 
   const providerTest = await runtime.testProvider('utility');
-  assertEqual(providerTest.ok, true, 'runtime provider test returns success result');
-  const providerTestCall = routerCalls.find((entry) => entry.roleId === 'providerTest');
-  assertEqual(providerTestCall.roleId, 'providerTest', 'runtime provider test uses providerTest role');
-  assertEqual(providerTestCall.request.lane, 'utility', 'runtime provider test targets selected lane');
-  assertEqual(providerTestCall.request.reasoningCategory, 'provider-test', 'runtime provider test labels diagnostic provider calls');
-  assertEqual(providerTestCall.request.reasoningIntent, 'minimal', 'runtime provider test always uses minimal provider reasoning');
-  assertEqual(providerTestCall.request.responseLength, 8192, 'runtime provider test uses the configured 8192-token lane ceiling');
-  assertEqual(providerTestCall.options.timeoutMs, 30000, 'runtime provider test uses a bounded test timeout');
-  assertEqual(settingsStore.get().providers.utility.health.status, 'pass', 'runtime provider test records passing provider health');
+  assertEqual(providerTest.ok, true, 'runtime profile certification returns success');
+  assertEqual(providerTest.certification.status, 'pass', 'runtime returns full profile certification');
+  const certificationCalls = routerCalls.filter((entry) => ['providerTest', 'sceneFrameCard', 'fusedCardBundle'].includes(entry.roleId));
+  assertDeepEqual(certificationCalls.map((entry) => entry.roleId), [
+    'providerTest',
+    'sceneFrameCard',
+    'fusedCardBundle'
+  ], 'runtime profile certification runs the three staged checks');
+  assertDeepEqual(certificationCalls.map((entry) => entry.request.responseLength), [128, 900, 1792], 'certification uses bounded stage budgets');
+  assert(certificationCalls.every((entry) => entry.request.lane === 'utility'), 'certification targets the selected lane');
+  assert(certificationCalls.every((entry) => entry.request.reasoningCategory === 'provider-test'), 'certification labels diagnostic provider calls');
+  assert(certificationCalls.every((entry) => entry.request.reasoningIntent === 'minimal'), 'certification always uses minimal provider reasoning');
+  assert(certificationCalls.every((entry) => entry.options.timeoutMs === 30000), 'certification uses a bounded timeout');
+  assertEqual(settingsStore.get().providers.utility.certification.status, 'pass', 'runtime persists passing profile certification');
+  assertEqual(settingsStore.get().providers.utility.certification.checks.fusedCards, 'pass', 'runtime persists the Fused check');
   const capabilityJournal = await storage.loadRunJournal('chat-1');
   const capabilityEvents = capabilityJournal.entries.filter((entry) => entry.event === 'provider.capability.changed');
-  assert(capabilityEvents.length >= 2, 'provider configuration and health transitions are journaled');
+  assert(capabilityEvents.length >= 2, 'provider configuration and certification transitions are journaled');
   assertDeepEqual(
     capabilityEvents[0].details.changedKeys,
-    ['source', 'openAICompatible.baseUrl', 'openAICompatible.model', 'apiKey', 'temperature', 'topP'],
+    [
+      'connectionProfileId',
+      'generationPolicy.samplerMode',
+      'generationPolicy.structuredOutputMode',
+      'samplerOverrides.temperature',
+      'samplerOverrides.topP',
+      'outputTokenCeiling'
+    ],
     'provider capability journal records only field-scoped changed keys'
   );
-  assertEqual(capabilityEvents[0].details.beforeState, 'ready', 'provider capability journal records prior state');
-  assertEqual(capabilityEvents[0].details.afterState, 'untested', 'provider capability journal records configuration transition');
-  assertEqual(capabilityEvents.at(-1).details.afterState, 'ready', 'provider capability journal records health transition');
+  assertEqual(capabilityEvents[0].details.beforeState, 'fused-ready', 'provider capability journal records prior state');
+  assertEqual(capabilityEvents[0].details.afterState, 'uncertified', 'provider capability journal records configuration transition');
+  assertEqual(capabilityEvents.at(-1).details.afterState, 'fused-ready', 'provider capability journal records certification transition');
   const serializedCapabilityJournal = JSON.stringify(capabilityEvents);
-  assert(!serializedCapabilityJournal.includes('utility-model'), 'provider capability journal omits model identifiers');
-  assert(!serializedCapabilityJournal.includes('example.test'), 'provider capability journal omits endpoint URLs');
-  assert(!serializedCapabilityJournal.includes('sk-runtime-secret'), 'provider capability journal omits session keys');
-
-  const cleared = await runtime.clearProviderKey('utility');
-  assertEqual(cleared.ok, true, 'runtime provider key clear returns success result');
-  assertEqual(cleared.clear.ok, true, 'runtime provider key clear returns prompt clear result');
-  assertEqual(cleared.provider.openAICompatible.sessionApiKeyPresent, false, 'runtime can clear provider session key');
-  assertEqual(settingsStore.getApiKey('utility'), '', 'runtime provider key clear removes session secret');
-  const clearedJournal = await storage.loadRunJournal('chat-1');
-  const clearEvent = clearedJournal.entries.filter((entry) => entry.event === 'provider.capability.changed').at(-1);
-  assertEqual(clearEvent.details.afterState, 'unconfigured', 'provider key clear journals the resulting capability state');
+  assert(!serializedCapabilityJournal.includes('utility-profile-v2'), 'provider capability journal omits the profile identifier');
+  assertNoSecretText(capabilityEvents, 'provider capability journal');
 }
 
 {
@@ -6322,25 +6329,23 @@ for (const scenario of [
     generationRouter: {
       async generate(roleId, request) {
         routerCalls.push({ roleId, request });
-        await providerGate.promise;
-        return {
-          ok: true,
-          data: { schema: 'recursion.providerTest.v1', ok: true }
-        };
+        if (roleId === 'providerTest') await providerGate.promise;
+        return profileCertificationResponse(roleId);
       }
     }
   });
   const first = runtime.testProvider('utility');
   const second = runtime.testProvider('utility');
-  await waitUntil(() => routerCalls.length === 1, 'single-flight provider test did not start');
-  assertEqual(first, second, 'duplicate same-lane provider tests share one in-flight promise');
-  assertDeepEqual(runtime.providerOperationState().tests, ['utility'], 'provider operation state exposes one active Utility test');
+  await waitUntil(() => routerCalls.length === 1, 'single-flight profile certification did not start', { delayMs: 1 });
+  assertEqual(first, second, 'duplicate same-lane profile certifications share one in-flight promise');
+  assertDeepEqual(runtime.providerOperationState().tests, ['utility'], 'provider operation state exposes one active Utility certification');
   providerGate.resolve();
   const [firstResult, secondResult] = await Promise.all([first, second]);
-  assertEqual(firstResult.ok, true, 'first single-flight provider test succeeds');
-  assertEqual(secondResult.ok, true, 'duplicate single-flight provider test shares success');
-  assertEqual(routerCalls.length, 1, 'duplicate same-lane provider tests make one router call');
+  assertEqual(firstResult.ok, true, 'first single-flight profile certification succeeds');
+  assertEqual(secondResult.ok, true, 'duplicate single-flight certification shares success');
+  assertEqual(routerCalls.length, 3, 'duplicate same-lane certification runs one staged sequence');
 }
+
 
 {
   const generationGate = deferred();
@@ -6386,31 +6391,32 @@ for (const scenario of [
   const { runtime, settingsStore } = createRuntimeHarness({
     generationRouter: {
       async generate(roleId) {
-        assertEqual(roleId, 'providerTest', 'stale-health fixture only calls provider test role');
-        providerTestStarted = true;
-        await providerGate.promise;
-        return {
-          ok: true,
-          data: { schema: 'recursion.providerTest.v1', ok: true }
-        };
+        if (roleId === 'providerTest') {
+          providerTestStarted = true;
+          await providerGate.promise;
+        }
+        return profileCertificationResponse(roleId);
       }
     }
   });
   const test = runtime.testProvider('utility');
-  await waitUntil(() => providerTestStarted, 'stale-health provider test did not start');
+  await waitUntil(() => providerTestStarted, 'stale certification did not start', { delayMs: 1 });
   const before = settingsStore.get().providers.utility;
   const update = await runtime.updateProviderConfig('utility', {
-    temperature: before.temperature === 0.42 ? 0.43 : 0.42
+    samplerOverrides: {
+      temperature: before.samplerOverrides.temperature === 0.42 ? 0.43 : 0.42
+    }
   });
-  assertEqual(update.ok, true, 'provider configuration changes while an old test is in flight');
+  assertEqual(update.ok, true, 'provider configuration changes while an old certification is in flight');
   providerGate.resolve();
   const result = await test;
   const after = settingsStore.get().providers.utility;
-  assertEqual(result.ok, true, 'stale provider test preserves its provider response');
-  assertEqual(result.healthStale, true, 'configuration change marks the in-flight provider health result stale');
-  assertEqual(after.health.status, 'not-run', 'stale provider test does not overwrite reset health');
+  assertEqual(result.ok, true, 'stale certification preserves its staged result');
+  assertEqual(result.certificationStale, true, 'configuration change marks the in-flight certification stale');
+  assertEqual(after.certification.status, 'not-run', 'stale certification does not overwrite reset certification');
   assertEqual(after.configRevision, before.configRevision + 1, 'configuration change advances the provider revision');
 }
+
 
 for (const reasoningLevel of ['medium', 'high', 'ultra']) {
   const routerCalls = [];
@@ -6421,8 +6427,7 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
       reasonerUse: 'auto',
       providers: {
         reasoner: {
-          source: 'host-connection-profile',
-          hostConnectionProfileId: ''
+          connectionProfileId: ''
         }
       }
     },
@@ -6463,8 +6468,7 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
       enhancements: { mode: 'redirect', applyMode: 'as-swipe', contextMessages: 13 },
       providers: {
         reasoner: {
-          source: 'host-connection-profile',
-          hostConnectionProfileId: ''
+          connectionProfileId: ''
         }
       }
     },
@@ -6589,11 +6593,11 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
   const { runtime, settingsStore } = createRuntimeHarness({
     settings: { reasonerUse: 'always' },
     generationRouter: {
-      async generate(roleId, request) {
+      async generate() {
         return {
           ok: false,
           error: {
-            code: 'RECURSION_PROVIDER_KEY_MISSING',
+            code: 'RECURSION_PROVIDER_AUTH_FAILED',
             message: 'Bearer sk-runtime-secret should not leak'
           }
         };
@@ -6602,27 +6606,21 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
   });
 
   const failed = await runtime.testProvider('reasoner');
-  assertEqual(failed.ok, false, 'runtime provider test returns failure result');
+  assertEqual(failed.ok, false, 'runtime profile certification returns failure result');
+  assertEqual(failed.error.code, 'RECURSION_PROVIDER_AUTH_FAILED', 'runtime profile certification returns a stable provider code');
   const reasoner = settingsStore.get().providers.reasoner;
-  assertEqual(reasoner.health.status, 'fail', 'runtime provider test records failing provider health');
-  assertNoSecretText(reasoner.health, 'provider test failure health');
+  assertEqual(reasoner.certification.status, 'fail', 'runtime records failing profile certification');
+  assertEqual(reasoner.certification.checks.connectivity, 'fail', 'runtime records failed connectivity');
+  assertNoSecretText(reasoner.certification, 'profile certification failure');
+  assertNoSecretText(failed, 'profile certification failure result');
 }
 
 {
   const { runtime, settingsStore } = createRuntimeHarness({
-    settings: {
-      providers: {
-        utility: {
-          resolvedProviderLabel: 'stale-provider',
-          resolvedModelLabel: 'stale-model'
-        }
-      }
-    },
     generationRouter: {
-      async generate(roleId, request) {
+      async generate() {
         return {
           ok: true,
-          diagnostics: { providerId: 'unsafe-provider', model: 'unsafe-model' },
           data: {
             schema: 'wrong.providerTest.schema',
             ok: true,
@@ -6634,79 +6632,45 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
   });
 
   const invalid = await runtime.testProvider('utility');
-  assertEqual(invalid.ok, false, 'runtime provider test rejects invalid success schema');
-  assertEqual(invalid.error.code, 'RECURSION_PROVIDER_TEST_INVALID', 'invalid provider test returns stable error code');
+  assertEqual(invalid.ok, false, 'runtime profile certification rejects invalid connectivity data');
+  assertEqual(invalid.error.code, 'RECURSION_PROVIDER_TEST_INVALID', 'invalid connectivity returns a stable safe code');
   const utility = settingsStore.get().providers.utility;
-  assertEqual(utility.health.status, 'fail', 'invalid provider test records failing health');
-  assertNoSecretText(utility.health, 'invalid provider test health');
-  assertNoSecretText(invalid, 'invalid provider test result');
+  assertEqual(utility.certification.status, 'fail', 'invalid connectivity records failing certification');
+  assertEqual(utility.certification.checks.connectivity, 'fail', 'invalid connectivity fails the first staged check');
+  assertNoSecretText(utility.certification, 'invalid connectivity certification');
+  assertNoSecretText(invalid, 'invalid connectivity result');
 }
 
 {
   const { runtime, settingsStore } = createRuntimeHarness({
-    settings: {
-      providers: {
-        utility: {
-          resolvedProviderLabel: 'stale-provider',
-          resolvedModelLabel: 'stale-model'
-        }
-      }
-    },
     generationRouter: {
-      async generate(roleId, request) {
+      async generate(roleId) {
+        if (roleId === 'providerTest' || roleId === 'sceneFrameCard') {
+          return profileCertificationResponse(roleId);
+        }
         return {
           ok: true,
-          diagnostics: { providerId: 'unsafe-provider', model: 'unsafe-model' },
           data: {
-            schema: 'recursion.providerTest.v1',
-            ok: false,
-            message: 'Bearer false-provider-token and sk-false-provider'
+            items: [{
+              family: 'Scene Frame',
+              promptText: 'Only one family was returned.',
+              evidenceRefs: ['message:0']
+            }]
           }
         };
       }
     }
   });
 
-  const invalid = await runtime.testProvider('utility');
-  assertEqual(invalid.ok, false, 'runtime provider test rejects schema success with false ok flag');
-  assertEqual(invalid.error.code, 'RECURSION_PROVIDER_TEST_INVALID', 'false-ok provider test returns stable error code');
+  const partial = await runtime.testProvider('utility');
+  assertEqual(partial.ok, true, 'single-card success permits partial profile certification');
+  assertEqual(partial.certification.status, 'partial', 'runtime exposes Segmented-only certification');
   const utility = settingsStore.get().providers.utility;
-  assertEqual(utility.health.status, 'fail', 'false-ok provider test records failing health');
-  assertNoSecretText(utility.health, 'false-ok provider test health');
-  assertNoSecretText(invalid, 'false-ok provider test result');
-}
-
-{
-  const { runtime, settingsStore } = createRuntimeHarness({
-    settings: {
-      providers: {
-        utility: {
-          resolvedProviderLabel: 'stale-provider',
-          resolvedModelLabel: 'stale-model'
-        }
-      }
-    },
-    generationRouter: {
-      async generate(roleId, request) {
-        return {
-          ok: true,
-          diagnostics: { providerId: 'unsafe-provider', model: 'unsafe-model' },
-          data: {
-            schema: 'recursion.providerTest.v1',
-            message: 'Bearer missing-ok-provider-token and sk-missing-ok-provider'
-          }
-        };
-      }
-    }
-  });
-
-  const invalid = await runtime.testProvider('utility');
-  assertEqual(invalid.ok, false, 'runtime provider test rejects schema success with missing ok flag');
-  assertEqual(invalid.error.code, 'RECURSION_PROVIDER_TEST_INVALID', 'missing-ok provider test returns stable error code');
-  const utility = settingsStore.get().providers.utility;
-  assertEqual(utility.health.status, 'fail', 'missing-ok provider test records failing health');
-  assertNoSecretText(utility.health, 'missing-ok provider test health');
-  assertNoSecretText(invalid, 'missing-ok provider test result');
+  assertEqual(utility.certification.status, 'partial', 'runtime persists partial certification');
+  assertEqual(utility.certification.checks.singleCard, 'pass', 'partial certification permits Segmented stages');
+  assertEqual(utility.certification.checks.fusedCards, 'fail', 'partial certification blocks Fused stages');
+  assertEqual(runtime.view().settings.providers.utility.capability.state, 'segmented-ready', 'runtime view reports Segmented readiness');
+  assertNoSecretText(partial, 'partial certification result');
 }
 
 

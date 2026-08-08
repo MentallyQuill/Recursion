@@ -7,6 +7,7 @@ import { activeCardDeckRuntimeScope, getActiveCardDeck, getAllCardDecks, normali
 import { getActivePostProcessDeck, normalizePostProcessDeckSettings } from '../post-process-decks.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../progress.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from '../settings.mjs';
+import { providerCapabilityDetail, providerCapabilityLabel } from './provider-panel.mjs';
 
 const PHASE_LABELS = Object.freeze({
   idle: '',
@@ -155,12 +156,15 @@ function reasonerState(view, activity) {
     return 'Composing';
   }
   const capability = asObject(settings.providerCapabilities?.reasoner?.promptPacket);
-  return {
-    ready: 'Ready',
-    untested: 'Untested',
-    unhealthy: 'Unhealthy',
-    unconfigured: 'Configure'
-  }[cleanText(capability.state).toLowerCase()] || 'Configure';
+  const state = cleanText(capability.state).toLowerCase();
+  return state ? providerCapabilityLabel(state) : 'Configure';
+}
+
+function reasonerCapabilityDetail(view) {
+  const settings = asObject(view.settings);
+  return providerCapabilityDetail(
+    cleanText(asObject(settings.providerCapabilities?.reasoner?.promptPacket).state).toLowerCase()
+  );
 }
 
 function collectProviderLanesFromSteps(steps, lanes = new Set()) {
@@ -337,6 +341,7 @@ export function createRecursionViewModel(view = {}) {
     composerLabel: laneLabel(composerLane, 'Utility'),
     progressFooterLabel: progressFooterLabel(source, progressRun, composerLane),
     reasonerState: reasonerState(source, activity),
+    reasonerCapabilityDetail: reasonerCapabilityDetail(source),
     reasonerLabel: `Reasoner ${reasonerState(source, activity).toLowerCase()}`,
     lastUpdatedAt: cleanText(source.updatedAt),
     cards

@@ -37,7 +37,7 @@ The older [Turn Context Compiler seed note](design/RECURSION_TURN_CONTEXT_COMPIL
 - Durable V2 manifests contain checkpoint metadata; isolated artifacts contain the minimum bodies needed for Resume and validated reuse.
 - Last Brief is display-only state and never authorizes reuse.
 - Generated work from prior turns is disposable and pruned automatically. Users configure journal retention only.
-- Direct-provider API keys remain session-only and never enter durable records or diagnostics.
+- Utility and Reasoner use only SillyTavern Connection Profiles; Recursion owns no endpoint or credential and never writes profile ids into durable diagnostics.
 - Automated live tests use dedicated soak users; intentional acceptance testing may verify the exact reported `default-user` chats.
 
 ## Product Boundary
@@ -156,9 +156,12 @@ Advanced Storage Retention exposes Journal Entries only. Diagnostics exposes `Re
 
 ## Provider And Privacy Contract
 
-Utility is required; Reasoner is optional and policy-selected. Each lane can use the current host model, a host connection profile, or an OpenAI-compatible endpoint. All machine jobs validate their visible structured output before runtime trusts it.
+Connection Profile requests are serialized per profile, use `extractData: false`, and pass through Recursion's canonical response parser. Staged certification distinguishes Segmented compatibility from Fused compatibility. A Fused selection on an uncertified or Segmented-only profile resolves to Segmented before dispatch. Card models return content and evidence only; Recursion attaches schema and snapshot identity locally.
 
-Raw provider prompts, raw responses, hidden reasoning, transcript bodies, and direct-provider secrets are excluded from normal journals, diagnostics, and proof reports. Diagnostic proof uses hashes, bounded statuses, mutation counts, and lifecycle counters.
+
+Utility is required; Reasoner is optional and policy-selected. Each lane requires a selected, available SillyTavern Connection Profile. Recursion stores only profile selection and independent preset, instruct, sampler, structured-output, and output-ceiling policy. All model jobs normalize and validate visible structured output before runtime trusts it.
+
+Raw provider prompts, raw responses, hidden reasoning, transcript bodies, and credential-bearing profile data are excluded from normal journals, diagnostics, and proof reports. Diagnostic proof uses hashes, bounded statuses, mutation counts, and lifecycle counters.
 
 ## Current Source Of Truth
 

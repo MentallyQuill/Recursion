@@ -39,7 +39,7 @@ The retention contract contains exactly:
 
 The first three values bound source construction and provider analysis. The final value bounds sanitized journal history. Generated operation artifacts are governed by manifest references and automatic pruning, not operator-tuned lifetime controls.
 
-Provider API keys are session-only. Reset Defaults preserves provider configuration, session keys, custom decks and scope, compact-bar settings, and viewer visibility. It updates normalized settings, pauses incompatible work, and clears Recursion prompt lanes without deleting chat.
+Recursion stores no provider endpoint or credential. Reset Defaults preserves Connection Profile selections and policies, custom decks and scope, compact-bar settings, and viewer visibility. It updates normalized settings, pauses incompatible work, and clears Recursion prompt lanes without deleting chat.
 
 ## V2 Manifest
 

@@ -44,7 +44,8 @@ import {
   validateGuidanceStageResult,
   validatePromptPacket
 } from './prompt.mjs';
-import { PROVIDER_CONTRACT_HASH, fetchOpenAICompatibleModels } from './providers.mjs';
+import { PROVIDER_CONTRACT_HASH } from './providers.mjs';
+import { certifyConnectionProfile } from './providers/profile-certification.mjs';
 import {
   providerConfigHash,
   resolveProviderCapability,
@@ -120,6 +121,7 @@ import {
   validatePreparedGenerationArtifact
 } from './runtime/prepared-generation.mjs';
 import { createRuntimeRunState } from './runtime/run-state.mjs';
+import { resolveEffectivePipelineMode } from './runtime/pipeline-policy.mjs';
 import {
   classifyGeneration,
   createTurnIdentity,
@@ -127,7 +129,6 @@ import {
 } from './runtime/turn-scope.mjs';
 
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
-const PROVIDER_TEST_SCHEMA = 'recursion.providerTest.v1';
 const PROVIDER_TEST_TIMEOUT_MS = 30000;
 const STORAGE_SCHEMA_VERSION = 1;
 const RUNTIME_CACHE_CONTRACT_VERSION = 1;
@@ -216,6 +217,86 @@ function safeText(value, limit = 700) {
   return truncate(compact(safeTextSource(value, limit).replace(SECRET_TEXT_PATTERN, '[redacted]'), limit), limit);
 }
 
+export function preserveFusedProviderFailure(providerResult = {}) {
+  if (!providerResult || providerResult.ok !== false) return null;
+  const source = providerResult?.diagnostics?.failure
+    || providerResult.failure
+    || providerResult.error
+    || {};
+  const code = safeText(source.code || 'RECURSION_FUSED_PROVIDER_FAILED', 120)
+    || 'RECURSION_FUSED_PROVIDER_FAILED';
+  return {
+    ...(source.kind ? { kind: safeText(source.kind, 80) } : {}),
+    code,
+    ...(source.category ? { category: safeText(source.category, 100) } : {}),
+    retryable: source.retryable === true,
+    message: safeText(source.message || 'Fused provider request failed.', 500)
+  };
+}
+
+export function validateFusedProviderResult(providerResult = {}, {
+  selectedCards = [],
+  request = null,
+  cardContext = {}
+} = {}) {
+  const providerFailure = preserveFusedProviderFailure(providerResult);
+  if (providerFailure) return { ok: false, error: providerFailure };
+
+  const parsed = cardsFromFusedProviderResult(providerResult, {
+    ...cardContext,
+    expectedSnapshotHash: request?.snapshotHash,
+    requestedCards: request?.requestedCards || [],
+    providerLane: request?.lane
+  });
+  const cards = Object.fromEntries(
+    parsed.cards.map((card) => [
+      safeText(card.family || card.role || card.id, 120),
+      sanitizeGeneratedCard(card)
+    ])
+  );
+  const selected = Array.isArray(selectedCards) ? selectedCards : [];
+  const outcomes = Object.fromEntries(selected.map((selectedCard) => {
+    const family = safeText(selectedCard?.family || selectedCard?.role || '', 120);
+    return [
+      family,
+      cards[family]
+        ? { state: 'completed', reason: null }
+        : { state: 'failed', reason: 'invalid-card' }
+    ];
+  }));
+  const acceptedFamilies = Object.keys(cards);
+  const unresolvedFamilies = selected
+    .map((selectedCard) => safeText(selectedCard?.family || selectedCard?.role || '', 120))
+    .filter((family) => family && !cards[family]);
+  if (acceptedFamilies.length > 0) {
+    return {
+      ok: true,
+      value: {
+        cards,
+        outcomes,
+        acceptedFamilies,
+        unresolvedFamilies,
+        fallback: unresolvedFamilies.length
+          ? {
+              mode: 'segmented',
+              reason: 'unresolved-fused-families',
+              families: unresolvedFamilies
+            }
+          : null
+      }
+    };
+  }
+  return {
+    ok: false,
+    error: {
+      code: 'RECURSION_FUSED_ZERO_USEFUL_CARDS',
+      category: 'validation',
+      retryable: true,
+      message: 'Fused bundle produced no useful cards.'
+    }
+  };
+}
+
 function hasSecretText(value) {
   SECRET_TEXT_PATTERN.lastIndex = 0;
   return SECRET_TEXT_PATTERN.test(String(value ?? ''));
@@ -243,18 +324,21 @@ function finiteNumberOrNull(value) {
 
 function cacheProviderSettingsSignature(provider = {}) {
   const source = asObject(provider);
-  const openAICompatible = asObject(source.openAICompatible);
+  const policy = asObject(source.generationPolicy);
+  const samplers = asObject(source.samplerOverrides);
   return {
-    source: String(source.source || ''),
-    hostConnectionProfileId: String(source.hostConnectionProfileId || ''),
-    openAICompatible: {
-      baseUrl: String(openAICompatible.baseUrl || ''),
-      model: String(openAICompatible.model || ''),
-      sessionApiKeyPresent: openAICompatible.sessionApiKeyPresent === true
+    connectionProfileId: String(source.connectionProfileId || ''),
+    generationPolicy: {
+      presetMode: String(policy.presetMode || 'isolated'),
+      instructMode: String(policy.instructMode || 'auto'),
+      samplerMode: String(policy.samplerMode || 'profile'),
+      structuredOutputMode: String(policy.structuredOutputMode || 'auto')
     },
-    temperature: numberOr(source.temperature, 0),
-    topP: numberOr(source.topP, 0),
-    maxTokens: numberOr(source.maxTokens, 0),
+    samplerOverrides: {
+      temperature: numberOr(samplers.temperature, 0),
+      topP: numberOr(samplers.topP, 0)
+    },
+    outputTokenCeiling: numberOr(source.outputTokenCeiling, 0),
     configRevision: numberOr(source.configRevision, 0)
   };
 }
@@ -1373,20 +1457,8 @@ export function generationBasisForLatestAssistantSwipe(snapshot, messageId = nul
 
 export function preparedGenerationSettingsSignature(settings = {}) {
   const normalized = settingsWithRuntimeCardScope(settings, { normalize: true });
-  const source = asObject(settings);
   const retention = normalizeRetentionSettings(normalized.retention);
-  const providerSignature = (lane) => {
-    const provider = asObject(normalized.providers?.[lane]);
-    const rawProvider = asObject(source.providers?.[lane]);
-    const rawOpenAICompatible = asObject(rawProvider.openAICompatible);
-    return cacheProviderSettingsSignature({
-      ...provider,
-      openAICompatible: {
-        ...asObject(provider.openAICompatible),
-        sessionApiKeyPresent: rawOpenAICompatible.sessionApiKeyPresent === true
-      }
-    });
-  };
+  const providerSignature = (lane) => cacheProviderSettingsSignature(normalized.providers?.[lane]);
   return {
     enabled: normalized.enabled,
     mode: normalized.mode,
@@ -1647,34 +1719,48 @@ function arbiterSafeSettings(settings, capabilityResolver = providerCapability) 
   };
 }
 
-function safeProviderHealth(value) {
+function safeProviderCertification(value) {
   const source = asObject(value);
-  const output = {
-    status: safeText(source.status || 'not-run', 40) || 'not-run'
+  const checks = asObject(source.checks);
+  const status = ['not-run', 'pass', 'partial', 'fail'].includes(safeText(source.status || '', 40))
+    ? safeText(source.status || '', 40)
+    : 'not-run';
+  return {
+    status,
+    ...(safeText(source.checkedAt || '', 80) ? { checkedAt: safeText(source.checkedAt || '', 80) } : {}),
+    ...(safeText(source.completionMode || '', 40) ? { completionMode: safeText(source.completionMode || '', 40) } : {}),
+    ...(safeText(source.structuredOutput || '', 40) ? { structuredOutput: safeText(source.structuredOutput || '', 40) } : {}),
+    checks: {
+      connectivity: safeText(checks.connectivity || 'not-run', 40) || 'not-run',
+      singleCard: safeText(checks.singleCard || 'not-run', 40) || 'not-run',
+      fusedCards: safeText(checks.fusedCards || 'not-run', 40) || 'not-run'
+    },
+    safeConcurrency: 1,
+    diagnosticCodes: safeStringList(source.diagnosticCodes, 80).slice(0, 12),
+    ...(safeText(source.compactError || '', 300) ? { compactError: safeText(source.compactError || '', 300) } : {})
   };
-  const checkedAt = safeText(source.checkedAt || '', 80);
-  const compactError = safeText(source.compactError || '', 300);
-  if (checkedAt) output.checkedAt = checkedAt;
-  if (compactError) output.compactError = compactError;
-  return output;
 }
 
 function safeProviderSettingsView(provider, settings, lane, capabilityResolver = providerCapability) {
   const source = asObject(provider);
+  const generationPolicy = asObject(source.generationPolicy);
+  const samplerOverrides = asObject(source.samplerOverrides);
   return {
-    lane: safeText(source.lane || '', 40),
-    source: safeText(source.source || '', 80),
-    hostConnectionProfileId: safeText(source.hostConnectionProfileId || '', 160),
-    openAICompatible: {
-      baseUrl: safeText(source.openAICompatible?.baseUrl || '', 300),
-      model: safeText(source.openAICompatible?.model || '', 160),
-      sessionApiKeyPresent: source.openAICompatible?.sessionApiKeyPresent === true
+    lane: safeText(source.lane || lane, 40),
+    connectionProfileId: safeText(source.connectionProfileId || '', 160),
+    generationPolicy: {
+      presetMode: safeText(generationPolicy.presetMode || 'isolated', 40),
+      instructMode: safeText(generationPolicy.instructMode || 'auto', 40),
+      samplerMode: safeText(generationPolicy.samplerMode || 'profile', 40),
+      structuredOutputMode: safeText(generationPolicy.structuredOutputMode || 'auto', 40)
     },
-    temperature: numberOr(source.temperature, 0),
-    topP: numberOr(source.topP, 0),
-    maxTokens: numberOr(source.maxTokens, 0),
+    samplerOverrides: {
+      temperature: numberOr(samplerOverrides.temperature, lane === 'reasoner' ? 0.4 : 0.1),
+      topP: numberOr(samplerOverrides.topP, 0.95)
+    },
+    outputTokenCeiling: numberOr(source.outputTokenCeiling, 8192),
     configRevision: numberOr(source.configRevision, 0),
-    health: safeProviderHealth(source.health),
+    certification: safeProviderCertification(source.certification),
     capability: sanitizeProviderCapability(capabilityResolver(settings, lane, 'prompt-packet'))
   };
 }
@@ -1744,11 +1830,11 @@ function safeSettingsView(settings, capabilityResolver = providerCapability) {
 function providerHealthForArbiter(settings, capabilityResolver = providerCapability) {
   const source = asObject(settings);
   const provider = (lane) => {
-    const config = asObject(source.providers?.[lane]);
     const capability = capabilityResolver(source, lane, 'prompt-packet');
     return {
-      source: safeText(config.source || '', 80),
-      status: capability.state
+      status: capability.state,
+      completionMode: capability.completionMode || 'unknown',
+      structuredOutput: capability.structuredOutput || 'unknown'
     };
   };
   return {
@@ -2218,38 +2304,12 @@ export function createRecursionRuntime({
   settingsStore = createSettingsStore({ root: {} }),
   storage = createStorageRepository({ storage: createMemoryStorageAdapter() }),
   activity = createActivityReporter(),
-  generationRouter = null,
-  fetchImpl = globalThis.fetch
+  generationRouter = null
 } = {}) {
   const runState = createRuntimeRunState();
   const activeProviderOperations = new Map();
   const activeProviderTests = new Map();
   const baseGenerationRouter = generationRouter;
-  const previousProviderAuthFailureHandler = host?.handleProviderAuthFailure;
-
-  if (host && typeof host === 'object') {
-    host.handleProviderAuthFailure = async ({ lane, configHash, configRevision } = {}) => {
-      const resolvedLane = providerLane(lane);
-      const provider = settingsStore.get().providers?.[resolvedLane] || {};
-      if (
-        Number(provider.configRevision || 0) !== Number(configRevision)
-        || providerConfigHash(provider) !== String(configHash || '')
-      ) {
-        return {
-          ok: false,
-          stale: true,
-          error: {
-            code: 'RECURSION_PROVIDER_AUTH_STALE',
-            message: 'Provider settings changed before the authentication failure settled.'
-          }
-        };
-      }
-      return clearProviderKey(resolvedLane, {
-        expectedRevision: Number(configRevision)
-      });
-    };
-  }
-
   function providerOperationLane(request = {}) {
     return asObject(request).lane === 'reasoner' ? 'reasoner' : 'utility';
   }
@@ -2281,7 +2341,7 @@ export function createRecursionRuntime({
     generationRouter = {
       ...baseGenerationRouter,
       async generate(roleId, request = {}, options = {}) {
-        if (roleId === 'providerTest') {
+        if (request?.certification === true || roleId === 'providerTest') {
           return baseGenerationRouter.generate(roleId, request, options);
         }
         const lane = providerOperationLane(request);
@@ -2549,7 +2609,7 @@ export function createRecursionRuntime({
       ...(redirectCapability?.required && !redirectCapability.eligible
         ? { blockedCapability: sanitizeProviderCapability(redirectCapability) }
         : {}),
-      ...(redirectCapability?.required && redirectCapability.eligible && redirectCapability.state === 'untested'
+      ...(redirectCapability?.required && redirectCapability.eligible && redirectCapability.state === 'uncertified'
         ? { cautionCapability: sanitizeProviderCapability(redirectCapability) }
         : {})
     };
@@ -3151,7 +3211,7 @@ export function createRecursionRuntime({
   async function updateProviderConfig(lane, patch = {}, options = {}) {
     const resolvedLane = providerLane(lane);
     const beforeSettings = settingsStore.get();
-    const beforeCapability = providerCapability(beforeSettings, resolvedLane, 'prompt-packet');
+    const beforeCapability = runtimeProviderCapability(beforeSettings, resolvedLane, 'prompt-packet');
     const update = settingsStore.updateProviderConfig(resolvedLane, patch, options);
     if (update.ok !== true || update.changedKeys.length === 0) {
       return { ...update, clear: null };
@@ -3160,7 +3220,7 @@ export function createRecursionRuntime({
     supersedeActiveRun();
     return trackRuntimeMutation(async () => {
       const afterSettings = settingsStore.get();
-      const afterCapability = providerCapability(afterSettings, resolvedLane, 'prompt-packet');
+      const afterCapability = runtimeProviderCapability(afterSettings, resolvedLane, 'prompt-packet');
       await appendProviderCapabilityMutation({
         lane: resolvedLane,
         kind: 'configuration',
@@ -3177,94 +3237,18 @@ export function createRecursionRuntime({
     });
   }
 
-  async function clearProviderKey(lane, options = {}) {
-    const resolvedLane = providerLane(lane);
-    const beforeSettings = settingsStore.get();
-    const beforeCapability = providerCapability(beforeSettings, resolvedLane, 'prompt-packet');
-    const update = settingsStore.clearApiKey(resolvedLane, options);
-    if (update.ok !== true || update.changedKeys.length === 0) {
-      return { ...update, clear: null };
-    }
-    const provider = update.provider;
-    supersedeActiveRun();
-    return trackRuntimeMutation(async () => {
-      const afterSettings = settingsStore.get();
-      const afterCapability = providerCapability(afterSettings, resolvedLane, 'prompt-packet');
-      await appendProviderCapabilityMutation({
-        lane: resolvedLane,
-        kind: 'configuration',
-        changedKeys: update.changedKeys,
-        before: beforeCapability,
-        after: afterCapability
-      });
-      await reconcileDurableExecutionAfterSettingsChange();
-      const clear = await clearPromptAfterSupersede({
-        successLabel: 'Recursion prompt cleared after provider key change.',
-        journalReason: 'provider-key-cleared'
-      });
-      return { ok: clear?.ok !== false, provider, changedKeys: update.changedKeys, clear };
-    });
-  }
-
-  async function fetchProviderModels(lane = 'utility', patch = {}) {
-    const resolvedLane = providerLane(lane);
-    const current = settingsStore.get().providers?.[resolvedLane] || {};
-    const cleanPatch = asObject(patch);
-    const provider = {
-      ...current,
-      ...cleanPatch,
-      openAICompatible: {
-        ...asObject(current.openAICompatible),
-        ...asObject(cleanPatch.openAICompatible)
-      }
-    };
-    if (provider.source !== 'openai-compatible') {
-      return {
-        ok: false,
-        lane: resolvedLane,
-        error: {
-          code: 'RECURSION_PROVIDER_MODEL_DISCOVERY_UNSUPPORTED',
-          message: 'Model discovery is only available for OpenAI-compatible endpoints.'
-        }
-      };
-    }
-    try {
-      const result = await fetchOpenAICompatibleModels({
-        baseUrl: provider.openAICompatible?.baseUrl,
-        apiKey: String(cleanPatch.apiKey || settingsStore.getApiKey(resolvedLane) || '').trim(),
-        fetchImpl,
-        signal: cleanPatch.signal
-      });
-      return {
-        ok: true,
-        lane: resolvedLane,
-        endpoint: safeText(result.endpoint || '', 300),
-        models: Array.isArray(result.models)
-          ? result.models.map((entry) => ({
-            id: safeText(entry?.id || '', 200),
-            label: safeText(entry?.label || entry?.id || '', 240)
-          })).filter((entry) => entry.id)
-          : []
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        lane: resolvedLane,
-        error: {
-          code: safeText(error?.code || 'RECURSION_PROVIDER_MODEL_DISCOVERY_FAILED', 120),
-          message: safeText(error?.message || 'Provider model discovery failed.', 300)
-        }
-      };
-    }
-  }
-
   function safeProviderProfiles(profiles = []) {
     return Array.isArray(profiles)
       ? profiles.slice(0, 100).map((profile) => ({
         id: safeIdentifier(profile?.id || '', '', 160),
         name: safeText(profile?.name || profile?.label || profile?.id || '', 180),
         model: safeText(profile?.model || '', 180),
-        label: safeText(profile?.label || profile?.name || profile?.id || '', 240)
+        label: safeText(profile?.label || profile?.name || profile?.id || '', 240),
+        completionMode: ['chat', 'text'].includes(safeText(profile?.completionMode || '', 20))
+          ? safeText(profile?.completionMode, 20)
+          : 'unknown',
+        presetName: safeText(profile?.presetName || '', 180),
+        instructName: safeText(profile?.instructName || '', 180)
       })).filter((profile) => profile.id)
       : [];
   }
@@ -5392,25 +5376,10 @@ export function createRecursionRuntime({
     return task;
   }
 
-  function providerTestPrompt(lane) {
-    return [
-      'Return strict JSON for a Recursion provider connectivity test.',
-      'Do not include prose outside JSON.',
-      `Lane: ${lane}.`,
-      '{"schema":"recursion.providerTest.v1","ok":true}'
-    ].join('\n');
-  }
-
-  async function recordProviderTestHealth(lane, status, checkedAt, configHash, configRevision, error = null) {
+  async function recordProviderCertificationResult(lane, certification, configHash, configRevision) {
     const beforeSettings = settingsStore.get();
-    const beforeCapability = providerCapability(beforeSettings, lane, 'prompt-packet');
-    const compactError = safeText(error?.message || error?.code || error || 'Provider test failed.', 300);
-    const result = settingsStore.recordProviderHealth(lane, {
-      status,
-      checkedAt,
-      source: 'provider-test',
-      ...(status === 'fail' ? { compactError } : {})
-    }, {
+    const beforeCapability = runtimeProviderCapability(beforeSettings, lane, 'prompt-packet');
+    const result = settingsStore.recordProviderCertification(lane, certification, {
       configHash,
       configRevision
     });
@@ -5418,23 +5387,16 @@ export function createRecursionRuntime({
       await host.settings.flush();
     }
     const afterSettings = settingsStore.get();
-    const afterCapability = providerCapability(afterSettings, lane, 'prompt-packet');
+    const afterCapability = runtimeProviderCapability(afterSettings, lane, 'prompt-packet');
     await trackRuntimeMutation(() => appendProviderCapabilityMutation({
       lane,
-      kind: result.stale ? 'stale-health' : 'health',
+      kind: result.stale ? 'stale-certification' : 'certification',
       changedKeys: [],
       before: beforeCapability,
       after: afterCapability,
       stale: result.stale === true
     })).catch(() => {});
     return result;
-  }
-
-  function validProviderTestResult(result) {
-    const data = asObject(result?.data);
-    return result?.ok === true
-      && data.schema === PROVIDER_TEST_SCHEMA
-      && data.ok === true;
   }
 
   function testProvider(lane = 'utility') {
@@ -5445,141 +5407,121 @@ export function createRecursionRuntime({
     }
 
     const task = (async () => {
-      const checkedAt = nowIso();
       const runId = makeId(`provider-test-${resolvedLane}`);
       const settings = settingsStore.get();
       const providerSnapshot = settings.providers?.[resolvedLane] || {};
       const configHash = providerConfigHash(providerSnapshot);
       const configRevision = Number(providerSnapshot.configRevision || 0);
+      const profiles = listProviderConnectionProfilesForUi();
+      const profile = profiles.find((entry) => entry.id === providerSnapshot.connectionProfileId) || null;
       const capability = resolveProviderCapability({
         settings,
         lane: resolvedLane,
         operation: 'provider-test',
-        host: {
-          currentModelAvailable: Boolean(generationRouter?.generate),
-          connectionProfiles: listProviderConnectionProfilesForUi()
-        }
+        host: { connectionProfiles: profiles }
       });
+
       startRuntimeActivity({
         runId,
         phase: 'providerCallStarted',
         mode: 'review',
         severity: 'info',
         providerLane: resolvedLane,
-        label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test started.`,
-        chips: [resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility', 'Provider']
+        label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} profile certification started.`,
+        chips: [resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility', 'Profile']
       });
 
-      if (!capability.testable) {
-        const error = {
-          code: 'RECURSION_PROVIDER_NOT_READY',
-          message: capability.message
+      let certification;
+      if (!capability.testable || !profile) {
+        certification = {
+          status: 'fail',
+          checkedAt: nowIso(),
+          completionMode: profile?.completionMode || 'unknown',
+          structuredOutput: 'unknown',
+          checks: { connectivity: 'fail', singleCard: 'not-run', fusedCards: 'not-run' },
+          safeConcurrency: 1,
+          diagnosticCodes: ['profile-unavailable'],
+          compactError: 'RECURSION_PROFILE_UNAVAILABLE: The selected Connection Profile is unavailable.'
         };
-        await recordProviderTestHealth(resolvedLane, 'fail', checkedAt, configHash, configRevision, error);
-        settleRuntimeActivity({
-          runId,
-          outcome: 'warning',
-          phase: 'providerTestFailed',
-          severity: 'warning',
-          providerLane: resolvedLane,
-          label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test unavailable.`,
-          chips: ['Provider'],
-          detail: sanitizeProviderCapability(capability)
-        });
-        return { ok: false, error };
-      }
-
-      if (!generationRouter || typeof generationRouter.generate !== 'function') {
-        const error = {
-          code: 'RECURSION_PROVIDER_ROUTER_UNAVAILABLE',
-          message: 'Provider test is unavailable.'
+      } else if (!generationRouter || typeof generationRouter.generate !== 'function') {
+        certification = {
+          status: 'fail',
+          checkedAt: nowIso(),
+          completionMode: profile.completionMode || 'unknown',
+          structuredOutput: 'unknown',
+          checks: { connectivity: 'fail', singleCard: 'not-run', fusedCards: 'not-run' },
+          safeConcurrency: 1,
+          diagnosticCodes: ['provider-router-unavailable'],
+          compactError: 'RECURSION_PROVIDER_ROUTER_UNAVAILABLE: Provider certification is unavailable.'
         };
-        await recordProviderTestHealth(resolvedLane, 'fail', checkedAt, configHash, configRevision, error);
-        return { ok: false, error };
-      }
-
-      try {
+      } else {
         stageRuntimeActivity({
           runId,
           phase: 'providerCallRunning',
           mode: 'review',
           severity: 'info',
           providerLane: resolvedLane,
-          label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test running.`,
-          chips: ['Provider']
+          label: `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} profile certification running.`,
+          chips: ['Profile']
         });
-        const configuredMaxTokens = Number(providerSnapshot.maxTokens) || 8192;
-        const result = await generationRouter.generate('providerTest', {
-          runId,
+        certification = await certifyConnectionProfile({
           lane: resolvedLane,
-          ...reasoningRequestMetadata({}, 'provider-test'),
-          responseLength: configuredMaxTokens,
-          prompt: providerTestPrompt(resolvedLane)
-        }, { timeoutMs: PROVIDER_TEST_TIMEOUT_MS });
-        if (validProviderTestResult(result)) {
-          const health = await recordProviderTestHealth(resolvedLane, 'pass', checkedAt, configHash, configRevision);
-          settleRuntimeActivity({
+          provider: providerSnapshot,
+          profile,
+          generate: (roleId, request) => generationRouter.generate(roleId, {
+            ...request,
+            ...reasoningRequestMetadata({}, 'provider-test')
+          }, {
             runId,
-            outcome: health.stale ? 'neutral' : 'success',
-            phase: 'settled',
-            severity: health.stale ? 'info' : 'success',
-            providerLane: resolvedLane,
-            label: health.stale
-              ? `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test result ignored after configuration changed.`
-              : `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test passed.`,
-            chips: ['Provider'],
-            detail: { configHash, stale: health.stale === true }
-          });
-          return { ...result, healthStale: health.stale === true };
-        }
-
-        const failure = result?.ok
-          ? {
-              code: 'RECURSION_PROVIDER_TEST_INVALID',
-              message: 'Provider test returned an invalid structured response.'
-            }
-          : (result?.error || {
-              code: 'RECURSION_PROVIDER_TEST_FAILED',
-              message: 'Provider test failed.'
-            });
-        const health = await recordProviderTestHealth(resolvedLane, 'fail', checkedAt, configHash, configRevision, failure);
-        settleRuntimeActivity({
-          runId,
-          outcome: health.stale ? 'neutral' : 'warning',
-          phase: 'providerTestFailed',
-          severity: health.stale ? 'info' : 'warning',
-          providerLane: resolvedLane,
-          label: health.stale
-            ? `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test result ignored after configuration changed.`
-            : `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test failed.`,
-          chips: ['Provider'],
-          detail: { configHash, stale: health.stale === true }
+            timeoutMs: PROVIDER_TEST_TIMEOUT_MS
+          })
         });
-        return result?.ok ? { ok: false, error: failure } : (result || { ok: false, error: failure });
-      } catch (error) {
-        const health = await recordProviderTestHealth(resolvedLane, 'fail', checkedAt, configHash, configRevision, error);
-        settleRuntimeActivity({
-          runId,
-          outcome: health.stale ? 'neutral' : 'warning',
-          phase: 'providerTestFailed',
-          severity: health.stale ? 'info' : 'warning',
-          providerLane: resolvedLane,
-          label: health.stale
-            ? `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test result ignored after configuration changed.`
-            : `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} provider test failed.`,
-          chips: ['Provider'],
-          detail: { configHash, stale: health.stale === true }
-        });
-        return {
-          ok: false,
-          healthStale: health.stale === true,
-          error: {
-            code: safeText(error?.code || 'RECURSION_PROVIDER_TEST_FAILED', 120),
-            message: safeText(error?.message || 'Provider test failed.', 300)
-          }
-        };
       }
+
+      const persisted = await recordProviderCertificationResult(
+        resolvedLane,
+        certification,
+        configHash,
+        configRevision
+      );
+      const stale = persisted.stale === true;
+      const passed = certification.status !== 'fail';
+      const label = stale
+        ? `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} profile certification ignored after configuration changed.`
+        : certification.status === 'pass'
+          ? `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} profile is Fused-certified.`
+          : certification.status === 'partial'
+            ? `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} profile is Segmented-certified.`
+            : `${resolvedLane === 'reasoner' ? 'Reasoner' : 'Utility'} profile certification failed.`;
+      settleRuntimeActivity({
+        runId,
+        outcome: stale ? 'neutral' : (passed ? 'success' : 'warning'),
+        phase: passed ? 'settled' : 'providerTestFailed',
+        severity: stale ? 'info' : (passed ? 'success' : 'warning'),
+        providerLane: resolvedLane,
+        label,
+        chips: ['Profile'],
+        detail: {
+          status: certification.status,
+          checks: certification.checks,
+          diagnosticCodes: certification.diagnosticCodes,
+          stale
+        }
+      });
+
+      return {
+        ok: passed,
+        certification,
+        certificationStale: stale,
+        ...(passed ? {} : {
+          error: {
+            code: certification.compactError.split(':')[0] || 'RECURSION_PROVIDER_TEST_FAILED',
+            message: certification.compactError || 'Profile certification failed.'
+          }
+        })
+      };
     })();
+
     activeProviderTests.set(resolvedLane, task);
     task.finally(() => {
       if (activeProviderTests.get(resolvedLane) === task) activeProviderTests.delete(resolvedLane);
@@ -6080,12 +6022,16 @@ export function createRecursionRuntime({
     const requests = buildCardRequests(plan, requestContext).map((request) => applyReasoningLaneToCardRequest(request, settings, runtimeProviderCapability));
     if (!requests.length) return empty;
     if (typeof generationRouter.batch !== 'function' && typeof generationRouter.generate !== 'function') return empty;
-    if (settings.pipelineMode === 'fused' && typeof generationRouter.generate === 'function') {
+    const pipelineDecision = resolveEffectivePipelineMode({
+      requestedMode: settings.pipelineMode,
+      utilityCapability: runtimeProviderCapability(settings, 'utility', 'prompt-packet')
+    });
+    if (pipelineDecision.effectiveMode === 'fused' && typeof generationRouter.generate === 'function') {
       return runFusedCardPipeline({
         runId,
         plan,
         snapshot,
-        settings,
+        settings: { ...settings, pipelineMode: pipelineDecision.effectiveMode },
         generationRouter,
         requests,
         requestContext,
@@ -6106,7 +6052,7 @@ export function createRecursionRuntime({
       runId,
       plan,
       snapshot,
-      settings,
+      settings: { ...settings, pipelineMode: pipelineDecision.effectiveMode },
       generationRouter,
       requests,
       sourceContext: cardSourceContext(snapshot),
@@ -6395,7 +6341,7 @@ export function createRecursionRuntime({
     };
   }
 
-  function executionProvenance(snapshot, settings, turnIdentity = null) {
+  function executionProvenance(snapshot, settings, turnIdentity = null, pipelineDecision = null) {
     const utility = settings?.providers?.utility || {};
     const turn = asObject(turnIdentity);
     return buildRunProvenance({
@@ -6405,10 +6351,12 @@ export function createRecursionRuntime({
       sourceIdentity: executionSourceIdentity(snapshot),
       settingsHash: hashJson(preparedGenerationSettingsSignature(settings)),
       provider: {
-        id: safeText(utility.source || utility.hostConnectionProfileId || 'utility', 180),
-        model: safeText(utility.openAICompatible?.model || utility.model || '', 180)
+        id: utility.connectionProfileId
+          ? `profile-${hashJson(utility.connectionProfileId).slice(0, 16)}`
+          : 'utility-unconfigured',
+        model: ''
       },
-      pipelineMode: settings.pipelineMode === 'fused' ? 'fused' : 'segmented',
+      pipelineMode: pipelineDecision?.effectiveMode || (settings.pipelineMode === 'fused' ? 'fused' : 'segmented'),
       promptVersions: {
         promptPacket: PROMPT_PACKET_VERSION,
         preprocessGraph: 1
@@ -6682,16 +6630,18 @@ export function createRecursionRuntime({
     };
   }
 
-  function durableSegmentedStages(context, plan) {
+  function durableSegmentedStages(context, plan, cardJobs = plan.cardJobs) {
+    const selectedCards = Array.isArray(cardJobs) ? cardJobs : [];
+    const scopedPlan = { ...plan, cardJobs: selectedCards };
     const requestContext = {
       runId: context.runId,
-      snapshotHash: plan.snapshotHash || hashJson(context.snapshot),
+      snapshotHash: scopedPlan.snapshotHash || hashJson(context.snapshot),
       snapshot: providerSafeSnapshot(context.snapshot, context.settings.retention),
       cardScope: runtimeScopePayload(context.settings),
       sourceCardsByFamily: activeCardDeckSourceCards(context.settings),
-      storyForm: plan.storyForm || UNKNOWN_STORY_FORM
+      storyForm: scopedPlan.storyForm || UNKNOWN_STORY_FORM
     };
-    const requests = buildCardRequests(plan, requestContext)
+    const requests = buildCardRequests(scopedPlan, requestContext)
       .map((request) => applyReasoningLaneToCardRequest(
         request,
         context.settings,
@@ -6708,7 +6658,7 @@ export function createRecursionRuntime({
       safeText(selectedCard?.family || selectedCard?.role || selectedCard?.roleId || '', 120)
     );
     return createSegmentedCardStages({
-      selectedCards: plan.cardJobs,
+      selectedCards,
       createCardRequest(selectedCard) {
         return requestForSelectedCard(selectedCard) || null;
       },
@@ -6807,7 +6757,7 @@ export function createRecursionRuntime({
             request?.prompt || '',
             'Correction required.',
             `Attempt ${attempt} was rejected [${safeText(error?.code || 'RECURSION_CARD_INVALID', 120)}]: ${safeText(error?.message || 'Card response was invalid.', 300)}`,
-            'Return one corrected JSON object only using schema "recursion.card.v1" with the requested role, family, snapshotHash, and exactly one items entry.'
+            'Return one corrected JSON object only with promptText and evidenceRefs.'
           ].filter(Boolean).join('\n\n')
         };
       },
@@ -6860,58 +6810,11 @@ export function createRecursionRuntime({
           return { ok: true, value: artifact };
         }
         const request = buildFusedCardBundleRequest(plan, requestContext);
-        const parsed = cardsFromFusedProviderResult(artifact?.providerResult, {
-          ...cardSourceContext(context.snapshot),
-          expectedSnapshotHash: request?.snapshotHash,
-          requestedCards: request?.requestedCards || [],
-          providerLane: request?.lane
+        return validateFusedProviderResult(artifact?.providerResult, {
+          selectedCards,
+          request,
+          cardContext: cardSourceContext(context.snapshot)
         });
-        const cards = Object.fromEntries(
-          parsed.cards.map((card) => [
-            safeText(card.family || card.role || card.id, 120),
-            sanitizeGeneratedCard(card)
-          ])
-        );
-        const outcomes = Object.fromEntries(selectedCards.map((selectedCard) => {
-          const family = safeText(selectedCard?.family || selectedCard?.role || '', 120);
-          return [
-            family,
-            cards[family]
-              ? { state: 'completed', reason: null }
-              : { state: 'failed', reason: 'invalid-card' }
-          ];
-        }));
-        if (Object.keys(cards).length > 0) {
-          return {
-            ok: true,
-            value: { cards, outcomes, fallback: null }
-          };
-        }
-        if (Number(artifact?.attempt || 0) >= context.settings.modelAttemptsPerStep) {
-          return {
-            ok: true,
-            value: {
-              cards: {},
-              outcomes,
-              fallback: {
-                mode: 'segmented',
-                reason: 'zero-useful-fused-cards'
-              }
-            }
-          };
-        }
-        return {
-          ok: false,
-          error: {
-            code: 'RECURSION_FUSED_ZERO_USEFUL_CARDS',
-            category: 'validation',
-            retryable: true,
-            message: 'Fused bundle produced no useful cards.'
-          }
-        };
-      },
-      createSegmentedFallbackStages() {
-        return durableSegmentedStages(context, plan);
       }
     }).map((stage) => ({
       ...stage,
@@ -7207,7 +7110,7 @@ export function createRecursionRuntime({
           ...settingsForPlan(context.settings, plan, runtimeProviderCapability),
           reasonerUse: 'off'
         };
-        return composePromptPacket({
+        const packet = await composePromptPacket({
           hand: dependencies['preprocess.hand'].artifact,
           snapshot: context.snapshot,
           settings: effectiveSettings,
@@ -7216,9 +7119,24 @@ export function createRecursionRuntime({
           runId: context.runId,
           precomposedGuidance: dependencies['preprocess.guidance'].artifact,
           storyForm: plan.storyForm || UNKNOWN_STORY_FORM,
-          pipelineMode: context.settings.pipelineMode === 'fused' ? 'fused' : 'segmented',
-          planDiagnostics: plan.diagnostics
+          pipelineMode: context.effectivePipelineMode,
+          planDiagnostics: mergeDiagnostics(
+            plan.diagnostics,
+            context.pipelineDecision.reasonCode ? [context.pipelineDecision.reasonCode] : []
+          )
         });
+        return {
+          ...packet,
+          pipelineMode: context.effectivePipelineMode,
+          diagnostics: {
+            ...packet.diagnostics,
+            requestedPipelineMode: context.pipelineDecision.requestedMode,
+            pipelineMode: context.pipelineDecision.effectiveMode,
+            pipelineReasonCodes: context.pipelineDecision.reasonCode
+              ? [context.pipelineDecision.reasonCode]
+              : []
+          }
+        };
       },
       validate(artifact) {
         try {
@@ -7332,8 +7250,19 @@ export function createRecursionRuntime({
     });
   }
 
+  function unresolvedFusedCardJobs(plan, fusedArtifact) {
+    const unresolved = new Set(
+      Array.isArray(fusedArtifact?.fallback?.families)
+        ? fusedArtifact.fallback.families.map((family) => safeText(family, 120))
+        : []
+    );
+    return (Array.isArray(plan?.cardJobs) ? plan.cardJobs : [])
+      .filter((job) => unresolved.has(safeText(job?.family || job?.role || '', 120)));
+  }
+
   function durableCardStageSet(context, plan, {
-    segmentedFallback = false
+    segmentedFallback = false,
+    fallbackCardJobs = []
   } = {}) {
     const cardJobs = Array.isArray(plan?.cardJobs) ? plan.cardJobs : [];
     if (cardJobs.length === 0) {
@@ -7343,8 +7272,8 @@ export function createRecursionRuntime({
         segmentedFallback: false
       };
     }
-    if (context.settings.pipelineMode !== 'fused') {
-      const stages = durableSegmentedStages(context, plan);
+    if (context.effectivePipelineMode !== 'fused') {
+      const stages = durableSegmentedStages(context, plan, cardJobs);
       return {
         stages,
         resultStageIds: stages.map((stage) => stage.id),
@@ -7359,10 +7288,10 @@ export function createRecursionRuntime({
         segmentedFallback: false
       };
     }
-    const segmentedStages = durableSegmentedStages(context, plan);
+    const segmentedStages = durableSegmentedStages(context, plan, fallbackCardJobs);
     return {
       stages: [...fusedStages, ...segmentedStages],
-      resultStageIds: segmentedStages.map((stage) => stage.id),
+      resultStageIds: [fusedStages[0].id, ...segmentedStages.map((stage) => stage.id)],
       segmentedFallback: true
     };
   }
@@ -7509,7 +7438,8 @@ export function createRecursionRuntime({
     }
 
     let segmentedFallback = false;
-    if (context.settings.pipelineMode === 'fused') {
+    let fallbackCardJobs = [];
+    if (context.effectivePipelineMode === 'fused') {
       const fusedRecord = manifest.stageRecords?.['preprocess.cards.fused'];
       if (!fusedRecord || validateDownstream) {
         manifest = await startDurableGraph(
@@ -7526,16 +7456,23 @@ export function createRecursionRuntime({
         'preprocess.cards.fused'
       );
       segmentedFallback = fusedArtifact?.fallback?.mode === 'segmented';
+      fallbackCardJobs = segmentedFallback
+        ? unresolvedFusedCardJobs(plan, fusedArtifact)
+        : [];
+      const fallbackStages = durableSegmentedStages(context, plan, fallbackCardJobs);
       if (
         segmentedFallback
-        && (validateDownstream || !durableSegmentedStages(context, plan).every(
+        && (validateDownstream || !fallbackStages.every(
           (stage) => manifest.stageRecords?.[stage.id]?.state === 'completed'
         ))
       ) {
         manifest = await startDurableGraph(
           context,
           manifest,
-          durableCardWaveGraph(context, plan, { segmentedFallback: true })
+          durableCardWaveGraph(context, plan, {
+            segmentedFallback: true,
+            fallbackCardJobs
+          })
         );
         if (manifest.state !== 'completed') {
           return durableOperationResult(manifest, plan);
@@ -7557,10 +7494,11 @@ export function createRecursionRuntime({
     }
 
     if (!manifest.stageRecords?.['preprocess.install'] || validateDownstream) {
+      const graphOptions = { segmentedFallback, fallbackCardJobs };
       manifest = await startDurableGraph(
         context,
         manifest,
-        durableFullGraph(context, plan, { segmentedFallback })
+        durableFullGraph(context, plan, graphOptions)
       );
       if (manifest.state !== 'completed') {
         return durableOperationResult(manifest, plan);
@@ -7568,7 +7506,7 @@ export function createRecursionRuntime({
     }
     preprocessGraphs.set(
       manifest.operationId,
-      durableFullGraph(context, plan, { segmentedFallback })
+      durableFullGraph(context, plan, { segmentedFallback, fallbackCardJobs })
     );
     return finalizeDurablePreprocess(context, manifest, plan);
   }
@@ -7671,6 +7609,10 @@ export function createRecursionRuntime({
     const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180)
       || DEFAULT_CHAT_ID;
     const initialCache = null;
+    const pipelineDecision = resolveEffectivePipelineMode({
+      requestedMode: settings.pipelineMode,
+      utilityCapability: runtimeProviderCapability(settings, 'utility', 'prompt-packet')
+    });
     const fallbackPlan = localFallbackPlan(snapshot, settings);
     fallbackPlan.source = {
       ...fallbackPlan.source,
@@ -7687,11 +7629,13 @@ export function createRecursionRuntime({
       ),
       pendingUserMessage,
       settings,
+      pipelineDecision,
+      effectivePipelineMode: pipelineDecision.effectiveMode,
       initialCache,
       turnIdentity,
       generationClassification,
       fallbackPlan,
-      provenance: executionProvenance(snapshot, settings, turnIdentity),
+      provenance: executionProvenance(snapshot, settings, turnIdentity, pipelineDecision),
       hostGeneration,
       generationType: safeText(generationType, 40)
     };
@@ -7725,14 +7669,18 @@ export function createRecursionRuntime({
     const plan = await loadExecutionArtifact(manifest, 'preprocess.arbiter');
     if (!plan) return durableBaseGraph(context);
     let segmentedFallback = false;
-    if (context.settings.pipelineMode === 'fused') {
+    let fallbackCardJobs = [];
+    if (context.effectivePipelineMode === 'fused') {
       const fusedArtifact = await loadExecutionArtifact(
         manifest,
         'preprocess.cards.fused'
       );
       segmentedFallback = fusedArtifact?.fallback?.mode === 'segmented';
+      fallbackCardJobs = segmentedFallback
+        ? unresolvedFusedCardJobs(plan, fusedArtifact)
+        : [];
     }
-    return durableFullGraph(context, plan, { segmentedFallback });
+    return durableFullGraph(context, plan, { segmentedFallback, fallbackCardJobs });
   }
 
   async function markLastBriefHistorical(chatKey, reason = 'new-user-turn') {
@@ -7862,7 +7810,7 @@ export function createRecursionRuntime({
       operationId,
       chatKey,
       phase: 'preprocess',
-      pipelineMode: settings.pipelineMode === 'fused' ? 'fused' : 'segmented',
+      pipelineMode: context.effectivePipelineMode,
       createdAt: nowIso(),
       sourceIdentity: provenance.sourceIdentity,
       provenance,
@@ -7879,6 +7827,17 @@ export function createRecursionRuntime({
     preprocessContexts.set(operationId, context);
     let graph = durableBaseGraph(context);
     preprocessGraphs.set(operationId, graph);
+    if (context.pipelineDecision.reasonCode) {
+      stageRuntimeActivity({
+        runId,
+        phase: 'pipelineModeAdjusted',
+        severity: 'info',
+        outcome: 'neutral',
+        label: 'Fused was requested, but the Utility Connection Profile is not Fused-certified. This run is using Segmented.',
+        chips: ['Pre-process', 'Segmented'],
+        detail: { code: context.pipelineDecision.reasonCode }
+      });
+    }
     startRuntimeActivity({ runId, label: 'Reading current turn...', chips: ['Pre-process'] });
     if (
       queuedIntent?.mode === 'full-fresh'
@@ -8912,10 +8871,6 @@ export function createRecursionRuntime({
       clearPendingFreshNextGeneration();
       await waitForExternalMutations();
       clearPreparedGeneration();
-      if (host && typeof host === 'object') {
-        if (previousProviderAuthFailureHandler === undefined) delete host.handleProviderAuthFailure;
-        else host.handleProviderAuthFailure = previousProviderAuthFailureHandler;
-      }
     },
     async refreshScene() {
       return prepareForGeneration({ refreshReason: 'user-refresh' });
@@ -8943,8 +8898,6 @@ export function createRecursionRuntime({
     updateSettings,
     resetSettingsMenu,
     updateProviderConfig,
-    clearProviderKey,
-    fetchProviderModels,
     testProvider,
     providerOperationState,
     providerCapability: providerCapabilityView,

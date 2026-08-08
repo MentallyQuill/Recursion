@@ -227,7 +227,7 @@ The UI can show:
 - validation warnings and regeneration requests
 - inspector-only notes as non-injected diagnostics
 
-The inspector is read-oriented. V1 actions stay broad: refresh scene, copy prompt packet metadata, open settings, test providers, clear OpenAI-compatible session keys, and inspect diagnostics.
+The inspector is read-oriented. V1 actions stay broad: refresh scene, copy prompt packet metadata, open settings, test Connection Profiles, and inspect diagnostics.
 
 ## Card Family Matrix
 

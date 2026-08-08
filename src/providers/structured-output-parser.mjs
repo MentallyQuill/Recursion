@@ -246,20 +246,18 @@ export function parseStructuredJsonText(text = '', options = {}) {
     { value: repairWithJsonRepair(transportDecodedBalanced), repairKind: 'escaped-transport-line-breaks' }
   ]);
   let lastError = null;
+  let parsedNonObject = false;
 
   for (const candidateEntry of candidates) {
     const candidate = candidateEntry.value;
     try {
-      const parsed = JSON.parse(candidate);
+      let parsed = JSON.parse(candidate);
+      if (options.requireObject !== false && Array.isArray(parsed) && parsed.length === 1 && isObject(parsed[0])) {
+        parsed = parsed[0];
+      }
       if (options.requireObject !== false && !isObject(parsed)) {
-        return {
-          ok: false,
-          error: 'Provider structured output must be an object.',
-          diagnostic: createDiagnostic(STRUCTURED_OUTPUT_PARSE_ERROR_CODES.JSON_NOT_OBJECT, 'Provider structured output must be an object.', {
-            visibleContentLength: source.length,
-            sample: source.slice(0, 600)
-          })
-        };
+        parsedNonObject = true;
+        continue;
       }
       return {
         ok: true,
@@ -274,12 +272,20 @@ export function parseStructuredJsonText(text = '', options = {}) {
     }
   }
 
+  if (parsedNonObject) {
+    return {
+      ok: false,
+      error: 'Provider structured output must be an object.',
+      diagnostic: createDiagnostic(STRUCTURED_OUTPUT_PARSE_ERROR_CODES.JSON_NOT_OBJECT, 'Provider structured output must be an object.', {
+        visibleContentLength: source.length
+      })
+    };
+  }
   return {
     ok: false,
     error: lastError?.message || 'Provider response was not valid JSON.',
     diagnostic: createDiagnostic(STRUCTURED_OUTPUT_PARSE_ERROR_CODES.JSON_INVALID, lastError?.message || 'Provider response was not valid JSON.', {
-      visibleContentLength: source.length,
-      sample: source.slice(0, 600)
+      visibleContentLength: source.length
     })
   };
 }

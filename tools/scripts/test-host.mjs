@@ -1,16 +1,9 @@
 import { createSillyTavernHost, normalizeSillyTavernMessageEvent, promptBlocksFromPacket } from '../../src/hosts/sillytavern/host.mjs';
 import { listSillyTavernConnectionProfiles } from '../../src/hosts/sillytavern/provider-profiles.mjs';
-import { createGenerationRouter } from '../../src/providers.mjs';
 import { hashJson } from '../../src/core.mjs';
 import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
 
 await import('./test-post-process-host-writer.mjs');
-
-async function flushMicrotasks(count = 6) {
-  for (let index = 0; index < count; index += 1) {
-    await Promise.resolve();
-  }
-}
 
 const prompts = [];
 const context = {
@@ -139,107 +132,74 @@ assertEqual(
 }
 
 {
-  const contextProfileService = {
+  const profileService = {
     getSupportedProfiles() {
       return [
-        { profileId: 'ctx-utility', label: 'Context Utility', model_name: 'glm-fast' },
-        { id: 'ctx-reasoner', name: 'Context Reasoner', settings: { model: 'o-reasoner' } }
+        {
+          id: 'ctx-utility',
+          name: 'Context Utility',
+          model: 'glm-fast',
+          api: 'textgenerationwebui',
+          preset: 'Local Precise',
+          instruct: 'ChatML',
+          'secret-id': 'must-not-leak',
+          'api-url': 'http://127.0.0.1:5001'
+        },
+        {
+          id: 'ctx-reasoner',
+          name: 'Context Reasoner',
+          model: 'o-reasoner',
+          api: 'openai',
+          preset: 'Reasoner Precise',
+          instruct: ''
+        }
       ];
+    },
+    getProfile(id) {
+      return this.getSupportedProfiles().find((profile) => profile.id === id) || null;
+    },
+    validateProfile(profile) {
+      return profile?.api === 'openai'
+        ? { selected: 'openai', source: 'openai' }
+        : { selected: 'textgenerationwebui', type: 'koboldcpp' };
+    },
+    async sendRequest() {
+      return { text: '{}' };
     }
   };
   const contextProfiles = listSillyTavernConnectionProfiles({
-    context: { ConnectionManagerRequestService: contextProfileService },
-    globals: {}
+    context: { ConnectionManagerRequestService: profileService }
   });
   assertDeepEqual(
-    contextProfiles.map((profile) => [profile.id, profile.label, profile.model]),
+    contextProfiles,
     [
-      ['ctx-utility', 'Context Utility / glm-fast', 'glm-fast'],
-      ['ctx-reasoner', 'Context Reasoner / o-reasoner', 'o-reasoner']
+      {
+        id: 'ctx-utility',
+        name: 'Context Utility',
+        model: 'glm-fast',
+        label: 'Context Utility / glm-fast',
+        api: 'textgenerationwebui',
+        completionMode: 'text',
+        presetName: 'Local Precise',
+        instructName: 'ChatML'
+      },
+      {
+        id: 'ctx-reasoner',
+        name: 'Context Reasoner',
+        model: 'o-reasoner',
+        label: 'Context Reasoner / o-reasoner',
+        api: 'openai',
+        completionMode: 'chat',
+        presetName: 'Reasoner Precise',
+        instructName: ''
+      }
     ],
-    'host connection profiles are detected from context.ConnectionManagerRequestService'
+    'host connection profiles use only the supported Connection Manager surface'
   );
-
-  const objectMapProfiles = listSillyTavernConnectionProfiles({
-    context: {
-      state: {
-        connectionManager: {
-          profiles: {
-            mapUtility: { uuid: 'map-utility', title: 'Map Utility', generationSettings: { model: 'map-fast' } },
-            mapReasoner: { profile_id: 'map-reasoner', profileName: 'Map Reasoner', modelId: 'map-deep' }
-          }
-        }
-      }
-    },
-    globals: {}
-  });
-  assertDeepEqual(
-    objectMapProfiles.map((profile) => [profile.id, profile.label, profile.model]),
-    [
-      ['map-utility', 'Map Utility / map-fast', 'map-fast'],
-      ['map-reasoner', 'Map Reasoner / map-deep', 'map-deep']
-    ],
-    'host connection profiles are detected from nested object-map host state'
-  );
-
-  const profilesBesideCharacters = listSillyTavernConnectionProfiles({
-    context: {
-      characters: [
-        { id: 'char-sam', name: 'Sam Vickers', avatar: 'sam.png', data: { description: 'character card' } },
-        { id: 'char-ash', name: 'Ashes of Peace', model: 'not-a-provider-model' }
-      ],
-      ConnectionManagerRequestService: {
-        getSupportedProfiles() {
-          return [{ id: 'real-profile', label: 'Real Profile', model: 'glm-real' }];
-        }
-      }
-    },
-    globals: {
-      extension_settings: {
-        characterCards: {
-          charMap: { id: 'char-map', name: 'Mapped Character Card', model: 'not-a-profile' }
-        }
-      }
-    }
-  });
-  assertDeepEqual(
-    profilesBesideCharacters.map((profile) => [profile.id, profile.label]),
-    [['real-profile', 'Real Profile / glm-real']],
-    'host connection profile discovery rejects SillyTavern character cards'
-  );
-
-  const characterCardWithExpensiveData = {
-    id: 'char-expensive',
-    name: 'Character Card That Must Not Be Traversed',
-    get data() {
-      throw new Error('character card data was traversed during connection profile discovery');
-    }
-  };
-  const profilesBesideExpensiveCharacters = listSillyTavernConnectionProfiles({
-    context: {
-      characters: [characterCardWithExpensiveData],
-      state: {
-        connectionManager: {
-          profiles: [{ id: 'state-profile', label: 'State Profile', model: 'glm-state' }]
-        }
-      }
-    },
-    globals: {
-      extension_settings: {
-        characterCards: {
-          get charExpensive() {
-            throw new Error('extension character card map was traversed during connection profile discovery');
-          }
-        }
-      }
-    }
-  });
-  assertDeepEqual(
-    profilesBesideExpensiveCharacters.map((profile) => [profile.id, profile.label]),
-    [['state-profile', 'State Profile / glm-state']],
-    'host connection profile discovery skips character-card containers instead of walking them'
-  );
+  assertEqual(JSON.stringify(contextProfiles).includes('must-not-leak'), false, 'profile metadata omits secret identifiers');
+  assertEqual(JSON.stringify(contextProfiles).includes('127.0.0.1'), false, 'profile metadata omits endpoint URLs');
 }
+
 
 {
   const boundedContext = {
@@ -1251,9 +1211,14 @@ const quietHost = createSillyTavernHost({
   }),
   settingsRoot: {}
 });
-const quietResponse = await quietHost.generation.generate({ prompt: 'Fallback prompt' });
-assertEqual(quietResponse.text, 'quiet text', 'quiet generation result normalized');
-assertEqual(quietCalls[0], 'Fallback prompt', 'quiet fallback receives prompt');
+let quietFallbackError = null;
+try {
+  await quietHost.generation.generate({ prompt: 'Fallback prompt' });
+} catch (error) {
+  quietFallbackError = error;
+}
+assertEqual(quietFallbackError?.code, 'RECURSION_CONNECTION_MANAGER_UNAVAILABLE', 'model stages require Connection Manager support');
+assertEqual(quietCalls.length, 0, 'model stages never fall back to quiet generation');
 
 {
   const generateCalls = [];
@@ -1388,409 +1353,6 @@ assertEqual(quietCalls[0], 'Fallback prompt', 'quiet fallback receives prompt');
   assertEqual(stopResult.error.code, 'RECURSION_HOST_STOP_UNAVAILABLE', 'host stop returns stable unavailable error code');
 }
 
-{
-  const batchCalls = [];
-  const batchSlotEvents = [];
-  let releaseFirst = null;
-  const concurrentBatchHost = createSillyTavernHost({
-    contextFactory: () => ({
-      currentChatId: 'concurrent-batch-chat',
-      chat: [],
-      generateRaw: async (request) => {
-        batchCalls.push(request.prompt);
-        if (request.prompt === 'slow first') {
-          await new Promise((resolve) => {
-            releaseFirst = resolve;
-          });
-        }
-        return { text: `batch:${request.prompt}` };
-      }
-    }),
-    settingsRoot: {}
-  });
-  assertDeepEqual(
-    concurrentBatchHost.generation.capabilities?.batch,
-    {
-      mode: 'concurrent',
-      maxConcurrency: 4,
-      slotIsolation: true,
-      supportsAbortSignal: true,
-      source: 'sillytavern-host-adapter'
-    },
-    'host batch advertises concurrent slot-isolated capability'
-  );
-  const pendingBatch = concurrentBatchHost.generation.batch([
-    { roleId: 'utilityArbiter', prompt: 'slow first', responseSchema: 'recursion.utilityArbiter.v1' },
-    { roleId: 'providerTest', prompt: 'fast second', responseSchema: 'recursion.providerTest.v1' }
-  ], {
-    onSlotSettled: (slot) => batchSlotEvents.push(slot)
-  });
-  await flushMicrotasks();
-  const submittedBeforeFirstSettled = [...batchCalls];
-  assertDeepEqual(
-    batchSlotEvents.map((slot) => [slot.index, slot.response?.text]),
-    [[1, 'batch:fast second']],
-    'host batch reports fast slot settlement before the blocked slot resolves'
-  );
-  releaseFirst();
-  const batchResults = await pendingBatch;
-  assertDeepEqual(
-    submittedBeforeFirstSettled,
-    ['slow first', 'fast second'],
-    'host batch submits sibling requests before first request settles'
-  );
-  assertDeepEqual(
-    batchResults.map((entry) => entry.text),
-    [
-      'batch:slow first',
-      'batch:fast second'
-    ],
-    'host batch preserves response order after concurrent submission'
-  );
-
-  const isolatedFailureHost = createSillyTavernHost({
-    contextFactory: () => ({
-      currentChatId: 'isolated-batch-chat',
-      chat: [],
-      generateRaw: async (request) => {
-        if (request.prompt === 'bad second') {
-          const error = new Error('isolated host slot failed');
-          error.code = 'RECURSION_TEST_HOST_SLOT_FAILED';
-          throw error;
-        }
-        return { text: `batch:${request.prompt}` };
-      }
-    }),
-    settingsRoot: {}
-  });
-  const isolatedFailureBatch = await isolatedFailureHost.generation.batch([
-    { roleId: 'utilityArbiter', prompt: 'good first', responseSchema: 'recursion.utilityArbiter.v1' },
-    { roleId: 'providerTest', prompt: 'bad second', responseSchema: 'recursion.providerTest.v1' }
-  ]);
-  assertEqual(isolatedFailureBatch[0].text, 'batch:good first', 'host batch keeps successful slot when sibling fails');
-  assertEqual(isolatedFailureBatch[1].ok, false, 'host batch returns per-slot failure envelope');
-  assertEqual(isolatedFailureBatch[1].error.code, 'RECURSION_TEST_HOST_SLOT_FAILED', 'host batch preserves per-slot failure code');
-}
-
-const quietProfileHost = createSillyTavernHost({
-  contextFactory: () => ({
-    currentChatId: 'quiet-profile-chat',
-    chat: [],
-    generateQuietPrompt: async () => 'quiet profile text'
-  }),
-  settingsRoot: {
-    recursion: {
-      providers: {
-        utility: {
-          source: 'host-connection-profile',
-          hostConnectionProfileId: 'quiet-profile-a'
-        }
-      }
-    }
-  }
-});
-const quietProfileResult = await createGenerationRouter({ client: quietProfileHost.providerClient }).generate('utilityArbiter', { prompt: 'Profile should not silently fall back.' });
-assertEqual(quietProfileResult.ok, false, 'host profile route fails when only quiet generation is available');
-assertEqual(quietProfileResult.error.code, 'RECURSION_HOST_PROFILE_UNSUPPORTED', 'host profile route reports unsupported API instead of current-model fallback');
-
-const connectionProfileCalls = [];
-const connectionProfileSignal = new AbortController().signal;
-const connectionProfileHost = createSillyTavernHost({
-  contextFactory: () => ({
-    chatId: 'connection-profile-chat',
-    chat: [],
-    ConnectionManagerRequestService: {
-      async sendRequest(profileId, messages, maxTokens, requestOptions, parameters) {
-        connectionProfileCalls.push({ profileId, messages, maxTokens, requestOptions, parameters });
-        return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };
-      }
-    }
-  }),
-  settingsRoot: {
-    recursion: {
-      providers: {
-        utility: {
-          source: 'host-connection-profile',
-          hostConnectionProfileId: 'utility-profile-service',
-          maxTokens: 512,
-          temperature: 0.15,
-          topP: 0.7
-        }
-      }
-    }
-  }
-});
-const connectionProfileResult = await createGenerationRouter({ client: connectionProfileHost.providerClient }).generate('utilityArbiter', {
-  prompt: 'Use profile service.',
-  systemPrompt: 'System profile service.',
-  snapshotHash: 'profile-snapshot-hash',
-  reasoningCategory: 'final-brief',
-  reasoningIntent: 'low',
-  signal: connectionProfileSignal
-});
-assertEqual(connectionProfileResult.ok, true, 'host connection profile routes through ConnectionManagerRequestService when available');
-assertEqual(connectionProfileCalls[0].profileId, 'utility-profile-service', 'connection profile service receives profile id');
-assertDeepEqual(
-  connectionProfileCalls[0].messages,
-  [
-    { role: 'system', content: 'System profile service.' },
-    { role: 'user', content: 'Use profile service.' }
-  ],
-  'connection profile service receives system and user messages'
-);
-assertEqual(connectionProfileCalls[0].maxTokens, 512, 'connection profile service receives configured max tokens');
-assertEqual(connectionProfileCalls[0].requestOptions.stream, false, 'connection profile service disables streaming for structured calls');
-assertEqual(connectionProfileCalls[0].requestOptions.extractData, false, 'connection profile service preserves raw structured output for Recursion parsing and recovery');
-assertEqual(connectionProfileCalls[0].requestOptions.includePreset, false, 'connection profile service skips host preset for machine JSON');
-assertEqual(connectionProfileCalls[0].requestOptions.includeInstruct, false, 'connection profile service skips host instruct for machine JSON');
-assertEqual(connectionProfileCalls[0].parameters.json_schema.name, 'recursion_utilityArbiter_v1', 'connection profile service receives JSON schema name');
-assertEqual(connectionProfileCalls[0].parameters.json_schema.value.properties.schema.const, 'recursion.utilityArbiter.v1', 'connection profile service constrains provider schema');
-assertEqual(connectionProfileCalls[0].parameters.json_schema.value.properties.snapshotHash.const, 'profile-snapshot-hash', 'connection profile service constrains snapshot hash');
-assert(connectionProfileCalls[0].parameters.json_schema.value.required.includes('snapshotHash'), 'connection profile service requires snapshot hash');
-assertDeepEqual(
-  connectionProfileCalls[0].parameters.reasoning,
-  { intent: 'minimal', category: 'final-brief', exclude: true },
-  'connection profile service receives sanitized reasoning intent'
-);
-assertEqual(connectionProfileCalls[0].parameters.reasoning_effort, 'minimal', 'connection profile service maps low reasoning intent to SillyTavern reasoning_effort');
-assertEqual(connectionProfileCalls[0].parameters.include_reasoning, false, 'connection profile service excludes private reasoning from the provider response');
-assertEqual(connectionProfileCalls[0].parameters.temperature, 0.15, 'connection profile service receives configured temperature');
-assertEqual(connectionProfileCalls[0].parameters.top_p, 0.7, 'connection profile service receives configured top p');
-const cappedConnectionProfileResult = await createGenerationRouter({ client: connectionProfileHost.providerClient }).generate('utilityArbiter', {
-  prompt: 'Use the configured profile ceiling.',
-  snapshotHash: 'profile-capped-snapshot-hash',
-  responseLength: 900
-});
-assertEqual(cappedConnectionProfileResult.ok, true, 'host connection profile accepts an oversized request budget');
-assertEqual(connectionProfileCalls[1].maxTokens, 512, 'host connection profile request cannot exceed configured lane max tokens');
-assert(typeof connectionProfileCalls[0].parameters.signal?.addEventListener === 'function', 'connection profile service receives abort-capable provider signal');
-assertEqual(connectionProfileCalls[0].parameters.signal.aborted, false, 'connection profile service receives active provider signal');
-
-const unlistedProfileCalls = [];
-const unlistedProfileHost = createSillyTavernHost({
-  contextFactory: () => ({
-    chatId: 'unlisted-profile-chat',
-    chat: [],
-    ConnectionManagerRequestService: {
-      async sendRequest(profileId, messages, maxTokens, requestOptions, parameters) {
-        unlistedProfileCalls.push({ profileId, messages, maxTokens, requestOptions, parameters });
-        return {
-          text: JSON.stringify({
-            schema: 'recursion.postProcessGuidance.v1',
-            snapshotHash: 'unlisted-profile-snapshot',
-            sourceHash: 'unlisted-profile-source',
-            guidanceText: 'Preserve the scene state and answer the newest user turn directly.'
-          })
-        };
-      }
-    }
-  }),
-  settingsRoot: {
-    recursion: {
-      reasoningLevel: 'medium',
-      providers: {
-        utility: {
-          source: 'host-connection-profile',
-          hostConnectionProfileId: 'saved-but-unlisted-profile',
-          maxTokens: 512
-        }
-      }
-    }
-  }
-});
-const unlistedProfileResult = await createGenerationRouter({ client: unlistedProfileHost.providerClient }).generate('postProcessGuidanceUtility', {
-  prompt: 'Synthesize post-process guidance through a callable saved profile.',
-  snapshotHash: 'unlisted-profile-snapshot',
-  sourceHash: 'unlisted-profile-source',
-  reasoningLevel: 'medium'
-});
-assertEqual(unlistedProfileResult.ok, true, 'production calls may use a saved profile even when synchronous profile enumeration is unavailable');
-assertEqual(unlistedProfileCalls.length, 1, 'callable unlisted profile reaches ConnectionManagerRequestService');
-assertEqual(unlistedProfileCalls[0].profileId, 'saved-but-unlisted-profile', 'callable unlisted profile preserves its saved profile id');
-
-const deepSeekProfileCalls = [];
-const deepSeekProfileHost = createSillyTavernHost({
-  contextFactory: () => ({
-    chatId: 'deepseek-profile-chat',
-    chat: [],
-    ConnectionManagerRequestService: {
-      getSupportedProfiles() {
-        return [{
-          id: 'deepseek-thinking-profile',
-          name: 'DeepSeek Thinking',
-          api: 'nanogpt',
-          model: 'deepseek/deepseek-v4-pro-cheaper:thinking'
-        }];
-      },
-      async sendRequest(profileId, messages, maxTokens, requestOptions, parameters) {
-        deepSeekProfileCalls.push({ profileId, messages, maxTokens, requestOptions, parameters });
-        return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };
-      }
-    }
-  }),
-  settingsRoot: {
-    recursion: {
-      providers: {
-        utility: {
-          source: 'host-connection-profile',
-          hostConnectionProfileId: 'deepseek-thinking-profile',
-          resolvedModelLabel: 'stale-openai-model',
-          maxTokens: 512
-        }
-      }
-    }
-  }
-});
-for (const reasoningIntent of ['minimal', 'medium', 'high']) {
-  const result = await createGenerationRouter({ client: deepSeekProfileHost.providerClient }).generate('utilityArbiter', {
-    prompt: `DeepSeek ${reasoningIntent} reasoning.`,
-    snapshotHash: `deepseek-${reasoningIntent}-snapshot`,
-    reasoningCategory: 'enhancement',
-    reasoningIntent
-  });
-  assertEqual(result.ok, true, `DeepSeek connection profile accepts ${reasoningIntent} reasoning intent`);
-}
-assertDeepEqual(
-  deepSeekProfileCalls.map((call) => call.parameters.reasoning_effort),
-  ['min', 'max', 'max'],
-  'DeepSeek thinking profile uses SillyTavern NanoGPT efforts that become provider none or high'
-);
-assertDeepEqual(
-  deepSeekProfileCalls.map((call) => call.parameters.reasoning.intent),
-  ['minimal', 'medium', 'high'],
-  'DeepSeek thinking profile preserves Recursion semantic reasoning metadata'
-);
-
-const nemotronProfileCalls = [];
-const nemotronProfileHost = createSillyTavernHost({
-  contextFactory: () => ({
-    chatId: 'nemotron-profile-chat',
-    chat: [],
-    ConnectionManagerRequestService: {
-      getSupportedProfiles() {
-        return [{
-          id: 'nemotron-thinking-profile',
-          name: 'Nemotron Thinking',
-          api: 'nanogpt',
-          model: 'nvidia/nemotron-3-ultra-550b-a55b:thinking'
-        }];
-      },
-      async sendRequest(profileId, messages, maxTokens, requestOptions, parameters) {
-        nemotronProfileCalls.push({ profileId, messages, maxTokens, requestOptions, parameters });
-        return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };
-      }
-    }
-  }),
-  settingsRoot: {
-    recursion: {
-      providers: {
-        utility: {
-          source: 'host-connection-profile',
-          hostConnectionProfileId: 'nemotron-thinking-profile',
-          maxTokens: 512
-        }
-      }
-    }
-  }
-});
-for (const reasoningIntent of ['minimal', 'medium', 'high']) {
-  const result = await createGenerationRouter({ client: nemotronProfileHost.providerClient }).generate('utilityArbiter', {
-    prompt: `Nemotron ${reasoningIntent} reasoning.`,
-    snapshotHash: `nemotron-${reasoningIntent}-snapshot`,
-    reasoningCategory: 'enhancement',
-    reasoningIntent
-  });
-  assertEqual(result.ok, true, `Nemotron NanoGPT profile accepts ${reasoningIntent} reasoning intent`);
-}
-assertDeepEqual(
-  nemotronProfileCalls.map((call) => call.parameters.reasoning_effort),
-  ['min', 'min', 'min'],
-  'Nemotron thinking profile disables hidden reasoning so machine JSON retains its output budget'
-);
-assertDeepEqual(
-  nemotronProfileCalls.map((call) => call.parameters.reasoning.intent),
-  ['minimal', 'medium', 'high'],
-  'Nemotron NanoGPT profile preserves Recursion semantic reasoning metadata'
-);
-
-const currentModelRawCalls = [];
-const currentModelProfileCalls = [];
-const currentModelHost = createSillyTavernHost({
-  contextFactory: () => ({
-    chatId: 'current-model-stale-profile-chat',
-    chat: [],
-    generateRaw: async (request) => {
-      currentModelRawCalls.push(request);
-      if (request.jsonSchema?.name === 'recursion_postProcessGuidance_v1') {
-        return {
-          text: JSON.stringify({
-            schema: 'recursion.postProcessGuidance.v1',
-            snapshotHash: request.jsonSchema.value.properties.snapshotHash.const,
-            sourceHash: request.jsonSchema.value.properties.sourceHash.const,
-            guidanceText: 'Continue from the established scene state and answer the newest turn.'
-          })
-        };
-      }
-      return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };
-    },
-    ConnectionManagerRequestService: {
-      async sendRequest(profileId, messages, maxTokens, requestOptions, parameters) {
-        currentModelProfileCalls.push({ profileId, messages, maxTokens, requestOptions, parameters });
-        return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };
-      }
-    }
-  }),
-  settingsRoot: {
-    recursion: {
-      providers: {
-        utility: {
-          source: 'host-current-model',
-          hostConnectionProfileId: 'stale-utility-profile',
-          maxTokens: 654,
-          temperature: 0.33,
-          topP: 0.8
-        }
-      }
-    }
-  }
-});
-const currentModelRouted = await createGenerationRouter({ client: currentModelHost.providerClient }).generate('utilityArbiter', {
-  prompt: 'Use current model.',
-  snapshotHash: 'current-model-schema-snapshot'
-});
-assertEqual(currentModelRouted.ok, true, 'host current model routes successfully with stale profile id');
-assertEqual(currentModelProfileCalls.length, 0, 'host current model does not call connection profile service with stale profile id');
-assertEqual(currentModelRawCalls.length, 1, 'host current model uses generateRaw when available');
-assertEqual(currentModelRawCalls[0].providerSource, 'host-current-model', 'host current model source is passed to generateRaw');
-assertEqual(currentModelRawCalls[0].jsonSchema.name, 'recursion_utilityArbiter_v1', 'host current model receives the normalized machine JSON schema envelope');
-assertEqual(
-  currentModelRawCalls[0].jsonSchema.value.properties.snapshotHash.const,
-  'current-model-schema-snapshot',
-  'host current model machine JSON schema preserves request identity constraints'
-);
-assertEqual(
-  Object.prototype.hasOwnProperty.call(currentModelRawCalls[0], 'hostConnectionProfileId'),
-  false,
-  'host current model generateRaw request omits stale profile id'
-);
-const currentModelPostProcess = await createGenerationRouter({ client: currentModelHost.providerClient }).generate('postProcessGuidanceUtility', {
-  prompt: 'Synthesize current-model post-process guidance.',
-  snapshotHash: 'current-model-post-process-snapshot',
-  sourceHash: 'current-model-post-process-source',
-  reasoningLevel: 'medium'
-});
-assertEqual(currentModelPostProcess.ok, true, 'host current model returns valid post-process guidance through the normalized schema path');
-assertEqual(currentModelRawCalls[1].jsonSchema.name, 'recursion_postProcessGuidance_v1', 'host current model post-process call receives the named schema envelope');
-assertEqual(
-  currentModelRawCalls[1].jsonSchema.value.properties.snapshotHash.const,
-  'current-model-post-process-snapshot',
-  'host current model post-process schema constrains snapshot identity'
-);
-assertEqual(
-  currentModelRawCalls[1].jsonSchema.value.properties.sourceHash.const,
-  'current-model-post-process-source',
-  'host current model post-process schema constrains source identity'
-);
 
 const stableSceneMessages = [{ mesid: 1, is_user: true, mes: 'First turn in the same scene.' }];
 const stableSceneHost = createSillyTavernHost({
@@ -1873,85 +1435,6 @@ assertEqual(groupSceneSnapshot.activeGroupHash, hashJson('group-a'), 'host snaps
 assertEqual(groupSceneIdentity.activeGroupHash, groupSceneSnapshot.activeGroupHash, 'assistant identity uses the snapshot group hash');
 assert(!JSON.stringify({ groupSceneSnapshot, groupSceneIdentity }).includes('group-a'), 'host identity surfaces never expose the raw group id');
 
-const rawCalls = [];
-const rawResponse = await host.generation.generate({
-  prompt: 'Return JSON',
-  systemPrompt: 'System',
-  responseLength: 123,
-  jsonSchema: { type: 'object' },
-  signal: 'signal-token'
-});
-assertEqual(rawResponse.text, '{"schema":"x"}', 'raw generation result preserved');
-const structuredContent = { schema: 'recursion.utilityArbiter.v1', ok: true };
-context.generateRaw = async () => ({ content: structuredContent, reasoning: { hidden: 'not prompt text' } });
-const structuredContentResponse = await host.generation.generate({ prompt: 'Return extracted JSON object' });
-assertEqual(
-  structuredContentResponse.text,
-  JSON.stringify(structuredContent),
-  'object-shaped host generation content is preserved as parseable JSON text'
-);
-context.generateRaw = async () => ({
-  message: {
-    role: 'assistant',
-    content: JSON.stringify(structuredContent),
-    reasoning: 'hidden provider reasoning must not become visible text',
-    reasoning_details: [{ text: 'hidden provider reasoning detail' }]
-  }
-});
-const chatMessageEnvelopeResponse = await host.generation.generate({ prompt: 'Return extracted chat message JSON content' });
-assertEqual(
-  chatMessageEnvelopeResponse.text,
-  JSON.stringify(structuredContent),
-  'host generation message envelopes use visible content without serializing reasoning fields'
-);
-context.generateRaw = async (request) => {
-  rawCalls.push(request);
-  return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };
-};
-const routed = await createGenerationRouter({ client: host.providerClient }).generate('utilityArbiter', { prompt: 'Route through provider client' });
-assertEqual(routed.ok, true, 'provider client routes through host generation');
-assertEqual(rawCalls[0].prompt, 'Route through provider client', 'provider client sends prompt to host');
-assertEqual(rawCalls[0].responseLength, 8192, 'provider client default maxTokens pass through to responseLength');
-assertEqual(rawCalls[0].temperature, 0.1, 'provider client temperature pass through');
-assertEqual(rawCalls[0].topP, 0.95, 'provider client topP pass through');
-const reasonedRouted = await createGenerationRouter({ client: host.providerClient }).generate('utilityArbiter', {
-  prompt: 'Route through provider client with reasoning metadata',
-  reasoningCategory: 'arbiter',
-  reasoningIntent: 'high'
-});
-assertEqual(reasonedRouted.ok, true, 'provider client routes host current model reasoning metadata');
-assertEqual(rawCalls[1].reasoningCategory, 'arbiter', 'host generateRaw receives reasoning category');
-assertEqual(rawCalls[1].reasoningIntent, 'high', 'host generateRaw receives reasoning intent');
-
-const profileCalls = [];
-const profileHost = createSillyTavernHost({
-  contextFactory: () => ({
-    chatId: 'profile-chat',
-    chat: [],
-    generateRaw: async (request) => {
-      profileCalls.push(request);
-      return { text: '{"schema":"recursion.utilityArbiter.v1","ok":true}' };
-    }
-  }),
-  settingsRoot: {
-    recursion: {
-      providers: {
-        utility: {
-          source: 'host-connection-profile',
-          hostConnectionProfileId: 'utility-profile-a',
-          maxTokens: 321,
-          temperature: 0.2,
-          topP: 0.75
-        }
-      }
-    }
-  }
-});
-const profileRouted = await createGenerationRouter({ client: profileHost.providerClient }).generate('utilityArbiter', { prompt: 'Use profile.' });
-assertEqual(profileRouted.ok, true, 'provider client routes host connection profile');
-assertEqual(profileCalls[0].providerSource, 'host-connection-profile', 'host connection profile source is passed through');
-assertEqual(profileCalls[0].hostConnectionProfileId, 'utility-profile-a', 'host connection profile id is passed through');
-assertEqual(profileCalls[0].responseLength, 321, 'host connection profile max tokens are passed through');
 
 const chatKeyHost = createSillyTavernHost({
   contextFactory: () => ({

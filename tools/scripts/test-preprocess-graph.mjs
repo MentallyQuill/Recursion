@@ -30,8 +30,7 @@ const fused = createPreprocessCardGraph({
   fused: {
     createBundleRequest: () => ({ families: ['character'] }),
     validateBundle: (bundle) => ({ ok: true, value: bundle }),
-    generateBundle: async () => ({ cards: {} }),
-    createSegmentedFallbackStages: () => []
+    generateBundle: async () => ({ cards: {} })
   }
 });
 assertEqual(fused.getStage('preprocess.cards.fused').executable, true, 'Fused graph has one executable bundle parent');

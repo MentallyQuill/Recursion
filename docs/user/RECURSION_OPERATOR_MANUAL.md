@@ -115,8 +115,8 @@ The ellipsis opens the integrated settings/options menu. It is configuration-fir
 Main controls:
 
 - Play: a Behavior section containing Strength, Min Cards, Max Cards, Prompt Footprint, and Focus.
-- Providers: collapsible Utility and Reasoner provider setup, test controls, and session key controls.
-- Advanced: collapsible Injection, Execution, UI, Context Windows, Storage Retention, and Diagnostics sections covering final prompt injection placement/role/depth, attempt windows, progress row limits, Recursion-owned evidence and analysis windows, Journal Entries, safe excerpts, Reset Turn Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point. Reset Defaults at the bottom restores Play and Advanced settings after confirmation while preserving providers, session-only provider keys, custom decks and scope, compact-bar settings, and viewer visibility.
+- Providers: collapsible Utility and Reasoner Connection Profile selection, policy controls, and Test Profile actions.
+- Advanced: collapsible Injection, Execution, UI, Context Windows, Storage Retention, and Diagnostics sections covering final prompt injection placement/role/depth, attempt windows, progress row limits, Recursion-owned evidence and analysis windows, Journal Entries, safe excerpts, Reset Turn Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point. Reset Defaults at the bottom restores Play and Advanced settings after confirmation while preserving Connection Profile selections and policies, custom decks and scope, compact-bar settings, and viewer visibility.
 
 The dropdown arrow opens Last Brief. The ellipsis opens options. The Hero Pixel Array or current-step status opens progress.
 
@@ -137,7 +137,7 @@ If Last Brief shows stale or wrong context, use the bar Regenerate command. Last
 The Full Viewer is the complete observatory. It should include:
 
 - `Now`: current mode, active run, latest hand, and prompt packet summary.
-- `Deck`: scene-local card state, emphasis, detail profile, provider source, and freshness.
+- `Deck`: scene-local card state, emphasis, detail profile, generation lane, cache state, and freshness.
 - `Activity`: bounded sanitized runtime, provider, storage, and prompt-install timeline.
 - `Prompt Packet`: Guidance, Card Evidence, Guardrails, selected refs, omissions, and injection metadata.
 - `Settings`: broad behavior controls.
@@ -252,7 +252,7 @@ flowchart LR
 
 Fused is the large foreground card-call pipeline. It runs the same Arbiter, card-scope filtering, Manual forced-card reconciliation, scene deck, hand selection, guidance composition, prompt packet validation, and install flow as Segmented. The difference is the card-generation stage: all Arbiter-requested or manually forced card families are appended into one `fusedCardBundle` request and returned as one `recursion.cardBundle.v1` response.
 
-Fused accepts valid requested card items, rejects unrequested or duplicate items, records compact omissions, and repairs damaged or missing requested siblings through individual Segmented card stages when at least one item is useful. It runs the full Segmented card path only when no useful bundle item survives. It still obeys Reasoning Level: Low and Medium use Utility, while High and Ultra use Reasoner when the Reasoner lane is healthy.
+Fused accepts valid requested card items, rejects unrequested or duplicate items, records compact omissions, and repairs damaged or missing requested siblings through individual Segmented card stages when at least one item is useful. It runs the full Segmented card path only when no useful bundle item survives. It still obeys Reasoning Level: Low and Medium use Utility, while High and Ultra use Reasoner when the required lane is eligible. A physical Fused request is sent only after that profile passes Fused certification.
 
 Fused is designed for stronger reasoning models such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar. Segmented is usually better for smaller or simpler models.
 
@@ -260,7 +260,7 @@ Use Fused when:
 
 - your selected provider can reliably return larger structured JSON;
 - you want one stronger model pass to coordinate multiple scene cards;
-- the Reasoner lane is healthy and selected through High or Ultra Reasoning Level;
+- the selected lane reports Fused certification and Reasoning Level routes the bundle there;
 - you are comfortable with targeted Segmented repair for damaged siblings and full Segmented fallback if the bundle has no useful cards.
 
 ```mermaid
@@ -312,32 +312,32 @@ Context-window caps are local Recursion tuning controls. Lower Source Freshness 
 
 ## Provider Controls
 
-Recursion has two provider lanes:
+Recursion has two Connection Profile-backed lanes:
 
-- Utility: required, default, and used for Arbiter planning, structured card work, provider tests, guidance composition, and fail-soft fallback guidance.
-- Reasoner: optional, selected by Reasoning Level and a configured `Ready` or `Untested` capability for synthesis, priority routing, crowded hands, conflicted cards, or subtle composition work. `Untested` is caution-only.
+- Utility: required for Arbiter planning, ordinary card work, validation support, guidance composition, and fail-soft fallback.
+- Reasoner: optional and selected by Reasoning Level for synthesis, priority cards, Fused bundles, and difficult editorial work.
 
-Each lane may support:
+Each lane exposes:
 
-- Current Host Model;
-- Host Connection Profile;
-- OpenAI-Compatible Endpoint;
-- base URL, model, fetched-model selector, and max token controls;
-- session API key field for direct endpoints;
-- Test Provider;
-- Clear Session Key for OpenAI-compatible endpoints;
-- status and resolved model labels.
+- Connection Profile;
+- Behavioral Preset: Isolated or Full Profile;
+- Instruct Formatting: Auto, On, or Off;
+- Samplers: Connection Profile or Recursion Override;
+- Structured Output: Auto, Native Schema, or Prompt JSON;
+- Temperature and Top P only when Recursion Override is selected;
+- Output Token Ceiling;
+- Test Profile;
+- capability state: Configure, Untested, Segmented, Fused, or Issue.
 
-Provider fields auto-save when changed. Source changes switch the visible field context immediately while preserving hidden alternate-source values. Session API keys stay in browser-session memory and are never persisted.
+Recursion does not own endpoint, credential, or model-selection fields. Those remain in SillyTavern's Connection Profile.
 
-Utility must be configured for normal operation. Reasoner can remain
-unconfigured; if Medium, High, or Ultra is selected while Reasoner is
-unconfigured or unhealthy, Recursion keeps the selected Reasoning Level and
-falls back through Utility for ordinary Pre-process work. A configured Untested
-Reasoner remains routable with caution status. High and Ultra Post-process
-guidance require a configured Ready or Untested Reasoner lane and fail soft
-without crossing to Utility when that route is unavailable or fails. See
-[Provider Setup](PROVIDER_SETUP.md).
+The recommended local-model policy is Isolated behavioral preset, Auto instruct formatting, Connection Profile samplers, and Auto structured output. This keeps text-completion framing and sampler tuning while excluding behavioral prompt content that can corrupt JSON.
+
+Test Profile performs connectivity, single-card, and Fused checks. A single-card pass enables Segmented. The Fused check must pass before Recursion physically dispatches a Fused bundle. Selecting Fused with an uncertified or Segmented-only profile automatically uses Segmented and records one sanitized downgrade.
+
+Provider edits auto-save, increment the lane configuration revision, and invalidate old certification. Same-profile model requests run through a FIFO queue with concurrency one. Utility and Reasoner may overlap only when they select different profiles.
+
+See [Provider Setup](PROVIDER_SETUP.md).
 
 ## First Run
 
@@ -345,7 +345,7 @@ Use this first-run path:
 
 1. Enable Recursion and confirm the bar mounts.
 2. Configure Utility.
-3. Configure and test Reasoner when you need Medium/High/Ultra synthesis or High/Ultra Post-process guidance.
+3. Select and test a Reasoner Connection Profile when you need Medium/High/Ultra synthesis or High/Ultra Post-process guidance.
 4. Confirm the power toggle is on.
 5. Leave Tense & PoV on Auto unless the active chat needs a forced story form.
 6. Set Pipeline to Segmented, then set mode to Auto.
@@ -353,7 +353,7 @@ Use this first-run path:
 8. Confirm progress reaches prompt ready or a clear fallback.
 9. Inspect Last Brief and Prompt Packet.
 10. Try Manual with a narrowed Cards scope and confirm selected families are covered while disabled families stay out.
-11. Try Fused with a stronger structured-output model, then confirm it reports accepted bundle work, targeted Segmented repair, or full Segmented fallback honestly.
+11. Try Fused only after the selected lane reports Fused, then confirm it reports accepted bundle work, targeted Segmented repair, or full Segmented fallback honestly.
 12. Use the power toggle to verify prompt cleanup.
 
 See [First Run Workflow](FIRST_RUN_WORKFLOW.md) for the shorter checklist.
@@ -384,7 +384,7 @@ Expected behavior:
 - Fused bundle with no useful cards: use the full Segmented card path.
 - Full Rebuild: queue one fresh Pre-process pass without starting provider or host work; the next matching swipe consumes it once and bypasses reusable work for that turn.
 - Card failure: omit failed cards and keep valid siblings.
-- Reasoner unconfigured, unhealthy, or missing credentials: compose ordinary Pre-process work with Utility when policy allows; fail High/Ultra Post-process guidance soft without crossing lanes. A configured Untested lane remains routable with caution status.
+- Reasoner unconfigured or Issue: compose ordinary Pre-process work with Utility when policy allows; fail High/Ultra Post-process guidance soft without crossing lanes. An Untested profile remains Segmented-routable with caution, while a physical Fused request requires Fused certification.
 - Recursion Stop: abort the current call, preserve accepted checkpoints, pause the operation, and expose Resume or Retry Stage.
 - SillyTavern host-generation stop: clear owned prompt keys and cancel pending Post-process work without automatically retrying the primary story generation.
 - Storage write failure: continue with memory state when safe and report a warning.
@@ -412,8 +412,8 @@ The packet should not contain raw provider responses, hidden chain-of-thought, b
 Diagnostics are for explaining recent behavior. Normal diagnostics may include:
 
 - operation and stage ids, states, attempt numbers, and elapsed time;
-- provider lane and source type;
-- resolved model label;
+- provider lane and capability state;
+- completion mode and structured-output method;
 - status category;
 - duration and token counts;
 - card ids, families, statuses, and token estimates;
@@ -430,7 +430,7 @@ Normal diagnostics must not include API keys, authorization headers, cookies, ra
 Recursion storage is turn- and checkpoint-oriented. The runtime owns durable V2 execution manifests and artifacts, queued next-swipe intents, the run journal, prompt metadata, redaction, repair, pruning, and prompt-lane cleanup. Current operator controls are:
 
 - power-toggle cleanup;
-- Clear Session Key for OpenAI-compatible provider lanes;
+- Connection Profile selection and generation policy;
 - Context-window bounds and Journal Entries retention;
 - diagnostics excerpt settings;
 - queued Reprocess from here, Reset Turn Cache, Clear Run Journal, and Export Diagnostics;
@@ -475,7 +475,7 @@ Use this checklist for a practical browser pass:
 17. On an eligible completed row, queue Reprocess from here on the next swipe and confirm the row reports Queued without starting work.
 18. Inspect Last Brief and the final Prompt Packet text.
 19. Turn power off and confirm cleanup.
-20. Clear session keys before screenshots or exports that might show provider setup.
+20. Export diagnostics and confirm no profile id, endpoint, credential, raw prompt, raw response, or hidden reasoning is present.
 
 Automated soak evidence uses dedicated `recursion-soak-*` users. An explicitly authorized acceptance pass may use the reported `default-user` chats after a production-only sync and must avoid recording raw chat text. See [Live Smoke Test Plan](../testing/LIVE_SMOKE_TEST_PLAN.md).
 

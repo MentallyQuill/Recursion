@@ -1,8 +1,65 @@
 import {
   classifyModelFailure,
+  resolveModelRetryDirective,
   runModelStageAttempts
 } from '../../src/execution/attempt-policy.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
+
+
+
+const schemaRequest = { structuredOutputMethod: 'native-schema', responseLength: 900 };
+assertDeepEqual(resolveModelRetryDirective({
+  failure: { code: 'RECURSION_STRUCTURED_OUTPUT_UNSUPPORTED', retryable: false },
+  request: schemaRequest,
+  attempt: 1,
+  limit: 2
+}), {
+  action: 'downgrade-structured-output',
+  delayMs: 0,
+  diagnosticCode: 'structured-output-downgraded',
+  nextRequest: { structuredOutputMethod: 'prompt-json', responseLength: 900 }
+}, 'unsupported native schema downgrades immediately');
+
+const contextDirective = resolveModelRetryDirective({
+  failure: { code: 'RECURSION_PROVIDER_CONTEXT_LIMIT', retryable: false },
+  request: { roleId: 'sceneFrameCard', responseLength: 900 },
+  attempt: 1,
+  limit: 2
+});
+assertEqual(contextDirective.action, 'reduce-output-budget', 'context overflow chooses budget reduction');
+assertEqual(contextDirective.nextRequest.responseLength, 675, 'context overflow reduces output by 25 percent');
+assertEqual(contextDirective.nextRequest.roleId, 'sceneFrameCard', 'budget reduction preserves the rest of the request');
+
+assertDeepEqual(resolveModelRetryDirective({
+  failure: { code: 'RECURSION_PROFILE_UNAVAILABLE', retryable: false },
+  request: { roleId: 'sceneFrameCard', responseLength: 900 },
+  attempt: 1,
+  limit: 2
+}), {
+  action: 'stop',
+  delayMs: 0,
+  diagnosticCode: '',
+  nextRequest: null
+}, 'profile configuration failures stop');
+
+assertEqual(resolveModelRetryDirective({
+  failure: { kind: 'validation', code: 'RECURSION_MODEL_OUTPUT_INVALID', retryable: true },
+  request: { roleId: 'sceneFrameCard', responseLength: 900 },
+  attempt: 1,
+  limit: 2
+}).action, 'retry-corrected', 'validation failure requests one corrected retry');
+
+assertDeepEqual(resolveModelRetryDirective({
+  failure: { code: 'RECURSION_PROVIDER_TRANSIENT', retryable: true },
+  request: { roleId: 'sceneFrameCard', responseLength: 900 },
+  attempt: 1,
+  limit: 2
+}), {
+  action: 'retry-same',
+  delayMs: 250,
+  diagnosticCode: 'provider-transient-retry',
+  nextRequest: { roleId: 'sceneFrameCard', responseLength: 900 }
+}, 'transient failure gets deterministic first retry delay');
 
 function parseJsonResponse({ text }) {
   try {
@@ -36,6 +93,8 @@ assertDeepEqual(result.value, { ok: true }, 'accepted validation value is return
 assertEqual(calls.length, 2, 'validation correction consumes the second attempt');
 assertEqual(settled.length, 2, 'each settled attempt produces one summary');
 assertEqual(settled[0].outcome, 'invalid', 'validation failure is classified as invalid');
+assertEqual(settled[0].action, 'retry-corrected', 'validation attempt records one correction action');
+assertEqual(settled[0].diagnosticCode, 'model-output-corrected', 'validation attempt records a safe diagnostic code');
 assertEqual(settled[1].outcome, 'accepted', 'valid response is accepted');
 assert(
   !JSON.stringify(settled).includes('INITIAL_PROMPT_CANARY')
@@ -79,13 +138,33 @@ const transportResult = await runModelStageAttempts({
     error.retryable = true;
     throw error;
   },
-  validate: parseJsonResponse
+  validate: parseJsonResponse,
+  sleep: async () => {}
 });
 assertEqual(transportResult.ok, false, 'exhausted transport attempts return failure');
 assertEqual(transportCalls, 2, 'two-attempt window makes only two transport requests');
 assertEqual(transportResult.attempts.length, 2, 'transport failures are summarized per attempt');
 assertEqual(transportResult.attempts[0].outcome, 'failed', 'transport failure has failed outcome');
 assertEqual(transportResult.failure.kind, 'transport', 'transport failure is classified');
+assertEqual(transportResult.attempts[0].action, 'retry-same', 'transient transport failure records retry action');
+assertEqual(transportResult.attempts[0].delayMs, 250, 'first transient retry records deterministic delay');
+
+
+let invalidResponseCalls = 0;
+const exhaustedWithResponse = await runModelStageAttempts({
+  attemptsPerStep: 2,
+  request: { roleId: 'sceneFrameCard', responseLength: 900 },
+  async invoke() {
+    invalidResponseCalls += 1;
+    return { marker: `response-${invalidResponseCalls}` };
+  },
+  validate() {
+    return { ok: false, error: { code: 'RECURSION_MODEL_OUTPUT_INVALID', category: 'validation', message: 'Invalid.', retryable: true } };
+  },
+  buildCorrectionRequest: ({ request }) => request
+});
+assertEqual(exhaustedWithResponse.ok, false, 'invalid responses can exhaust the attempt window');
+assertEqual(exhaustedWithResponse.lastResponse.marker, 'response-2', 'exhausted result retains the last response');
 
 const abortController = new AbortController();
 let abortCalls = 0;
@@ -151,7 +230,8 @@ async function runManualWindow() {
       error.retryable = true;
       throw error;
     },
-    validate: parseJsonResponse
+    validate: parseJsonResponse,
+    sleep: async () => {}
   });
 }
 await runManualWindow();

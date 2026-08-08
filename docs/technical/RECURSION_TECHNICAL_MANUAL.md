@@ -49,7 +49,7 @@ flowchart LR
     Install --> Continue["Host generation"]
 ```
 
-Fused changes only the foreground card-generation stage. It keeps the Segmented Arbiter, scope, Manual forced-card reconciliation, deck, hand, guidance, packet, and install stages, but sends all requested card families as one `fusedCardBundle` model call. Runtime accepts valid requested siblings, rejects unrequested or duplicate cards, repairs damaged or missing requested siblings with individual Segmented card calls, and uses full Segmented fallback only when the bundle yields no useful cards. Fused still obeys Reasoning Level: Low/Medium use Utility, while High/Ultra use configured Ready or Untested Reasoner and fall back to Utility only when that lane is unconfigured, unhealthy, or fails.
+Fused changes only the foreground card-generation stage. It keeps the Segmented Arbiter, scope, Manual forced-card reconciliation, deck, hand, guidance, packet, and install stages, but sends all requested card families as one `fusedCardBundle` model call. Runtime accepts valid requested siblings, rejects unrequested or duplicate cards, repairs damaged or missing requested siblings with individual Segmented card calls, and uses full Segmented fallback only when the bundle yields no useful cards. Fused still obeys Reasoning Level: Low/Medium route the bundle to Utility, while High/Ultra may route it to Reasoner. The selected physical lane must be Fused-certified; otherwise runtime chooses Segmented before sending a bundle request.
 
 Fused is designed for stronger reasoning models such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar. Segmented is usually the better pipeline for smaller, simpler, or less reliable structured-output models.
 
@@ -64,12 +64,12 @@ Stop aborts the active call, requests native host Stop, and pauses the operation
 | Core helpers | `src/core.mjs` | Stable hashing, safe ids, truncation, JSON parsing, cloning, timestamps, and redaction. |
 | Execution contracts | `src/execution-contracts.mjs` | Durable operation, stage, artifact, queued-intent, failure, and lifecycle contracts. |
 | Execution scheduler | `src/execution-scheduler.mjs` | Checkpoint-aware stage traversal, attempt windows, stop/pause/resume/retry, stale guards, and queued invalidation. |
-| Settings | `src/settings.mjs` | Mode, Segmented/Fused pipeline mode, attempts per step, Reasoning Level, strength, footprint, focus, provider preferences, injection settings, retention caps, UI limits, and session-only API key handling. |
+| Settings | `src/settings.mjs` | Mode, Segmented/Fused pipeline mode, attempts per step, Reasoning Level, strength, footprint, focus, Connection Profile policies, staged certification, injection settings, retention caps, and UI limits. |
 | Retention policy | `src/retention-policy.mjs` | User-facing cap defaults, ranges, settings normalization, and bounded source-window selection. |
 | Behavior policy | `src/settings-policy.mjs` | Source-backed Strength, Min/Max Cards, Focus, Prompt Footprint, policy prompt lines, effective footprint, and diagnostics summaries. |
 | Activity | `src/activity.mjs` | Sanitized user-facing activity events for the bar, progress menu, viewer, and diagnostics. |
 | Progress model | `src/progress.mjs` | Hero Pixel Array blocks, progress-menu rows, nested card/model-call status, and compact current-step text. |
-| Providers | `src/providers.mjs` | Utility and Reasoner lane routing, host-current-model, host-connection-profile, OpenAI-compatible calls, model discovery, JSON parsing, bounded stage attempts, aborts, and model-call diagnostics. |
+| Providers | `src/providers.mjs` | Utility and Reasoner Connection Profile routing, policy resolution, per-profile queuing, structured response parsing, role validation, bounded stage attempts, certification, aborts, and privacy-safe model-call diagnostics. |
 | Cards | `src/cards.mjs` | Fixed V1 catalog, card normalization, provider-result conversion, lifecycle application, and hand selection. |
 | Card scope | `src/card-scope.mjs` | Fixed family/sub-item scope catalog, Auto focus payloads, Manual whitelist enforcement helpers, and safe scope summaries. |
 | Prompt | `src/prompt.mjs` | Guidance, card evidence, guardrail sections, budgets, omissions, Reasoner merge, validation, and prompt block conversion. |
@@ -87,7 +87,7 @@ Manual captures the current turn and follows the selected prompt-install pipelin
 
 Auto mode runs the selected pipeline and installs validated prompt blocks through Recursion-owned SillyTavern prompt keys when the selected path produces useful guidance. User-selected card families and sub-items are preferred in Auto, but the Utility Arbiter still sees the full fixed catalog in Segmented and can request unselected families when they have high relevance to scene constraints, scene coherence, or the current user message.
 
-Settings and provider changes supersede the active run, abort stale provider work where possible, and await prompt cleanup before their operation results resolve. `updateSettings` returns updated settings plus the prompt-clear result; `updateProvider` and `clearProviderKey` return updated provider settings plus the prompt-clear result. Clear failure leaves the setting or provider change applied, returns `ok: false`, and surfaces the sanitized prompt-clear warning.
+Settings and provider changes supersede the active run, abort stale provider work where possible, and await prompt cleanup before their operation results resolve. `updateSettings` returns updated settings plus the prompt-clear result; `updateProviderConfig` returns updated profile policy plus the prompt-clear result. A material provider edit increments `configRevision` and invalidates prior certification. Clear failure leaves the setting or provider change applied, returns `ok: false`, and surfaces the sanitized prompt-clear warning.
 
 ## Provider Lanes
 
@@ -98,9 +98,9 @@ Recursion has two provider lanes:
 | Utility | Required default lane for Arbiter planning, card work, provider tests, guidance composition, and fail-soft guidance support. |
 | Reasoner | Optional composer lane for rich, crowded, conflicted, or subtle hands. Utility remains the fallback. |
 
-Each lane can use the current host model, a host connection profile when the host supports it, or an OpenAI-compatible endpoint. Direct endpoint API keys live only in the session secret store and are never persisted. OpenAI-compatible model discovery is read-only against `/models`; it may use the session key but does not save secrets, write journals, clear prompts, or invalidate active-turn work.
+Each lane requires a selected SillyTavern Connection Profile. Recursion stores no endpoint, credential, model-discovery result, or authorization header. The generation policy independently controls Behavioral Preset isolation, text-completion instruct formatting, sampler inheritance, and structured-output method. Same-profile calls run through a FIFO queue with concurrency one.
 
-Reasoning Level is the operator-facing lane-depth control. Low is Utility-only, Medium uses configured Ready or Untested Reasoner for guidance composition, High adds that Reasoner lane for Arbiter and priority card families, and Ultra is Reasoner-heavy. Untested is caution-only and remains routable. Unconfigured or unhealthy Reasoner routes fall back to Utility without blocking normal chat generation. Post-process guidance stays on the selected lane for its operation and fails soft when that lane is unavailable or its routed call fails.
+Reasoning Level is the operator-facing lane-depth control. Low is Utility-only, Medium uses an eligible Reasoner for guidance composition, High adds Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy. Segmented eligibility requires connectivity and single-card certification; Fused eligibility additionally requires the representative Fused check. A requested Fused run automatically becomes Segmented when the selected Utility profile is uncertified or only Segmented-certified. Post-process guidance stays on the selected lane for its operation and fails soft when that lane is unavailable or its routed call fails.
 
 ## Card And Hand System
 

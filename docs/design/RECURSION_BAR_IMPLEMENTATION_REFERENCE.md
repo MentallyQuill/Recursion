@@ -389,23 +389,21 @@ Scene Frame: Hold the beat boundary; answer the current moment before skipping a
 
     <div class="settings-pane" data-pane="providers">
       <section class="provider-section is-open">
-        <button class="provider-card" type="button" aria-expanded="true"><span class="provider-card-title">Utility Provider</span><span class="provider-status pass">not run</span></button>
+        <button class="provider-card" type="button" aria-expanded="true"><span class="provider-card-title">Utility Provider</span><span class="provider-status pass">Segmented</span></button>
         <div class="provider-body">
           <div class="provider-grid">
-            <label>Source<select><option selected>Current Host Model</option><option>Host Connection Profile</option><option>OpenAI-Compatible Endpoint</option></select></label>
-            <label class="provider-context-field" data-source-context="profile" hidden>Profile<select><option selected>Select Profile</option><option>Quiet Utility / glm-fast</option></select></label>
-            <div class="provider-context-fields" data-source-context="openai-compatible" hidden>
-              <label>Base URL<input placeholder="https://host/v1"></label>
-              <label>Model<input placeholder="model"></label>
-              <label>Session Key<input type="password" placeholder="Session API key"></label>
-            </div>
-            <label>Max Tokens<input type="number" value="8192"></label>
+            <label>Connection Profile<select><option selected>Quiet Utility / glm-fast</option></select></label>
+            <label>Behavioral Preset<select><option selected>Isolated</option><option>Full Profile</option></select></label>
+            <label>Instruct Formatting<select><option selected>Auto</option><option>On</option><option>Off</option></select></label>
+            <label>Samplers<select><option selected>Connection Profile</option><option>Recursion Override</option></select></label>
+            <label>Structured Output<select><option selected>Auto</option><option>Native Schema</option><option>Prompt JSON</option></select></label>
+            <label>Output Token Ceiling<input type="number" value="8192"></label>
           </div>
-          <div class="provider-actions"><button>Test Provider</button></div>
+          <div class="provider-actions"><button>Test Profile</button></div>
         </div>
       </section>
       <section class="provider-section">
-        <button class="provider-card" type="button" aria-expanded="false"><span class="provider-card-title">Reasoner Provider</span><span class="provider-status">optional</span></button>
+        <button class="provider-card" type="button" aria-expanded="false"><span class="provider-card-title">Reasoner Provider</span><span class="provider-status">Untested</span></button>
         <div class="provider-body" hidden></div>
       </section>
     </div>

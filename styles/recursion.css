@@ -3082,6 +3082,21 @@
   line-height: 1;
 }
 
+.recursion-provider-card-status {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.recursion-provider-capability-detail {
+  color: color-mix(in srgb, var(--recursion-accent) 72%, var(--SmartThemeBodyColor, #e0e0e0));
+  font-size: 9px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
 .recursion-provider-status.pass {
   color: color-mix(in srgb, var(--recursion-success) 84%, transparent);
 }

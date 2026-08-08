@@ -2,23 +2,18 @@ import { hashJson } from './core.mjs';
 
 export const PROVIDER_CAPABILITY_STATES = Object.freeze([
   'unconfigured',
-  'untested',
-  'ready',
+  'uncertified',
+  'segmented-ready',
+  'fused-ready',
   'unhealthy'
 ]);
 
 const LANES = new Set(['utility', 'reasoner']);
 const REASONING_LEVELS = new Set(['low', 'medium', 'high', 'ultra']);
-const HEALTH_STATES = new Set(['pass', 'fail']);
 const OPERATIONS = new Set(['prompt-packet', 'provider-test', 'redirect', 'post-process']);
 const CONFIGURATION_REASON_CODES = new Set([
-  'provider-current-model-unavailable',
   'provider-profile-missing',
   'provider-profile-unavailable',
-  'provider-base-url-missing',
-  'provider-model-missing',
-  'provider-session-key-missing',
-  'provider-source-unsupported',
   'provider-unconfigured'
 ]);
 
@@ -61,76 +56,36 @@ function connectionProfileIds(host = {}) {
 }
 
 function validateProviderRoute(provider = {}, host = {}) {
-  const source = text(provider.source) || 'host-current-model';
-
-  if (source === 'host-current-model') {
-    const available = host.currentModelAvailable !== false;
-    return {
-      complete: available,
-      testable: available,
-      reasonCode: available ? '' : 'provider-current-model-unavailable'
-    };
+  const profileId = text(provider.connectionProfileId);
+  if (!profileId) {
+    return { complete: false, testable: false, reasonCode: 'provider-profile-missing' };
   }
-
-  if (source === 'host-connection-profile') {
-    const profileId = text(provider.hostConnectionProfileId);
-    if (!profileId) {
-      return {
-        complete: false,
-        testable: false,
-        reasonCode: 'provider-profile-missing'
-      };
-    }
-    const profileIds = connectionProfileIds(host);
-    if (!profileIds || !profileIds.has(profileId)) {
-      return {
-        complete: false,
-        testable: false,
-        reasonCode: 'provider-profile-unavailable'
-      };
-    }
-    return { complete: true, testable: true, reasonCode: '' };
+  const profileIds = connectionProfileIds(host);
+  if (!profileIds || !profileIds.has(profileId)) {
+    return { complete: false, testable: false, reasonCode: 'provider-profile-unavailable' };
   }
+  return { complete: true, testable: true, reasonCode: '' };
+}
 
-  if (source === 'openai-compatible') {
-    const direct = provider.openAICompatible || {};
-    if (!text(direct.baseUrl)) {
-      return {
-        complete: false,
-        testable: false,
-        reasonCode: 'provider-base-url-missing'
-      };
-    }
-    if (!text(direct.model)) {
-      return {
-        complete: false,
-        testable: false,
-        reasonCode: 'provider-model-missing'
-      };
-    }
-    if (direct.sessionApiKeyPresent !== true) {
-      return {
-        complete: false,
-        testable: false,
-        reasonCode: 'provider-session-key-missing'
-      };
-    }
-    return { complete: true, testable: true, reasonCode: '' };
-  }
+function certificationMatches(provider, configHash) {
+  const certification = provider?.certification || {};
+  return text(certification.configHash) === configHash;
+}
 
-  return {
-    complete: false,
-    testable: false,
-    reasonCode: 'provider-source-unsupported'
-  };
+function capabilityState({ configured, certification, hashMatches }) {
+  if (!configured) return 'unconfigured';
+  if (!hashMatches || certification?.status === 'not-run' || !certification?.status) return 'uncertified';
+  if (certification.checks?.singleCard !== 'pass') return 'unhealthy';
+  if (certification.checks?.fusedCards === 'pass') return 'fused-ready';
+  return 'segmented-ready';
 }
 
 function capabilityReasonCode({ lane, state, required, configuration }) {
   if (state === 'unconfigured') return configuration.reasonCode || 'provider-unconfigured';
-  if (state === 'untested') return `${lane}-untested`;
+  if (state === 'uncertified') return `${lane}-uncertified`;
   if (state === 'unhealthy') return `${lane}-unhealthy`;
-  if (required) return `${lane}-required-ready`;
-  return `${lane}-ready`;
+  if (state === 'fused-ready') return required ? `${lane}-required-fused-ready` : `${lane}-fused-ready`;
+  return required ? `${lane}-required-segmented-ready` : `${lane}-segmented-ready`;
 }
 
 function laneTitle(lane) {
@@ -139,37 +94,32 @@ function laneTitle(lane) {
 
 function capabilityMessage({ lane, state, required, configuration }) {
   const title = laneTitle(lane);
-  if (state === 'ready') {
-    return required ? `${title} is ready and required for this operation.` : `${title} is ready.`;
-  }
-  if (state === 'untested') return `${title} is untested.`;
-  if (state === 'unhealthy') return `${title} is unhealthy.`;
-
-  const suffix = {
-    'provider-current-model-unavailable': 'current model is unavailable.',
-    'provider-profile-missing': 'profile is not selected.',
-    'provider-profile-unavailable': 'profile is unavailable.',
-    'provider-base-url-missing': 'base URL is missing.',
-    'provider-model-missing': 'model is missing.',
-    'provider-session-key-missing': 'session API key is missing.',
-    'provider-source-unsupported': 'source is unsupported.'
-  }[configuration.reasonCode] || 'configuration is incomplete.';
+  if (state === 'fused-ready') return required ? `${title} is Fused-ready and required for this operation.` : `${title} is Fused-ready.`;
+  if (state === 'segmented-ready') return required ? `${title} is Segmented-ready and required for this operation.` : `${title} is Segmented-ready.`;
+  if (state === 'uncertified') return `${title} profile is untested.`;
+  if (state === 'unhealthy') return `${title} profile has a compatibility issue.`;
+  const suffix = configuration.reasonCode === 'provider-profile-unavailable'
+    ? 'profile is unavailable.'
+    : 'profile is not selected.';
   return `${title} ${suffix}`;
 }
 
 export function providerConfigHash(provider = {}) {
+  const lane = normalizeLane(provider.lane);
   return hashJson({
-    lane: normalizeLane(provider.lane),
-    source: text(provider.source) || 'host-current-model',
-    hostConnectionProfileId: text(provider.hostConnectionProfileId),
-    openAICompatible: {
-      baseUrl: text(provider.openAICompatible?.baseUrl),
-      model: text(provider.openAICompatible?.model),
-      sessionApiKeyPresent: provider.openAICompatible?.sessionApiKeyPresent === true
+    lane,
+    connectionProfileId: text(provider.connectionProfileId),
+    generationPolicy: {
+      presetMode: text(provider.generationPolicy?.presetMode) || 'isolated',
+      instructMode: text(provider.generationPolicy?.instructMode) || 'auto',
+      samplerMode: text(provider.generationPolicy?.samplerMode) || 'profile',
+      structuredOutputMode: text(provider.generationPolicy?.structuredOutputMode) || 'auto'
     },
-    temperature: finiteNumber(provider.temperature),
-    topP: finiteNumber(provider.topP),
-    maxTokens: finiteNumber(provider.maxTokens),
+    samplerOverrides: {
+      temperature: finiteNumber(provider.samplerOverrides?.temperature, lane === 'reasoner' ? 0.4 : 0.1),
+      topP: finiteNumber(provider.samplerOverrides?.topP, 0.95)
+    },
+    outputTokenCeiling: Math.max(128, Math.trunc(finiteNumber(provider.outputTokenCeiling, 8192))),
     configRevision: Math.max(0, Math.trunc(finiteNumber(provider.configRevision)))
   });
 }
@@ -182,42 +132,29 @@ export function resolveProviderCapability({
 } = {}) {
   const resolvedLane = normalizeLane(lane);
   const provider = settings.providers?.[resolvedLane] || {};
-  const configHash = providerConfigHash({
-    ...provider,
-    lane: resolvedLane
-  });
+  const configHash = providerConfigHash({ ...provider, lane: resolvedLane });
   const configuration = validateProviderRoute(provider, host);
-  const health = provider.health || {};
-  const healthMatches = text(health.configHash) === configHash;
-  const state = !configuration.complete
-    ? 'unconfigured'
-    : !healthMatches || !HEALTH_STATES.has(text(health.status))
-      ? 'untested'
-      : health.status === 'pass'
-        ? 'ready'
-        : 'unhealthy';
+  const certification = provider.certification || { status: 'not-run' };
+  const state = capabilityState({
+    configured: configuration.complete,
+    certification,
+    hashMatches: certificationMatches(provider, configHash)
+  });
   const reasoningLevel = normalizeReasoningLevel(settings.reasoningLevel);
   const resolvedOperation = normalizeOperation(operation);
-  const postProcessLane = reasoningLevel === 'high' || reasoningLevel === 'ultra'
-    ? 'reasoner'
-    : 'utility';
+  const postProcessLane = reasoningLevel === 'high' || reasoningLevel === 'ultra' ? 'reasoner' : 'utility';
   const required = resolvedOperation === 'post-process'
     ? resolvedLane === postProcessLane
-    : resolvedLane === 'reasoner'
-      && resolvedOperation === 'redirect'
-      && reasoningLevel !== 'low';
+    : resolvedLane === 'reasoner' && resolvedOperation === 'redirect' && reasoningLevel !== 'low';
   const selectedByPolicy = resolvedOperation === 'post-process'
     ? resolvedLane === postProcessLane
     : resolvedLane === 'utility' || reasoningLevel !== 'low';
+  const segmentedEligible = configuration.complete && state !== 'unhealthy';
+  const fusedEligible = configuration.complete && state === 'fused-ready';
   const eligible = resolvedOperation === 'provider-test'
     ? configuration.testable
-    : selectedByPolicy && (state === 'ready' || state === 'untested');
-  const reasonCode = capabilityReasonCode({
-    lane: resolvedLane,
-    state,
-    required,
-    configuration
-  });
+    : selectedByPolicy && segmentedEligible;
+  const reasonCode = capabilityReasonCode({ lane: resolvedLane, state, required, configuration });
 
   return Object.freeze({
     lane: resolvedLane,
@@ -226,36 +163,29 @@ export function resolveProviderCapability({
     configRevision: Math.max(0, Math.trunc(finiteNumber(provider.configRevision))),
     configured: configuration.complete,
     testable: configuration.testable,
-    ready: state === 'ready',
+    ready: state === 'segmented-ready' || state === 'fused-ready',
+    segmentedEligible,
+    fusedEligible,
+    completionMode: text(certification.completionMode) || 'unknown',
+    structuredOutput: text(certification.structuredOutput) || 'unknown',
+    safeConcurrency: 1,
     required,
     selectedByPolicy,
     eligible,
     reasonCode,
-    message: capabilityMessage({
-      lane: resolvedLane,
-      state,
-      required,
-      configuration
-    })
+    message: capabilityMessage({ lane: resolvedLane, state, required, configuration })
   });
 }
 
 export function sanitizeProviderCapability(capability = {}) {
   const lane = normalizeLane(capability.lane);
-  const state = PROVIDER_CAPABILITY_STATES.includes(capability.state)
-    ? capability.state
-    : 'unconfigured';
+  const state = PROVIDER_CAPABILITY_STATES.includes(capability.state) ? capability.state : 'unconfigured';
   const required = capability.required === true;
   const configurationReasonCode = CONFIGURATION_REASON_CODES.has(text(capability.reasonCode))
     ? text(capability.reasonCode)
     : 'provider-unconfigured';
   const configuration = { reasonCode: configurationReasonCode };
-  const reasonCode = capabilityReasonCode({
-    lane,
-    state,
-    required,
-    configuration
-  });
+  const reasonCode = capabilityReasonCode({ lane, state, required, configuration });
   return Object.freeze({
     lane,
     state,
@@ -264,15 +194,15 @@ export function sanitizeProviderCapability(capability = {}) {
     configured: capability.configured === true,
     testable: capability.testable === true,
     ready: capability.ready === true,
+    segmentedEligible: capability.segmentedEligible === true,
+    fusedEligible: capability.fusedEligible === true,
+    completionMode: ['chat', 'text'].includes(text(capability.completionMode)) ? text(capability.completionMode) : 'unknown',
+    structuredOutput: ['native-schema', 'prompt-json'].includes(text(capability.structuredOutput)) ? text(capability.structuredOutput) : 'unknown',
+    safeConcurrency: 1,
     required,
     selectedByPolicy: capability.selectedByPolicy === true,
     eligible: capability.eligible === true,
     reasonCode,
-    message: capabilityMessage({
-      lane,
-      state,
-      required,
-      configuration
-    })
+    message: capabilityMessage({ lane, state, required, configuration })
   });
 }

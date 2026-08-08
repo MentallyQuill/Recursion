@@ -163,6 +163,7 @@ assertDeepEqual(stageRecord, {
   summary: null,
   failure: null,
   diagnosticCodes: [],
+  lastAttemptAction: null,
   attempts: { window: 0, limit: 2, used: 0, total: 0 },
   executionToken: null,
   startedAt: null,
@@ -189,6 +190,8 @@ const checkpoint = createCheckpoint({
     key: 'artifact-a',
     hash: 'artifact-hash-a'
   },
+  diagnosticCodes: [],
+  lastAttemptAction: null,
   completedAt: '2026-07-29T12:00:01.000Z'
 });
 
@@ -208,6 +211,8 @@ assertDeepEqual(checkpoint, {
     key: 'artifact-a',
     hash: 'artifact-hash-a'
   },
+  diagnosticCodes: [],
+  lastAttemptAction: null,
   completedAt: '2026-07-29T12:00:01.000Z'
 }, 'createCheckpoint creates the canonical completed checkpoint');
 

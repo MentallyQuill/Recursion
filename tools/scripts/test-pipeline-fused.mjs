@@ -1,5 +1,50 @@
-import { createFusedCardStages, createSegmentedCardStages } from '../../src/runtime/preprocess-graph.mjs';
+import { createFusedCardStages } from '../../src/runtime/preprocess-graph.mjs';
+import { preserveFusedProviderFailure, validateFusedProviderResult } from '../../src/runtime.mjs';
 import { assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
+
+for (const code of [
+  'RECURSION_PROVIDER_CONTEXT_LIMIT',
+  'RECURSION_STRUCTURED_OUTPUT_UNSUPPORTED',
+  'RECURSION_PROVIDER_RATE_LIMIT',
+  'RECURSION_PROVIDER_TRANSIENT'
+]) {
+  const failure = preserveFusedProviderFailure({
+    ok: false,
+    diagnostics: {
+      failure: {
+        kind: 'transport',
+        category: 'provider',
+        code,
+        retryable: true,
+        message: `${code} from the selected profile.`
+      }
+    }
+  });
+  assertEqual(failure.code, code, `Fused preserves provider failure code ${code}`);
+}
+assertEqual(
+  preserveFusedProviderFailure({ ok: true, data: { cards: [] } }),
+  null,
+  'successful Fused responses do not create provider failures'
+);
+
+const runtimeFailure = validateFusedProviderResult({
+  ok: false,
+  diagnostics: {
+    failure: {
+      code: 'RECURSION_PROVIDER_RATE_LIMIT',
+      category: 'provider',
+      retryable: true,
+      message: 'The selected profile is rate limited.'
+    }
+  },
+  data: { items: [] }
+}, {
+  selectedCards: [{ family: 'character' }],
+  request: { requestedCards: [{ family: 'character' }] }
+});
+assertEqual(runtimeFailure.ok, false, 'runtime Fused validation rejects provider failures before card parsing');
+assertEqual(runtimeFailure.error.code, 'RECURSION_PROVIDER_RATE_LIMIT', 'runtime Fused validation preserves provider failure identity');
 
 function validateBundle(bundle, { selectedCards }) {
   const cards = {};
@@ -12,19 +57,38 @@ function validateBundle(bundle, { selectedCards }) {
       outcomes[family] = { state: 'failed', reason: 'invalid-card' };
     }
   }
-  return {
-    ok: Object.keys(cards).length > 0,
-    value: {
-      cards,
-      outcomes,
-      fallback: null
-    },
-    error: { code: 'zero-useful-fused-cards', retryable: true }
-  };
+  const acceptedFamilies = Object.keys(cards);
+  const unresolvedFamilies = selectedCards.filter((family) => !cards[family]);
+  return acceptedFamilies.length > 0
+    ? {
+        ok: true,
+        value: {
+          cards,
+          outcomes,
+          acceptedFamilies,
+          unresolvedFamilies,
+          fallback: unresolvedFamilies.length
+            ? {
+                mode: 'segmented',
+                reason: 'unresolved-fused-families',
+                families: unresolvedFamilies
+              }
+            : null
+        }
+      }
+    : {
+        ok: false,
+        value: { cards, outcomes },
+        error: {
+          code: 'RECURSION_FUSED_ZERO_USEFUL_CARDS',
+          category: 'validation',
+          retryable: true,
+          message: 'Fused bundle produced no useful cards.'
+        }
+      };
 }
 
 {
-  const segmentedFallbackCalls = [];
   const [stage] = createFusedCardStages({
     selectedCards: ['character', 'setting'],
     createBundleRequest: () => ({ families: ['character', 'setting'] }),
@@ -34,26 +98,25 @@ function validateBundle(bundle, { selectedCards }) {
         character: { family: 'character', valid: true },
         setting: { family: 'setting', valid: false }
       }
-    }),
-    createSegmentedFallbackStages: () => {
-      segmentedFallbackCalls.push('created');
-      return [];
-    }
+    })
   });
   const result = await stage.run({ request: await stage.buildRequest({}, {}) });
   const validated = await stage.validate(result, {});
   assertEqual(validated.ok, true, 'a partially useful Fused bundle is accepted');
   assertEqual(Object.keys(validated.value.cards).length, 1, 'valid Fused sibling survives invalid output');
-  assertDeepEqual(validated.value.outcomes.setting, { state: 'failed', reason: 'invalid-card' }, 'invalid sibling remains a validation outcome');
-  assertEqual(segmentedFallbackCalls.length, 0, 'partial useful output does not start Segmented fallback');
+  assertDeepEqual(validated.value.acceptedFamilies, ['character'], 'accepted family is explicit');
+  assertDeepEqual(validated.value.unresolvedFamilies, ['setting'], 'unresolved family is explicit');
+  assertDeepEqual(
+    validated.value.fallback,
+    { mode: 'segmented', reason: 'unresolved-fused-families', families: ['setting'] },
+    'partial Fused output carries a targeted repair directive'
+  );
   assertEqual(stage.executable, true, 'Fused bundle parent owns its action');
   assertEqual(stage.outcomeChildren.every((child) => child.executable === false), true, 'Fused item children are non-executable outcomes');
 }
 
 {
   const fusedCalls = [];
-  const segmentedFallbackCalls = [];
-  const arbiterCalls = [];
   const [stage] = createFusedCardStages({
     selectedCards: ['character', 'setting'],
     createBundleRequest: () => ({ families: ['character', 'setting'] }),
@@ -61,16 +124,7 @@ function validateBundle(bundle, { selectedCards }) {
     generateBundle: async (_request, { attempt }) => {
       fusedCalls.push(attempt);
       return { cards: {} };
-    },
-    createSegmentedFallbackStages: ({ selectedCards }) => createSegmentedCardStages({
-      selectedCards,
-      createCardRequest: (family) => ({ family }),
-      validateCard: (card) => ({ ok: true, value: card }),
-      generateCard: async (request) => {
-        segmentedFallbackCalls.push(request.family);
-        return { family: request.family, valid: true };
-      }
-    })
+    }
   });
 
   let lastArtifact = null;
@@ -85,24 +139,35 @@ function validateBundle(bundle, { selectedCards }) {
     assertEqual(validation.ok, false, `zero-useful Fused attempt ${attempt} remains retryable`);
   }
 
-  const fallback = await stage.onAttemptsExhausted({
+  const settled = await stage.settleExhausted({
     lastArtifact,
+    failure: {
+      code: 'RECURSION_FUSED_ZERO_USEFUL_CARDS',
+      category: 'validation',
+      retryable: true
+    },
+    attempts: 2,
+    request: { families: ['character', 'setting'] },
     context: {},
     dependencies: {
       'preprocess.arbiter': { artifact: { selectedCards: ['character', 'setting'] } }
     }
   });
-  for (const fallbackStage of fallback.stages) {
-    const request = await fallbackStage.buildRequest({}, fallback.dependencies);
-    const artifact = await fallbackStage.run({ request, dependencies: fallback.dependencies, attempt: 1 });
-    const validation = await fallbackStage.validate(artifact, {});
-    assertEqual(validation.ok, true, `${fallbackStage.id} fallback validates`);
-  }
 
   assertEqual(fusedCalls.length, 2, 'Fused bundle consumes its own two-attempt window');
-  assertEqual(segmentedFallbackCalls.length, 2, 'zero useful output starts one Segmented call per selected card');
-  assertEqual(arbiterCalls.length, 0, 'fallback reuses the existing Arbiter artifact');
-  assertEqual(fallback.artifact.fallback.mode, 'segmented', 'Fused artifact records the explicit fallback directive');
+  assertEqual(settled.ok, true, 'exhausted zero-useful Fused output settles explicitly');
+  assertDeepEqual(settled.value.acceptedFamilies, [], 'zero-useful settlement accepts no families');
+  assertDeepEqual(settled.value.unresolvedFamilies, ['character', 'setting'], 'zero-useful settlement exposes every unresolved family');
+  assertDeepEqual(
+    settled.value.fallback,
+    {
+      mode: 'segmented',
+      reason: 'zero-useful-fused-cards',
+      families: ['character', 'setting']
+    },
+    'zero-useful settlement records one complete Segmented fallback directive'
+  );
+  assertEqual(Object.hasOwn(settled, 'stages'), false, 'settlement hook does not mutate or extend the graph');
 }
 
 console.log('fused pipeline tests passed');

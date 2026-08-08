@@ -12,7 +12,8 @@ import {
   extractProviderResponseReasoning,
   extractProviderResponseText,
   getProviderResponseFailure,
-  isProviderResponseTokenLimitFinishReason
+  isProviderResponseTokenLimitFinishReason,
+  normalizeProviderEnvelope
 } from '../../src/providers/provider-response-normalizer.mjs';
 import {
   extractJsonObjectsFromArrayProperty,
@@ -21,6 +22,35 @@ import {
   repairCommonJson,
   stripReasoningBlocks
 } from '../../src/providers/structured-output-parser.mjs';
+
+const envelopeFixtures = [
+  { name: 'chat content', input: { choices: [{ message: { content: '{"ok":true}' } }] }, expectedText: '{"ok":true}' },
+  { name: 'text completion', input: { choices: [{ text: '{"ok":true}' }] }, expectedText: '{"ok":true}' },
+  { name: 'direct structured object', input: { schema: 'recursion.providerTest.v1', ok: true }, expectedStructured: { schema: 'recursion.providerTest.v1', ok: true } },
+  { name: 'direct parsed object', input: { parsed: { ok: true } }, expectedStructured: { ok: true } },
+  { name: 'message parsed object', input: { choices: [{ message: { parsed: { ok: true } } }] }, expectedStructured: { ok: true } },
+  { name: 'tool arguments', input: { choices: [{ message: { tool_calls: [{ function: { arguments: '{"ok":true}' } }] } }] }, expectedStructured: { ok: true } },
+  { name: 'legacy function arguments', input: { choices: [{ message: { function_call: { arguments: '{"ok":true}' } } }] }, expectedStructured: { ok: true } },
+  {
+    name: 'Claude tool input',
+    input: {
+      content: [{
+        type: 'tool_use',
+        name: 'recursion_provider_test',
+        input: { schema: 'recursion.providerTest.v1', ok: true }
+      }]
+    },
+    expectedStructured: { schema: 'recursion.providerTest.v1', ok: true }
+  }
+];
+for (const fixture of envelopeFixtures) {
+  const envelope = normalizeProviderEnvelope(fixture.input);
+  if (fixture.expectedText !== undefined) assertEqual(envelope.text, fixture.expectedText, `${fixture.name} text`);
+  if (fixture.expectedStructured !== undefined) assertDeepEqual(envelope.structured, fixture.expectedStructured, `${fixture.name} structured`);
+}
+assertDeepEqual(parseStructuredJsonText('[{"ok":true}]').value, { ok: true }, 'singleton object array unwraps');
+assertDeepEqual(parseStructuredJsonText('[1,2]\nTrailing object: {"ok":true}').value, { ok: true }, 'non-object first candidate does not stop later object recovery');
+assertEqual(JSON.stringify(parseStructuredJsonText('not json')).includes('sample'), false, 'diagnostics contain no output sample');
 
 const strict = parseStructuredJsonText('{"schema":"recursion.providerTest.v1","ok":true}');
 assertEqual(strict.ok, true, 'strict object parses');
@@ -183,6 +213,7 @@ assertEqual(emptyFailure.code, PROVIDER_RESPONSE_ERROR_CODES.EMPTY_CONTENT, 'emp
 const described = describeProviderResponse(reasoningOnly);
 assertEqual(described.visibleContentLength, 0, 'provider description includes visible length');
 assertEqual(described.reasoningLength, 'hidden chain of thought'.length, 'provider description includes reasoning length');
+assertEqual(Object.hasOwn(described, 'sample'), false, 'provider descriptions never expose visible output samples');
 
 assertEqual(assertProviderResponseText({ text: 'visible' }, { providerTitle: 'Utility' }), 'visible', 'assertProviderResponseText returns visible text');
 assertProviderResponseText({ schema: 'recursion.providerTest.v1', ok: true }, { providerTitle: 'Utility' });

@@ -87,7 +87,7 @@ The source is preflighted locally before any provider request.
 
 Some connection-profile providers intermittently omit machine-envelope metadata even when the returned reviewer payload contains its actual semantic work. Recursion may restore the **missing only** `schema` and `sourceHash` values from the immutable request, and default omitted display-only `assessment` and `reviewDomains` to empty objects. This recovery is allowed only for `generationReviewer` responses that already contain array-shaped `cardOutcomes` and `patches`. A nonempty mismatched source hash, malformed patch list, malformed ledger, unknown card ID, incomplete coverage, invalid status, or unsafe target still fails the normal validator; no provider response gains authority merely because the envelope is completed locally.
 
-For Connection Manager requests, `machineJson` also requires `extractData: false`. SillyTavern's extracted-data path attempts its own JSON parse and substitutes `{}` when it cannot parse a provider's visible text. That destroys the response Recursion needs for its parser and one bounded correction request. Recursion instead receives the raw Connection Manager envelope, extracts visible content itself, and keeps the normal parser, schema, and semantic validation sequence authoritative. Non-machine generation continues to use SillyTavern's extracted-data behavior.
+Connection Profile model requests always use `extractData: false`. SillyTavern's extracted-data path may attempt its own JSON parse and substitute `{}` when visible content cannot be parsed. That would destroy the response Recursion needs for its canonical envelope parser and bounded correction request. Recursion therefore receives the raw Connection Manager envelope, extracts visible content itself, and keeps syntax, schema, and semantic validation authoritative.
 
 An enabled Enhancement review with a repairable defect must not silently succeed without a patch. Conversely, a response with no valid bounded target must not incur a paid model call merely to establish that fact.
 
@@ -232,7 +232,6 @@ export function buildGenerationReviewRequest({
     lane,
     ...reasoning,
     responseSchema: GENERATION_REVIEW_SCHEMA,
-    machineJson: true,
     responseLength: 3200,
     prompt: [
       'Return a Recursion Generation Review and Enhancement result as strict JSON.',

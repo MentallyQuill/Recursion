@@ -906,7 +906,6 @@ function requestBase(schema, prompt, lane = '') {
     prompt,
     systemPrompt: `Return only one valid ${schema} JSON object. Do not emit prose, markdown, reasoning, or an alternate schema.`,
     responseSchema: schema,
-    machineJson: true,
     ...(lane ? { lane } : {}),
     reasoningCategory: 'editorial-transform',
     reasoningIntent: 'medium'

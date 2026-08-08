@@ -11,389 +11,180 @@ function assertThrows(fn, pattern, message) {
     fn();
   } catch (error) {
     const actual = String(error?.message || error);
-    if (!pattern || pattern.test(actual)) return;
+    if (!pattern || pattern.test(actual)) return error;
     throw new Error(`${message}: unexpected error ${actual}`);
   }
   throw new Error(message);
 }
 
-function configuredProvider(lane, health = { status: 'not-run' }) {
-  const provider = {
+function provider(lane, {
+  profileId = `${lane}-profile`,
+  certification = { status: 'not-run' },
+  revision = 0
+} = {}) {
+  const base = {
     lane,
-    source: 'host-connection-profile',
-    hostConnectionProfileId: `${lane}-profile`,
-    openAICompatible: {
-      baseUrl: '',
-      model: '',
-      sessionApiKeyPresent: false
+    connectionProfileId: profileId,
+    generationPolicy: {
+      presetMode: 'isolated',
+      instructMode: 'auto',
+      samplerMode: 'profile',
+      structuredOutputMode: 'auto'
     },
-    temperature: lane === 'reasoner' ? 0.4 : 0.1,
-    topP: 0.95,
-    maxTokens: 8192,
-    configRevision: 3
+    samplerOverrides: { temperature: lane === 'reasoner' ? 0.4 : 0.1, topP: 0.95 },
+    outputTokenCeiling: 8192,
+    configRevision: revision,
+    certification: { status: 'not-run' }
   };
+  if (certification.status !== 'not-run') {
+    base.certification = {
+      ...certification,
+      configHash: providerConfigHash(base),
+      checkedAt: '2026-08-06T00:00:00.000Z',
+      completionMode: certification.completionMode || 'text',
+      structuredOutput: certification.structuredOutput || 'prompt-json',
+      checks: certification.checks || { connectivity: 'pass', singleCard: 'pass', fusedCards: 'pass' },
+      safeConcurrency: 1,
+      diagnosticCodes: [],
+      compactError: ''
+    };
+  }
+  return base;
+}
+
+function settingsFor({ reasoningLevel = 'medium', utility, reasoner } = {}) {
   return {
-    ...provider,
-    health: {
-      ...health,
-      ...(health.status === 'pass' || health.status === 'fail'
-        ? { configHash: providerConfigHash(provider) }
-        : {})
+    reasoningLevel,
+    providers: {
+      utility: utility || provider('utility'),
+      reasoner: reasoner || provider('reasoner')
     }
   };
 }
 
-function settingsFor({
-  reasoningLevel = 'medium',
-  utility = configuredProvider('utility'),
-  reasoner = configuredProvider('reasoner')
-} = {}) {
-  return {
-    reasoningLevel,
-    providers: { utility, reasoner }
-  };
-}
-
-const host = {
-  currentModelAvailable: true,
-  connectionProfiles: [
-    { id: 'utility-profile' },
-    { id: 'reasoner-profile' }
-  ]
-};
-
-assertDeepEqual(
-  PROVIDER_CAPABILITY_STATES,
-  ['unconfigured', 'untested', 'ready', 'unhealthy'],
-  'capability states are stable'
-);
+const host = { connectionProfiles: [{ id: 'utility-profile' }, { id: 'reasoner-profile' }] };
+assertDeepEqual(PROVIDER_CAPABILITY_STATES, [
+  'unconfigured',
+  'uncertified',
+  'segmented-ready',
+  'fused-ready',
+  'unhealthy'
+], 'capability states are stable');
 
 for (const lane of ['utility', 'reasoner']) {
   const unconfigured = resolveProviderCapability({
+    settings: settingsFor({ [lane]: provider(lane, { profileId: '' }) }),
+    lane,
+    operation: 'prompt-packet',
+    host
+  });
+  assertEqual(unconfigured.state, 'unconfigured', `${lane} missing profile is unconfigured`);
+  assertEqual(unconfigured.testable, false, `${lane} missing profile is not testable`);
+
+  const uncertified = resolveProviderCapability({ settings: settingsFor(), lane, operation: 'prompt-packet', host });
+  assertEqual(uncertified.state, 'uncertified', `${lane} selected profile is uncertified`);
+  assertEqual(uncertified.segmentedEligible, true, `${lane} uncertified profile may use conservative Segmented`);
+  assertEqual(uncertified.fusedEligible, false, `${lane} uncertified profile may not use Fused`);
+
+  const segmented = resolveProviderCapability({
     settings: settingsFor({
-      [lane]: {
-        ...configuredProvider(lane),
-        hostConnectionProfileId: ''
-      }
+      [lane]: provider(lane, {
+        certification: {
+          status: 'partial',
+          checks: { connectivity: 'pass', singleCard: 'pass', fusedCards: 'fail' }
+        }
+      })
     }),
     lane,
     operation: 'prompt-packet',
     host
   });
-  assertEqual(unconfigured.state, 'unconfigured', `${lane} missing route is unconfigured`);
-  assertEqual(unconfigured.configured, false, `${lane} missing route is not configured`);
-  assertEqual(unconfigured.testable, false, `${lane} missing route is not testable`);
+  assertEqual(segmented.state, 'segmented-ready', `${lane} single-card pass is Segmented-ready`);
+  assertEqual(segmented.ready, true, `${lane} Segmented-ready is ready`);
+  assertEqual(segmented.fusedEligible, false, `${lane} failed Fused check is not Fused-eligible`);
 
-  const untested = resolveProviderCapability({
-    settings: settingsFor({ [lane]: configuredProvider(lane) }),
+  const fused = resolveProviderCapability({
+    settings: settingsFor({ [lane]: provider(lane, { certification: { status: 'pass' } }) }),
     lane,
     operation: 'prompt-packet',
     host
   });
-  assertEqual(untested.state, 'untested', `${lane} without bound health is untested`);
-  assertEqual(untested.testable, true, `${lane} complete route is testable`);
-
-  const ready = resolveProviderCapability({
-    settings: settingsFor({
-      [lane]: configuredProvider(lane, { status: 'pass' })
-    }),
-    lane,
-    operation: 'prompt-packet',
-    host
-  });
-  assertEqual(ready.state, 'ready', `${lane} matching pass is ready`);
-  assertEqual(ready.ready, true, `${lane} matching pass exposes ready`);
+  assertEqual(fused.state, 'fused-ready', `${lane} complete certification is Fused-ready`);
+  assertEqual(fused.segmentedEligible, true, `${lane} Fused-ready remains Segmented-eligible`);
+  assertEqual(fused.fusedEligible, true, `${lane} Fused-ready is Fused-eligible`);
+  assertEqual(fused.completionMode, 'text', `${lane} completion mode is exposed`);
+  assertEqual(fused.structuredOutput, 'prompt-json', `${lane} structured method is exposed`);
+  assertEqual(fused.safeConcurrency, 1, `${lane} safe concurrency is one`);
 
   const unhealthy = resolveProviderCapability({
     settings: settingsFor({
-      [lane]: configuredProvider(lane, { status: 'fail', compactError: 'unsafe provider detail' })
+      [lane]: provider(lane, {
+        certification: {
+          status: 'fail',
+          checks: { connectivity: 'pass', singleCard: 'fail', fusedCards: 'not-run' }
+        }
+      })
     }),
     lane,
     operation: 'prompt-packet',
     host
   });
-  assertEqual(unhealthy.state, 'unhealthy', `${lane} matching failure is unhealthy`);
-  assert(!unhealthy.message.includes('unsafe provider detail'), `${lane} capability message excludes provider error detail`);
-
-  const staleHealthProvider = configuredProvider(lane, { status: 'pass' });
-  staleHealthProvider.maxTokens = 4096;
-  const staleHealth = resolveProviderCapability({
-    settings: settingsFor({ [lane]: staleHealthProvider }),
-    lane,
-    operation: 'prompt-packet',
-    host
-  });
-  assertEqual(staleHealth.state, 'untested', `${lane} stale health hash becomes untested`);
+  assertEqual(unhealthy.state, 'unhealthy', `${lane} failed single-card check is unhealthy`);
+  assertEqual(unhealthy.segmentedEligible, false, `${lane} unhealthy profile cannot route model work`);
 }
 
-for (const reasoningLevel of ['low', 'medium', 'high', 'ultra']) {
-  for (const operation of ['prompt-packet', 'provider-test', 'redirect']) {
-    const readyReasoner = resolveProviderCapability({
-      settings: settingsFor({
-        reasoningLevel,
-        reasoner: configuredProvider('reasoner', { status: 'pass' })
-      }),
-      lane: 'reasoner',
-      operation,
-      host
-    });
-    const required = operation === 'redirect' && reasoningLevel !== 'low';
-    assertEqual(readyReasoner.required, required, `${reasoningLevel} ${operation} required policy`);
-    assertEqual(
-      readyReasoner.selectedByPolicy,
-      reasoningLevel !== 'low',
-      `${reasoningLevel} ${operation} selection policy`
-    );
-    assertEqual(
-      readyReasoner.eligible,
-      operation === 'provider-test' ? true : reasoningLevel !== 'low',
-      `${reasoningLevel} ${operation} ready eligibility`
-    );
-  }
-}
-
-for (const lane of ['utility', 'reasoner']) {
-  for (const reasoningLevel of ['low', 'medium', 'high', 'ultra']) {
-    for (const operation of ['prompt-packet', 'provider-test', 'redirect']) {
-      for (const state of ['unconfigured', 'untested', 'ready', 'unhealthy']) {
-        const health = state === 'ready'
-          ? { status: 'pass' }
-          : state === 'unhealthy'
-            ? { status: 'fail' }
-            : { status: 'not-run' };
-        const base = configuredProvider(lane, health);
-        const provider = state === 'unconfigured'
-          ? { ...base, hostConnectionProfileId: '' }
-          : base;
-        const capability = resolveProviderCapability({
-          settings: settingsFor({ reasoningLevel, [lane]: provider }),
-          lane,
-          operation,
-          host
-        });
-        const testable = state !== 'unconfigured';
-        const selected = lane === 'utility' || reasoningLevel !== 'low';
-        assertEqual(capability.state, state, `${lane} ${reasoningLevel} ${operation} ${state} matrix state`);
-        assertEqual(
-          capability.eligible,
-          operation === 'provider-test'
-            ? testable
-            : selected && (state === 'ready' || state === 'untested'),
-          `${lane} ${reasoningLevel} ${operation} ${state} matrix eligibility`
-        );
-      }
-    }
-  }
-}
-
-for (const reasoningLevel of ['medium', 'high', 'ultra']) {
-  for (const state of ['unconfigured', 'untested', 'unhealthy']) {
-    const base = configuredProvider('reasoner', state === 'unhealthy' ? { status: 'fail' } : { status: 'not-run' });
-    const reasoner = state === 'unconfigured'
-      ? { ...base, hostConnectionProfileId: '' }
-      : base;
-    const ordinary = resolveProviderCapability({
-      settings: settingsFor({ reasoningLevel, reasoner }),
-      lane: 'reasoner',
-      operation: 'prompt-packet',
-      host
-    });
-    assertEqual(ordinary.state, state, `${reasoningLevel} ordinary ${state} state`);
-    assertEqual(ordinary.required, false, `${reasoningLevel} ordinary work does not require Reasoner`);
-    assertEqual(
-      ordinary.eligible,
-      state === 'untested',
-      `${reasoningLevel} ordinary ${state} only treats untested as routable caution`
-    );
-
-    const redirect = resolveProviderCapability({
-      settings: settingsFor({ reasoningLevel, reasoner }),
-      lane: 'reasoner',
-      operation: 'redirect',
-      host
-    });
-    assertEqual(redirect.required, true, `${reasoningLevel} Redirect requires Reasoner`);
-    assertEqual(
-      redirect.eligible,
-      state === 'untested',
-      `${reasoningLevel} Redirect only treats untested as routable caution`
-    );
-  }
-}
-
-const lowRedirectReasoner = resolveProviderCapability({
-  settings: settingsFor({
-    reasoningLevel: 'low',
-    reasoner: configuredProvider('reasoner', { status: 'fail' })
-  }),
-  lane: 'reasoner',
-  operation: 'redirect',
-  host
-});
-const lowRedirectUtility = resolveProviderCapability({
-  settings: settingsFor({
-    reasoningLevel: 'low',
-    utility: configuredProvider('utility', { status: 'pass' })
-  }),
-  lane: 'utility',
-  operation: 'redirect',
-  host
-});
-assertEqual(lowRedirectReasoner.selectedByPolicy, false, 'Low Redirect does not select Reasoner');
-assertEqual(lowRedirectReasoner.required, false, 'Low Redirect does not require Reasoner');
-assertEqual(lowRedirectUtility.eligible, true, 'Low Redirect selects ready Utility');
-
-for (const reasoningLevel of ['low', 'medium', 'high', 'ultra']) {
-  const expectedLane = reasoningLevel === 'high' || reasoningLevel === 'ultra'
-    ? 'reasoner'
-    : 'utility';
-  for (const lane of ['utility', 'reasoner']) {
-    const capability = resolveProviderCapability({
-      settings: settingsFor({
-        reasoningLevel,
-        [lane]: configuredProvider(lane, { status: 'pass' })
-      }),
-      lane,
-      operation: 'post-process',
-      host
-    });
-    assertEqual(
-      capability.selectedByPolicy,
-      lane === expectedLane,
-      `${reasoningLevel} post-process selects only ${expectedLane}`
-    );
-    assertEqual(
-      capability.required,
-      lane === expectedLane,
-      `${reasoningLevel} post-process requires only ${expectedLane}`
-    );
-    assertEqual(
-      capability.eligible,
-      lane === expectedLane,
-      `${reasoningLevel} post-process forbids provider-lane substitution`
-    );
-  }
-}
-
-const unavailableHighPostProcess = resolveProviderCapability({
-  settings: settingsFor({
-    reasoningLevel: 'high',
-    reasoner: configuredProvider('reasoner', { status: 'fail' }),
-    utility: configuredProvider('utility', { status: 'pass' })
-  }),
-  lane: 'reasoner',
-  operation: 'post-process',
-  host
-});
-assertEqual(unavailableHighPostProcess.required, true, 'High post-process still requires Reasoner when unhealthy');
-assertEqual(unavailableHighPostProcess.eligible, false, 'High post-process does not fall back to healthy Utility');
-
-const untestedMediumUtilityPostProcess = resolveProviderCapability({
-  settings: settingsFor({
-    reasoningLevel: 'medium',
-    utility: configuredProvider('utility', { status: 'not-run' })
-  }),
-  lane: 'utility',
-  operation: 'post-process',
-  host
-});
-assertEqual(
-  untestedMediumUtilityPostProcess.eligible,
-  true,
-  'Medium post-process may use a configured Utility lane without a separate provider test'
-);
-
-const directProvider = {
-  lane: 'reasoner',
-  source: 'openai-compatible',
-  hostConnectionProfileId: '',
-  openAICompatible: {
-    baseUrl: 'https://example.invalid/v1',
-    model: 'reasoner-model',
-    sessionApiKeyPresent: true
-  },
-  temperature: 0.4,
-  topP: 0.95,
-  maxTokens: 8192,
-  configRevision: 7,
-  health: { status: 'not-run' }
-};
-const directTest = resolveProviderCapability({
-  settings: settingsFor({ reasoner: directProvider }),
-  lane: 'reasoner',
-  operation: 'provider-test',
-  host
-});
-assertEqual(directTest.testable, true, 'complete direct provider is testable');
-assertEqual(directTest.eligible, true, 'provider test eligibility does not require prior health');
-
-const missingKey = resolveProviderCapability({
-  settings: settingsFor({
-    reasoner: {
-      ...directProvider,
-      openAICompatible: {
-        ...directProvider.openAICompatible,
-        sessionApiKeyPresent: false
-      }
-    }
-  }),
-  lane: 'reasoner',
-  operation: 'provider-test',
-  host
-});
-assertEqual(missingKey.state, 'unconfigured', 'direct provider without key is unconfigured');
-assertEqual(missingKey.testable, false, 'direct provider without key is not testable');
-assertEqual(missingKey.reasonCode, 'provider-session-key-missing', 'missing key has a safe reason code');
-
-const unavailableCurrentModel = resolveProviderCapability({
-  settings: settingsFor({
-    utility: {
-      ...configuredProvider('utility'),
-      source: 'host-current-model'
-    }
-  }),
-  lane: 'utility',
-  operation: 'provider-test',
-  host: { currentModelAvailable: false }
-});
-assertEqual(unavailableCurrentModel.reasonCode, 'provider-current-model-unavailable', 'unavailable current model is explicit');
-assertEqual(unavailableCurrentModel.testable, false, 'unavailable current model is not testable');
-
-const unavailableProfile = resolveProviderCapability({
+const unavailable = resolveProviderCapability({
   settings: settingsFor(),
   lane: 'reasoner',
   operation: 'redirect',
   host: { connectionProfiles: [{ id: 'different-profile' }] }
 });
-assertEqual(unavailableProfile.reasonCode, 'provider-profile-unavailable', 'unavailable saved profile is explicit');
-const unverifiedProfileInventory = resolveProviderCapability({
-  settings: settingsFor({
-    reasoner: configuredProvider('reasoner', { status: 'pass' })
-  }),
-  lane: 'reasoner',
-  operation: 'prompt-packet',
-  host: {}
-});
-assertEqual(unverifiedProfileInventory.state, 'unconfigured', 'missing authoritative profile inventory fails closed');
-assertEqual(unverifiedProfileInventory.eligible, false, 'saved profile cannot route when availability is unconfirmed');
+assertEqual(unavailable.reasonCode, 'provider-profile-unavailable', 'unavailable saved profile is explicit');
+assertEqual(unavailable.eligible, false, 'unavailable profile cannot route');
 
-for (const [field, mutate] of [
-  ['lane', (provider) => ({ ...provider, lane: 'utility' })],
-  ['source', (provider) => ({ ...provider, source: 'host-current-model' })],
-  ['profile', (provider) => ({ ...provider, hostConnectionProfileId: 'changed-profile' })],
-  ['base URL', (provider) => ({ ...provider, openAICompatible: { ...provider.openAICompatible, baseUrl: 'https://changed.invalid/v1' } })],
-  ['model', (provider) => ({ ...provider, openAICompatible: { ...provider.openAICompatible, model: 'changed-model' } })],
-  ['key presence', (provider) => ({ ...provider, openAICompatible: { ...provider.openAICompatible, sessionApiKeyPresent: !provider.openAICompatible.sessionApiKeyPresent } })],
-  ['temperature', (provider) => ({ ...provider, temperature: 0.8 })],
-  ['top-p', (provider) => ({ ...provider, topP: 0.8 })],
-  ['max tokens', (provider) => ({ ...provider, maxTokens: 4096 })]
-]) {
-  const original = directProvider;
-  assert(
-    providerConfigHash(mutate(original)) !== providerConfigHash(original),
-    `${field} participates in provider configuration hash`
-  );
+for (const reasoningLevel of ['low', 'medium', 'high', 'ultra']) {
+  const readySettings = settingsFor({
+    reasoningLevel,
+    utility: provider('utility', { certification: { status: 'pass' } }),
+    reasoner: provider('reasoner', { certification: { status: 'pass' } })
+  });
+  const reasonerRedirect = resolveProviderCapability({
+    settings: readySettings,
+    lane: 'reasoner',
+    operation: 'redirect',
+    host
+  });
+  assertEqual(reasonerRedirect.required, reasoningLevel !== 'low', `${reasoningLevel} Redirect requirement`);
+  assertEqual(reasonerRedirect.selectedByPolicy, reasoningLevel !== 'low', `${reasoningLevel} Redirect reasoner selection`);
+
+  const postLane = reasoningLevel === 'high' || reasoningLevel === 'ultra' ? 'reasoner' : 'utility';
+  for (const lane of ['utility', 'reasoner']) {
+    const post = resolveProviderCapability({ settings: readySettings, lane, operation: 'post-process', host });
+    assertEqual(post.selectedByPolicy, lane === postLane, `${reasoningLevel} post-process selects ${postLane}`);
+    assertEqual(post.required, lane === postLane, `${reasoningLevel} post-process requires ${postLane}`);
+  }
 }
+
+const base = provider('utility');
+for (const [field, mutate] of [
+  ['lane', (value) => ({ ...value, lane: 'reasoner' })],
+  ['profile', (value) => ({ ...value, connectionProfileId: 'changed-profile' })],
+  ['preset mode', (value) => ({ ...value, generationPolicy: { ...value.generationPolicy, presetMode: 'full-profile' } })],
+  ['instruct mode', (value) => ({ ...value, generationPolicy: { ...value.generationPolicy, instructMode: 'off' } })],
+  ['sampler mode', (value) => ({ ...value, generationPolicy: { ...value.generationPolicy, samplerMode: 'recursion' } })],
+  ['structured mode', (value) => ({ ...value, generationPolicy: { ...value.generationPolicy, structuredOutputMode: 'prompt-json' } })],
+  ['temperature', (value) => ({ ...value, samplerOverrides: { ...value.samplerOverrides, temperature: 0.8 } })],
+  ['top-p', (value) => ({ ...value, samplerOverrides: { ...value.samplerOverrides, topP: 0.8 } })],
+  ['output ceiling', (value) => ({ ...value, outputTokenCeiling: 4096 })],
+  ['revision', (value) => ({ ...value, configRevision: 1 })]
+]) {
+  assert(providerConfigHash(mutate(base)) !== providerConfigHash(base), `${field} participates in provider hash`);
+}
+assertEqual(
+  providerConfigHash({ ...base, secret: 'must-not-matter', endpoint: 'http://localhost:5001' }),
+  providerConfigHash(base),
+  'unknown and secret-bearing fields do not participate in provider hash'
+);
 
 assertThrows(
   () => resolveProviderCapability({ settings: settingsFor(), lane: 'reasonre', operation: 'redirect', host }),
@@ -407,32 +198,36 @@ assertThrows(
 );
 
 const sanitized = sanitizeProviderCapability({
-  ...directTest,
+  ...resolveProviderCapability({
+    settings: settingsFor({ utility: provider('utility', { certification: { status: 'pass' } }) }),
+    lane: 'utility',
+    operation: 'prompt-packet',
+    host
+  }),
   secret: 'must-not-survive',
-  reasonCode: 'Bearer sk-reason-code-secret',
   message: 'Bearer sk-message-secret'
 });
-assertDeepEqual(
-  Object.keys(sanitized).sort(),
-  [
-    'configHash',
-    'configRevision',
-    'configured',
-    'eligible',
-    'lane',
-    'message',
-    'ready',
-    'reasonCode',
-    'required',
-    'selectedByPolicy',
-    'state',
-    'testable'
-  ].sort(),
-  'sanitized capability exposes only bounded fields'
-);
+assertDeepEqual(Object.keys(sanitized).sort(), [
+  'completionMode',
+  'configHash',
+  'configRevision',
+  'configured',
+  'eligible',
+  'fusedEligible',
+  'lane',
+  'message',
+  'ready',
+  'reasonCode',
+  'required',
+  'safeConcurrency',
+  'segmentedEligible',
+  'selectedByPolicy',
+  'state',
+  'structuredOutput',
+  'testable'
+].sort(), 'sanitized capability exposes only bounded fields');
 assert(!JSON.stringify(sanitized).includes('must-not-survive'), 'sanitized capability excludes unknown fields');
-assert(!JSON.stringify(sanitized).includes('sk-reason-code-secret'), 'sanitized capability does not trust caller reason text');
-assert(!JSON.stringify(sanitized).includes('sk-message-secret'), 'sanitized capability does not trust caller message text');
+assert(!JSON.stringify(sanitized).includes('sk-message-secret'), 'sanitized capability rebuilds safe messages');
 assert(Object.isFrozen(sanitized), 'sanitized capability is immutable');
 
 console.log('[pass] provider capability');

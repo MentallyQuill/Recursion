@@ -103,21 +103,28 @@ If the user-file API throws or returns a non-OK response for read, write, or del
 
 ## Settings Adapter
 
-Settings are stored under `extension_settings.recursion` and normalized through `src/settings.mjs`. Provider API keys are intercepted as session-only values and are never written to extension settings.
+Settings are stored under `extension_settings.recursion` and normalized through `src/settings.mjs`. Each Utility or Reasoner lane stores a selected Connection Profile id, generation policy, sampler overrides, output-token ceiling, configuration revision, and staged certification. Recursion does not store provider endpoints, credentials, authorization headers, or complete Connection Profile data.
 
 ## Generation Adapter
 
-The generation adapter prefers `generateRaw` when available. It passes prompt, system prompt, response length, temperature, top-p, provider source, host connection profile id, response schema metadata, machine-JSON intent, and abort signal.
+Utility and Reasoner work has one supported transport: `ConnectionManagerRequestService.sendRequest`. The adapter requires `getSupportedProfiles`, `getProfile`, `validateProfile`, and `sendRequest`, validates the selected profile as chat or text completion, and fails with a stable non-retryable configuration error when the profile or host capability is missing. There is no current-model or direct-endpoint fallback.
 
-The SillyTavern adapter owns connection-profile discovery because the object graph and ConnectionManager APIs are host-specific. It exposes `providerProfiles.list()` for runtime/UI setup checks while provider core remains host-neutral.
+The request keeps four policies independent:
 
-Host connection profile routing uses `ConnectionManagerRequestService.sendRequest` when available. For Recursion machine-JSON jobs, the adapter disables host preset/instruct inclusion and passes a minimal JSON schema constraint keyed to the expected Recursion response schema and frozen snapshot hash when present. This is an output-shape request, not trust by itself; `src/providers.mjs` still parses and validates the returned visible JSON before runtime consumes it.
+- `includePreset` follows Behavioral Preset (`Isolated` or `Full Profile`);
+- `includeInstruct` follows Instruct Formatting and is enabled automatically for text-completion profiles;
+- sampler values come from an allowlisted projection of the Connection Profile preset or explicit Recursion overrides;
+- native schema payloads are attached only when the effective structured-output method is `native-schema`.
 
-If only `generateQuietPrompt` is available, host connection profiles are unsupported and current-host-model generation can still run. Missing generation APIs produce a provider failure, not a host-blocking exception.
+The adapter passes `extractData: false` so SillyTavern returns the provider envelope and Recursion performs its own canonical response extraction, JSON recovery, and role validation. Prompt text, raw response bodies, complete profile objects, endpoint fields, secret references, and hidden reasoning are not returned through diagnostics.
+
+Every model request enters an abort-aware FIFO queue keyed by Connection Profile id. Calls sharing a profile never overlap; calls using distinct profiles may overlap. Stop aborts the active request where supported and removes queued work before it starts.
+
+Post-process prose rewriting is a separate host-owned operation. `generation.rewriteWithPostProcess()` temporarily installs the validated Recursion guidance packet, invokes SillyTavern's native quiet generation path, normalizes the resulting prose, and clears the temporary prompt key. This path writes prose; the Utility and Reasoner Connection Profile path returns structured Recursion data.
 
 The stop adapter exposes `generation.stop(details)`. It prefers SillyTavern's extension-context `stopGeneration()` function, which triggers the same host stop path as the native Stop control. If that API is absent, it falls back to clicking the native `#mes_stop` / `.mes_stop` button. If neither seam exists, it returns `RECURSION_HOST_STOP_UNAVAILABLE` so runtime can still abort Recursion work and clear prompt lanes without claiming the host model was stopped.
 
-The native chat-generation adapter exposes `generation.start(details)` for host-owned generation flows, but the Recursion Bar Regenerate command does not call it. Regenerate only queues one full-fresh next-generation intent; the next SillyTavern send or swipe remains the host generation trigger and consumes that intent through the generation interceptor. This seam is separate from `generation.generate(...)`, which remains the provider/quiet machine-JSON path for Utility and Reasoner calls.
+The native chat-generation adapter exposes `generation.start(details)` for host-owned generation flows, but the Recursion Bar Regenerate command does not call it. Regenerate only queues one full-fresh next-generation intent; the next SillyTavern send or swipe remains the host generation trigger and consumes that intent through the generation interceptor.
 
 ## UI Mount
 

@@ -1,3 +1,7 @@
+import {
+  normalizeCheckpointAttemptAction,
+  normalizeCheckpointDiagnosticCodes
+} from './execution/checkpoints.mjs';
 import { activeCardDeckSourceCards } from './pre-process-decks.mjs';
 
 const VALID_STATES = new Set(['pending', 'running', 'done', 'cached', 'warning', 'failed', 'skipped', 'info']);
@@ -979,6 +983,8 @@ function normalizeChildStep(input, index = 0) {
     failureCode: safeDisplayText(source.failureCode, '', 120)
       .replace(/[^A-Z0-9_]+/gi, '_')
       .toUpperCase() || null,
+    diagnosticCodes: normalizeCheckpointDiagnosticCodes(source.diagnosticCodes),
+    lastAttemptAction: normalizeCheckpointAttemptAction(source.lastAttemptAction),
     order: Number.isFinite(Number(source.order)) ? Number(source.order) : index
   };
   if (children.length) step.children = children;
@@ -1024,6 +1030,8 @@ function normalizeStep(input, index = 0) {
       .replace(/[^A-Z0-9_]+/gi, '_')
       .toUpperCase()
       || null,
+    diagnosticCodes: normalizeCheckpointDiagnosticCodes(source.diagnosticCodes),
+    lastAttemptAction: normalizeCheckpointAttemptAction(source.lastAttemptAction),
     order: Number.isFinite(Number(source.order)) ? Number(source.order) : index
   };
   if (children.length) step.children = children;
@@ -1457,6 +1465,8 @@ function executionProgressStep(stage, operation, queuedReprocess, overrides = {}
     reason: reason || null,
     suggestedAction: safeDisplayText(source.failure?.suggestedAction, '', 180) || null,
     failureCode: safeDisplayText(source.failure?.code, '', 120) || null,
+    diagnosticCodes: normalizeCheckpointDiagnosticCodes(source.diagnosticCodes),
+    lastAttemptAction: normalizeCheckpointAttemptAction(source.lastAttemptAction),
     action: actionForProgressStage({
       operation,
       stage: source,

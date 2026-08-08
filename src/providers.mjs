@@ -9,15 +9,18 @@ import {
 } from './core.mjs';
 import {
   PROVIDER_RESPONSE_ERROR_CODES,
-  assertProviderResponseText
+  assertProviderResponseText,
+  normalizeProviderEnvelope
 } from './providers/provider-response-normalizer.mjs';
 import {
   STRUCTURED_OUTPUT_PARSE_ERROR_CODES,
   parseStructuredJsonText
 } from './providers/structured-output-parser.mjs';
+import { createProfileRequestQueue } from './providers/profile-request-queue.mjs';
+import { normalizeProviderError } from './providers/provider-errors.mjs';
+import { outputBudgetForRequest } from './providers/stage-output-budgets.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
 import {
-  providerConfigHash,
   resolveProviderCapability
 } from './provider-capability.mjs';
 import {
@@ -35,7 +38,6 @@ import {
 } from './post-process-guidance.mjs';
 
 const LANES = new Set(['utility', 'reasoner']);
-const HOST_SOURCES = new Set(['host-current-model', 'host-connection-profile']);
 const EDITORIAL_PATCH_DOMAINS = new Set([
   'dialogue',
   'narrative-execution',
@@ -77,21 +79,21 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'providerTest'
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer', 'postProcessGuidanceReasoner']);
-export const PROVIDER_CONTRACT_VERSION = 7;
+export const PROVIDER_CONTRACT_VERSION = 8;
 const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   utilityArbiter: 'recursion.utilityArbiter.v1',
-  sceneFrameCard: 'recursion.card.v1',
-  activeCastCard: 'recursion.card.v1',
-  characterMotivationCard: 'recursion.card.v1',
-  dialogueRelationshipCard: 'recursion.card.v1',
-  socialSubtextCard: 'recursion.card.v1',
-  sceneConstraintsCard: 'recursion.card.v1',
-  knowledgeSecretsCard: 'recursion.card.v1',
-  clocksConsequencesCard: 'recursion.card.v1',
-  environmentAffordancesCard: 'recursion.card.v1',
-  possessionsItemsCard: 'recursion.card.v1',
-  openThreadsCard: 'recursion.card.v1',
-  fusedCardBundle: 'recursion.cardBundle.v1',
+  sceneFrameCard: 'recursion.cardPayload.v1',
+  activeCastCard: 'recursion.cardPayload.v1',
+  characterMotivationCard: 'recursion.cardPayload.v1',
+  dialogueRelationshipCard: 'recursion.cardPayload.v1',
+  socialSubtextCard: 'recursion.cardPayload.v1',
+  sceneConstraintsCard: 'recursion.cardPayload.v1',
+  knowledgeSecretsCard: 'recursion.cardPayload.v1',
+  clocksConsequencesCard: 'recursion.cardPayload.v1',
+  environmentAffordancesCard: 'recursion.cardPayload.v1',
+  possessionsItemsCard: 'recursion.cardPayload.v1',
+  openThreadsCard: 'recursion.cardPayload.v1',
+  fusedCardBundle: 'recursion.cardBundlePayload.v1',
   guidanceComposer: 'recursion.guidanceComposer.v1',
   cardAuthoringAssist: 'recursion.cardAuthoringAssist.v1',
   generationReviewer: 'recursion.generationReview.v1',
@@ -106,7 +108,7 @@ const ROLE_RESPONSE_SCHEMAS = Object.freeze({
 });
 const SEGMENTED_CARD_ROLES = new Set(
   Object.entries(ROLE_RESPONSE_SCHEMAS)
-    .filter(([, schema]) => schema === 'recursion.card.v1')
+    .filter(([, schema]) => schema === 'recursion.cardPayload.v1')
     .map(([roleId]) => roleId)
 );
 export const PROVIDER_CONTRACT_HASH = hashJson({
@@ -150,33 +152,9 @@ function providerError(code, message, { retryable = false, status = undefined, c
   return error;
 }
 
-async function markOpenAiAuthFailure(host, settingsStore, lane, providerSnapshot = {}) {
-  const configRevision = Number(providerSnapshot.configRevision || 0);
-  const configHash = providerConfigHash(providerSnapshot);
-  try {
-    if (typeof host?.handleProviderAuthFailure === 'function') {
-      await host.handleProviderAuthFailure({
-        lane,
-        configHash,
-        configRevision
-      });
-      return;
-    }
-    if (typeof settingsStore?.clearApiKey === 'function') {
-      settingsStore.clearApiKey(lane, { expectedRevision: configRevision });
-    }
-  } catch {
-    // The provider call still fails with a stable auth error; stale credentials remain untouched.
-  }
-}
-
 function laneName(value, fallback = 'utility') {
   const lane = String(value || '').trim();
   return LANES.has(lane) ? lane : fallback;
-}
-
-function sourceName(value) {
-  return String(value || 'host-current-model').trim() || 'host-current-model';
 }
 
 function normalizeReasoningIntent(value) {
@@ -223,8 +201,6 @@ function providerConfigFor(settingsStore, lane) {
 
 function providerCapabilityHost(host = null) {
   return {
-    currentModelAvailable: typeof host?.generation?.generate === 'function'
-      || typeof host?.generation?.batch === 'function',
     connectionProfiles: listProviderConnectionProfiles({ host })
   };
 }
@@ -516,49 +492,66 @@ function editorialVerificationChecksSchema(validEvidenceIds) {
   };
 }
 
-export function machineJsonSchemaForRequest(request = {}) {
+export function jsonSchemaForRequest(request = {}) {
   const schema = String(request?.responseSchema || '').trim();
-  if (!schema || request?.machineJson !== true) return null;
-  if (schema === 'recursion.card.v1') {
-    const metadata = plainObject(request?.metadata) ? request.metadata : {};
-    const snapshotHash = String(request?.snapshotHash || '').trim();
-    const role = String(metadata.role || request?.roleId || '').trim();
-    const family = String(metadata.family || '').trim();
+  if (!schema) return null;
+  if (schema === 'recursion.cardPayload.v1') {
     return {
       name: schemaSafeName(schema),
       schema: {
         type: 'object',
         properties: {
-          schema: { const: schema },
-          snapshotHash: snapshotHash ? { const: snapshotHash } : { type: 'string' },
-          role: role ? { const: role } : { type: 'string' },
-          family: family ? { const: family } : { type: 'string' },
-          items: {
+          promptText: { type: 'string', minLength: 1 },
+          evidenceRefs: {
             type: 'array',
             minItems: 1,
-            maxItems: 1,
+            maxItems: 12,
+            items: { type: 'string' }
+          }
+        },
+        required: ['promptText', 'evidenceRefs'],
+        additionalProperties: false
+      }
+    };
+  }
+  if (schema === 'recursion.cardBundlePayload.v1') {
+    const requestedFamilies = uniqueRequestStrings(
+      (Array.isArray(request?.requestedCards) ? request.requestedCards : [])
+        .map((entry) => entry?.family)
+    );
+    return {
+      name: schemaSafeName(schema),
+      schema: {
+        type: 'object',
+        properties: {
+          items: {
+            type: 'array',
+            minItems: 0,
+            maxItems: Math.max(1, requestedFamilies.length || 12),
             items: {
               type: 'object',
               properties: {
-                promptText: { type: 'string' },
-                summary: { type: 'string' },
+                family: requestedFamilies.length ? { enum: requestedFamilies } : { type: 'string' },
+                promptText: { type: 'string', minLength: 1 },
                 evidenceRefs: {
                   type: 'array',
                   minItems: 1,
                   maxItems: 12,
                   items: { type: 'string' }
                 },
-                tokenEstimate: { type: 'integer', minimum: 1, maximum: 1000 },
-                detailProfile: { enum: ['compact', 'standard', 'expanded'] },
-                emphasis: { enum: ['normal', 'emphasized', 'muted'] },
-                inspectorNotes: { type: 'string' }
+                coveredSourceCardIds: {
+                  type: 'array',
+                  maxItems: 32,
+                  uniqueItems: true,
+                  items: { type: 'string' }
+                }
               },
-              required: ['promptText', 'evidenceRefs'],
+              required: ['family', 'promptText', 'evidenceRefs'],
               additionalProperties: false
             }
           }
         },
-        required: ['schema', 'snapshotHash', 'role', 'family', 'items'],
+        required: ['items'],
         additionalProperties: false
       }
     };
@@ -922,25 +915,54 @@ function responseStructure(value) {
     });
 }
 
+function validateCardPayload(data) {
+  return plainObject(data)
+    && typeof data.promptText === 'string'
+    && data.promptText.trim().length > 0
+    && Array.isArray(data.evidenceRefs)
+    && data.evidenceRefs.length > 0
+    && data.evidenceRefs.every((ref) => typeof ref === 'string' && ref.trim().length > 0);
+}
+
+function validateCardBundlePayload(data) {
+  if (!plainObject(data) || !Array.isArray(data.items)) return false;
+  return data.items.every((item) => plainObject(item)
+    && typeof item.family === 'string'
+    && item.family.trim().length > 0
+    && typeof item.promptText === 'string'
+    && item.promptText.trim().length > 0
+    && Array.isArray(item.evidenceRefs)
+    && item.evidenceRefs.length > 0
+    && item.evidenceRefs.every((ref) => typeof ref === 'string' && ref.trim().length > 0)
+    && (!Object.hasOwn(item, 'coveredSourceCardIds')
+      || (Array.isArray(item.coveredSourceCardIds)
+        && item.coveredSourceCardIds.every((id) => typeof id === 'string'))));
+}
+
 function validateRoleResponseSchema(roleId, data) {
   const expected = expectedResponseSchema(roleId);
   if (!expected) throw unsupportedRoleError(roleId);
-  const actual = String(data?.schema || '').trim();
-  if (actual !== expected) {
-    const error = providerError(
-      'RECURSION_PROVIDER_SCHEMA_MISMATCH',
-      'Provider output schema did not match the requested role.',
-      { retryable: false }
-    );
-    error.roleId = roleId;
-    error.expectedSchema = expected;
-    error.actualSchema = actual || '(missing)';
-    error.responseFields = plainObject(data)
-      ? Object.keys(data).filter((key) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(key)).sort().slice(0, 24)
-      : [];
-    error.responseShape = responseStructure(data);
-    throw error;
+  if (SEGMENTED_CARD_ROLES.has(roleId)) {
+    if (validateCardPayload(data)) return;
+  } else if (roleId === 'fusedCardBundle') {
+    if (validateCardBundlePayload(data)) return;
+  } else if (String(data?.schema || '').trim() === expected) {
+    return;
   }
+  const actual = String(data?.schema || '').trim();
+  const error = providerError(
+    'RECURSION_PROVIDER_SCHEMA_MISMATCH',
+    'Provider output schema did not match the requested role.',
+    { retryable: false }
+  );
+  error.roleId = roleId;
+  error.expectedSchema = expected;
+  error.actualSchema = actual || '(missing)';
+  error.responseFields = plainObject(data)
+    ? Object.keys(data).filter((key) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(key)).sort().slice(0, 24)
+    : [];
+  error.responseShape = responseStructure(data);
+  throw error;
 }
 
 function normalizeRepairFailedCardIds(failedCardIds, request = {}) {
@@ -1298,114 +1320,6 @@ function cleanRequestForDiagnostics(request = {}) {
   return sanitize(clean, 200);
 }
 
-function openAiCompatibleReasoningDialect(providerConfig = {}) {
-  const baseUrl = String(providerConfig?.openAICompatible?.baseUrl || '').toLowerCase();
-  const model = String(providerConfig?.openAICompatible?.model || '').toLowerCase();
-  const haystack = `${baseUrl} ${model}`;
-  if (haystack.includes('deepseek') || model.includes('deepseek-reasoner')) return 'deepseek-reasoner';
-  if (haystack.includes('openrouter.ai')) return 'openrouter';
-  if (haystack.includes('z.ai') || haystack.includes('zhipu') || model.startsWith('glm-') || model.includes('/glm-')) return 'z-ai-glm';
-  if (haystack.includes('minimax') || model.includes('minimax-m3')) return 'minimax-m3';
-  if (haystack.includes('api.openai.com') || /(^|[/:-])(gpt-[5-9]|o[1-9])/.test(model)) return 'openai';
-  return 'none';
-}
-
-function openAiStyleReasoningEffort(intent) {
-  if (intent === 'high') return 'high';
-  if (intent === 'medium') return 'medium';
-  return 'minimal';
-}
-
-function glmReasoningEffort(intent) {
-  if (intent === 'high') return 'max';
-  if (intent === 'medium') return 'medium';
-  return 'minimal';
-}
-
-function openAiCompatibleReasoningPlan(enriched = {}, { omitReasoning = false } = {}) {
-  const intent = normalizeReasoningIntent(enriched.reasoningIntent);
-  const category = reasoningCategoryName(enriched.reasoningCategory);
-  if (!intent) {
-    return {
-      body: {},
-      diagnostics: category ? { reasoningCategory: category } : {}
-    };
-  }
-  const dialect = openAiCompatibleReasoningDialect(enriched.providerConfig);
-  const diagnostics = {
-    reasoningIntent: intent,
-    ...(category ? { reasoningCategory: category } : {}),
-    reasoningDialect: dialect,
-    reasoningApplied: false
-  };
-  if (omitReasoning) {
-    return {
-      body: {},
-      diagnostics: { ...diagnostics, reasoningDowngraded: true }
-    };
-  }
-  if (dialect === 'openrouter' || dialect === 'openai') {
-    return {
-      body: { reasoning: { effort: openAiStyleReasoningEffort(intent), exclude: true } },
-      diagnostics: { ...diagnostics, reasoningApplied: true }
-    };
-  }
-  if (dialect === 'z-ai-glm') {
-    return {
-      body: {
-        thinking: { type: 'enabled' },
-        reasoning_effort: glmReasoningEffort(intent)
-      },
-      diagnostics: { ...diagnostics, reasoningApplied: true }
-    };
-  }
-  if (dialect === 'minimax-m3') {
-    return {
-      body: { thinking: intent === 'high' ? 'enabled' : 'adaptive' },
-      diagnostics: { ...diagnostics, reasoningApplied: true }
-    };
-  }
-  return { body: {}, diagnostics };
-}
-
-async function readProviderErrorMessage(response) {
-  try {
-    const payload = await response.json();
-    return compact([
-      payload?.error?.message,
-      payload?.error?.code,
-      payload?.message,
-      typeof payload === 'string' ? payload : JSON.stringify(payload)
-    ].filter(Boolean).join(' '));
-  } catch {
-    return '';
-  }
-}
-
-function providerRejectedReasoningFields(status, message) {
-  if (status !== 400 && status !== 422) return false;
-  const text = String(message || '').toLowerCase();
-  if (!/(reasoning|thinking|reasoning_effort)/.test(text)) return false;
-  return /(unknown|unrecognized|unsupported|invalid|unexpected|not\s+permitted|extra|extraneous)/.test(text);
-}
-
-function openAiEndpoint(baseUrl) {
-  const base = String(baseUrl || '').trim().replace(/\/+$/g, '');
-  if (!base) {
-    throw providerError('RECURSION_PROVIDER_CONFIG_INVALID', 'OpenAI-compatible base URL is required.', { retryable: false });
-  }
-  let parsed;
-  try {
-    parsed = new URL(base);
-  } catch {
-    throw providerError('RECURSION_PROVIDER_CONFIG_INVALID', 'OpenAI-compatible base URL is invalid.', { retryable: false });
-  }
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
-    throw providerError('RECURSION_PROVIDER_CONFIG_INVALID', 'OpenAI-compatible base URL must use http or https.', { retryable: false });
-  }
-  return /\/chat\/completions$/i.test(base) ? base : `${base}/chat/completions`;
-}
-
 function plainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -1413,45 +1327,6 @@ function plainObject(value) {
 function textValue(value, fallback = '') {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim();
   return text || fallback;
-}
-
-function controlOptions(options = {}) {
-  const source = plainObject(options) ? options : {};
-  return {
-    context: source.context ?? null,
-    globals: source.globals ?? globalThis
-  };
-}
-
-function hostContext(globals = globalThis) {
-  try {
-    return globals?.SillyTavern?.getContext?.() || globals?.getContext?.() || null;
-  } catch {
-    return null;
-  }
-}
-
-const MODEL_KEY_PATTERN = /(^|_|\b)(model|modelid|model_id|modelname|model_name|selectedmodel|selected_model|chatmodel|chat_model|completionmodel|completion_model)$/i;
-
-function modelFromProfile(profile = {}) {
-  const seen = new Set();
-  function visit(value, depth = 0) {
-    if (!value || typeof value !== 'object' || seen.has(value) || depth > 5) return '';
-    seen.add(value);
-    for (const [key, child] of Object.entries(value)) {
-      if (child === null || child === undefined) continue;
-      if (typeof child !== 'object' && MODEL_KEY_PATTERN.test(String(key).replace(/[^a-z0-9_]/ig, ''))) {
-        const model = textValue(child);
-        if (model) return model;
-      }
-    }
-    for (const key of ['settings', 'generationSettings', 'generation_settings', 'provider', 'completion', 'chatCompletion', 'chat_completion', 'config', 'data']) {
-      const model = visit(value[key], depth + 1);
-      if (model) return model;
-    }
-    return '';
-  }
-  return visit(profile);
 }
 
 export function listProviderConnectionProfiles(options = {}) {
@@ -1466,106 +1341,49 @@ export function listProviderConnectionProfiles(options = {}) {
   return [];
 }
 
-function currentHostModel(options = {}) {
-  const { globals } = controlOptions(options);
-  const context = options?.context ?? hostContext(globals);
-  const roots = [
-    context?.chatCompletionSettings,
-    context?.completionSettings,
-    context?.settings,
-    context?.power_user,
-    globals?.power_user,
-    globals?.oai_settings,
-    globals?.nai_settings,
-    globals?.textgenerationwebui_settings
-  ];
-  for (const root of roots) {
-    const model = modelFromProfile(root);
-    if (model) return model;
-  }
-  return '';
-}
-
-function sourceLabel(source) {
-  const normalized = sourceName(source);
-  if (normalized === 'host-connection-profile') return 'Host Connection Profile';
-  if (normalized === 'openai-compatible') return 'OpenAI-Compatible Endpoint';
-  return 'Current Host Model';
-}
-
 export function validateProviderConfiguration(provider = {}, options = {}) {
-  const source = sourceName(provider.source);
   const profiles = Array.isArray(options.profiles)
     ? options.profiles
     : listProviderConnectionProfiles(options);
   const lane = laneName(provider.lane);
-  const capabilityProvider = source === 'openai-compatible' && textValue(options.apiKey)
-    ? {
-        ...provider,
-        openAICompatible: {
-          ...(plainObject(provider.openAICompatible) ? provider.openAICompatible : {}),
-          sessionApiKeyPresent: true
-        }
-      }
-    : provider;
   const capability = resolveProviderCapability({
     settings: {
       reasoningLevel: 'medium',
-      providers: { [lane]: { ...capabilityProvider, lane } }
+      providers: { [lane]: { ...provider, lane } }
     },
     lane,
     operation: 'provider-test',
-    host: {
-      currentModelAvailable: options.hostGenerationAvailable !== false,
-      connectionProfiles: profiles
-    }
+    host: { connectionProfiles: profiles }
   });
   const missingByReason = {
-    'provider-current-model-unavailable': ['hostGeneration'],
-    'provider-profile-missing': ['hostConnectionProfileId'],
-    'provider-profile-unavailable': ['connectionProfile'],
-    'provider-base-url-missing': ['baseUrl'],
-    'provider-model-missing': ['model'],
-    'provider-session-key-missing': ['sessionApiKey'],
-    'provider-source-unsupported': ['source']
+    'provider-profile-missing': ['connectionProfileId'],
+    'provider-profile-unavailable': ['connectionProfile']
   };
   return {
     ready: capability.testable,
     missing: missingByReason[capability.reasonCode] || [],
-    source,
-    sourceLabel: sourceLabel(source),
+    providerType: 'sillytavern-connection-profile',
+    sourceLabel: 'Connection Profile',
     message: capability.message
   };
 }
 
 export function providerModelStatus(provider = {}, options = {}) {
-  const source = sourceName(provider.source);
-  if (source === 'host-connection-profile') {
-    const profiles = Array.isArray(options.profiles) ? options.profiles : listProviderConnectionProfiles(options);
-    const validation = validateProviderConfiguration(provider, { ...options, profiles });
-    const selected = profiles.find((entry) => entry.id === textValue(provider.hostConnectionProfileId));
-    return {
-      ...validation,
-      model: selected?.model || '',
-      label: selected?.label || (provider.hostConnectionProfileId ? `${provider.hostConnectionProfileId} (saved)` : sourceLabel(source)),
-      profileId: selected?.id || textValue(provider.hostConnectionProfileId),
-      profileLabel: selected?.name || ''
-    };
-  }
-  const validation = validateProviderConfiguration(provider, options);
-  if (source === 'openai-compatible') {
-    const model = textValue(provider.openAICompatible?.model);
-    return {
-      ...validation,
-      model,
-      label: model ? `OpenAI-Compatible / ${model}` : 'OpenAI-Compatible Endpoint'
-    };
-  }
-  const model = currentHostModel(options);
+  const profiles = Array.isArray(options.profiles)
+    ? options.profiles
+    : listProviderConnectionProfiles(options);
+  const validation = validateProviderConfiguration(provider, { ...options, profiles });
+  const profileId = textValue(provider.connectionProfileId);
+  const selected = profiles.find((entry) => entry.id === profileId);
   return {
     ...validation,
-    model,
-    label: 'Current Host Model'
+    model: selected?.model || '',
+    label: selected?.label || (profileId ? `${profileId} (saved)` : 'Connection Profile'),
+    profileId: selected?.id || profileId,
+    profileLabel: selected?.name || '',
+    completionMode: selected?.completionMode || 'unknown',
+    presetName: selected?.presetName || '',
+    instructName: selected?.instructName || ''
   };
 }
 
@@ -1595,111 +1413,12 @@ export function providerRouteSummary(settings = {}, host = {}) {
   };
 }
 
-function normalizeOpenAiBaseUrl(baseUrl) {
-  let base = String(baseUrl || '').trim().replace(/\/+$/g, '');
-  if (!base) {
-    throw providerError('RECURSION_PROVIDER_CONFIG_INVALID', 'OpenAI-compatible base URL is required.', { retryable: false });
-  }
-  try {
-    const parsed = new URL(base);
-    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('invalid protocol');
-  } catch {
-    throw providerError('RECURSION_PROVIDER_CONFIG_INVALID', 'OpenAI-compatible base URL is invalid.', { retryable: false });
-  }
-  base = base.replace(/\/chat\/completions$/i, '');
-  base = base.replace(/\/responses$/i, '');
-  base = base.replace(/\/models$/i, '');
-  return base.replace(/\/+$/g, '');
-}
-
-export function openAiModelsEndpoint(baseUrl) {
-  return `${normalizeOpenAiBaseUrl(baseUrl)}/models`;
-}
-
-function normalizeModelList(payload = {}) {
-  const source = Array.isArray(payload?.data)
-    ? payload.data
-    : (Array.isArray(payload?.models) ? payload.models : []);
-  const byId = new Map();
-  for (const entry of source) {
-    const id = textValue(typeof entry === 'string' ? entry : (entry?.id || entry?.model || entry?.name));
-    if (!id || byId.has(id)) continue;
-    byId.set(id, {
-      id,
-      label: textValue(typeof entry === 'string' ? entry : (entry?.name || entry?.label || entry?.id || entry?.model), id)
-    });
-  }
-  return [...byId.values()];
-}
-
-export async function fetchOpenAICompatibleModels({
-  baseUrl,
-  apiKey = '',
-  fetchImpl = globalThis.fetch,
-  signal = undefined
-} = {}) {
-  if (typeof fetchImpl !== 'function') {
-    throw providerError('RECURSION_PROVIDER_FETCH_UNAVAILABLE', 'Fetch is unavailable for OpenAI-compatible model discovery.', {
-      retryable: false
-    });
-  }
-  const key = String(apiKey || '').trim();
-  if (!key) {
-    throw providerError('RECURSION_PROVIDER_KEY_MISSING', 'OpenAI-compatible provider key is missing for model discovery.', {
-      retryable: false
-    });
-  }
-  const endpoint = openAiModelsEndpoint(baseUrl);
-  let response;
-  try {
-    response = await fetchImpl(endpoint, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${key}` },
-      credentials: 'omit',
-      signal
-    });
-  } catch (error) {
-    if (error?.code === 'RECURSION_PROVIDER_CONFIG_INVALID') throw error;
-    if (error?.name === 'AbortError') throw abortError();
-    throw providerError('RECURSION_PROVIDER_TRANSPORT_FAILED', 'Provider model discovery transport failed.', {
-      retryable: true,
-      cause: error
-    });
-  }
-  if (!response?.ok) {
-    const status = Number(response?.status || 0);
-    throw providerError('RECURSION_PROVIDER_HTTP_ERROR', `Provider model discovery failed with HTTP ${status || 'error'}.`, {
-      retryable: status === 429 || (status >= 500 && status < 600),
-      status
-    });
-  }
-  let payload;
-  try {
-    payload = await response.json();
-  } catch (error) {
-    throw providerError('RECURSION_PROVIDER_RESPONSE_JSON_INVALID', 'Provider model discovery response was not valid JSON.', {
-      retryable: false,
-      cause: error
-    });
-  }
-  return {
-    ok: true,
-    endpoint,
-    models: normalizeModelList(payload)
-  };
-}
-
-function chatMessages(request = {}) {
-  if (Array.isArray(request.messages) && request.messages.length > 0) return request.messages;
-  return [{ role: 'user', content: String(request.prompt ?? '') }];
-}
-
 function providerResponseFailureError(error, enriched = {}) {
   const code = String(error?.code || '');
   const details = error?.details || {};
   const providerDiagnostics = sanitize({
     providerSource: enriched.providerSource,
-    model: details.model || enriched.providerConfig?.resolvedModelLabel || enriched.providerConfig?.openAICompatible?.model || '',
+    model: details.model || enriched.providerConfig?.resolvedModelLabel || '',
     effectiveMaxTokens: Number(details.maxTokens || providerRequestMaxTokens(enriched) || 0) || 0,
     finishReason: details.finishReason,
     promptTokens: details.promptTokens,
@@ -1747,33 +1466,101 @@ function positiveTokenLimit(value) {
 }
 
 function providerRequestMaxTokens(enriched = {}) {
-  const configured = positiveTokenLimit(enriched.providerConfig?.maxTokens);
+  const configured = positiveTokenLimit(enriched.providerConfig?.outputTokenCeiling);
   const requested = positiveTokenLimit(enriched.responseLength)
     ?? positiveTokenLimit(enriched.maxTokens);
   if (configured && requested) return Math.min(configured, requested);
-  return configured ?? requested;
+  return requested ?? configured;
 }
 
-function parseOpenAiText(payload, enriched = {}) {
-  return providerVisibleText(payload, {
-    ...enriched,
-    providerSource: enriched.providerSource || 'OpenAI-compatible'
+const EFFECTIVE_COMPLETION_MODES = new Set(['chat', 'text']);
+const EFFECTIVE_SAMPLER_SOURCES = new Set(['profile', 'recursion', 'recursion-fallback']);
+const EFFECTIVE_STRUCTURED_OUTPUT_METHODS = new Set(['native-schema', 'prompt-json']);
+const EFFECTIVE_POLICY_DIAGNOSTIC_CODES = new Set([
+  'structured-output-downgraded',
+  'profile-sampler-projection-failed'
+]);
+
+function fixedPolicyDiagnosticCodes(value) {
+  return [...new Set(
+    (Array.isArray(value) ? value : [])
+      .map((code) => String(code || '').trim().toLowerCase())
+      .filter((code) => EFFECTIVE_POLICY_DIAGNOSTIC_CODES.has(code))
+  )].slice(0, 12);
+}
+
+function shortProfileDiagnosticHash(profileId = '') {
+  const cleanId = String(profileId || '').trim();
+  if (!cleanId) return '';
+  return `${hashJson(cleanId)}${hashJson(`profile:${cleanId}`)}`.slice(0, 16);
+}
+
+function effectivePolicyDiagnostics(response = {}, enriched = {}) {
+  const policy = plainObject(response?.generationPolicy) ? response.generationPolicy : {};
+  const completionModeValue = String(
+    response?.completionMode || response?.profile?.completionMode || ''
+  ).trim().toLowerCase();
+  const samplerSourceValue = String(policy.samplerSource || '').trim().toLowerCase();
+  const structuredOutputValue = String(policy.structuredOutputMethod || '').trim().toLowerCase();
+  return Object.freeze({
+    connectionProfileIdHash: shortProfileDiagnosticHash(enriched.connectionProfileId),
+    completionMode: EFFECTIVE_COMPLETION_MODES.has(completionModeValue)
+      ? completionModeValue
+      : 'chat',
+    presetMode: policy.includePreset === true ? 'full-profile' : 'isolated',
+    instructApplied: policy.includeInstruct === true,
+    samplerSource: EFFECTIVE_SAMPLER_SOURCES.has(samplerSourceValue)
+      ? samplerSourceValue
+      : 'recursion-fallback',
+    structuredOutputMethod: EFFECTIVE_STRUCTURED_OUTPUT_METHODS.has(structuredOutputValue)
+      ? structuredOutputValue
+      : 'prompt-json',
+    responseLength: Math.max(0, Math.trunc(Number(providerRequestMaxTokens(enriched)) || 0)),
+    queueConcurrency: Math.max(1, Math.trunc(Number(enriched.queueConcurrency) || 1)),
+    diagnosticCodes: fixedPolicyDiagnosticCodes(policy.diagnosticCodes)
   });
 }
 
-function normalizeProviderResponse(response, enriched) {
-  const output = response && typeof response === 'object' ? { ...response } : { text: String(response ?? '') };
-  const text = providerVisibleText(output, enriched);
+function responsePolicyDiagnostics(response = {}) {
+  if (!plainObject(response?.effectivePolicy)) return {};
+  const policy = response.effectivePolicy;
   return {
-    ...output,
-    text,
+    effectivePolicy: sanitize({
+      connectionProfileIdHash: String(policy.connectionProfileIdHash || '').slice(0, 16),
+      completionMode: EFFECTIVE_COMPLETION_MODES.has(policy.completionMode) ? policy.completionMode : 'chat',
+      presetMode: policy.presetMode === 'full-profile' ? 'full-profile' : 'isolated',
+      instructApplied: policy.instructApplied === true,
+      samplerSource: EFFECTIVE_SAMPLER_SOURCES.has(policy.samplerSource) ? policy.samplerSource : 'recursion-fallback',
+      structuredOutputMethod: EFFECTIVE_STRUCTURED_OUTPUT_METHODS.has(policy.structuredOutputMethod)
+        ? policy.structuredOutputMethod
+        : 'prompt-json',
+      responseLength: Math.max(0, Math.trunc(Number(policy.responseLength) || 0)),
+      queueConcurrency: Math.max(1, Math.trunc(Number(policy.queueConcurrency) || 1)),
+      diagnosticCodes: fixedPolicyDiagnosticCodes(policy.diagnosticCodes)
+    }, 120)
+  };
+}
+
+function normalizeProviderResponse(response, enriched) {
+  const envelope = normalizeProviderEnvelope(response);
+  if (!envelope.structured && !String(envelope.text || '').trim()) {
+    providerVisibleText(response?.raw ?? response, enriched);
+  }
+  return {
+    text: envelope.text,
+    structured: envelope.structured,
+    reasoning: envelope.reasoning,
+    finishReasons: envelope.finishReasons,
+    usage: envelope.usage,
     roleId: enriched.roleId,
     lane: enriched.lane,
-    providerSource: enriched.providerSource,
-    providerId: output.providerId || enriched.providerSource,
-    model: output.model || enriched.providerConfig?.resolvedModelLabel || enriched.providerConfig?.openAICompatible?.model || '',
+    providerId: envelope.source,
+    model: envelope.model,
+    responseId: envelope.responseId,
     providerConfig: enriched.providerConfig,
-    ...reasoningDiagnostics({ ...enriched, ...output })
+    completionMode: response?.completionMode || response?.profile?.completionMode || 'unknown',
+    effectivePolicy: effectivePolicyDiagnostics(response, enriched),
+    ...reasoningDiagnostics({ ...enriched, ...response })
   };
 }
 
@@ -1902,10 +1689,16 @@ function collectStrings(value, target) {
 
 function sanitizedError(error, request = {}) {
   const actionable = actionableError(error);
-  const rawCode = String(actionable?.code || actionable?.name || 'RECURSION_PROVIDER_FAILED');
-  const message = actionable?.external === true
-    ? 'Provider generation failed.'
-    : scrubKnownRequestText(actionable?.message || 'Provider generation failed.', request);
+  const originalCode = String(actionable?.code || actionable?.name || 'RECURSION_PROVIDER_FAILED');
+  const normalizedFailure = normalizeProviderError(error);
+  const rawCode = originalCode.startsWith('RECURSION_')
+    ? originalCode
+    : normalizedFailure.code;
+  const useNormalizedMessage = actionable?.external === true
+    || normalizedFailure.code === rawCode;
+  const message = useNormalizedMessage
+    ? normalizedFailure.message
+    : scrubKnownRequestText(actionable?.message || normalizedFailure.message, request);
   const actualSchema = scrubKnownRequestText(actionable?.actualSchema || '', request);
   const expectedSchema = scrubKnownRequestText(actionable?.expectedSchema || '', request);
   const roleId = String(actionable?.roleId || '')
@@ -1923,7 +1716,9 @@ function sanitizedError(error, request = {}) {
   return sanitize({
     code: scrubKnownRequestText(rawCode, request),
     message: truncate(compact(message), 300),
-    retryable: retryableError(error),
+    retryable: originalCode.startsWith('RECURSION_')
+      ? retryableError(error)
+      : normalizedFailure.retryable,
     ...providerFailureDiagnostics(error),
     ...(roleId ? { roleId } : {}),
     ...(expectedSchema ? { expectedSchema: truncate(compact(expectedSchema), 120) } : {}),
@@ -1941,6 +1736,7 @@ function responseIdentityDiagnostics(response = {}) {
   const responseId = String(source.responseId || '').trim();
   const visibleContentLength = String(source.text || '').length;
   return sanitize({
+    ...responsePolicyDiagnostics(source),
     ...(providerSource ? { providerSource } : {}),
     ...(providerId ? { providerId } : {}),
     ...(model ? { model } : {}),
@@ -2211,7 +2007,18 @@ export function parseStructuredOutput(text) {
   return parsed.value;
 }
 
-function parseProviderStructuredOutput(text) {
+function parseProviderStructuredOutput(envelope = {}) {
+  if (envelope?.structured && typeof envelope.structured === 'object' && !Array.isArray(envelope.structured)) {
+    return {
+      data: envelope.structured,
+      diagnostics: {
+        structuredOutputSource: 'provider-structured',
+        structuredOutputRepaired: false,
+        visibleContentLength: String(envelope.text || '').length
+      }
+    };
+  }
+  const text = String(envelope?.text || '');
   const parsed = parseStructuredJsonText(text);
   if (!parsed.ok) {
     const code = parsed.diagnostic?.code === STRUCTURED_OUTPUT_PARSE_ERROR_CODES.JSON_NOT_OBJECT
@@ -2224,6 +2031,7 @@ function parseProviderStructuredOutput(text) {
   return {
     data: parsed.value,
     diagnostics: {
+      structuredOutputSource: 'visible-content',
       structuredOutputRepaired: parsed.repaired === true,
       ...(parsed.repaired ? { structuredOutputRepairCode: 'json_repaired' } : {}),
       ...(parsed.repairKind ? {
@@ -2236,15 +2044,17 @@ function parseProviderStructuredOutput(text) {
   };
 }
 
-export function createProviderClient({ host = null, settingsStore = null, fetchImpl = globalThis.fetch } = {}) {
+export function createProviderClient({
+  host = null,
+  settingsStore = null,
+  requestQueue = createProfileRequestQueue()
+} = {}) {
   function enrich(roleId, request = {}) {
     const resolvedRoleId = String(roleId || '').trim();
     if (!resolvedRoleId) {
       throw providerError('RECURSION_PROVIDER_ROLE_MISSING', 'Provider request is missing roleId.', { retryable: false });
     }
-    if (!isProviderRole(resolvedRoleId)) {
-      throw unsupportedRoleError(resolvedRoleId);
-    }
+    if (!isProviderRole(resolvedRoleId)) throw unsupportedRoleError(resolvedRoleId);
 
     const postProcessGuidanceRole = resolvedRoleId === 'postProcessGuidanceUtility'
       || resolvedRoleId === 'postProcessGuidanceReasoner';
@@ -2257,11 +2067,13 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
       );
     }
     const { settings, config } = providerConfigFor(settingsStore, lane);
-    const operation = resolvedRoleId === 'providerTest'
+    const operation = request.certification === true
       ? 'provider-test'
-      : postProcessGuidanceRole
-        ? 'post-process'
-        : 'prompt-packet';
+      : resolvedRoleId === 'providerTest'
+        ? 'provider-test'
+        : postProcessGuidanceRole
+          ? 'post-process'
+          : 'prompt-packet';
     const capabilitySettings = postProcessGuidanceRole
       ? { ...settings, reasoningLevel: request.reasoningLevel }
       : settings;
@@ -2278,233 +2090,93 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
         { retryable: false, providerDiagnostics: { capability } }
       );
     }
+    if (!config.connectionProfileId) {
+      throw providerError(
+        'RECURSION_PROFILE_MISSING',
+        'Select a SillyTavern Connection Profile.',
+        { retryable: false, providerDiagnostics: { capability } }
+      );
+    }
+
+    const responseLength = outputBudgetForRequest(
+      resolvedRoleId,
+      request,
+      config.outputTokenCeiling
+    );
 
     return {
       ...request,
       roleId: resolvedRoleId,
       lane,
-      ...(normalizeReasoningIntent(request.reasoningIntent) ? { reasoningIntent: normalizeReasoningIntent(request.reasoningIntent) } : {}),
-      ...(reasoningCategoryName(request.reasoningCategory) ? { reasoningCategory: reasoningCategoryName(request.reasoningCategory) } : {}),
+      responseLength,
+      ...(normalizeReasoningIntent(request.reasoningIntent)
+        ? { reasoningIntent: normalizeReasoningIntent(request.reasoningIntent) }
+        : {}),
+      ...(reasoningCategoryName(request.reasoningCategory)
+        ? { reasoningCategory: reasoningCategoryName(request.reasoningCategory) }
+        : {}),
       responseSchema: expectedResponseSchema(resolvedRoleId),
-      machineJson: true,
-      providerSource: sourceName(config.source),
+      connectionProfileId: config.connectionProfileId,
       providerConfig: cloneJson(config)
     };
   }
 
+  async function generateEnriched(enriched) {
+    if (typeof host?.generation?.generate !== 'function') {
+      throw providerError(
+        'RECURSION_CONNECTION_MANAGER_UNAVAILABLE',
+        'SillyTavern Connection Manager generation is unavailable.',
+        { retryable: false }
+      );
+    }
+    return requestQueue.run(
+      enriched.connectionProfileId,
+      async () => {
+        const response = await host.generation.generate(enriched);
+        return normalizeProviderResponse(response, {
+          ...enriched,
+          queueConcurrency: requestQueue.stats(enriched.connectionProfileId).concurrency
+        });
+      },
+      { signal: enriched.signal ?? null }
+    );
+  }
+
   async function generate(roleId, request = {}) {
-    const enriched = enrich(roleId, request);
-    const source = enriched.providerSource;
-
-    if (HOST_SOURCES.has(source)) {
-      if (typeof host?.generation?.generate !== 'function') {
-        throw providerError('RECURSION_HOST_GENERATION_UNAVAILABLE', 'Host generation API is unavailable.', {
-          retryable: false
-        });
-      }
-      const response = await host.generation.generate(enriched);
-      return normalizeProviderResponse(response, enriched);
-    }
-
-    if (source !== 'openai-compatible') {
-      throw providerError('RECURSION_PROVIDER_SOURCE_UNSUPPORTED', `Unsupported provider source: ${source}`, {
-        retryable: false
-      });
-    }
-
-    if (typeof fetchImpl !== 'function') {
-      throw providerError('RECURSION_PROVIDER_FETCH_UNAVAILABLE', 'Fetch is unavailable for OpenAI-compatible provider calls.', {
-        retryable: false
-      });
-    }
-
-    const apiKey = settingsStore?.getApiKey?.(enriched.lane) || '';
-    if (!apiKey) {
-      throw providerError('RECURSION_PROVIDER_KEY_MISSING', 'OpenAI-compatible provider key is missing for this session.', {
-        retryable: false
-      });
-    }
-
-    const model = String(enriched.providerConfig?.openAICompatible?.model || '').trim();
-    if (!model) {
-      throw providerError('RECURSION_PROVIDER_CONFIG_INVALID', 'OpenAI-compatible model is required.', { retryable: false });
-    }
-
-    function buildOpenAiCompatibleBody({ omitReasoning = false } = {}) {
-      const machineSchema = machineJsonSchemaForRequest(enriched);
-      const reasoningPlan = openAiCompatibleReasoningPlan(enriched, { omitReasoning });
-      return {
-        body: {
-          model,
-          messages: chatMessages(enriched),
-          temperature: enriched.providerConfig.temperature,
-          top_p: enriched.providerConfig.topP,
-          max_tokens: providerRequestMaxTokens(enriched),
-          response_format: machineSchema
-            ? {
-                type: 'json_schema',
-                json_schema: {
-                  name: machineSchema.name,
-                  strict: false,
-                  schema: machineSchema.schema
-                }
-              }
-            : { type: 'json_object' },
-          stream: false,
-          ...reasoningPlan.body
-        },
-        reasoningDiagnostics: reasoningPlan.diagnostics
-      };
-    }
-
-    const endpoint = openAiEndpoint(enriched.providerConfig?.openAICompatible?.baseUrl);
-    let requestBody = buildOpenAiCompatibleBody();
-
-    async function sendOpenAiCompatible(body) {
-      return await fetchImpl(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(body),
-        signal: enriched.signal
-      });
-    }
-
-    let response;
-    try {
-      response = await sendOpenAiCompatible(requestBody.body);
-    } catch (error) {
-      if (error?.code === 'RECURSION_PROVIDER_CONFIG_INVALID') throw error;
-      if (error?.name === 'AbortError') throw abortError();
-      throw providerError('RECURSION_PROVIDER_TRANSPORT_FAILED', 'Provider transport failed.', {
-        retryable: true,
-        cause: error
-      });
-    }
-
-    if (!response?.ok) {
-      const status = Number(response?.status || 0);
-      if (status === 401 || status === 403) {
-        await markOpenAiAuthFailure(host, settingsStore, enriched.lane, enriched.providerConfig);
-        throw providerError('RECURSION_PROVIDER_AUTH_FAILED', 'OpenAI-compatible authentication failed.', {
-          retryable: false,
-          status
-        });
-      }
-      if (requestBody.reasoningDiagnostics?.reasoningApplied === true) {
-        const errorMessage = await readProviderErrorMessage(response);
-        if (providerRejectedReasoningFields(status, errorMessage)) {
-          requestBody = buildOpenAiCompatibleBody({ omitReasoning: true });
-          try {
-            response = await sendOpenAiCompatible(requestBody.body);
-          } catch (error) {
-            if (error?.name === 'AbortError') throw abortError();
-            throw providerError('RECURSION_PROVIDER_TRANSPORT_FAILED', 'Provider transport failed.', {
-              retryable: true,
-              cause: error
-            });
-          }
-        }
-      }
-    }
-
-    if (!response?.ok) {
-      const status = Number(response?.status || 0);
-      if (status === 401 || status === 403) {
-        await markOpenAiAuthFailure(host, settingsStore, enriched.lane, enriched.providerConfig);
-        throw providerError('RECURSION_PROVIDER_AUTH_FAILED', 'OpenAI-compatible authentication failed.', {
-          retryable: false,
-          status
-        });
-      }
-      throw providerError('RECURSION_PROVIDER_HTTP_ERROR', `Provider request failed with HTTP ${status || 'error'}.`, {
-        retryable: status === 429 || (status >= 500 && status < 600),
-        status
-      });
-    }
-
-    let payload;
-    try {
-      payload = await response.json();
-    } catch (error) {
-      throw providerError('RECURSION_PROVIDER_RESPONSE_JSON_INVALID', 'Provider response was not valid JSON.', {
-        retryable: false,
-        cause: error
-      });
-    }
-    return normalizeProviderResponse({
-      text: parseOpenAiText(payload, enriched),
-      providerId: 'openai-compatible',
-      model: payload?.model || model,
-      responseId: payload?.id || '',
-      ...requestBody.reasoningDiagnostics
-    }, enriched);
+    return generateEnriched(enrich(roleId, request));
   }
 
   async function batch(requests = [], options = {}) {
     const normalized = requests.map((entry) => normalizeBatchRequest(entry));
     const enriched = normalized.map(({ roleId, request }) => enrich(roleId, request));
     const onSlotSettled = typeof options?.onSlotSettled === 'function' ? options.onSlotSettled : null;
-
-    function normalizeHostBatchSlot(response, index, batchDiagnostics = {}) {
-      const responseObject = response && typeof response === 'object' && !Array.isArray(response)
-        ? response
-        : { text: String(response ?? '') };
-      if (responseObject.ok === false && responseObject.error) {
-        return normalizeProviderSlotFailure(responseObject, enriched[index], batchDiagnostics);
-      }
-      return normalizeProviderResponse({ ...batchDiagnostics, ...responseObject }, enriched[index]);
-    }
-
-    function notifyClientSlotSettled(index, response, batchDiagnostics = {}) {
-      if (!onSlotSettled) return;
-      if (!Number.isInteger(index) || index < 0 || index >= enriched.length) return;
-      let normalizedResponse;
-      try {
-        normalizedResponse = normalizeHostBatchSlot(response, index, batchDiagnostics);
-      } catch (error) {
-        normalizedResponse = normalizeProviderSlotFailure({ ok: false, error }, enriched[index], batchDiagnostics);
-      }
-      safeInvoke(() => onSlotSettled({
-        index,
-        roleId: normalized[index].roleId,
-        request: enriched[index],
-        response: normalizedResponse
-      }));
-    }
-
-    const canUseHostBatch = typeof host?.generation?.batch === 'function'
-      && enriched.every((request) => HOST_SOURCES.has(request.providerSource));
-
-    if (canUseHostBatch) {
-      const batchDiagnostics = batchCapabilityDiagnostics(host.generation.capabilities?.batch);
-      const responses = await host.generation.batch(enriched, {
-        onSlotSettled: (slot = {}) => {
-          const index = Number(slot.index);
-          const response = Object.prototype.hasOwnProperty.call(slot, 'response')
-            ? slot.response
-            : (Object.prototype.hasOwnProperty.call(slot, 'result') ? slot.result : slot.value);
-          notifyClientSlotSettled(index, response, batchDiagnostics);
-        }
-      });
-      if (!Array.isArray(responses) || responses.length !== enriched.length) {
-        throw providerError('RECURSION_PROVIDER_BATCH_INVALID', 'Host batch response shape did not match request batch.', {
-          retryable: false
-        });
-      }
-      return responses.map((response, index) => normalizeHostBatchSlot(response, index, batchDiagnostics));
-    }
-
-    return Promise.all(normalized.map(({ roleId, request }, index) => generate(roleId, request)
-      .then((response) => {
-        notifyClientSlotSettled(index, response);
+    return Promise.all(enriched.map((request, index) => generateEnriched(request).then(
+      (response) => {
+        safeInvoke(() => onSlotSettled?.({
+          index,
+          roleId: normalized[index].roleId,
+          request,
+          response
+        }));
         return response;
-      }, (error) => {
-        notifyClientSlotSettled(index, { ok: false, error });
+      },
+      (error) => {
+        const operationAborted = error?.code === 'RECURSION_PROVIDER_ABORTED'
+          || request.signal?.aborted
+          || options.signal?.aborted;
+        const response = operationAborted
+          ? { ok: false, error }
+          : normalizeProviderSlotFailure({ error }, request, { slotIsolation: true });
+        safeInvoke(() => onSlotSettled?.({
+          index,
+          roleId: normalized[index].roleId,
+          request,
+          response
+        }));
+        if (!operationAborted) return response;
         throw error;
-      })));
+      }
+    )));
   }
 
   function listProfiles(options = {}) {
@@ -2514,41 +2186,10 @@ export function createProviderClient({ host = null, settingsStore = null, fetchI
   function status(lane = 'utility', options = {}) {
     const resolvedLane = laneName(lane);
     const { config } = providerConfigFor(settingsStore, resolvedLane);
-    return providerModelStatus(config, {
-      ...options,
-      host,
-      apiKey: settingsStore?.getApiKey?.(resolvedLane) || options.apiKey || ''
-    });
+    return providerModelStatus(config, { ...options, host });
   }
 
-  async function fetchModels(lane = 'utility', patch = {}) {
-    const resolvedLane = laneName(lane);
-    const { config } = providerConfigFor(settingsStore, resolvedLane);
-    const cleanPatch = plainObject(patch) ? patch : {};
-    const provider = {
-      ...config,
-      ...cleanPatch,
-      openAICompatible: {
-        ...(config.openAICompatible || {}),
-        ...(plainObject(cleanPatch.openAICompatible) ? cleanPatch.openAICompatible : {})
-      }
-    };
-    if (sourceName(provider.source) !== 'openai-compatible') {
-      throw providerError(
-        'RECURSION_PROVIDER_MODEL_DISCOVERY_UNSUPPORTED',
-        'Model discovery is only available for OpenAI-compatible endpoints.',
-        { retryable: false }
-      );
-    }
-    return fetchOpenAICompatibleModels({
-      baseUrl: provider.openAICompatible?.baseUrl,
-      apiKey: cleanPatch.apiKey || settingsStore?.getApiKey?.(resolvedLane) || '',
-      fetchImpl,
-      signal: cleanPatch.signal
-    });
-  }
-
-  return { generate, batch, listProfiles, status, fetchModels };
+  return Object.freeze({ generate, batch, listProfiles, status });
 }
 
 export function createGenerationRouter({ client, activity = null, journal = null, timeoutMs = null } = {}) {
@@ -2625,7 +2266,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         effectiveTimeoutMs,
         composedExternalSignal.signal || null
       );
-      const parsed = parseProviderStructuredOutput(raw.text);
+      const parsed = parseProviderStructuredOutput(raw);
       const normalized = normalizeRoleResponse(roleId, parsed.data, request);
       const data = normalized.data;
       validateRoleResponseSchema(roleId, data);
@@ -2634,6 +2275,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         ...parsed.diagnostics,
         ...normalized.diagnostics,
         ...reasoningDiagnostics(raw),
+        ...responsePolicyDiagnostics(raw),
         providerSource: raw.providerSource,
         providerId: raw.providerId,
         model: raw.model,
@@ -2823,7 +2465,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
 
     async function successResult(entry, raw, retryCount = 0, extraDiagnostics = {}) {
       throwSlotFailure(raw);
-      const parsed = parseProviderStructuredOutput(raw?.text);
+      const parsed = parseProviderStructuredOutput(raw);
       const normalized = normalizeRoleResponse(entry.roleId, parsed.data, entry.request);
       const data = normalized.data;
       validateRoleResponseSchema(entry.roleId, data);
@@ -2832,6 +2474,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         ...parsed.diagnostics,
         ...normalized.diagnostics,
         ...reasoningDiagnostics(raw),
+        ...responsePolicyDiagnostics(raw),
         providerSource: raw?.providerSource,
         providerId: raw?.providerId,
         model: raw?.model,
@@ -2881,7 +2524,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
     }
 
     function emitSlotSuccessActivity(entry, raw, retryCount = 0) {
-      const parsed = parseProviderStructuredOutput(raw?.text);
+      const parsed = parseProviderStructuredOutput(raw);
       const normalized = normalizeRoleResponse(entry.roleId, parsed.data, entry.request);
       const data = normalized.data;
       validateRoleResponseSchema(entry.roleId, data);
@@ -2894,6 +2537,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
           ...parsed.diagnostics,
           ...normalized.diagnostics,
           ...reasoningDiagnostics(raw),
+          ...responsePolicyDiagnostics(raw),
           providerSource: raw?.providerSource,
           providerId: raw?.providerId,
           model: raw?.model,
@@ -3020,6 +2664,9 @@ export function createGenerationRouter({ client, activity = null, journal = null
         });
       }
     } catch (error) {
+      if (error?.code === 'RECURSION_PROVIDER_ABORTED' || options.signal?.aborted) {
+        throw error;
+      }
       for (const entry of pendingEntries) {
         results[entry.index] = await failureResult(entry, error, 0);
         emitSlotFailureActivity(entry, error, null, 0, { force: true });

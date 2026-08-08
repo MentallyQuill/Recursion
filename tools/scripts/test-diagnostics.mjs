@@ -7,7 +7,7 @@ import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
 const payload = buildDiagnosticsPayload({
   createdAt: '2026-07-04T00:00:00.000Z',
   settings: {
-    provider: { utility: { openAICompatible: { apiKey: 'sk-live-secret' } } },
+    provider: { utility: { credentials: { accessToken: 'sk-live-secret' } } },
     preProcessDecks: {
       version: 1,
       activeDeckId: 'custom',

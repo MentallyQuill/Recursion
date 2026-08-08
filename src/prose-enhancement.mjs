@@ -425,7 +425,6 @@ export function buildProseEnhancementRequest({
     ...(lane ? { lane } : {}),
     reasoningCategory,
     reasoningIntent,
-    machineJson: true,
     cardContext: (Array.isArray(cardContext) ? cardContext : [])
       .slice(0, 8)
       .map((card) => ({

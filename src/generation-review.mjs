@@ -309,7 +309,6 @@ export function buildGenerationReviewRequest({
     systemPrompt: 'Return only one valid Recursion Generation Review JSON object. Do not emit prose, markdown, reasoning, or an alternate schema.',
     responseSchema: GENERATION_REVIEW_SCHEMA,
     responseLength: 3200,
-    machineJson: true,
     sourceHash: safeText(sourceHash, 180),
     validTargetIds: targetList.map((target) => target.id),
     installedCardIds,

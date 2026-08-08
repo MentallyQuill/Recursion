@@ -23,7 +23,7 @@ import {
 } from './lib/sillytavern-live-harness.mjs';
 import { assert, assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
 
-const liveEditorialModule = await import('./lib/live-editorial-effectiveness.mjs').catch(() => ({}));
+const liveEditorialModule = await import('./lib/live-editorial-effectiveness.mjs');
 const liveEditorialSource = readFileSync(join(process.cwd(), 'tools', 'scripts', 'lib', 'live-editorial-effectiveness.mjs'), 'utf8');
 const evaluateLiveRedirectScenarioArtifacts = liveEditorialModule.evaluateLiveRedirectScenarioArtifacts;
 const evaluateLiveRepairScenarioArtifacts = liveEditorialModule.evaluateLiveRepairScenarioArtifacts;
@@ -2127,7 +2127,7 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     const runRoot = join(artifactRoot, 'live-smoke', 'sillytavern', report.runId);
     mkdirSync(join(runRoot, 'prompt'), { recursive: true });
     writeFileSync(join(runRoot, 'prompt', 'unsafe.json'), JSON.stringify({
-      sessionApiKey: 'sk-live-secret',
+      temporaryCredential: 'sk-live-secret',
       accessToken: 'plain-access-token',
       openaiApiKey: 'plain-openai-key',
       clientSecret: 'plain-client-secret',

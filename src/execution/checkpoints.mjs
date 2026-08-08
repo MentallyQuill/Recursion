@@ -25,6 +25,46 @@ export const STAGE_STATES = Object.freeze([
 
 const TERMINAL_OPERATION_STATES = new Set(['completed', 'stale', 'abandoned']);
 
+export const CHECKPOINT_DIAGNOSTIC_CODES = Object.freeze([
+  'structured-output-downgraded',
+  'output-budget-reduced',
+  'output-budget-at-floor',
+  'model-output-corrected',
+  'provider-rate-limit-retry',
+  'provider-transient-retry',
+  'provider-retry',
+  'stage-reprocess-consumed',
+  'profile-sampler-projection-failed',
+  'profile-not-fused-certified',
+  'fused-fallback-segmented',
+  'unresolved-fused-families',
+  'zero-useful-fused-cards'
+]);
+
+export const CHECKPOINT_ATTEMPT_ACTIONS = Object.freeze([
+  'stop',
+  'downgrade-structured-output',
+  'reduce-output-budget',
+  'retry-corrected',
+  'retry-same'
+]);
+
+const CHECKPOINT_DIAGNOSTIC_CODE_SET = new Set(CHECKPOINT_DIAGNOSTIC_CODES);
+const CHECKPOINT_ATTEMPT_ACTION_SET = new Set(CHECKPOINT_ATTEMPT_ACTIONS);
+
+export function normalizeCheckpointDiagnosticCodes(value) {
+  return [...new Set(
+    (Array.isArray(value) ? value : [])
+      .map((code) => cleanText(code).trim().toLowerCase())
+      .filter((code) => CHECKPOINT_DIAGNOSTIC_CODE_SET.has(code))
+  )];
+}
+
+export function normalizeCheckpointAttemptAction(value) {
+  const action = cleanText(value).trim().toLowerCase();
+  return CHECKPOINT_ATTEMPT_ACTION_SET.has(action) ? action : null;
+}
+
 function cleanText(value) {
   return typeof value === 'string' ? value : '';
 }
@@ -136,6 +176,8 @@ export function createCheckpoint({
   provenance,
   attempts,
   artifactRef,
+  diagnosticCodes = [],
+  lastAttemptAction = null,
   completedAt
 }) {
   return {
@@ -150,6 +192,8 @@ export function createCheckpoint({
     provenance: normalizeExecutionProvenance(provenance),
     attempts: normalizeAttempts(attempts),
     artifactRef: normalizeArtifactRef(artifactRef),
+    diagnosticCodes: normalizeCheckpointDiagnosticCodes(diagnosticCodes),
+    lastAttemptAction: normalizeCheckpointAttemptAction(lastAttemptAction),
     completedAt: cleanText(completedAt)
   };
 }
@@ -179,6 +223,8 @@ export function normalizeCheckpoint(value) {
     provenance: normalizeExecutionProvenance(value.provenance),
     attempts: normalizeAttempts(value.attempts),
     artifactRef,
+    diagnosticCodes: normalizeCheckpointDiagnosticCodes(value.diagnosticCodes),
+    lastAttemptAction: normalizeCheckpointAttemptAction(value.lastAttemptAction),
     completedAt: cleanText(value.completedAt)
   };
 }
@@ -226,6 +272,7 @@ export function createStageRecord({
     summary: null,
     failure: null,
     diagnosticCodes: [],
+    lastAttemptAction: null,
     attempts: {
       window: 0,
       limit: positiveInteger(attemptsLimit),
@@ -251,11 +298,8 @@ export function normalizeStageRecord(value) {
     state: STAGE_STATES.includes(value.state) ? value.state : 'pending',
     checkpoint: normalizeCheckpoint(value.checkpoint),
     summary: normalizeStageSummary(value.summary),
-    diagnosticCodes: [...new Set(
-      (Array.isArray(value.diagnosticCodes) ? value.diagnosticCodes : [])
-        .map((code) => cleanText(code).slice(0, 120))
-        .filter(Boolean)
-    )].slice(0, 20),
+    diagnosticCodes: normalizeCheckpointDiagnosticCodes(value.diagnosticCodes),
+    lastAttemptAction: normalizeCheckpointAttemptAction(value.lastAttemptAction),
     failure: value.failure && typeof value.failure === 'object'
       ? {
           code: cleanText(value.failure.code),

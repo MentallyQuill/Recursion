@@ -7,6 +7,58 @@ const RECURSION_PROMPT_KEYS = [
   'recursion.guardrails'
 ];
 
+const SMOKE_PROFILE_ID = 'recursion-smoke-profile';
+
+function profileBackedSettings(settings = {}) {
+  return {
+    recursion: {
+      ...settings,
+      providers: {
+        utility: { connectionProfileId: SMOKE_PROFILE_ID },
+        reasoner: { connectionProfileId: SMOKE_PROFILE_ID },
+        ...(settings.providers || {})
+      }
+    }
+  };
+}
+
+function withSmokeConnectionManager(context, label = 'smoke') {
+  if (context.ConnectionManagerRequestService) return context;
+  const profile = { id: SMOKE_PROFILE_ID, name: 'Recursion Smoke', model: 'smoke-model', api: 'textgenerationwebui' };
+  context.ConnectionManagerRequestService = {
+    getSupportedProfiles() { return [profile]; },
+    getProfile(profileId) { return profileId === SMOKE_PROFILE_ID ? profile : null; },
+    validateProfile(candidate) { return candidate?.id === SMOKE_PROFILE_ID ? { selected: 'textgenerationwebui' } : {}; },
+    async sendRequest(_profileId, messages = [], maxTokens, options = {}, overridePayload = {}) {
+      const prompt = messages.map((message) => String(message?.content || '')).join('\n');
+      if (typeof context.generateRaw === 'function') {
+        return context.generateRaw({ prompt, maxTokens, signal: options.signal ?? null, overridePayload });
+      }
+      const snapshotHash = prompt.match(/Snapshot hash:\s*([^\s]+)/)?.[1] || '';
+      if (prompt.includes('recursion.guidanceComposer.v1')) {
+        return { text: JSON.stringify({
+          schema: 'recursion.guidanceComposer.v1',
+          snapshotHash,
+          guidanceText: 'Preserve the current visible scene and answer the immediate user message.',
+          sourceCardIds: [],
+          guardrailCardIds: [],
+          omittedCardIds: [],
+          diagnostics: [`${label}-guidance-smoke`]
+        }) };
+      }
+      return { text: JSON.stringify({
+        schema: 'recursion.utilityArbiter.v1',
+        snapshotHash,
+        action: 'skip',
+        reasonerDecision: { mode: 'skip', reason: 'smoke test', signals: [] },
+        budgets: { targetBriefTokens: 500, maxCards: 6 },
+        diagnostics: [`${label}-smoke`]
+      }) };
+    }
+  };
+  return context;
+}
+
 const extensionModule = await import('../../src/extension/index.js');
 
 const placeholderPayload = [
@@ -136,6 +188,23 @@ function createFakeSillyTavernContext(label) {
     controlEvents,
     userFiles,
     context: {
+      ConnectionManagerRequestService: {
+        getSupportedProfiles() {
+          return [{ id: SMOKE_PROFILE_ID, name: 'Recursion Smoke', model: 'smoke-model', api: 'textgenerationwebui' }];
+        },
+        getProfile(profileId) {
+          return profileId === SMOKE_PROFILE_ID
+            ? { id: SMOKE_PROFILE_ID, name: 'Recursion Smoke', model: 'smoke-model', api: 'textgenerationwebui' }
+            : null;
+        },
+        validateProfile(profile) {
+          return profile?.id === SMOKE_PROFILE_ID ? { selected: 'textgenerationwebui' } : {};
+        },
+        async sendRequest(_profileId, messages = [], maxTokens, options = {}, overridePayload = {}) {
+          const prompt = messages.map((message) => String(message?.content || '')).join('\n');
+          return fake.context.generateRaw({ prompt, maxTokens, signal: options.signal ?? null, overridePayload });
+        }
+      },
       chatId: `${label}-chat`,
       chat: [{ mesid: 0, is_user: true, mes: `${label} user message.` }],
       extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
@@ -260,12 +329,13 @@ function createFakeClassList() {
 
 async function assertLifecycleClearsInstalledPrompt(hookName) {
   const fake = createFakeSillyTavernContext(hookName);
-  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = { getContext: () => fake.context };
 
   const originalChat = { payload: `${hookName}-chat-payload` };
   assertEqual(await globalThis.recursionGenerationInterceptor(originalChat), originalChat, `${hookName} setup keeps original chat`);
   for (const key of RECURSION_PROMPT_KEYS) {
+    fake.context.setExtensionPrompt(key, `${hookName}-${key}-payload`, 'IN_PROMPT', 1, false, 'SYSTEM');
     assert(fake.promptState.get(key), `${hookName} setup installs ${key}`);
   }
 
@@ -285,12 +355,15 @@ async function assertLifecycleClearFailureIsFailSoft(hookName) {
   const fake = createFakeSillyTavernContext(`${hookName}-clear-failure`);
   const warnings = [];
   const originalWarn = console.warn;
-  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = { getContext: () => fake.context };
 
   try {
     console.warn = (...args) => warnings.push(args);
     assertEqual(await globalThis.recursionGenerationInterceptor(`${hookName}-failure-chat`), `${hookName}-failure-chat`, `${hookName} failure setup keeps original chat`);
+    for (const key of RECURSION_PROMPT_KEYS) {
+      fake.context.setExtensionPrompt(key, `${hookName}-${key}-payload`, 'IN_PROMPT', 1, false, 'SYSTEM');
+    }
     fake.throwOnClear = true;
     assertEqual(await globalThis[hookName](), true, `${hookName} returns true when prompt clear throws`);
     assert(warnings.some((entry) => String(entry[0] || '').includes('clear')), `${hookName} logs prompt clear failure`);
@@ -383,7 +456,7 @@ if (lifecycleFailures.length) {
   const eventSource = createFakeEventSource();
   fake.context.eventSource = eventSource;
   fake.context.event_types = { CHAT_CHANGED: 'chat_changed' };
-  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = { getContext: () => fake.context };
 
   await globalThis.recursionOnDelete();
@@ -420,7 +493,7 @@ if (lifecycleFailures.length) {
     MESSAGE_UPDATED: 'message_updated',
     MESSAGE_SWIPED: 'message_swiped'
   };
-  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = { getContext: () => fake.context };
 
   await globalThis.recursionOnDelete();
@@ -495,7 +568,7 @@ if (lifecycleFailures.length) {
       })
     };
   };
-  globalThis.extension_settings = { recursion: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = { getContext: () => fake.context };
 
   await globalThis.recursionOnDelete();
@@ -556,7 +629,7 @@ if (lifecycleFailures.length) {
       })
     };
   };
-  globalThis.extension_settings = { recursion: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 
@@ -897,7 +970,7 @@ if (false) {
     CHAT_CHANGED: 'chat_changed',
     GENERATION_STOPPED: 'generation_stopped'
   };
-  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = { getContext: () => fake.context };
 
   await globalThis.recursionOnDelete();
@@ -929,7 +1002,7 @@ if (false) {
   const eventSource = createFakeEventSource();
   fake.context.eventSource = eventSource;
   fake.context.event_types = { CHAT_CHANGED: 'chat_changed' };
-  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = { getContext: () => fake.context };
 
   await globalThis.recursionOnDelete();
@@ -952,7 +1025,7 @@ if (false) {
     GENERATION_AFTER_COMMANDS: 'generation_after_commands',
     GENERATION_ENDED: 'generation_ended'
   };
-  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = { getContext: () => fake.context };
 
   await globalThis.recursionOnDelete();
@@ -1017,7 +1090,7 @@ if (false) {
     reasonerUse: 'off',
     enhancements: { target: 'prose', applyMode: 'as-swipe', contextMessages: 3 }
   });
-  globalThis.SillyTavern = { getContext: () => context };
+  globalThis.SillyTavern = { getContext: () => withSmokeConnectionManager(context) };
 
   await globalThis.recursionOnDelete();
   assertEqual(await globalThis.recursionOnActivate(), true, 'stale held recovery setup activates');
@@ -1124,7 +1197,7 @@ if (false) {
     reasonerUse: 'off',
     enhancements: { target: 'on', applyMode: 'replace', contextMessages: 3 }
   });
-  globalThis.SillyTavern = { getContext: () => context };
+  globalThis.SillyTavern = { getContext: () => withSmokeConnectionManager(context) };
 
   await globalThis.recursionOnDelete();
   assertEqual(await globalThis.recursionOnActivate(), true, 'prose assistant-landed setup activates');
@@ -1241,8 +1314,8 @@ if (false) {
       };
     }
   };
-  globalThis.extension_settings = { recursion: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' } };
-  globalThis.SillyTavern = { getContext: () => context };
+  globalThis.extension_settings = profileBackedSettings({ pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' });
+  globalThis.SillyTavern = { getContext: () => withSmokeConnectionManager(context) };
 
   await globalThis.recursionOnDelete();
   assertEqual(await globalThis.recursionOnActivate(), true, 'assistant-landed setup activates');
@@ -1268,9 +1341,9 @@ if (false) {
 
 {
   const prompts = [];
-  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = {
-    getContext: () => ({
+    getContext: () => withSmokeConnectionManager({
       chatId: 'quiet-interceptor-bypass-chat',
       chat: [{ mesid: 0, is_user: false, mes: 'Committed assistant before internal quiet generation.' }],
       extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
@@ -1300,9 +1373,9 @@ if (false) {
 
 {
   const prompts = [];
-  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = {
-    getContext: () => ({
+    getContext: () => withSmokeConnectionManager({
       chatId: 'pending-interceptor-chat',
       chat: [{ mesid: 0, is_user: false, mes: 'Committed assistant message.' }],
       extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
@@ -1340,9 +1413,9 @@ if (false) {
 
 {
   const prompts = [];
-  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = {
-    getContext: () => ({
+    getContext: () => withSmokeConnectionManager({
       chatId: 'pending-messages-array-chat',
       chat: [{ mesid: 2, is_user: false, mes: 'Committed assistant before object payload.' }],
       extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
@@ -1382,9 +1455,9 @@ if (false) {
 
 {
   const prompts = [];
-  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = {
-    getContext: () => ({
+    getContext: () => withSmokeConnectionManager({
       chatId: 'assistant-tail-chat',
       chat: [
         { mesid: 0, is_user: true, mes: 'Committed user message.' },
@@ -1425,9 +1498,9 @@ if (false) {
 
 {
   const prompts = [];
-  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = {
-    getContext: () => ({
+    getContext: () => withSmokeConnectionManager({
       chatId: 'provider-shaped-payload-chat',
       chat: [{ mesid: 4, is_user: false, mes: 'Committed assistant reply only.' }],
       extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
@@ -1467,9 +1540,9 @@ if (false) {
 
 {
   const files = new Map();
-  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = {
-    getContext: () => ({
+    getContext: () => withSmokeConnectionManager({
       chatId: 'journal-chat',
       chat: [{ mesid: 0, is_user: true, mes: 'Journal smoke user message.' }],
       extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
@@ -1544,9 +1617,9 @@ if (false) {
 
 {
   const files = new Map();
-  globalThis.extension_settings = { recursion: { mode: 'auto', reasonerUse: 'off' } };
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
   globalThis.SillyTavern = {
-    getContext: () => ({
+    getContext: () => withSmokeConnectionManager({
       chatId: 'journal-failure-chat',
       chat: [{ mesid: 0, is_user: true, mes: 'Journal failure smoke user message.' }],
       extension_prompt_types: { IN_CHAT: 'IN_CHAT', IN_PROMPT: 'IN_PROMPT', BEFORE_PROMPT: 'BEFORE_PROMPT' },
@@ -1647,8 +1720,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
     },
     { mesid: 1, is_user: true, mes: 'Generate the lock-gated response.' }
   ];
-  globalThis.extension_settings = {
-    recursion: {
+  globalThis.extension_settings = profileBackedSettings({
       mode: 'auto',
       reasoningLevel: 'medium',
       postProcess: {
@@ -1657,8 +1729,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
         rewriteFlow: 'unified',
         contextMessages: 13
       }
-    }
-  };
+    });
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 
@@ -1753,8 +1824,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
   fake.context.chat = [
     { mesid: 0, is_user: true, mes: 'Generate one response despite duplicate terminal events.' }
   ];
-  globalThis.extension_settings = {
-    recursion: {
+  globalThis.extension_settings = profileBackedSettings({
       mode: 'auto',
       reasoningLevel: 'medium',
       postProcess: {
@@ -1763,8 +1833,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
         rewriteFlow: 'unified',
         contextMessages: 13
       }
-    }
-  };
+    });
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 
@@ -1859,8 +1928,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
   fake.context.chat = [
     { mesid: 0, is_user: true, mes: 'Generate a response whose control lock fails.' }
   ];
-  globalThis.extension_settings = {
-    recursion: {
+  globalThis.extension_settings = profileBackedSettings({
       mode: 'auto',
       reasoningLevel: 'medium',
       postProcess: {
@@ -1869,8 +1937,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
         rewriteFlow: 'unified',
         contextMessages: 13
       }
-    }
-  };
+    });
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 
@@ -1918,8 +1985,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
   fake.context.chat = [
     { mesid: 0, is_user: true, mes: 'Generate without Post-process.' }
   ];
-  globalThis.extension_settings = {
-    recursion: {
+  globalThis.extension_settings = profileBackedSettings({
       mode: 'auto',
       reasoningLevel: 'medium',
       postProcess: {
@@ -1928,8 +1994,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
         rewriteFlow: 'unified',
         contextMessages: 13
       }
-    }
-  };
+    });
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 
@@ -1967,8 +2032,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
   fake.context.chat = [
     { mesid: 0, is_user: true, mes: 'Arm Post-process, then turn it off.' }
   ];
-  globalThis.extension_settings = {
-    recursion: {
+  globalThis.extension_settings = profileBackedSettings({
       mode: 'auto',
       reasoningLevel: 'medium',
       postProcess: {
@@ -1977,8 +2041,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
         rewriteFlow: 'unified',
         contextMessages: 13
       }
-    }
-  };
+    });
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 
@@ -2033,8 +2096,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
     },
     { mesid: 1, is_user: true, mes: 'Generate a genuinely new response.' }
   ];
-  globalThis.extension_settings = {
-    recursion: {
+  globalThis.extension_settings = profileBackedSettings({
       mode: 'auto',
       reasoningLevel: 'medium',
       postProcess: {
@@ -2043,8 +2105,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
         rewriteFlow: 'unified',
         contextMessages: 13
       }
-    }
-  };
+    });
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 
@@ -2107,8 +2168,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
     swipes: ['The response begins here.'],
     swipe_info: [{ extra: {} }]
   }];
-  globalThis.extension_settings = {
-    recursion: {
+  globalThis.extension_settings = profileBackedSettings({
       mode: 'auto',
       reasoningLevel: 'medium',
       postProcess: {
@@ -2117,8 +2177,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
         rewriteFlow: 'unified',
         contextMessages: 13
       }
-    }
-  };
+    });
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 
@@ -2157,30 +2216,49 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
   fake.context.chat = [
     { mesid: 0, is_user: true, mes: 'Generate, then stop during Post-process guidance.' }
   ];
-  globalThis.extension_settings = {
-    recursion: {
-      mode: 'auto',
-      reasoningLevel: 'medium',
-      postProcess: {
-        enabled: true,
-        applyMode: 'as-swipe',
-        rewriteFlow: 'unified',
-        contextMessages: 13
-      }
+  globalThis.extension_settings = profileBackedSettings({
+    mode: 'auto',
+    reasoningLevel: 'medium',
+    postProcess: {
+      enabled: true,
+      applyMode: 'as-swipe',
+      rewriteFlow: 'unified',
+      contextMessages: 13
     }
-  };
+  });
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 
   await globalThis.recursionOnDelete();
   await globalThis.recursionGenerationInterceptor(fake.context.chat, undefined, undefined, 'normal');
   const activeRuntime = globalThis.__recursionLiveHarnessRuntime;
-  fake.context.generateRaw = async () => ({
-    text: JSON.stringify({
-      schema: 'recursion.providerTest.v1',
-      ok: true
-    })
-  });
+  fake.context.generateRaw = async (request = {}) => {
+    const prompt = String(request.prompt || '');
+    if (prompt.includes('two requested card items')) {
+      return {
+        text: JSON.stringify({
+          items: [
+            { family: 'Scene Frame', promptText: 'Track the immediate objective.', evidenceRefs: ['message:0'] },
+            { family: 'Scene Constraints', promptText: 'Preserve established constraints.', evidenceRefs: ['message:0'] }
+          ]
+        })
+      };
+    }
+    if (prompt.includes('one short instruction')) {
+      return {
+        text: JSON.stringify({
+          promptText: 'Track the immediate objective.',
+          evidenceRefs: ['message:0']
+        })
+      };
+    }
+    return {
+      text: JSON.stringify({
+        schema: 'recursion.providerTest.v1',
+        ok: true
+      })
+    };
+  };
   assertEqual((await activeRuntime.testProvider('utility')).ok, true, 'native Stop guidance fixture readies Utility');
   let guidanceRequest = null;
   let releaseGuidance;
@@ -2242,8 +2320,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
   fake.context.chat = [
     { mesid: 0, is_user: true, mes: 'Generate and revise one response.' }
   ];
-  globalThis.extension_settings = {
-    recursion: {
+  globalThis.extension_settings = profileBackedSettings({
       mode: 'auto',
       reasoningLevel: 'medium',
       postProcess: {
@@ -2252,8 +2329,7 @@ for (const cancellation of ['edit', 'swipe', 'delete', 'chat-change', 'stop']) {
         rewriteFlow: 'unified',
         contextMessages: 13
       }
-    }
-  };
+    });
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 

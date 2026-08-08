@@ -653,27 +653,35 @@ function itemMatchesProviderCatalog(item, catalog) {
 export function providerCardRejectReason(result, context = {}) {
   if (!result?.ok) return 'provider-failed';
   const data = asObject(result.data);
-  if (data.schema !== CARD_RESPONSE_SCHEMA) return 'schema-mismatch';
-  const items = Array.isArray(data.items)
-    ? data.items
-    : (Array.isArray(data.cards) ? data.cards : []);
-  if (items.length !== 1) return `item-count-${items.length}`;
-  const catalog = resolveProviderEnvelopeCatalog(data, context);
-  if (!catalog) return 'catalog-mismatch';
-  if (!providerSnapshotMatches(data, context)) return 'snapshot-mismatch';
-  const item = asObject(items[0]);
-  if (!itemMatchesProviderCatalog(item, catalog)) return 'item-catalog-mismatch';
+  let item = data;
+  if (!String(data.promptText || '').trim()) {
+    const legacyItems = Array.isArray(data.items)
+      ? data.items
+      : (Array.isArray(data.cards) ? data.cards : []);
+    if (legacyItems.length !== 1) return `item-count-${legacyItems.length}`;
+    item = asObject(legacyItems[0]);
+  }
+  const expectedRole = String(context.expectedRole || '').trim();
+  const expectedFamily = String(context.expectedFamily || '').trim();
+  let catalog = null;
+  try {
+    catalog = resolveCatalog({ role: expectedRole, family: expectedFamily }, { strict: true });
+  } catch {
+    return 'catalog-mismatch';
+  }
   const evidenceRefs = repairProviderEvidenceRefs(item.evidenceRefs ?? item.evidence, context);
   if (!hasValidMessageEvidenceRefs(evidenceRefs, context)) return 'evidence-message-missing';
   try {
     normalizeCard({
-      ...item,
+      promptText: item.promptText ?? item.text ?? item.claim,
+      summary: item.summary,
+      evidenceRefs,
       role: catalog.role,
       family: catalog.family,
-      promptText: item.promptText ?? item.text ?? item.claim,
-      evidenceRefs,
-      tokenEstimate: item.tokenEstimate ?? item.tokenCost,
-      inspectorNotes: item.inspectorNotes
+      detailProfile: context.detailProfile || item.detailProfile || 'standard',
+      emphasis: context.emphasis || item.emphasis || 'normal',
+      inspectorNotes: item.inspectorNotes,
+      origin: item.origin || 'provider'
     }, context);
   } catch (error) {
     return safeId(cleanText(error?.message || error || 'normalization-failed', 120), 'normalization-failed');
@@ -1010,13 +1018,11 @@ export function buildCardRequests(plan = {}, context = {}) {
           storyFormPromptBlock(storyForm),
           refreshOfCardId ? `Refreshes cached card: ${refreshOfCardId}` : '',
           'Return one JSON object only. Do not wrap it in markdown.',
-          'The JSON object must use schema "recursion.card.v1" and an "items" array with one card object.',
-          `Envelope role must be "${catalog.role}".`,
-          `Envelope family must be "${catalog.family}".`,
-          promptSnapshotHash ? `Envelope snapshotHash must be "${promptSnapshotHash}".` : '',
-          'The card object may contain promptText, summary, evidenceRefs, tokenEstimate, detailProfile, emphasis, and inspectorNotes.',
-          'The card object must include at least one evidenceRefs entry containing a message:N reference.',
-          'promptText is the only prompt-facing card text. inspectorNotes are private diagnostics for the Recursion inspector.',
+          'Return one JSON object with exactly these fields:',
+          '{"promptText":"Track the immediate objective and obstruction.","evidenceRefs":["message:12"]}',
+          'Do not repeat schema names, role names, family names, or snapshot hashes.',
+          'evidenceRefs must include at least one message:N reference.',
+          'promptText is the only prompt-facing card text.',
           cardInstructionContractLine(),
           cardPromptSafetyInstruction(catalog),
           sourceCards.length
@@ -1098,14 +1104,11 @@ export function buildFusedCardBundleRequest(plan = {}, context = {}) {
     prompt: [
       'Generate all requested Recursion scene cards in one structured card bundle.',
       'Return one JSON object only. Do not wrap it in markdown.',
-      `The JSON object must use schema "${CARD_BUNDLE_RESPONSE_SCHEMA}".`,
-      snapshotHash ? `Top-level snapshotHash must be "${snapshotHash}".` : '',
-      'Top-level items must be an array. Each item is one card object for one requested family.',
-      `Each item must include schema "${CARD_RESPONSE_SCHEMA}", family, role, promptText, and evidenceRefs.`,
-      'Each item should include coveredSourceCardIds listing every source deck card represented in the fused prompt.',
-      'Return at most one item per requested family. Do not generate unrequested families.',
-      'If a requested card cannot be safely generated, omit it from items and add an omitted entry with family, role, and reason.',
-      'promptText is the only prompt-facing card text. inspectorNotes are private diagnostics for the Recursion inspector.',
+      'Return one JSON object with exactly this shape:',
+      '{"items":[{"family":"Scene Frame","promptText":"Track the immediate objective and obstruction.","evidenceRefs":["message:12"],"coveredSourceCardIds":[]}]}',
+      'Return at most one item per requested family. Do not return unrequested families.',
+      'Each item must contain family, promptText, evidenceRefs, and optional coveredSourceCardIds only.',
+      'promptText is the only prompt-facing card text.',
       cardInstructionContractLine(),
       storyFormPromptBlock(storyForm),
       requestBlocks.join('\n\n'),
@@ -1121,42 +1124,57 @@ export function buildFusedCardBundleRequest(plan = {}, context = {}) {
 }
 
 export function cardsFromProviderResult(result, context = {}) {
-  if (!result?.ok) return [];
+  if (result?.ok !== true) return [];
   const data = asObject(result.data);
-  if (data.schema !== CARD_RESPONSE_SCHEMA) return [];
-  const items = Array.isArray(data.items)
-    ? data.items
-    : (Array.isArray(data.cards) ? data.cards : []);
-  if (items.length !== 1) return [];
-  const catalog = resolveProviderEnvelopeCatalog(data, context);
+  let source = data;
+  let legacyEnvelope = null;
+  if (!String(data.promptText || '').trim()) {
+    const legacyItems = Array.isArray(data.items)
+      ? data.items
+      : (Array.isArray(data.cards) ? data.cards : []);
+    if (legacyItems.length !== 1) return [];
+    source = asObject(legacyItems[0]);
+    legacyEnvelope = data;
+  }
+
+  const expectedRole = String(context.expectedRole || legacyEnvelope?.role || source.role || source.roleId || '').trim();
+  const expectedFamily = String(context.expectedFamily || legacyEnvelope?.family || source.family || '').trim();
+  const expectedSnapshotHash = String(context.expectedSnapshotHash || context.snapshotHash || legacyEnvelope?.snapshotHash || '').trim();
+  const catalog = resolveCatalog({ role: expectedRole, family: expectedFamily }, { strict: false });
   if (!catalog) return [];
-  if (!providerSnapshotMatches(data, context)) return [];
-  return items.flatMap((item) => {
-    const source = asObject(item);
-    if (!itemMatchesProviderCatalog(source, catalog)) return [];
-    const evidenceRefs = repairProviderEvidenceRefs(source.evidenceRefs ?? source.evidence, context);
-    if (!hasValidMessageEvidenceRefs(evidenceRefs, context)) return [];
-    try {
-      const normalized = normalizeCard({
-        ...source,
-        role: catalog.role,
-        family: catalog.family,
-        promptText: source.promptText ?? source.text ?? source.claim,
-        evidenceRefs,
-        tokenEstimate: source.tokenEstimate ?? source.tokenCost,
-        inspectorNotes: source.inspectorNotes
-      }, context);
-      const sourceCardIds = Array.isArray(context.sourceCardIds) ? context.sourceCardIds.map(String).filter(Boolean) : [];
-      const sourceCards = Array.isArray(context.sourceCards) ? context.sourceCards : [];
-      return [{
-        ...normalized,
-        ...(sourceCardIds.length ? { sourceCardIds, sourceCoverage: 'requested' } : {}),
-        ...(sourceCards.length ? { sourceCards } : {})
-      }];
-    } catch {
-      return [];
-    }
-  });
+  const evidenceRefs = repairProviderEvidenceRefs(source.evidenceRefs ?? source.evidence, context);
+  if (!hasValidMessageEvidenceRefs(evidenceRefs, context)) return [];
+
+  try {
+    const normalized = normalizeCard({
+      promptText: source.promptText ?? source.text ?? source.claim,
+      summary: source.summary,
+      evidenceRefs,
+      role: catalog.role,
+      family: catalog.family,
+      detailProfile: context.detailProfile || source.detailProfile || 'standard',
+      emphasis: context.emphasis || source.emphasis || 'normal',
+      inspectorNotes: source.inspectorNotes,
+      origin: source.origin || 'provider'
+    }, context);
+    const sourceCardIds = Array.isArray(context.sourceCardIds)
+      ? context.sourceCardIds.map(String).filter(Boolean)
+      : [];
+    const sourceCards = Array.isArray(context.sourceCards) ? context.sourceCards : [];
+    return [{
+      ...normalized,
+      schema: CARD_RESPONSE_SCHEMA,
+      snapshotHash: expectedSnapshotHash,
+      provenance: {
+        source: 'provider',
+        providerLane: result?.diagnostics?.lane || result?.lane || context.providerLane || 'utility'
+      },
+      ...(sourceCardIds.length ? { sourceCardIds, sourceCoverage: 'requested' } : {}),
+      ...(sourceCards.length ? { sourceCards } : {})
+    }];
+  } catch {
+    return [];
+  }
 }
 
 export function cardsFromFusedProviderResult(result, context = {}) {
@@ -1175,133 +1193,87 @@ export function cardsFromFusedProviderResult(result, context = {}) {
     }
     return output;
   };
-  if (!result?.ok) {
+
+  let data = asObject(result?.data);
+  if (result?.ok !== true) {
     output.diagnostics.push('fused-bundle-provider-failed');
     const recoveredItems = extractJsonObjectsFromArrayProperty(result?.recoverableText || result?.text || '', 'items');
     if (!recoveredItems.length) return finalize();
     output.diagnostics.push('fused-bundle-fragment-recovered');
-    result = {
-      ...result,
-      ok: true,
-      data: {
-        schema: CARD_BUNDLE_RESPONSE_SCHEMA,
-        snapshotHash: context.expectedSnapshotHash || context.snapshotHash || '',
-        items: recoveredItems
-      }
-    };
+    data = { items: recoveredItems };
   }
-  const data = asObject(result.data);
-  const envelopeSchemaOk = data.schema === CARD_BUNDLE_RESPONSE_SCHEMA;
-  if (!envelopeSchemaOk) {
-    output.diagnostics.push('fused-bundle-schema-mismatch');
-    if (!Array.isArray(data.items) || data.items.length === 0) return finalize();
-    output.diagnostics.push('fused-bundle-envelope-damaged');
-  }
-  if (!providerSnapshotMatches(data, context)) {
-    output.diagnostics.push('fused-bundle-snapshot-mismatch');
+  if (!Array.isArray(data.items)) {
+    output.diagnostics.push('fused-bundle-items-missing');
     return finalize();
   }
+
   const requested = new Map((Array.isArray(context.requestedCards) ? context.requestedCards : [])
     .map((card) => {
       const catalog = resolveCatalog({ family: card?.family, role: card?.role ?? card?.roleId }, { strict: false });
       return catalog ? [catalog.family, {
         ...catalog,
-      sourceCardIds: Array.isArray(card?.sourceCardIds) ? card.sourceCardIds.map(String).filter(Boolean) : [],
+        sourceCardIds: Array.isArray(card?.sourceCardIds) ? card.sourceCardIds.map(String).filter(Boolean) : [],
         sourceCards: Array.isArray(card?.sourceCards) ? card.sourceCards : []
       }] : null;
     })
     .filter(Boolean));
   const seen = new Set();
-  const encounteredRequested = new Set();
-  const items = Array.isArray(data.items) ? data.items : [];
-  for (const rawItem of items) {
+
+  for (const rawItem of data.items) {
     const item = asObject(rawItem);
-    const catalog = resolveCatalog({ family: item.family, role: item.role ?? item.roleId }, { strict: false });
-    const diagnosticName = cleanOptionalText(item.family || item.role || item.roleId || 'unknown', 80) || 'unknown';
+    const catalog = resolveCatalog({ family: item.family }, { strict: false });
+    const diagnosticName = cleanOptionalText(item.family || 'unknown', 80) || 'unknown';
     if (!catalog || !requested.has(catalog.family) || seen.has(catalog.family)) {
       if (catalog?.family) output.rejectedFamilies.push(catalog.family);
       output.diagnostics.push(`fused-item-rejected:${diagnosticName}`);
       continue;
     }
-    encounteredRequested.add(catalog.family);
+    const request = requested.get(catalog.family);
     const cards = cardsFromProviderResult({
       ok: true,
+      lane: result?.lane,
+      diagnostics: result?.diagnostics,
       data: {
-        schema: CARD_RESPONSE_SCHEMA,
-        snapshotHash: data.snapshotHash,
-        family: catalog.family,
-        role: catalog.role,
-        items: [item]
+        promptText: item.promptText,
+        evidenceRefs: item.evidenceRefs
       }
     }, {
       ...context,
-      expectedFamily: catalog.family,
-      expectedRole: catalog.role,
-      sourceCardIds: requested.get(catalog.family)?.sourceCardIds || [],
-      sourceCards: requested.get(catalog.family)?.sourceCards || []
+      expectedRole: request.role,
+      expectedFamily: request.family,
+      expectedSnapshotHash: context.expectedSnapshotHash || context.snapshotHash || '',
+      sourceCardIds: request.sourceCardIds,
+      sourceCards: request.sourceCards
     });
     if (!cards.length) {
       output.invalidFamilies.push(catalog.family);
-      const rejectReason = providerCardRejectReason({
-        ok: true,
-        data: {
-          schema: CARD_RESPONSE_SCHEMA,
-          snapshotHash: data.snapshotHash,
-          family: catalog.family,
-          role: catalog.role,
-          items: [item]
-        }
-      }, {
-        ...context,
-        expectedFamily: catalog.family,
-        expectedRole: catalog.role
-      });
-      output.diagnostics.push(`fused-item-invalid:${catalog.family}${rejectReason ? `:${rejectReason}` : ''}`);
+      output.diagnostics.push(`fused-item-invalid:${catalog.family}`);
       continue;
     }
     seen.add(catalog.family);
     output.acceptedFamilies.push(catalog.family);
-    const expectedSourceCardIds = requested.get(catalog.family)?.sourceCardIds || [];
     const coveredSourceCardIds = Array.isArray(item.coveredSourceCardIds)
       ? item.coveredSourceCardIds.map(String).filter(Boolean)
       : [];
-    const explicitOmittedSourceCardIds = Array.isArray(item.omittedSourceCardIds)
-      ? item.omittedSourceCardIds.map(String).filter(Boolean)
-      : [];
-    const hasCompleteCoverageReport = expectedSourceCardIds.length > 0
+    const expectedSourceCardIds = request.sourceCardIds;
+    const completeCoverage = expectedSourceCardIds.length > 0
       && coveredSourceCardIds.length === expectedSourceCardIds.length
       && expectedSourceCardIds.every((id) => coveredSourceCardIds.includes(id));
-    if (expectedSourceCardIds.length && coveredSourceCardIds.length && !hasCompleteCoverageReport) {
-      const missingSourceCardIds = expectedSourceCardIds.filter((id) => !coveredSourceCardIds.includes(id));
-      if (missingSourceCardIds.length) {
-        output.diagnostics.push(`fused-source-coverage-incomplete:${catalog.family}:${missingSourceCardIds.join(',')}`);
-      }
-    }
     output.cards.push(...cards.map((card) => ({
       ...card,
       providerRole: 'fusedCardBundle',
-      providerLane: result.lane || context.providerLane || 'utility',
-      fusedBundleId: result.diagnostics?.runId || result.diagnostics?.requestHash || '',
-      ...(requested.get(catalog.family)?.sourceCardIds?.length
-        ? {
-            sourceCardIds: requested.get(catalog.family).sourceCardIds,
-            sourceCards: requested.get(catalog.family).sourceCards,
-            sourceCoverage: hasCompleteCoverageReport ? 'reported' : 'included',
-            inclusionEvidence: hasCompleteCoverageReport ? 'provider-confirmed' : 'generation-contract',
-            ...(coveredSourceCardIds.length ? { coveredSourceCardIds } : {}),
-            ...(explicitOmittedSourceCardIds.length ? { omittedSourceCardIds: explicitOmittedSourceCardIds } : {})
-          }
-        : {})
+      providerLane: result?.lane || context.providerLane || 'utility',
+      fusedBundleId: result?.diagnostics?.runId || result?.diagnostics?.requestHash || '',
+      ...(coveredSourceCardIds.length ? { coveredSourceCardIds } : {}),
+      ...(expectedSourceCardIds.length ? {
+        sourceCoverage: completeCoverage ? 'reported' : 'included',
+        inclusionEvidence: completeCoverage ? 'provider-confirmed' : 'generation-contract'
+      } : {})
     })));
   }
-  for (const omission of Array.isArray(data.omitted) ? data.omitted : []) {
-    const family = cleanOptionalText(omission?.family || '', 120);
-    const role = cleanOptionalText(omission?.role || omission?.roleId || '', 120);
-    const reason = cleanOptionalText(omission?.reason || 'provider-skipped', 120);
-    if (family || role) output.omissions.push({ family, role, reason });
-  }
+
   for (const family of requested.keys()) {
-    if (!encounteredRequested.has(family)) {
+    if (!seen.has(family)) {
       output.missingFamilies.push(family);
       output.diagnostics.push(`fused-item-missing:${family}`);
     }

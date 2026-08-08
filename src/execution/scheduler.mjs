@@ -7,6 +7,14 @@ import {
   normalizeStageRecord
 } from './checkpoints.mjs';
 import { runModelStageAttempts } from './attempt-policy.mjs';
+
+const MODEL_RETRY_ACTIONS = new Set([
+  'stop',
+  'downgrade-structured-output',
+  'reduce-output-budget',
+  'retry-corrected',
+  'retry-same'
+]);
 import {
   compareRunProvenance,
   normalizeExecutionProvenance,
@@ -500,6 +508,12 @@ export function createExecutionScheduler({
             ) {
               return null;
             }
+            const diagnosticCodes = summary.diagnosticCode
+              ? [...new Set([...(record.diagnosticCodes || []), summary.diagnosticCode])]
+              : (record.diagnosticCodes || []);
+            const lastAttemptAction = MODEL_RETRY_ACTIONS.has(summary.action)
+              ? summary.action
+              : (record.lastAttemptAction || null);
             draft.stageRecords[stage.id] = {
               ...record,
               attempts: {
@@ -507,6 +521,8 @@ export function createExecutionScheduler({
                 used: Number(record.attempts.used || 0) + 1,
                 total: Number(record.attempts.total || 0) + 1
               },
+              diagnosticCodes,
+              lastAttemptAction,
               failure: summary.failure ? failureRecord(summary.failure) : null,
               updatedAt: now()
             };
@@ -532,6 +548,32 @@ export function createExecutionScheduler({
       }
 
       if (attemptResult.aborted || controller.signal.aborted) return;
+      if (
+        !attemptResult.ok
+        && modelStage
+        && typeof stage.settleExhausted === 'function'
+      ) {
+        const settled = await stage.settleExhausted({
+          lastArtifact: attemptResult.lastResponse,
+          failure: attemptResult.failure,
+          attempts: attemptResult.attempts,
+          request,
+          context: runtime.context,
+          dependencies: dependencyArtifacts
+        });
+        if (settled?.ok === true) {
+          attemptResult = {
+            ok: true,
+            value: settled.value,
+            attempts: attemptResult.attempts
+          };
+        } else if (settled?.failure) {
+          attemptResult = {
+            ...attemptResult,
+            failure: settled.failure
+          };
+        }
+      }
       if (!attemptResult.ok) {
         await failStage(runtime, stage, executionToken, attemptResult.failure);
         return;
@@ -581,6 +623,8 @@ export function createExecutionScheduler({
         ),
         provenance: runtime.provenance,
         attempts: currentRecord.attempts,
+        diagnosticCodes: currentRecord.diagnosticCodes,
+        lastAttemptAction: currentRecord.lastAttemptAction,
         artifactRef: {
           ...savedRef,
           artifactId: savedRef.artifactId || artifactId

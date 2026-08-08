@@ -1,7 +1,16 @@
-import { failureFrom, providerFailure } from '../failures.mjs';
+import { failureFrom } from '../failures.mjs';
+import { normalizeProviderError } from '../providers/provider-errors.mjs';
+import { minimumOutputBudgetForRole } from '../providers/stage-output-budgets.mjs';
 
 const ATTEMPT_MIN = 1;
 const ATTEMPT_MAX = 5;
+const MODEL_RETRY_ACTIONS = new Set([
+  'stop',
+  'downgrade-structured-output',
+  'reduce-output-budget',
+  'retry-corrected',
+  'retry-same'
+]);
 
 function normalizeAttempts(value) {
   const parsed = Number.parseInt(value, 10);
@@ -16,24 +25,12 @@ function isAbort(error, signal) {
     || error?.code === 'RECURSION_PROVIDER_ABORTED';
 }
 
-function safeCode(value, fallback) {
-  const code = String(value || fallback)
-    .toUpperCase()
-    .replace(/[^A-Z0-9_]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 120);
-  return code || fallback;
-}
-
 export function classifyModelFailure(error, { kind = 'transport', signal = null } = {}) {
   if (isAbort(error, signal)) {
-    return Object.freeze({
-      kind: 'abort',
-      code: 'RECURSION_MODEL_ATTEMPT_ABORTED',
-      category: 'stale-state',
-      message: 'The model attempt was stopped.',
-      retryable: false
-    });
+    return normalizeProviderError(Object.assign(new Error('Stopped.'), {
+      name: 'AbortError',
+      code: 'RECURSION_PROVIDER_ABORTED'
+    }));
   }
   if (kind === 'validation') {
     const failure = failureFrom(error, {
@@ -52,32 +49,125 @@ export function classifyModelFailure(error, { kind = 'transport', signal = null 
       ...(failure.suggestedAction ? { suggestedAction: failure.suggestedAction } : {})
     });
   }
-  const failure = providerFailure(error, { stage: 'model-attempt' });
-  return Object.freeze({
-    kind: 'transport',
-    code: failure.code,
-    category: failure.category,
-    message: failure.message,
-    retryable: failure.retryable
-  });
+  return normalizeProviderError(error);
 }
 
 function normalizeValidation(value) {
-  if (value?.ok === true) {
-    return { ok: true, value: value.value };
-  }
-  if (value?.ok === false) {
-    return { ok: false, error: value.error };
-  }
+  if (value?.ok === true) return { ok: true, value: value.value };
+  if (value?.ok === false) return { ok: false, error: value.error };
   return { ok: true, value };
+}
+
+function failureKindForRejectedResponse(error) {
+  if (error?.kind === 'transport') return 'transport';
+  const category = String(error?.category || '').trim().toLowerCase();
+  if ([
+    'provider',
+    'provider-account',
+    'provider-request',
+    'provider-timeout',
+    'provider-length',
+    'configuration',
+    'compatibility',
+    'capacity'
+  ].includes(category)) return 'transport';
+  return 'validation';
+}
+
+function retryDirective(action, {
+  delayMs = 0,
+  diagnosticCode = '',
+  nextRequest = null
+} = {}) {
+  if (!MODEL_RETRY_ACTIONS.has(action)) throw new TypeError(`Unknown retry action: ${action}`);
+  return Object.freeze({
+    action,
+    delayMs: Math.max(0, Math.trunc(Number(delayMs) || 0)),
+    diagnosticCode: String(diagnosticCode || '').slice(0, 120),
+    nextRequest
+  });
+}
+
+function stopDirective(diagnosticCode = '') {
+  return retryDirective('stop', { diagnosticCode });
+}
+
+export function resolveModelRetryDirective({ failure, request, attempt, limit }) {
+  if (attempt >= limit || failure?.kind === 'abort') return stopDirective();
+
+  if (failure?.code === 'RECURSION_STRUCTURED_OUTPUT_UNSUPPORTED'
+      && request?.structuredOutputMethod === 'native-schema') {
+    return retryDirective('downgrade-structured-output', {
+      diagnosticCode: 'structured-output-downgraded',
+      nextRequest: { ...request, structuredOutputMethod: 'prompt-json' }
+    });
+  }
+
+  if (failure?.code === 'RECURSION_PROVIDER_CONTEXT_LIMIT') {
+    const floor = minimumOutputBudgetForRole(request?.roleId);
+    const current = Number(request?.responseLength) || floor;
+    const reduced = Math.max(floor, Math.floor(current * 0.75));
+    if (reduced >= current) return stopDirective('output-budget-at-floor');
+    return retryDirective('reduce-output-budget', {
+      diagnosticCode: 'output-budget-reduced',
+      nextRequest: { ...request, responseLength: reduced }
+    });
+  }
+
+  if (failure?.kind === 'validation') {
+    return retryDirective('retry-corrected', {
+      diagnosticCode: 'model-output-corrected'
+    });
+  }
+
+  if (failure?.code === 'RECURSION_PROVIDER_RATE_LIMIT'
+      || failure?.code === 'RECURSION_PROVIDER_TRANSIENT'
+      || (failure?.kind === 'transport' && failure?.retryable === true)) {
+    const delayMs = attempt === 1 ? 250 : 750;
+    const diagnosticCode = failure.code === 'RECURSION_PROVIDER_RATE_LIMIT'
+      ? 'provider-rate-limit-retry'
+      : failure.code === 'RECURSION_PROVIDER_TRANSIENT'
+        ? 'provider-transient-retry'
+        : 'provider-retry';
+    return retryDirective('retry-same', {
+      delayMs,
+      diagnosticCode,
+      nextRequest: request
+    });
+  }
+
+  return stopDirective();
+}
+
+function abortableSleep(ms, signal) {
+  if (ms <= 0) return Promise.resolve();
+  if (signal?.aborted) {
+    return Promise.reject(Object.assign(new Error('Provider retry was stopped.'), {
+      name: 'AbortError',
+      code: 'RECURSION_PROVIDER_ABORTED'
+    }));
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      reject(Object.assign(new Error('Provider retry was stopped.'), {
+        name: 'AbortError',
+        code: 'RECURSION_PROVIDER_ABORTED'
+      }));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 async function notifyAttempt(onAttemptSettled, attempts, summary) {
   const frozen = Object.freeze(summary);
   attempts.push(frozen);
-  if (typeof onAttemptSettled === 'function') {
-    await onAttemptSettled(frozen);
-  }
+  if (typeof onAttemptSettled === 'function') await onAttemptSettled(frozen);
 }
 
 export async function runModelStageAttempts({
@@ -86,6 +176,8 @@ export async function runModelStageAttempts({
   invoke,
   validate,
   buildCorrectionRequest,
+  resolveDirective = resolveModelRetryDirective,
+  sleep = abortableSleep,
   signal = null,
   onAttemptSettled = null
 } = {}) {
@@ -96,84 +188,93 @@ export async function runModelStageAttempts({
   const attempts = [];
   let currentRequest = request;
   let lastFailure = null;
+  let lastResponse;
 
   for (let attempt = 1; attempt <= limit; attempt += 1) {
-    if (signal?.aborted === true) {
-      lastFailure = classifyModelFailure(null, { signal });
-      return { ok: false, aborted: true, failure: lastFailure, attempts };
+    if (signal?.aborted) {
+      lastFailure = normalizeProviderError(Object.assign(new Error('Stopped.'), { name: 'AbortError' }));
+      return { ok: false, aborted: true, failure: lastFailure, lastResponse, attempts };
     }
 
     let response;
+    let validationError = null;
+    let outcome = 'failed';
     try {
-      response = await invoke(currentRequest, {
-        attempt,
-        signal
-      });
+      response = await invoke(currentRequest, { attempt, signal });
+      lastResponse = response;
+      if (signal?.aborted) {
+        throw Object.assign(new Error('Provider request was stopped.'), {
+          name: 'AbortError',
+          code: 'RECURSION_PROVIDER_ABORTED'
+        });
+      }
+      const normalized = normalizeValidation(await validate(response, { attempt, signal }));
+      if (normalized.ok) {
+        await notifyAttempt(onAttemptSettled, attempts, {
+          attempt,
+          outcome: 'accepted',
+          action: 'stop',
+          delayMs: 0,
+          diagnosticCode: ''
+        });
+        return { ok: true, value: normalized.value, response, attempts };
+      }
+      validationError = normalized.error;
+      lastFailure = classifyModelFailure(validationError, { kind: failureKindForRejectedResponse(validationError), signal });
+      outcome = 'invalid';
     } catch (error) {
       lastFailure = classifyModelFailure(error, { signal });
-      await notifyAttempt(onAttemptSettled, attempts, {
-        attempt,
-        outcome: lastFailure.kind === 'abort' ? 'aborted' : 'failed',
-        failure: lastFailure
-      });
-      if (lastFailure.kind === 'abort') {
-        return { ok: false, aborted: true, failure: lastFailure, attempts };
-      }
-      continue;
+      outcome = lastFailure.kind === 'abort' ? 'aborted' : 'failed';
     }
 
-    if (signal?.aborted === true) {
-      lastFailure = classifyModelFailure(null, { signal });
-      await notifyAttempt(onAttemptSettled, attempts, {
-        attempt,
-        outcome: 'aborted',
-        failure: lastFailure
-      });
-      return { ok: false, aborted: true, failure: lastFailure, attempts };
-    }
-
-    let validation;
-    try {
-      validation = normalizeValidation(await validate(response, {
-        attempt,
-        signal
-      }));
-    } catch (error) {
-      validation = { ok: false, error };
-    }
-
-    if (validation.ok) {
-      await notifyAttempt(onAttemptSettled, attempts, {
-        attempt,
-        outcome: 'accepted'
-      });
-      return {
-        ok: true,
-        value: validation.value,
-        response,
-        attempts
-      };
-    }
-
-    lastFailure = classifyModelFailure(validation.error, { kind: 'validation', signal });
+    const directive = resolveDirective({
+      failure: lastFailure,
+      request: currentRequest,
+      attempt,
+      limit
+    });
     await notifyAttempt(onAttemptSettled, attempts, {
       attempt,
-      outcome: 'invalid',
-      failure: lastFailure
+      outcome,
+      failure: lastFailure,
+      action: directive.action,
+      delayMs: directive.delayMs,
+      diagnosticCode: directive.diagnosticCode
     });
-    if (attempt < limit && typeof buildCorrectionRequest === 'function') {
+
+    if (lastFailure.kind === 'abort') {
+      return { ok: false, aborted: true, failure: lastFailure, lastResponse, attempts };
+    }
+    if (directive.action === 'stop') break;
+
+    if (directive.delayMs > 0) {
+      try {
+        await sleep(directive.delayMs, signal);
+      } catch (error) {
+        lastFailure = classifyModelFailure(error, { signal });
+        return { ok: false, aborted: lastFailure.kind === 'abort', failure: lastFailure, lastResponse, attempts };
+      }
+    }
+
+    if (directive.action === 'retry-corrected') {
+      if (typeof buildCorrectionRequest !== 'function') break;
       currentRequest = await buildCorrectionRequest({
         request: currentRequest,
-        response,
-        error: validation.error,
+        response: lastResponse,
+        error: validationError,
         attempt
       });
+    } else {
+      currentRequest = directive.nextRequest;
     }
+
+    if (!currentRequest || typeof currentRequest !== 'object') break;
   }
 
   return {
     ok: false,
-    failure: lastFailure || classifyModelFailure(null),
+    failure: lastFailure || classifyModelFailure(new Error('Provider request failed.'), { signal }),
+    lastResponse,
     attempts
   };
 }

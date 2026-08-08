@@ -1,703 +1,424 @@
-# Provider and Generation Spec
+# Provider And Generation Spec
 
-## Purpose
-
-This spec defines how Recursion selects providers, runs generation jobs, validates structured outputs, and records diagnostics for the SillyTavern extension.
-
-Recursion borrows the Directive-style two-lane provider model, but keeps the surface smaller: Utility is the default worker for fast structured jobs, and Reasoner is an optional synthesis pass for difficult prompt-composition cases. Recursion is pre-alpha, so implementations should update old or provisional code in place to match this contract rather than preserve incompatible legacy behavior.
+This document is the normative architecture for Recursion model calls. It applies to Utility, Reasoner, provider certification, Segmented card generation, Fused card generation, and model-backed Enhancement stages.
 
 Related documents:
 
-- [Product Scope](../design/RECURSION_PRODUCT_SCOPE.md)
-- [Runtime Architecture](RUNTIME_ARCHITECTURE.md)
-- [Card System Spec](../design/CARD_SYSTEM_SPEC.md)
-- [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md)
-- [Prompt Composition Spec](PROMPT_COMPOSITION_SPEC.md)
-- [Storage and Diagnostics](STORAGE_AND_DIAGNOSTICS.md)
-- [UI Spec](../design/UI_SPEC.md)
+- [Model Calls And Provider Routing](../technical/MODEL_CALLS_AND_PROVIDER_ROUTING.md)
+- [Provider Setup](../user/PROVIDER_SETUP.md)
+- [Prompt Privacy And Safety](../user/PROMPT_PRIVACY_AND_SAFETY.md)
+- [Storage And Diagnostics](../technical/STORAGE_AND_DIAGNOSTICS.md)
+
+## Product Boundary
+
+Recursion uses SillyTavern Connection Profiles for every Utility and Reasoner model call.
+
+Recursion does not own:
+
+- provider endpoints;
+- credentials or authorization headers;
+- model discovery;
+- provider-specific transport configuration;
+- the primary roleplay generation route;
+- the currently selected chat model as an implicit fallback.
+
+SillyTavern owns those concerns. Recursion stores only a selected Connection Profile id and generation policy for each lane.
+
+A model stage cannot run unless its lane references a Connection Profile that SillyTavern exposes through the supported Connection Manager API. Missing or unsupported profile access is a configuration failure, not a retryable model failure.
 
 ## Provider Lanes
 
-Recursion has two provider lanes.
+| Lane | Required | Typical work |
+| --- | --- | --- |
+| Utility | Yes | Arbiter planning, ordinary card stages, validation support, standard guidance, provider certification, and fail-soft fallback. |
+| Reasoner | No | Policy-selected synthesis, high-priority cards, Fused bundles, and difficult editorial work. |
 
-| Lane | Default use | Expected behavior | User-facing posture |
-| --- | --- | --- | --- |
-| Utility | Arbiter, scene/card extraction, card generation, lifecycle support, structured diagnostics | Fast, cheap, bounded, JSON-first, tolerant of being batched | Required operational lane |
-| Reasoner | Optional composition/fusion of crowded, ambiguous, or conflicted card hands | Slower, smarter, synthesis-oriented, still evidence-bound | Optional, capability-gated |
+Reasoner is not a replacement Utility. It must not create durable lore, hidden motives, private chain-of-thought artifacts, or detached story output.
 
-Utility is the operational backbone. It should handle the initial Arbiter call and normal card generation without needing a Reasoner handoff.
+## Settings Contract
 
-Reasoner is not a better default Utility. It is a narrow composer lane used when Recursion already has structured Utility outputs and needs sharper guidance from a crowded or conflicted hand. Reasoner must not create new lore, hidden motives, durable canon, or private chain-of-thought artifacts.
-
-## Provider Settings Contract
-
-Each lane stores one provider settings object. The settings shape should remain small enough to map directly to the provider cards described in [UI Spec](../design/UI_SPEC.md).
+Each lane uses the following normalized shape:
 
 ```ts
-type RecursionProviderLane = "utility" | "reasoner";
+type GenerationPolicy = {
+  presetMode: "isolated" | "full-profile";
+  instructMode: "auto" | "on" | "off";
+  samplerMode: "profile" | "recursion";
+  structuredOutputMode: "auto" | "native-schema" | "prompt-json";
+};
 
-type RecursionProviderSource =
-  | "host-current-model"
-  | "host-connection-profile"
-  | "openai-compatible";
-
-type RecursionProviderSettings = {
-  lane: RecursionProviderLane;
-  source: RecursionProviderSource;
-  hostConnectionProfileId?: string;
-  openAICompatible?: {
-    baseUrl: string;
-    model: string;
-    sessionApiKeyPresent: boolean;
+type ProviderCertification = {
+  status: "not-run" | "pass" | "partial" | "fail";
+  configHash?: string;
+  checkedAt?: string;
+  completionMode?: "chat" | "text" | "unknown";
+  structuredOutput?: "native-schema" | "prompt-json" | "unknown";
+  checks?: {
+    connectivity: "not-run" | "pass" | "fail";
+    singleCard: "not-run" | "pass" | "fail";
+    fusedCards: "not-run" | "pass" | "fail";
   };
-  temperature: number;
-  topP: number;
-  maxTokens: number;
+  safeConcurrency?: 1;
+  diagnosticCodes?: string[];
+  compactError?: string;
+};
+
+type ProviderSettings = {
+  lane: "utility" | "reasoner";
+  connectionProfileId: string;
+  generationPolicy: GenerationPolicy;
+  samplerOverrides: {
+    temperature: number;
+    topP: number;
+  };
+  outputTokenCeiling: number;
   configRevision: number;
-  resolvedProviderLabel?: string;
-  resolvedModelLabel?: string;
-  health: {
-    status: "pass" | "fail" | "not-run";
-    configHash?: string;
-    checkedAt?: string;
-    compactError?: string;
-  };
+  certification: ProviderCertification;
 };
 ```
 
-There is no provider `enabled` Boolean. Provider capability is derived by one
-shared resolver from the lane configuration, selected source requirements, host
-support, session credential presence, and health evidence bound to the current
-configuration hash:
+Normalization is allowlist-based. Unknown fields are discarded. A material profile or policy change increments `configRevision` and resets certification to `not-run`. A certification write can change certification fields only and is accepted only when its configuration hash and revision still match.
 
-| Capability | Meaning |
-| --- | --- |
-| `unconfigured` | The selected route lacks required data, host support, or a session credential. |
-| `untested` | The route is complete, but no pass/fail evidence matches its current configuration hash. |
-| `ready` | A passing health result matches the current configuration hash. |
-| `unhealthy` | A failing health result matches the current configuration hash. |
-
-A configured provider whose health is `untested` remains routable and is shown
-as a caution. Untested status never blocks generation. An incomplete
-configuration or an explicitly unhealthy lane may still block an operation
-whose routing contract requires that lane. Provider testing remains the action
-that promotes an untested lane to `ready` or marks it `unhealthy`.
-
-Configuration and health mutations are separate. A field-scoped configuration
-commit supplies the exact expected `configRevision`; a successful material
-change increments the revision and invalidates prior health. A no-op preserves
-both. Provider-test completion records only pass/fail health for the hash it
-tested, so a stale result cannot overwrite newer configuration or establish
-readiness for it.
-
-The high-level Recursion settings also include `reasoningLevel: "low" | "medium" | "high" | "ultra"` as the authoritative user-facing provider-bias control. It defaults to `medium`. V1 derives the internal Reasoner route preference from it: Low selects Utility-only routing, while Medium, High, and Ultra use Reasoner for policy-selected work when its configured capability is `ready` or `untested`. The companion card-budget settings are `minCards` and `maxCards`; runtime derives `normalCards = floor((minCards + maxCards) / 2)`.
-
-Reasoning Level also controls runtime lane preference and card pressure:
-
-| Level | Arbiter lane | Card lanes | Composer | Card pressure |
-| --- | --- | --- | --- | --- |
-| Low | Utility | Utility | Utility | Cap positive `maxCards` at Min Cards. |
-| Medium | Utility | Utility | Reasoner | Cap positive `maxCards` at Normal Cards. |
-| High | Reasoner when routable | Reasoner for high-priority families, Utility for lower-priority families | Reasoner | Cap positive `maxCards` at Normal Cards. |
-| Ultra | Reasoner when routable | Reasoner when routable | Reasoner | Raise and cap positive `maxCards` at Max Cards. |
-
-If Reasoner is `unconfigured` or `unhealthy`, ordinary Medium/High/Ultra work
-falls back to Utility for Pre-process work instead of blocking host generation.
-An `untested` configured Reasoner remains selected and exposes a caution.
-Post-process guidance is lane-sticky: Low/Medium use Utility and High/Ultra
-require a configured routable Reasoner, failing soft without cross-lane
-fallback only when that lane is unconfigured or unhealthy.
-
-Reasoning Level also maps to provider-level reasoning intent for model calls that actually use the Reasoner lane:
-
-| Work category | Low | Medium | High | Ultra |
-| --- | --- | --- | --- | --- |
-| Guidance augmentation / `reasonerComposer` | minimal | medium | medium | high |
-| Arbiter on Reasoner | minimal | minimal | medium | medium |
-| Card generation on Reasoner | minimal | minimal | minimal | medium |
-| Provider tests | minimal | minimal | minimal | minimal |
-
-Provider reasoning intent is request metadata, not prompt text. OpenAI-compatible adapters apply it only for known dialects: OpenRouter and OpenAI receive `reasoning: { effort, exclude: true }`; GLM/Z.AI receives `thinking: { type: "enabled" }` plus `reasoning_effort`; MiniMax M3 receives `thinking: "adaptive"` or `"enabled"`; DeepSeek reasoner and unknown endpoints receive no speculative reasoning fields. If a known endpoint rejects reasoning fields with a 400/422 unsupported-parameter response, the adapter retries once without reasoning fields and records `reasoningDowngraded: true` in sanitized diagnostics.
-
-Source options:
-
-- `host-current-model`: use the model currently active in SillyTavern.
-- `host-connection-profile`: use a named SillyTavern connection profile.
-- `openai-compatible`: use a direct OpenAI-compatible endpoint with base URL, model, session API key, temperature, top-p, and max token controls.
-
-V1 should implement all three source options for Utility and Reasoner when the host exposes the required APIs. If a host cannot support connection profiles, the setting should be unavailable with a clear UI status rather than silently mapped to the current model.
-
-Utility and Reasoner provider settings default to `8192` max tokens. The configured lane value is the authoritative response ceiling for every provider source. Provider Test uses that configured ceiling, including the untouched `8192` default, rather than a smaller hidden cap. Other callers may supply a narrower per-request response length, but a request may never exceed the configured lane ceiling.
-
-Provider setup uses the same control-plane helpers as generation:
-
-- Connection-profile discovery is a host-adapter capability. Provider core accepts an already discovered profile list or a host capability callback; it does not inspect SillyTavern globals.
-- `listProviderConnectionProfiles()` delegates to the active host capability or explicit callback and otherwise returns an empty list.
-- `providerModelStatus()` resolves the selected source into a compact readiness label before a test call runs, including selected connection profile model labels when the host exposes them.
-- `fetchOpenAICompatibleModels()` discovers direct endpoint models by normalizing the configured base URL to `/models` and parsing OpenAI-style `data[]` or `models[]` responses.
-
-Provider core is host-neutral. Host connection-profile discovery is supplied by the active host adapter; OpenAI-compatible endpoint model discovery remains provider-core behavior because it belongs to the endpoint contract rather than the SillyTavern object graph.
-
-Connection profile discovery must stay scoped to provider/connection-profile seams. It must not traverse SillyTavern character, character-card, persona, avatar, group, or Recursion card containers while searching for profiles. The Providers pane should reuse one detected profile list while rendering Utility and Reasoner controls instead of asking the host repeatedly during a single render. The Profile control is a filterable combobox: typed text filters the local detected list, and persisted provider settings change only after the user chooses a detected profile entry.
-
-Model discovery is read-only. It may use the currently typed session key, but it must not save settings, persist secrets, write diagnostics, clear prompts, or invalidate active-turn work. Fetch failures are compact UI status, not runtime generation failures.
-
-The Providers settings pane shows a compact route summary derived from Reasoning Level. Recursion does not expose Directive-style deep per-role routing controls in V1; Reasoning Level remains the operator-facing route control, and runtime owns the detailed role-to-lane policy.
-
-Machine JSON calls carry the expected response schema as provider request metadata. Host connection profile calls pass a minimal JSON schema constraint to `ConnectionManagerRequestService.sendRequest` when available and suppress host preset/instruct wrapping for those machine-readable Recursion jobs. The schema constrains the response `schema` field and, when the request has a frozen `snapshotHash`, the response `snapshotHash` field. This keeps saved SillyTavern profiles useful for routing while avoiding accidental roleplay preset text around strict JSON contracts. Human-facing SillyTavern generation remains outside Recursion's provider-job wrapper.
-
-Host current-model calls pass normalized `reasoningIntent`, `reasoningCategory`, and nested `reasoning` metadata to raw host adapters when a caller provides reasoning intent. Host connection-profile calls pass both Recursion's normalized `parameters.reasoning = { intent, category, exclude: true }` metadata and SillyTavern's native `reasoning_effort` plus `include_reasoning: false` fields. The native fields are required for Connection Manager's OpenRouter backend to apply the requested effort instead of silently using a `:thinking` model's default reasoning budget. Recursion never stores or exposes hidden reasoning content.
-
-Utility always has a settings object. If its capability is `unconfigured` or `unhealthy`,
-Recursion degrades to validated exact-turn or local behavior and does not block normal
-SillyTavern generation.
-
-Reasoner is optional. Medium, High, and Ultra keep their selected UI level when
-its capability changes. An `untested` configured Reasoner remains routable with
-a caution; `unconfigured` or `unhealthy` ordinary work falls back to Utility,
-while Medium+ Redirect remains visibly unavailable.
-
-Provider Test is single-flight per lane. Concurrent callers for the same lane
-share the in-flight test. A test requested while production work is active on
-that lane returns `RECURSION_PROVIDER_BUSY`; it does not cancel, supersede, or
-race the production request.
-
-The first working loop must include:
-
-- Utility provider settings and test action;
-- Reasoner provider settings and test action;
-- Utility Arbiter structured call;
-- Utility guidance path through `guidanceComposer`;
-- Reasoner composition path through `reasonerComposer`;
-- Utility guidance plus raw selected Card Evidence as the default and fallback packet path.
-
-## Session Secret Boundary
-
-OpenAI-compatible API keys are session-only secrets.
-
-The implementation must not persist API keys in:
-
-- extension settings;
-- pipeline manifests or artifacts;
-- prepared packets or card records;
-- queued next-swipe intents;
-- prompt packets;
-- model-call journal entries;
-- diagnostics exports;
-- browser local storage or SillyTavern file storage.
-
-Persisted settings may record only `sessionApiKeyPresent: true | false` so the UI can show that the current browser session has a key loaded. Clearing a session key must remove it from memory and immediately mark the lane untestable until a key is re-entered. Changing source, host connection profile, base URL, model, max tokens, or session key must clear stale provider-test pass state and resolved provider/model labels.
-
-Provider requests may receive the key through an in-memory provider runtime object. The key must not be copied into request hashes, error text, telemetry payloads, or thrown exceptions.
-
-## Generation Roles
-
-Generation roles describe why a model call exists. They are not the same thing as provider lanes. Each role declares its default lane, output schema, and failure behavior.
-
-| Role | Default lane | Purpose | Failure behavior |
-| --- | --- | --- | --- |
-| `utilityArbiter` | Utility, configured Ready or Untested Reasoner at High/Ultra | Plan fresh turn card work, decide whether to skip or compose, infer story tense/POV, and optionally invoke Reasoner | Unavailable lane uses a validated exact-turn packet only when deterministic classification already permits it, otherwise skips injection; invalid schema or missing/mismatched `snapshotHash` uses conservative local fallback |
-| `sceneFrameCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Produce compact current-scene frame data | Omit card with diagnostic |
-| `activeCastCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Capture who is present, visible state, and current conversational or physical role | Omit card with diagnostic |
-| `characterMotivationCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Capture observable or safely inferred motives, pressures, hesitations, and goals | Omit card with diagnostic |
-| `dialogueRelationshipCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture current conversational tension, relationship texture, promises, conflicts, and voice constraints | Omit card with diagnostic |
-| `socialSubtextCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture scene-observable implied social meaning such as humor, veiled pressure, invitation, boundaries, status, and face | Omit card with diagnostic |
-| `sceneConstraintsCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Identify hard scene constraints, contradiction traps, timing, access, and plausibility risks for native generation | Omit card with diagnostic |
-| `knowledgeSecretsCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Capture concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries | Omit card with diagnostic |
-| `clocksConsequencesCard` | Utility, configured Ready or Untested Reasoner at High/Ultra | Capture deadlines, countdowns, delayed consequences, and escalation triggers | Omit card with diagnostic |
-| `environmentAffordancesCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture spatial layout, sensory texture, hazards, obstacles, exits, and usable environmental affordances | Omit card with diagnostic |
-| `possessionsItemsCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture important held, carried, worn, hidden, lost, stolen, or controlled objects and who has them | Omit card with diagnostic |
-| `openThreadsCard` | Utility, configured Ready or Untested Reasoner at Ultra | Capture immediate unresolved pressures and promises visible in play | Omit card with diagnostic |
-| `fusedCardBundle` | Utility by default, Reasoner when Fused routing selects it | Generate every requested card family together in one structured foreground bundle | Validate every sibling independently; if zero useful cards survive, run the Segmented per-card stages. |
-| `guidanceComposer` | Utility | Write provider-authored direction for using selected raw cards in native generation | Fall back to raw-card-only packet when invalid or unavailable |
-| `cardAuthoringAssist` | Utility | Rewrite a user draft or intent into a compact high-value Recursion card suggestion | Keep the user draft as local fallback and expose provider-fallback diagnostics |
-| `postProcessGuidanceUtility` | Utility at Low/Medium only | Analyze where and how the frozen ordered Post-process cards apply; return concise structured guidance, never revised story prose | May use the remaining configured stage attempts on Utility; exhaustion fails the operation/category without Reasoner fallback |
-| `postProcessGuidanceReasoner` | Reasoner at High/Ultra only | Analyze where and how the frozen ordered Post-process cards apply; return concise structured guidance, never revised story prose | May use the remaining configured stage attempts on Reasoner; exhaustion fails the operation/category without Utility fallback |
-| `reasonerComposer` | Reasoner | Fuse crowded or conflicted card hands into a compact instruction patch | Fall back to Utility guidance plus raw selected Card Evidence |
-| `providerTest` | Selected lane | Validate lane connectivity and structured response capability at the configured max-token ceiling | Record hash-bound health only; never mutate provider configuration |
-
-Card names should align with [Card System Spec](../design/CARD_SYSTEM_SPEC.md). Prompt installation and depth decisions belong to [Prompt Composition Spec](PROMPT_COMPOSITION_SPEC.md), not provider routing.
-
-The literal `compose-brief` Arbiter action remains a V1 enum name for the
-Pre-process Guidance/Card Evidence/Guardrails packet. The router rejects
-undeclared role ids and requires each role to return its expected schema before
-reporting `ok: true`: Arbiter uses `recursion.utilityArbiter.v1`, card roles use
-`recursion.card.v1`, Fused card bundles use `recursion.cardBundle.v1`, Guidance Composer uses
-`recursion.guidanceComposer.v1`, Card Authoring Assist uses
-`recursion.cardAuthoringAssist.v1`, Post-process guidance uses
-`recursion.postProcessGuidance.v1`, Reasoner Composer uses
-`recursion.reasonerComposer.v1`, and Provider Test uses
-`recursion.providerTest.v1`. Post-process guidance requests carry frozen
-operation identity, ordered card records, bounded evidence, and the writable
-draft; they return guidance only. SillyTavern's native quiet-generation path is
-the sole Post-process prose writer.
-
-Post-process Guidance Utility and Post-process Guidance Reasoner both use the
-`recursion.postProcessGuidance.v1` response schema.
-
-## Historical Editorial Contract
-
-The remaining Redirect and Editorial sections below document the retired
-Enhancement-era implementation for archaeology only. They are not current V1
-provider authority; current Post-process behavior is defined by
-[Post-process Cards Runtime](POST_PROCESS_CARDS_RUNTIME.md).
-
-The retired role identifiers were `generationReviewer`,
-`editorialDiagnostician`, `editorialTransformer`, `editorialVerifier`, and
-`editorialEffectivenessJudge`. They remain named here so migration audits and
-historical provider-contract tests can distinguish them from the current
-`postProcessGuidanceUtility` and `postProcessGuidanceReasoner` roles. They must
-not be added back to the active Generation Roles table or used by new runtime
-calls.
-
-### Redirect contract (historical)
-
-Redirect is a trajectory correction, not a stronger Recompose. A `proceed`
-diagnosis requires `sourceFailure`, `replacementObjective`, non-empty
-`requiredBeats`, non-empty `forbiddenSourceBeats`, `sceneCharacters`, and
-`characterPressure`. Runtime requires usable bounded structure and request-known
-citations but does not decide whether the diagnosis covered every character or
-interpreted a want correctly. The mandatory Verifier judges those claims against
-the complete frozen evidence. Pressure remains advisory: it can make a strong
-response more likely, but never mechanically requires speech, action, or rising
-pressure.
-
-`sourcePressureEffect` should use `increasing`, `decreasing`, `unchanged`, or
-`unclear`. A blank effect is incomplete advisory bookkeeping, not a terminal
-diagnosis failure: runtime normalizes only that missing value to `unclear`,
-records its exact `characterPressure[N].sourcePressureEffect` path, and passes
-the diagnostic to the writer and mandatory Verifier. It preserves the
-provider-authored immediate want, citations, and reason unchanged and does not
-spend a correction call. Non-empty pressure claims remain model evidence for
-the Verifier rather than a deterministic enum gate.
-
-`proceed` is Redirect's only valid diagnosis decision. Editorial diagnosis uses
-low reasoning intent from the first request to protect the structured response
-budget. Provider-authored
-`no-change` is a semantic contract failure and may receive one correction request.
-If correction remains invalid, Redirect fails visibly and preserves the original;
-it never reports a skipped success.
-
-Required beats remain authoritative independently of pressure. When a validated
-beat requires visible speech or action, the transformer and verifier cannot replace
-it with passive attention, agreement, observation, or internal feeling.
-
-The Redirect transformer returns top-level `text`; the provider boundary constructs
-the canonical internal candidate and one evidence-backed `changeLedger` entry whose
-`kind` is `redirect`. Every Redirect is independently
-verified at every reasoning level. Cache identity and execution use the same
-`editorialVerificationRequired()` result, so a direct or stale candidate cannot be
-reused as verified. An accepted verifier result is bound to the candidate hash and
-contains each of these checks exactly once:
-
-The Redirect provider schema requires a non-empty `changeLedger` and constrains its
-entries to `kind: "redirect"`; Recompose retains the broader change-kind enum.
-
-- `diagnosis-evidence-grounded`
-- `source-failure-removed`
-- `replacement-objective-fulfilled`
-- `required-beats-satisfied`
-- `forbidden-source-beats-excluded`
-- `character-pressure-coherent`
-- `hard-constraints-preserved`
-- `user-turn-answered`
-- `unsupported-facts-absent`
-
-The Redirect verifier request includes the complete proposed diagnosis, not only
-its hash, so all nine checks are evaluated against frozen evidence, the replacement
-objective, required and forbidden beats, and private character-pressure map. The
-provider returns only `failedChecks` plus a short reason. The provider boundary
-derives accept/reject and constructs all nine canonical evidence-bound check rows
-locally. Unknown, duplicate, or malformed failed-check names remain invalid. The
-hash still binds identity; it is not a substitute for the semantic input.
-Low Redirect uses Utility for diagnosis, transformation, and verification.
-Medium, High, and Ultra require a configured Reasoner capability in `ready` or
-`untested` state before host generation.
-Diagnosis remains on its normal Utility-first policy; transformation and
-verification remain on the exact selected Reasoner configuration with no Utility
-fallback. Runtime revalidates that configuration before diagnosis and before
-each mandatory Reasoner stage.
-
-Missing, duplicate, failed, or unclear checks reject the candidate before host
-mutation. Unknown diagnosis evidence references are surfaced privately to the
-Verifier rather than deterministically deciding editorial support. Accepted Redirects always append/select one Recursion-owned
-swipe and persist `sourceHash`, `candidateHash`, `verification: "accept"`, the
-Redirect ledger, and private diagnosis evidence in that swipe marker. Cached reuse
-requires that persisted accepted marker and performs no provider call. Visible UI,
-assistant prose, prompt packets, and journal details expose no private character-want
-or pressure text; journals retain only hashes, counts, status, and stable error codes.
-
-`editorialEffectivenessJudge` exists only for dedicated live evaluation. It judges
-the produced candidate independently on exact criteria `replacement-objective`,
-`forbidden-source-beats`, `character-pressure`, and `evidence-and-constraints`.
-Normal chat generation never invokes it.
-
-`generationReviewer` follows the centralized stage-attempt policy. Its request carries the frozen source hash, eligible patch target IDs, and installed card IDs as structured fields so the provider machine schema can bind `sourceHash` and constrain patch, evidence, and outcome identifiers before semantic validation. Once its JSON and role schema pass, its role validator confirms the frozen source hash, exact eligible dialogue/prose target text, non-overlap, installed card IDs, outcome labels, and evidence target IDs. The active mode-specific Editorial path adds the Repair compact-audit contract: `editorialVerifier` returns only dynamic `failedCardIds`, and Recursion derives the complete canonical ledger and decision locally. Parser/schema failure, raw JSON reformat failure, and semantic review failure may motivate the next attempt only while the model stage remains current and has attempts remaining. Every attempt preserves lane, provider source, model configuration, frozen snapshot, and pipeline provenance; raw provider text and hidden reasoning never reach review state, cache, journals, or UI details.
-
-Card roles, `guidanceComposer`, and `reasonerComposer` receive the Arbiter-normalized `recursion.storyForm.v1` object as request context. Card roles must return instruction-shaped `promptText` in that form rather than narrative prose, mini-scenes, dialogue, sensory recap, or decorative narration. Guidance roles must align their prompt guidance to the same tense and point of view rather than deriving an independent form from the prompt.
-
-When a `fusedCardBundle` provider call fails structured-output parsing but exposes visible response text, runtime may recover complete card objects from the `items` array prefix. Recovered fragments still pass the normal snapshot and per-card validation before use. Full Segmented card fallback is reserved for zero trusted Fused cards.
-
-## Utility Arbiter Call
-
-The Utility Arbiter is the first model call when Recursion needs model help for a turn. Its job is to make the run plan, not to write prose.
-
-Inputs:
-
-- one immutable runtime snapshot;
-- snapshot hash;
-- current chat/message fingerprint;
-- current settings hash;
-- exact turn key and compatible checkpoint metadata;
-- available card types and token budgets;
-- behavior influence policy for Strength, Focus, and Prompt Footprint;
-- Reasoner on/off state and health summary.
-
-The Arbiter should return every auto decision it can in the initial call. Recursion should not spend a separate model call just to decide whether to use Reasoner unless a later version has a concrete, measured reason to do so.
-
-The Arbiter also owns story-form detection when the user has not forced a story form. It should infer the current tense and point of view from the latest visible assistant narration first, using the pending user message only when no assistant narration exists. This keeps card generation and prompt composition aligned with the host model's established output form. If the operator selects a Tense & PoV override, runtime bypasses Arbiter inference for the effective story form and uses a high-confidence `User override` story-form object instead.
-
-After runtime applies scope and card-budget limits, `refresh-cards` requires at least one executable card job. An empty refresh is a retryable semantic validation failure and receives the normal Arbiter correction request. A valid action with zero card jobs skips both Fused and Segmented card-provider stages and continues through downstream packet preparation. Provider-unavailable errors are reserved for an unavailable provider boundary; an absent card request is not provider unavailability.
-
-Required output shape:
+The default policy is:
 
 ```json
 {
-  "schema": "recursion.utilityArbiter.v1",
-  "snapshotHash": "string",
-  "action": "skip | reuse-cache | refresh-cards | compose-brief",
-  "sceneStatus": "same-scene | soft-shift | hard-shift | unknown",
-  "promptFootprint": "compact | normal | rich",
-  "cardJobs": [
-    {
-      "role": "sceneFrameCard",
-      "priority": 0.94,
-      "reason": "string"
-    }
-  ],
-  "reasonerDecision": {
-    "mode": "skip | use",
-    "reason": "string",
-    "signals": ["crowded-hand", "conflicting-cards"]
-  },
-  "budgets": {
-    "targetBriefTokens": 450,
-    "maxCards": 6
-  },
-  "storyForm": {
-    "schema": "recursion.storyForm.v1",
-    "tense": "past | present | mixed | unknown",
-    "pov": "first-person | second-person | third-person-limited | third-person-omniscient | mixed | unknown",
-    "confidence": "high | medium | low",
-    "evidenceRefs": ["message:8"],
-    "reason": "Latest assistant narration uses past tense third-person-limited prose."
-  },
-  "diagnostics": ["string"]
+  "presetMode": "isolated",
+  "instructMode": "auto",
+  "samplerMode": "profile",
+  "structuredOutputMode": "auto"
 }
 ```
 
-The Utility Arbiter must echo the frozen request `snapshotHash`. Missing or mismatched Arbiter hashes are stale output; runtime rejects the plan and uses the conservative local fallback instead of trusting its action, card jobs, lifecycle, diagnostics, or Reasoner decision.
+## Independent Generation Policies
 
-The provider router only receives card jobs that can fit the effective hand budget. The Arbiter is instructed not to emit more `cardJobs` than `budgets.maxCards`, but runtime enforces this mechanically before provider calls because provider calls are the expensive boundary.
+The generation policies are intentionally independent. No single Boolean controls prompt isolation, instruct formatting, samplers, and structured output.
 
-Invalid or unsupported `storyForm` values normalize to `unknown` rather than failing the whole plan. Runtime also runs a heuristic cross-check against the latest assistant narration. If obvious tense cues disagree with a confident Arbiter result, runtime lowers story form to `unknown` and records the disagreement reason. If stable-tense assistant narration has strong mixed POV evidence, runtime preserves that as mixed POV even when the Arbiter chose a single viewpoint family. Unknown story form produces conservative downstream prompt text that tells card and story models to match the active chat's established form.
+### Behavioral Preset
 
-The Arbiter is allowed to choose `reasonerDecision.mode: "use"` only when the
-shared resolver reports a configured Reasoner in `ready` or `untested` state.
-For `unconfigured` or `unhealthy`, runtime normalizes the decision to `skip`
-and records a compact capability reason.
+`isolated` excludes the complete profile preset from Recursion analysis prompts.
 
-`promptFootprint` is a current-turn override only. Runtime accepts only `compact`, `normal`, or `rich`; invalid or missing values fall back to the stored user setting and must not appear in the sanitized plan. The override is passed to Prompt Composition for the packet being installed, but it does not mutate the stored setting.
+`full-profile` imports the complete profile preset. It is an advanced opt-in because behavioral instructions, prose requirements, roleplay framing, or wrappers can invalidate structured responses.
 
-## Batched Card Calls
+### Instruct Formatting
 
-Utility card calls should run from one snapshot. The batch boundary is part of the correctness contract: all card jobs in a run must see the same chat state, turn key, settings hash, and prompt budget.
+`auto` enables instruct formatting for text-completion profiles and disables it for chat-completion profiles.
 
-The preferred execution shape is:
+`on` always requests the profile instruct template. `off` suppresses it.
 
-1. Runtime freezes a `snapshotHash` before asking the Arbiter.
-2. Arbiter returns a plan that echoes the same `snapshotHash`.
-3. Runtime rejects missing or mismatched Arbiter hashes before trusting `cardJobs`.
-4. Utility card jobs are submitted as one batch when the host/provider supports batching.
-5. If batching is unavailable, jobs may run sequentially, but they must still use the same frozen snapshot and shared run id.
-6. Each card returns structured JSON with its own schema id, frozen snapshot hash, and compact evidence references.
-7. Runtime validates and accepts, repairs locally where safe, or omits each card independently.
+This permits local text-completion models to retain ChatML, Alpaca, or another framing template while the full behavioral preset remains isolated.
 
-Card calls must not depend on sibling card outputs from the same batch. Fusion happens later in the Guidance composer or Reasoner composer.
+### Samplers
 
-Common card output envelope:
+`profile` asks SillyTavern to materialize the selected generation preset and projects only allowlisted sampler fields.
+
+The allowlist includes common temperature, top-p/top-k/min-p, repetition, dynamic temperature, Mirostat, DRY, XTC, seed, beam, and sampler-order controls. It excludes:
+
+- messages and prompts;
+- model or route selection;
+- endpoint data and credentials;
+- stop strings;
+- reasoning controls;
+- token-limit fields.
+
+When sampler projection fails, Recursion uses its lane temperature and top-p overrides and records `profile-sampler-projection-failed`. It does not import the complete preset as a fallback.
+
+`recursion` uses the lane overrides directly.
+
+### Structured Output
+
+`auto` uses the structured-output method established by current profile certification.
+
+`native-schema` explicitly requests native schema support. `prompt-json` relies on the prompt contract and Recursion's parser.
+
+An unsupported native-schema response may downgrade to prompt JSON only when the current attempt directive allows that single change. Downgrade state is recorded as a fixed code, not raw provider text.
+
+## Request Flow
+
+```text
+Utility/Reasoner stage
+  -> selected Connection Profile
+  -> generation policy resolver
+  -> profile FIFO queue
+  -> ConnectionManagerRequestService.sendRequest
+  -> canonical response envelope
+  -> structured-output parser
+  -> role validator
+  -> failure classifier and attempt directive
+  -> durable checkpoint or explicit fallback artifact
+```
+
+The Connection Manager call uses the following behavioral contract:
+
+```js
+service.sendRequest(
+  connectionProfileId,
+  messages,
+  maxTokens,
+  {
+    stream: false,
+    signal,
+    extractData: false,
+    includePreset,
+    includeInstruct
+  },
+  overridePayload
+);
+```
+
+`extractData: false` is mandatory. Recursion receives the raw provider envelope so it can normalize visible content, recover bounded JSON candidates, validate role-specific contracts, and classify failures consistently. A host-side empty-object substitution is never accepted as successful structured output.
+
+## Completion Mode
+
+The profile adapter accepts only completion modes it can identify through SillyTavern's validated profile mapping:
+
+- chat completion;
+- text completion.
+
+Unknown profile mappings are unsupported. The adapter does not silently redirect to another model route.
+
+## Traffic Control
+
+Every Connection Profile has an abort-aware FIFO queue with physical concurrency one.
+
+Consequences:
+
+- Segmented sibling stages can remain logically independent and checkpointable while their model calls execute one at a time on the same profile.
+- Utility and Reasoner may overlap only when they use different profiles.
+- An aborted queued request is removed before execution.
+- An active request receives the runtime abort signal.
+- A queue failure cannot strand later entries.
+
+The queue boundary exists below all pipeline paths, so certification, Pre-process, Enhancement, and repair calls obey the same traffic policy.
+
+## Output Budgets
+
+The provider lane's `outputTokenCeiling` is a hard maximum, not the default for every request. Each role receives a smaller stage budget.
+
+Representative budgets:
+
+| Stage | Initial budget |
+| --- | ---: |
+| Connectivity certification | 128 |
+| Single card | 900 |
+| Utility Arbiter | 1,200 |
+| Guidance Composer | 1,600 |
+| Reasoner Composer | 1,800 |
+| Fused bundle | Scales with requested family count and remains capped |
+| Editorial stages | Derived from the specific editorial contract and lane ceiling |
+
+A context-limit directive reduces only the current stage's output allowance, normally by 25 percent and never below its role floor. It does not also change samplers, prompt policy, profile, or structured-output method.
+
+## Staged Profile Certification
+
+`Test Profile` performs three checks:
+
+1. Small connectivity JSON.
+2. Representative compact single-card JSON.
+3. Representative two-family Fused JSON.
+
+Certification never stores the prompt, raw response, provider exception, profile object, endpoint data, or credentials.
+
+Capability states are:
+
+| State | Meaning |
+| --- | --- |
+| `unconfigured` | No selected available profile. |
+| `uncertified` | Profile is configured but no current certification matches its configuration. |
+| `segmented-ready` | Connectivity and single-card checks passed; Fused did not pass. |
+| `fused-ready` | All three checks passed. |
+| `unhealthy` | Connectivity or single-card compatibility failed. |
+
+An uncertified configured profile can run Segmented with a visible caution. A partial certification is useful and enables Segmented. Fused is physically dispatched only for `fused-ready`.
+
+Certification is single-flight per lane. A certification request does not cancel active production work. When the lane is busy, the test returns a stable busy result.
+
+## Requested And Effective Pipeline Mode
+
+The user's requested pipeline and the runtime's effective pipeline are distinct.
+
+```ts
+type PipelineDecision = {
+  requestedMode: "segmented" | "fused";
+  effectiveMode: "segmented" | "fused";
+  reasonCode: "" | "profile-not-fused-certified";
+};
+```
+
+Rules:
+
+- A requested Segmented run remains Segmented.
+- A requested Fused run remains Fused only when Utility is Fused-eligible under the current lane policy.
+- Otherwise, it becomes Segmented before a Fused provider request is sent.
+- The downgrade is shown once and stored as a fixed safe code.
+
+## Compact Card Contracts
+
+The model returns model-owned content only. Recursion attaches request-owned identity after validation.
+
+Single-card response:
 
 ```json
 {
-  "schema": "recursion.card.v1",
-  "role": "sceneFrameCard",
-  "family": "Scene Frame",
-  "snapshotHash": "string",
+  "promptText": "Track the immediate objective and obstruction.",
+  "evidenceRefs": ["message:12"]
+}
+```
+
+Fused response:
+
+```json
+{
   "items": [
     {
-      "promptText": "Keep the next response grounded in the visible scene.",
-      "summary": "Current scene frame",
-      "evidenceRefs": ["message:42"],
-      "tokenEstimate": 18,
-      "detailProfile": "standard",
-      "emphasis": "normal"
+      "family": "Scene Frame",
+      "promptText": "Track the immediate objective and obstruction.",
+      "evidenceRefs": ["message:12"],
+      "coveredSourceCardIds": []
     }
   ]
 }
 ```
 
-The machine JSON Schema for a Segmented card request requires the complete envelope: `schema`, frozen `snapshotHash`, request-owned `role`, request-owned `family`, and exactly one `items` object with `promptText` and `evidenceRefs`. Optional item fields are bounded to the canonical V1 card contract. The provider prompt repeats the same contract because provider-side JSON Schema enforcement is not universal.
+Recursion attaches:
 
-Cards should be concise, observable, and player-message-adjacent. Provider cards are omitted independently when the envelope role/family does not match the requested catalog slot, the envelope `snapshotHash` does not match the frozen request hash, the card lacks parseable `message:N` evidence, or prompt-facing text contains hidden-reasoning wording. They must not include hidden character thoughts, private chain-of-thought, or broad plot plans.
-
-A Segmented response shaped as `{ "envelope": { ... }, "items": [ ... ] }` may be flattened only when the frozen request supplies a nonempty role, family, and snapshot hash, exactly one object item exists, and every provider-supplied schema/role/family/snapshot value agrees with that request. Missing identity is restored from the frozen request; conflicting identity is never overwritten. Successful recovery records `semanticNormalization: "nested-card-envelope"` without retaining raw provider text.
-
-Manual forced selection does not create a new provider schema. Runtime still sends one request per selected or Arbiter-requested family and expects the same `recursion.card.v1` envelope with one prompt-facing item for that family. If Manual selected a family that the Arbiter omitted, runtime synthesizes the missing `cardJob` after scope filtering with `forcedBy: "manual-selection"`; the provider is not asked to generate multiple families in one response.
-
-## Turn Artifact Freshness
-
-The Utility Arbiter does not decide whether prior generated work crosses a turn boundary. Runtime classifies that deterministically before dispatch. A new user message always receives fresh Arbiter and card work; there is no expiry clock or semantic-scene judgment.
-
-Before any stored card enters the deck or hand, runtime verifies:
-
-- the chat and exact turn key match;
-- the bounded message range is still visible and its source hash matches;
-- selected-swipe, character/group, settings, provider, pipeline, deck, prompt, and stage contracts match;
-- every dependency and artifact hash validates;
-- at least one parseable `message:N` evidence ref exists and remains inside the frozen source range;
-- no matching Reprocess or Full Rebuild intent invalidates the artifact.
-
-A failed check makes the checkpoint stale. Its prompt text, summary, and evidence cannot become prompt-facing. Unchanged-swipe reuse is allowed only when the completed packet and every required binding validate; otherwise runtime safely rebuilds.
-
-## Reasoner Composer Call
-
-The Reasoner Composer receives accepted Utility cards, budget metadata, conflict markers, and the same snapshot hash. It returns a compact instruction patch for prompt composition. Runtime rejects missing or mismatched `snapshotHash` values as stale composer output and falls back to Utility guidance plus raw selected card evidence.
-
-Reasoner is appropriate when:
-
-- accepted cards exceed the normal prompt budget;
-- Utility cards conflict or overlap in a way bounded runtime validation cannot cleanly resolve;
-- multiple active characters have tense or subtle visible posture that needs careful fusion;
-- the Arbiter selected Reasoner in its initial response and the shared resolver reports it configured as `ready` or `untested`.
-
-Reasoner is not appropriate when:
-
-- the hand is small and non-conflicting;
-- Utility produced invalid or insufficient card data;
-- Reasoning Level policy selects Utility;
-- Reasoner capability is `unconfigured` or `unhealthy`.
-
-Required output shape:
-
-```json
-{
-  "schema": "recursion.reasonerComposer.v1",
-  "snapshotHash": "string",
-  "instructionPatch": "string",
-  "keptCardIds": ["string"],
-  "droppedCardIds": [
-    {
-      "id": "string",
-      "reason": "duplicate | lower-priority | budget-exceeded | unsupported"
-    }
-  ],
-  "conflictResolutions": [
-    {
-      "summary": "string",
-      "basis": ["message:42", "card:scene-constraints-1"]
-    }
-  ],
-  "warnings": ["string"]
-}
-```
-
-Reasoner output is advisory to prompt composition. It does not write durable cards, mutate scene state directly, or override explicit source evidence.
-
-## Auto Lane Selection
-
-Auto lane selection follows this order:
-
-1. Local runtime checks decide whether Recursion is disabled, no-op, or able to reuse cache.
-2. Utility Arbiter decides the run action, card jobs, and Reasoner use where possible.
-3. Utility card calls generate the structured hand.
-4. Runtime validation accepts or omits cards, while the Utility Arbiter owns semantic hand selection.
-5. Reasoner runs only if policy selects it, the shared resolver reports a configured `ready` or `untested` lane, and accepted card data is sufficient.
-6. Prompt composition installs the Utility-only or Reasoner-assisted packet.
-
-Auto must be Utility-first. A configured Ready or Untested Reasoner is eligible
-under the selected Reasoning Level; routability must not cause every run to use
-Reasoner.
-
-Advanced job routing may expose `Auto Route`, `Utility Provider`, and `Reasoner Provider` for internal roles, but v1 should keep that surface secondary to the main Utility and Reasoner provider cards.
-
-## First Working Loop Contract
-
-The first end-to-end loop should prove both composer paths even if the default setting is Utility-only:
-
-1. Capture a stable snapshot.
-2. Run Utility Arbiter or use a fake Arbiter fixture in tests.
-3. Generate or reuse a small accepted hand.
-4. Compose a prompt packet through `guidanceComposer`, injecting guidance plus full raw selected card evidence.
-5. Compose through `reasonerComposer` when the setting and Arbiter decision permit it.
-6. Keep Utility guidance plus raw selected Card Evidence if Reasoner is unconfigured, unhealthy, fails, times out, or returns invalid schema.
-7. Install, skip, or clear the Recursion prompt packet through the host adapter.
-8. Emit visible progress stages and sanitized model-call journal entries for the route taken.
-
-Reasoner must not become mandatory for normal operation. The Utility path must remain good enough to ship as the default path.
-
-## Structured Output and Validation
-
-All provider-owned Recursion jobs must request structured JSON and validate before use.
-
-Machine-JSON requests carry the expected `responseSchema` and, when available, the frozen `snapshotHash` into provider adapters. OpenAI-compatible calls should use schema-constrained JSON when supported, and SillyTavern connection-profile calls should pass equivalent `json_schema` metadata while disabling host preset/instruct injection for machine output. Prompt text and correction retries still spell out the required `schema` and `snapshotHash` fields because provider-side schema support is not universal.
-
-Reasoning intent metadata may accompany machine-JSON requests. It is limited to compact fields such as `reasoningIntent`, `reasoningCategory`, `reasoningDialect`, `reasoningApplied`, and `reasoningDowngraded`; it must not include raw chain-of-thought or hidden reasoning text.
-
-Validation requirements:
-
-- normalize provider-shaped responses before parsing so empty visible output, reasoning-only output, and token-limit truncation become stable provider failures instead of ambiguous JSON parse failures;
-- parse JSON through the shared structured-output parser, including safe recovery from fenced JSON, wrapper prose, `<think>` / `<reasoning>` blocks, comments, trailing commas, smart quotes, BOMs, literal line breaks inside strings, and a pinned local `jsonrepair` pass for complete object-shaped candidates;
-- treat syntax repair as syntax repair only: never fabricate missing `schema`, `snapshotHash`, role, family, evidence, card text, budgets, diagnostics, or composer fields;
-- verify `schema`, `role`, `snapshotHash`, enum values, string lengths, numeric ranges, and required arrays;
-- reject outputs that include raw hidden reasoning, chain-of-thought, private motives, or unsupported durable lore;
-- reject outputs that cite evidence outside the frozen snapshot;
-- clamp confidence and token estimates to valid ranges;
-- mark each accepted card or composer patch with schema version and source role.
-
-Schema mismatch diagnostics may retain the requested role, expected and actual schema names, provider source/model, safe top-level field names, and a bounded value-free response structure such as `items:array(1)`. They must not retain provider field values, card text, prompts, transcript text, secrets, or reasoning. Durable model-stage failures preserve a safe precise message and suggested action so progress does not collapse a known provider-output error into an internal failure.
-
-Repaired output remains untrusted until all role-specific validation passes. Local repair runs only after strict/common parsing fails and only for candidates with complete object boundaries; it does not turn truncated Fused prefixes into synthetic complete bundles. A repaired Arbiter object missing or mismatching the frozen `snapshotHash` still falls back to the conservative local plan. A repaired card object with a missing or mismatched role, family, `snapshotHash`, or evidence range is omitted independently. Success diagnostics may record compact metadata such as `structuredOutputRepaired`, `structuredOutputRepairCode`, `structuredOutputRecovery: "local-json-repair"`, `originalResponseHash`, `repairedResponseHash`, and `visibleContentLength`; diagnostics, journals, activity, and artifacts must not persist raw malformed provider text or hidden reasoning.
-
-`providerTest` is a connectivity and structured-output probe, not a content job. It passes only when the router succeeds and the parsed payload contains `schema: "recursion.providerTest.v1"` plus explicit `ok: true`; missing or false `ok` fails the lane test.
-
-Invalid Utility Arbiter output should fall back to conservative local behavior: reuse valid cache, use the local fallback plan when safe, or skip Recursion injection for the turn. A missing, timed-out, or transport-failing Utility provider should not create fresh local cards; it should reuse valid cache or skip.
-
-Invalid card output should omit only that card. One bad card must not poison the whole batch. A retry receives the prior stable code and validation message while preserving the original frozen request. If attempts are exhausted, the completed fail-soft operation remains `Needs attention`; the failed card row, exact reason, and suggested action stay visible even though valid siblings continue through guidance and prompt installation.
-
-Invalid Reasoner output should fall back to Utility guidance plus raw selected Card Evidence.
-
-Prompt composition should consume only accepted structured data. It should not parse useful facts from rejected raw provider text.
-
-## Telemetry/Model Call Journal
-
-Recursion keeps a sanitized model-call journal for diagnostics and UI status. The journal is bounded, compact, and safe to persist as described in [Storage and Diagnostics](STORAGE_AND_DIAGNOSTICS.md).
-
-Journal entries may include:
-
-- timestamp;
-- run id and optional batch id;
-- role;
-- lane;
-- source type;
-- provider label;
-- model label;
-- status: `success`, `validation-failed`, `provider-failed`, `aborted`, `skipped`;
-- latency in milliseconds;
-- snapshot hash;
-- request hash;
-- response hash;
 - schema id;
-- attempt count;
-- compact error code and compact error message.
+- frozen snapshot hash;
+- role id;
+- normalized family;
+- card id and provenance;
+- detail profile and emphasis;
+- source-card identity;
+- token estimate.
 
-Successful stages that required more than one attempt are success-with-caution for visible progress. Runtime may accept their data, but the progress row remains amber with compact `retried` meta and a sanitized reason instead of turning green.
+A provider must not be required to echo values Recursion already knows. Returned identity fields, when present in a supported envelope, may be used only if they agree with the frozen request.
 
-Normalized provider error codes include:
+## Canonical Response Envelope
 
-- `RECURSION_PROVIDER_EMPTY_RESPONSE`: the provider returned no visible content.
-- `RECURSION_PROVIDER_REASONING_ONLY`: the provider returned hidden reasoning without visible JSON content.
-- `RECURSION_PROVIDER_TOKEN_LIMIT`: the provider stopped at a token limit before returning complete visible JSON.
+All profile responses are normalized before parsing.
 
-Machine-JSON token exhaustion receives at most one compact structured recovery.
-Sanitized failure diagnostics retain the provider model, effective output ceiling,
-finish reason, token usage, visible response size, attempt count, and recovery kind
-when the provider supplies them. They never retain provider text or reasoning.
+The canonical envelope may contain:
 
-Journal entries must not include:
+- visible content;
+- a direct structured value;
+- reasoning-present Boolean, never reasoning text;
+- finish reason;
+- bounded usage;
+- model label;
+- provider label;
+- response-shape classification.
 
-- raw prompts;
-- raw provider responses;
-- API keys or bearer tokens;
-- full SillyTavern messages;
-- full prompt packets;
-- private chain-of-thought;
-- user-authored text except through hashes or short non-reversible labels.
+Supported source shapes include:
 
-The Inspector may show the latest calls and validation status, but raw prompt/response capture is out of scope by default.
+- chat message content;
+- text-completion text;
+- direct structured objects;
+- parsed message objects;
+- tool-call function arguments;
+- legacy function-call arguments;
+- supported response-output arrays;
+- singleton arrays containing one object.
 
-## Provider Failure Behavior
+Raw provider responses are not retained in the canonical diagnostics object.
 
-Provider failures must degrade Recursion, not the chat.
+## Structured Parsing And Recovery
 
-Provider failures cross the runtime/activity boundary only as normalized failure descriptors. Known errors use fixed, sanitized user copy; unknown provider errors say that the selected model connection could not complete the request. A provider-owned timeout may still be classified as a timeout, but Recursion does not impose a default generation deadline.
+The bounded parser sequence is:
 
-Utility failure:
+1. Direct structured object.
+2. Tool or function arguments.
+3. Visible response content.
+4. Singleton-array unwrap.
+5. Balanced-object candidates.
+6. Common local JSON repair.
+7. Role schema and semantic validation.
 
-- let the owning model stage consume another attempt when its configured attempt window remains open and the runtime still owns the current snapshot;
-- do not block normal SillyTavern generation;
-- reuse a still-valid installed prompt packet only if its snapshot/settings hashes match;
-- otherwise clear or skip Recursion injection for the turn;
-- record a sanitized journal entry and visible lane status.
+The parser continues after a wrong top-level candidate instead of treating the first parseable value as authoritative. When multiple candidates exist, the expected role contract determines which candidate is usable.
 
-Card failure:
+Parser and validation errors contain stable codes, bounded lengths, and structural metadata only. They do not contain response excerpts.
 
-- accept valid sibling cards;
-- treat malformed or missing-role batch entries as failed slots before provider dispatch;
-- omit failed cards with omission reasons;
-- continue composition if enough accepted cards remain.
+## Failure Classification And Attempt Directives
 
-Reasoner failure:
+Each failed attempt receives one action.
 
-- let the owning model stage consume another attempt when its configured attempt window remains open, the runtime still owns the snapshot, and the current configuration hash remains eligible;
-- fall back to Utility guidance plus raw selected Card Evidence;
-- do not run an additional hidden Utility model call solely to recover the Reasoner result; use the Guidance composer output that is already part of the normal route, or compose locally from accepted cards if available;
-- record a compact reason such as auth failure, timeout, validation failure, or provider error.
+| Failure class | Directive |
+| --- | --- |
+| Native schema unsupported | Downgrade structured output to prompt JSON. |
+| Context limit | Reduce only the stage output budget. |
+| Invalid structured or semantic output | Send one bounded correction prompt when the role allows it. |
+| 429, timeout, or transient transport failure | Retry with bounded delay. |
+| Missing profile, unsupported host API, or configuration mismatch | Stop without retry. |
+| Abort | Stop immediately and do not start queued work. |
 
-OpenAI-compatible authentication failure:
+One retry never combines schema downgrade, budget reduction, sampler changes, and prompt changes. The scheduler records only allowlisted action and diagnostic codes.
 
-- mark the lane unhealthy for the current session;
-- preserve non-secret settings;
-- keep the API key out of error messages;
-- require the user to re-enter or clear the session key before another direct-endpoint test.
+Automatic attempts apply only to Recursion model stages. They do not retry SillyTavern's primary story generation.
 
-Slow calls, provider-owned timeouts, and aborts:
+## Partial Fused Recovery
 
-- provider calls must receive an abort signal from the runtime;
-- user disable, chat change, settings change, and host generation stop should abort in-flight Recursion calls when their output would be stale;
-- aborted calls should not install prompt packets;
-- player Stop / `GENERATION_STOPPED` should settle Recursion progress as skipped instead of provider warning or failure.
+Fused validation is item-scoped.
 
-## Retry and Fallback Policy
+- Valid requested items are accepted and checkpointed.
+- Duplicate, unrequested, or invalid items are rejected independently.
+- Accepted families and unresolved families are explicit artifact fields.
+- When at least one item is useful, only unresolved families receive Segmented repair stages.
+- Accepted Fused cards are not regenerated.
+- When no useful item survives and attempts are exhausted, the scheduler invokes the stage's explicit exhaustion settlement hook once and starts the full Segmented path.
 
-All Recursion-owned model stages use one centralized attempt policy:
+The exhaustion hook may settle an artifact but may not launch provider calls or mutate the graph directly.
 
-- Advanced `Attempts per step` is an integer from one through five and defaults to two.
-- The value is the total number of automatic model calls available to each model stage, including the first call. It is not “retries plus one.”
-- Local, storage, validation, packet-build, prompt-install, and host-commit stages do not consume model attempts.
-- Each call keeps the same logical role and lane. A validation failure may use a correction request for the next attempt; transport failure may repeat the request.
-- Abort, stale source, or supersession ends the attempt window immediately.
-- Recursion supplies no default timeout. A slow call may remain pending indefinitely until the provider returns, fails, or the user stops it.
-- SillyTavern's primary story generation is outside this attempt policy and is never automatically retried by Recursion.
-- Exhausting a blocking stage pauses the operation and exposes explicit Retry. Retry opens a new attempt window for that stage and invalidates its dependents without rerunning unrelated valid checkpoints.
-- Card failures keep accepted siblings under their declared failure policy. Fused with zero useful cards falls back to Segmented.
-- Every fallback and exhausted window emits bounded status and diagnostics without provider bodies.
+## Reasoning-Level Routing
 
-Automatic attempts are for recovery from failure, not for chasing a more pleasing creative answer. A provider may still charge for an attempt whose response never reached Recursion; checkpointing prevents unrelated successful work from being discarded but cannot reverse that charge.
+| Level | Arbiter | Cards | Guidance |
+| --- | --- | --- | --- |
+| Low | Utility | Utility | Utility |
+| Medium | Utility | Utility | Reasoner when eligible |
+| High | Reasoner when eligible | Reasoner for priority families, Utility otherwise | Reasoner when eligible |
+| Ultra | Reasoner when eligible | Reasoner-heavy | Reasoner when eligible |
 
-## V1 Cuts
+Ordinary Pre-process work falls back to Utility when Reasoner is unavailable. Post-process contracts that explicitly require Reasoner remain lane-sticky and fail soft rather than silently crossing lanes.
 
-V1 intentionally excludes:
+## Durable State And Diagnostics
 
-- persisted API keys;
-- raw prompt or raw response logging by default;
-- arbitrary user-authored prompt-call chains;
-- a Directive-sized role-routing matrix;
-- Reasoner as a default always-on lane;
-- separate model calls just to decide whether Reasoner should run;
-- multi-provider racing or quorum voting;
-- durable lore, vector recall, transcript summarization, or character database ownership;
-- hidden-thought storage on chat messages;
-- automatic migration support for incompatible pre-alpha provider settings;
-- accepting unstructured prose as a successful generation-role result.
+A stage checkpoint may retain:
 
-Because Recursion is pre-alpha, incompatible provisional code should be replaced in place with this v1 contract. The implementation should favor one clear provider/runtime path over compatibility shims.
+- stage id and version;
+- state and attempt counters;
+- output hash and artifact reference;
+- allowlisted diagnostic codes;
+- one allowlisted last-attempt action;
+- bounded timestamps and size metadata.
+
+It must not retain:
+
+- raw profile ids;
+- endpoints or credentials;
+- prompts or raw responses;
+- hidden reasoning;
+- transcript bodies;
+- provider exceptions or stack traces.
+
+Safe provider diagnostics may include a non-reversible bounded profile hash, completion mode, structured-output method, sampler source, preset/instruct Booleans, stage budget, finish reason, bounded usage, and fixed codes.
+
+## Operator Rules
+
+1. Create one or two SillyTavern Connection Profiles.
+2. Select a profile for Utility and Reasoner.
+3. Keep Behavioral Preset on Isolated unless the complete profile preset is intentionally trusted.
+4. Keep Instruct Formatting on Auto for text-completion compatibility.
+5. Keep Samplers on Connection Profile to inherit sampler settings without importing prompt fields.
+6. Run Test Profile. Segmented may run after a single-card pass; Fused requires a Fused-card pass.
+7. Uncertified or partially certified Fused requests automatically use Segmented.
+
+## Non-Goals
+
+The provider layer does not implement:
+
+- endpoint or credential ownership;
+- model discovery;
+- provider-specific direct HTTP requests;
+- hidden fallback to the current chat model;
+- detached primary story generation;
+- persistence of raw prompts, outputs, or reasoning;
+- arbitrary user-authored provider chains;
+- unbounded concurrency.

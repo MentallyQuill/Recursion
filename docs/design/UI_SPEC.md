@@ -949,7 +949,7 @@ Metachip rules:
 - Expanded rows may show full card text, but compact metadata should still stay restrained; deeper card metadata belongs in the Full Viewer or Prompt Packet inspector.
 - Avoid assigning every tag its own color. Random chip color sprawl is explicitly out of scope.
 
-Hover/focus help should be useful but never required. Icon-only controls, progress rows, provider marks, status indicators, card family icons, compact card rows, metachips, provider source controls, Injection controls, and Diagnostics actions should expose short tooltip/accessibility copy that explains what the thing is, what clicking it does, or why it is in its current state. Card row hover copy may include family, safe summary, selected/omitted reason, source/cache state, and bounded evidence metadata. It must not show raw provider output, hidden reasoning, API keys, stack traces, or raw transcript text. Full card text remains click-to-expand, not hover-only.
+Hover/focus help should be useful but never required. Icon-only controls, progress rows, provider marks, status indicators, card family icons, compact card rows, metachips, provider policy controls, Injection controls, and Diagnostics actions should expose short tooltip/accessibility copy that explains what the thing is, what clicking it does, or why it is in its current state. Card row hover copy may include family, safe summary, selected/omitted reason, source/cache state, and bounded evidence metadata. It must not show raw provider output, hidden reasoning, API keys, stack traces, or raw transcript text. Full card text remains click-to-expand, not hover-only.
 
 Reference DOM shape:
 
@@ -1205,7 +1205,7 @@ The menu uses three tabs:
 - Providers.
 - Advanced.
 
-Play, Provider, and Advanced setting controls auto-save on committed changes. The compact settings menu must not render a broad `Save Settings` button, and provider lanes must not render a separate `Save Provider` button. Closing the menu should never discard changed Strength, card limits, Focus, Prompt Footprint, provider source/profile/endpoint/model/max tokens, Injection, UI, Retention, or Diagnostics values. Provider session keys remain session-only even when entered through autosave.
+Play, Provider, and Advanced setting controls auto-save on committed changes. The compact settings menu must not render a broad `Save Settings` button, and provider lanes must not render a separate `Save Provider` button. Closing the menu should never discard changed Strength, card limits, Focus, Prompt Footprint, Connection Profile selection, provider policy, output ceiling, Injection, UI, Retention, or Diagnostics values.
 
 Switching between settings tabs is internal panel navigation. A tab click must keep the settings menu open, even though the tab switch re-renders the floating panel content; outside-click closers must ignore that handled tab-switch event.
 
@@ -1226,33 +1226,38 @@ Pipeline, Mode, and Reasoning Level belong to the compact bar controls and must 
 - High: Reasoner Arbiter, Reasoner for high-priority card families, Utility for other card families, and Reasoner guidance composition; card pressure capped at Normal Cards.
 - Ultra: Reasoner-heavy Arbiter, card generation, and guidance composition with card pressure raised/capped at Max Cards.
 
-`reasoningLevel` is persisted as `low | medium | high | ultra`, default `medium`. It is the authoritative user-facing provider-bias setting. Low keeps ordinary work on Utility. Medium, High, and Ultra use Reasoner for policy-selected work when its configured capability is `ready` or `untested`; an untested lane is shown as a caution, not a blocker. Unconfigured or unhealthy Reasoner routes ordinary Pre-process work to Utility without changing the selected level. Post-process guidance is lane-sticky: Low and Medium use Utility, High and Ultra require Reasoner, and failed same-lane attempts fail soft without crossing lanes.
+`reasoningLevel` is persisted as `low | medium | high | ultra`, default `medium`. It is the authoritative user-facing provider-bias setting. Low keeps ordinary work on Utility. Medium, High, and Ultra use Reasoner for policy-selected work when its configured capability is `segmented-ready`, `fused-ready`, or `uncertified`; an uncertified lane is shown as a caution, not a blocker. Unconfigured or unhealthy Reasoner routes ordinary Pre-process work to Utility without changing the selected level. Post-process guidance is lane-sticky: Low and Medium use Utility, High and Ultra require Reasoner, and failed same-lane attempts fail soft without crossing lanes.
 
-Providers contains the complete provider setup surface in collapsible lane sections:
+Providers contains the complete Connection Profile setup surface in collapsible lane sections:
 
 - Utility Provider, required and open by default.
 - Reasoner Provider, optional and collapsed by default unless it is configured.
-- Compact route summary derived from Reasoning Level; no deep per-role routing editor in V1.
-- Source, profile, endpoint, model, session key, max tokens.
-- Readiness text for the selected source before running a provider test.
-- Fetch Models for OpenAI-compatible endpoints, with a fetched model selector that writes the chosen id into the model field.
-- Test Provider. Clear Session Key appears only for OpenAI-compatible endpoints.
-- Status, resolved provider, and resolved model.
-- Temperature and top-p stay internal/defaulted in the compact V1 menu so the provider pane matches the mockup and does not become a dense admin form.
-- User-opened provider lane disclosures remain open across autosave rerenders. Editing Reasoner fields must not collapse the Reasoner Provider section.
-- Test Provider uses lane-local busy feedback: the clicked button changes to `Testing...`, becomes disabled, and clears back when the request settles.
-- Each provider header shows one derived capability label: `Ready`, `Untested`, `Unhealthy`, or `Configure`. There is no provider enable control or persisted enable Boolean.
+- One searchable SillyTavern Connection Profile combobox per lane.
+- Behavioral Preset: Isolated or Full Profile.
+- Instruct Formatting: Auto, On, or Off.
+- Samplers: Connection Profile or Recursion Override.
+- Structured Output: Auto, Native Schema, or Prompt JSON.
+- Temperature and Top P controls shown only for Recursion Override.
+- Output Token Ceiling as the lane hard maximum; individual model stages use smaller budgets.
+- `Test Profile`, with lane-local `Testing...` busy feedback.
+- Compact capability state: `Configure`, `Untested`, `Ready`, or `Unhealthy`. `Segmented` and `Fused` remain separate capability details on a `Ready` provider; they are not compact state labels.
+- No provider enable switch, endpoint input, credential field, model selector, or model-fetch action.
 
-Provider Source changes the field context inside each lane immediately, matching the lean Directive/Saga pattern instead of showing every possible provider field at once:
+The operator rules are explicit:
 
-- Current Host Model shows no connection-specific option boxes; it uses the active SillyTavern model context.
-- Host Connection Profile shows a searchable Profile combobox and hides OpenAI-compatible endpoint, model, and session key fields. Typing filters detected profiles in place; only selecting a listed profile commits and auto-saves the underlying profile id.
-- OpenAI-Compatible Endpoint shows Base URL, Model, and Session Key and hides Profile.
-- Clear Session Key appears only for OpenAI-compatible endpoints.
-- Max Tokens and provider actions remain visible for every Source.
-- Provider lane fields auto-save on committed changes. Each commit sends only the changed field plus the rendered `configRevision`; stale revisions are rejected and refreshed instead of overwriting a newer edit. Hidden alternate-source field values are preserved so a user can compare sources without losing typed settings, but the selected source/profile/endpoint/model/max tokens apply immediately. Session API keys are accepted by autosave into session memory only; they must not persist.
-- Utility and Reasoner default to `8192` max tokens. Provider Test uses the lane's configured max-token ceiling, which is `8192` when untouched, plus a bounded timeout. It must not substitute a smaller hidden response cap.
-- Provider Test is single-flight per lane. A duplicate same-lane request joins the in-flight test, while a test requested during active same-lane generation returns a compact busy result without canceling or superseding that work.
+1. Create one or two Connection Profiles in SillyTavern.
+2. Select a profile for Utility and Reasoner.
+3. Keep Behavioral Preset on Isolated unless the complete profile preset is intentionally trusted.
+4. Keep Instruct Formatting on Auto for text-completion compatibility.
+5. Keep Samplers on Connection Profile to inherit sampler settings without importing prompt fields.
+6. Run Test Profile. A `Ready` provider carries `Segmented` detail after the single-card pass and `Fused` detail after the Fused-card pass.
+7. Uncertified or partially certified Fused requests automatically use Segmented.
+
+Profile combobox typing filters the detected list locally. Persisted settings change only when the user selects a listed entry. The Providers tab builds both comboboxes from one profile lookup per render and must not scan character, persona, group, avatar, or Recursion card collections.
+
+Every committed provider edit sends only the relevant allowlisted field plus the rendered `configRevision`. Stale revisions are rejected and refreshed instead of overwriting a newer edit. A material edit increments the revision and resets certification. User-opened lane disclosures remain open across autosave rerenders.
+
+`Test Profile` performs connectivity, single-card, and Fused checks. It is single-flight per lane. A duplicate same-lane request joins the in-flight test; a test requested while production work is using the same lane returns a compact busy result without canceling that work.
 
 Advanced contains low-frequency controls grouped into collapsible sections:
 
@@ -1262,7 +1267,7 @@ Advanced contains low-frequency controls grouped into collapsible sections:
 - Context Windows: Post-process Evidence Messages, Source Freshness Messages, Source Freshness Text Budget, and Provider Analysis Messages. These controls bound Recursion-owned evidence and analysis windows; they do not replace or limit SillyTavern writer context.
 - Storage Retention: Journal Entries only. Generated turn work is scoped to the active turn and prior-turn artifacts are pruned automatically; this control never deletes SillyTavern chat.
 - Diagnostics: safe excerpts, Reset Turn Cache, Export Diagnostics, and Clear Run Journal.
-- Reset Defaults: a confirmed action at the bottom of Advanced that restores Play and Advanced controls to `DEFAULT_RECURSION_SETTINGS`. It preserves provider settings and session-only keys, custom card decks and scope, compact-bar settings, and viewer visibility.
+- Reset Defaults: a confirmed action at the bottom of Advanced that restores Play and Advanced controls to `DEFAULT_RECURSION_SETTINGS`. It preserves provider settings, custom card decks and scope, compact-bar settings, and viewer visibility.
 
 Injection controls apply to the final prompt packet after Utility guidance or Reasoner composition. They do not expose card-level placement, card editing, or per-turn prompt engineering. They exist for preset/model compatibility when a SillyTavern setup needs the Recursion packet to land in a different host lane or depth.
 
@@ -1276,45 +1281,36 @@ Most internal Auto settings should not be exposed as controls. The UI can displa
 
 ## Provider Controls
 
-Provider controls should follow the smaller Directive-style lane model:
+Provider controls use one Connection Profile-only contract for Utility and Reasoner.
 
-- Utility Provider.
-- Reasoner Provider.
+Each provider card contains:
 
-Each provider card should support:
+- searchable Connection Profile selection;
+- Behavioral Preset policy;
+- Instruct Formatting policy;
+- Sampler source policy;
+- Structured Output policy;
+- conditional Temperature and Top P overrides;
+- Output Token Ceiling;
+- Test Profile;
+- compact capability and completion-mode status.
 
-- Source: Current Host Model, Host Connection Profile, OpenAI-Compatible Endpoint.
-- Searchable connection profile combobox when using host profiles.
-- Base URL, model, Fetch Models, and fetched-model selector for OpenAI-compatible endpoints.
-- Session API key field.
-- Max tokens.
-- Test Provider.
-- Clear Session Key for OpenAI-compatible endpoints.
-- Status and resolved model.
+The complete profile preset warning appears only when `Full Profile` is selected. Recursion Override sampler fields remain hidden while Connection Profile samplers are selected. No provider-owned credential or endpoint controls exist.
 
-The compact Providers tab shows Utility details by default and keeps Reasoner as a collapsed optional lane until the user opens or configures it. Temperature and top-p remain normalized provider settings with safe defaults, but they are not visible controls in the compact top-bar menu.
+The header capability states and separate readiness details are:
 
-The Providers tab should build Utility and Reasoner profile comboboxes from one connection-profile lookup per render. Profile discovery must not walk character-card, persona, group, avatar, or Recursion card collections; those collections can be large enough to make native dropdown expansion feel blocked. The combobox list must be scrollable for long SillyTavern profile collections, open inside the provider lane flow so rounded disclosures do not clip the options, and filter typing must not write partial text into provider settings.
+| Compact state | Meaning | Capability detail |
+| --- | --- | --- |
+| Configure | No selected available profile. |
+| Untested | Selected profile lacks current certification. |
+| Ready | Connectivity and the required profile checks passed. | `Segmented` after the single-card pass; `Fused` after the Fused-card pass. |
+| Unhealthy | Connectivity or profile compatibility failed. | none |
 
-Provider selector, status-class, and draft-reading helpers live in the provider panel module so the Providers tab keeps one stable control contract while the surrounding settings surface is refactored.
+The selected pipeline does not override capability. A Fused selection with an ineligible profile is represented honestly as an effective `Segmented` capability detail under the `Ready` state and one sanitized downgrade code.
 
-Provider cards must not sprawl by rendering profile and OpenAI endpoint fields together. The selected Source owns the visible option context, while hidden alternate-source values remain available if the user switches back.
+Provider selector, status-class, and draft-reading helpers live in the provider-panel module. The draft shape is exactly `connectionProfileId`, `generationPolicy`, `samplerOverrides`, and `outputTokenCeiling`; normalization adds lane, revision, and certification.
 
-Provider lane controls autosave. Tooltip and helper copy must not mention a Save Provider action; testing a provider is a separate explicit command.
-
-API keys are session-only. They must not be written to extension settings, turn checkpoints, prompt packets, run journals, diagnostics, reports, or artifacts.
-
-Provider capability is derived from route completeness, host support, session
-credentials, and health evidence bound to the current configuration hash:
-
-- `Configure`: capability `unconfigured`; the selected source is incomplete or unavailable.
-- `Untested`: capability `untested`; configuration is complete but has no current hash-bound result.
-- `Ready`: capability `ready`; the current configuration hash has a passing result.
-- `Unhealthy`: capability `unhealthy`; the current configuration hash has a failing result.
-
-Changing a capability-bearing field increments `configRevision` and makes prior
-health evidence stale. Health results may change capability state but never
-rewrite provider configuration.
+Recursion stores no endpoint or credential. Provider cards, tooltips, diagnostics, and Full Viewer must not render Connection Profile ids, raw prompts, raw responses, hidden reasoning, or credential-bearing profile data.
 
 ## Visual System
 
@@ -1381,7 +1377,7 @@ Provider fallback states should appear in the Hero Pixel Array Progress Menu and
 - `Reasoner failed. Utility composed.`
 - `Utility unavailable. Recursion skipped.`
 - `Using cached hand.`
-- `Provider test failed. Check session key.`
+- `Profile test failed. Check the selected Connection Profile and its SillyTavern connection settings.`
 
 ## Mobile Behavior
 

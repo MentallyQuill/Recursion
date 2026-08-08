@@ -113,6 +113,11 @@ function fallbackArtifact(validated, selectedCards) {
   const value = validated?.value && typeof validated.value === 'object'
     ? validated.value
     : {};
+  const cards = value.cards && typeof value.cards === 'object' ? value.cards : {};
+  const acceptedFamilies = Object.keys(cards);
+  const unresolvedFamilies = selectedCards
+    .map(selectedCardKey)
+    .filter((family) => family && !cards[family]);
   const outcomes = value.outcomes && typeof value.outcomes === 'object'
     ? value.outcomes
     : Object.fromEntries(selectedCards.map((card) => [
@@ -121,11 +126,16 @@ function fallbackArtifact(validated, selectedCards) {
       ]));
   return {
     ...value,
-    cards: value.cards && typeof value.cards === 'object' ? value.cards : {},
+    cards,
     outcomes,
+    acceptedFamilies,
+    unresolvedFamilies,
     fallback: {
       mode: 'segmented',
-      reason: 'zero-useful-fused-cards'
+      reason: acceptedFamilies.length
+        ? 'unresolved-fused-families'
+        : 'zero-useful-fused-cards',
+      families: unresolvedFamilies
     }
   };
 }
@@ -134,17 +144,12 @@ export function createFusedCardStages({
   selectedCards = [],
   createBundleRequest,
   validateBundle,
-  generateBundle,
-  createSegmentedFallbackStages
+  generateBundle
 } = {}) {
   const cards = Array.isArray(selectedCards) ? [...selectedCards] : [];
   const build = requireFunction(createBundleRequest, 'createBundleRequest');
   const validate = requireFunction(validateBundle, 'validateBundle');
   const generate = requireFunction(generateBundle, 'generateBundle');
-  const createFallback = requireFunction(
-    createSegmentedFallbackStages,
-    'createSegmentedFallbackStages'
-  );
 
   return [Object.freeze({
     id: 'preprocess.cards.fused',
@@ -184,7 +189,7 @@ export function createFusedCardStages({
         artifact
       );
     },
-    async onAttemptsExhausted({
+    async settleExhausted({
       lastArtifact,
       context,
       dependencies
@@ -198,21 +203,19 @@ export function createFusedCardStages({
         }),
         lastArtifact
       );
-      const stages = await createFallback({
-        selectedCards: cards,
-        context,
-        dependencies,
-        fusedArtifact: fallbackArtifact(validated, cards)
-      });
       return {
-        artifact: fallbackArtifact(validated, cards),
-        stages: Array.isArray(stages) ? stages : [],
-        dependencies
+        ok: true,
+        value: fallbackArtifact(validated, cards)
       };
     },
     summarize(artifact) {
       return {
-        acceptedFamilies: Object.keys(artifact?.cards || {}).slice(0, 40),
+        acceptedFamilies: Array.isArray(artifact?.acceptedFamilies)
+          ? artifact.acceptedFamilies.slice(0, 40)
+          : Object.keys(artifact?.cards || {}).slice(0, 40),
+        unresolvedFamilies: Array.isArray(artifact?.unresolvedFamilies)
+          ? artifact.unresolvedFamilies.slice(0, 40)
+          : [],
         fallback: artifact?.fallback?.mode || null
       };
     }

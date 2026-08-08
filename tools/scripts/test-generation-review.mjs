@@ -55,7 +55,6 @@ const request = buildGenerationReviewRequest({
 });
 
 assertEqual(request.responseSchema, GENERATION_REVIEW_SCHEMA, 'request carries generation-review schema');
-assertEqual(request.machineJson, true, 'request requires machine JSON');
 assertEqual(request.sourceHash, 'source-hash', 'request exposes the immutable source hash to the provider schema');
 assertDeepEqual(
   request.validTargetIds,

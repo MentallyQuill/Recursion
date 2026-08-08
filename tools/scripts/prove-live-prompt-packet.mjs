@@ -253,8 +253,8 @@ function installProviderRequestRecorderScript() {
       const event = {
         source,
         role: classifyPrompt(prompt),
-        profileId: String(payload.profileId || payload.hostConnectionProfileId || ''),
-        providerSource: String(payload.providerSource || (payload.profileId ? 'host-connection-profile' : '')),
+        profileId: String(payload.profileId || payload.connectionProfileId || ''),
+        providerSource: String(payload.connectionProfileId || payload.profileId ? 'connection-profile' : ''),
         maxTokens: Number(payload.maxTokens || payload.responseLength || 0),
         responseSchema: String(payload.responseSchema || parameters?.json_schema?.name || ''),
         reasoningIntent: String(reasoning.intent || payload.reasoningIntent || ''),
@@ -395,7 +395,7 @@ async function forceProviderProfile(page, profileName, timeoutMs) {
         profiles: candidates.map((profile) => profile.label || profile.id).slice(0, 20)
       };
     }
-    if (!runtime || typeof runtime.updateSettings !== 'function' || typeof runtime.updateProvider !== 'function') {
+    if (!runtime || typeof runtime.updateSettings !== 'function' || typeof runtime.updateProviderConfig !== 'function') {
       return {
         ok: false,
         reason: 'runtime-provider-api-unavailable',
@@ -403,10 +403,7 @@ async function forceProviderProfile(page, profileName, timeoutMs) {
       };
     }
     await runtime.updateSettings({ reasoningLevel: 'high' });
-    const providerPatch = {
-      source: 'host-connection-profile',
-      hostConnectionProfileId: selected.id
-    };
+    const providerPatch = { connectionProfileId: selected.id };
     await runtime.updateProviderConfig('utility', providerPatch);
     await runtime.updateProviderConfig('reasoner', providerPatch);
     const utilityTest = typeof runtime.testProvider === 'function'
@@ -437,12 +434,10 @@ async function forceProviderProfile(page, profileName, timeoutMs) {
   await page.waitForFunction((profileId) => {
     const settings = globalThis.__recursionLiveHarnessRuntime?.view?.()?.settings || {};
     return settings.reasoningLevel === 'high'
-      && settings.providers?.utility?.source === 'host-connection-profile'
-      && settings.providers?.reasoner?.source === 'host-connection-profile'
-      && settings.providers?.utility?.hostConnectionProfileId === profileId
-      && settings.providers?.reasoner?.hostConnectionProfileId === profileId
-      && settings.providerCapabilities?.utility?.promptPacket?.state === 'ready'
-      && settings.providerCapabilities?.reasoner?.promptPacket?.state === 'ready';
+      && settings.providers?.utility?.connectionProfileId === profileId
+      && settings.providers?.reasoner?.connectionProfileId === profileId
+      && ['segmented-ready', 'fused-ready'].includes(settings.providerCapabilities?.utility?.promptPacket?.state)
+      && ['segmented-ready', 'fused-ready'].includes(settings.providerCapabilities?.reasoner?.promptPacket?.state);
   }, result.selected.id, { timeout: timeoutMs });
   return result;
 }

@@ -71,6 +71,7 @@ export function extractProviderContentText(value) {
       .map((part) => {
         if (typeof part === 'string') return part;
         if (!part || typeof part !== 'object') return '';
+        if (part.thought === true) return '';
         if (part.type === 'text' && typeof part.text === 'string') return part.text;
         if (typeof part.text === 'string') return part.text;
         if (typeof part.content === 'string') return part.content;
@@ -85,9 +86,23 @@ export function extractProviderContentText(value) {
     if (typeof value.text === 'string') return value.text;
     if (typeof value.content === 'string') return value.content;
     if (Array.isArray(value.content)) return extractProviderContentText(value.content);
+    if (Array.isArray(value.parts)) return extractProviderContentText(value.parts);
     if (typeof value.value === 'string') return value.value;
   }
   return '';
+}
+
+function extractProviderThoughtText(value) {
+  if (Array.isArray(value)) {
+    return value.map((part) => {
+      if (!part || typeof part !== 'object') return '';
+      if (part.thought === true) return extractProviderContentText({ ...part, thought: false });
+      return extractProviderThoughtText(part.parts ?? part.content);
+    }).filter(Boolean).join('');
+  }
+  if (!isObject(value)) return '';
+  if (value.thought === true) return extractProviderContentText({ ...value, thought: false });
+  return extractProviderThoughtText(value.parts ?? value.content);
 }
 
 export function extractProviderResponseText(value = '') {
@@ -103,6 +118,7 @@ export function extractProviderResponseText(value = '') {
     || extractProviderContentText(candidate?.text)
     || extractProviderContentText(output?.content)
     || extractProviderContentText(output?.text)
+    || extractProviderContentText(value.responseContent)
     || extractProviderContentText(value.message?.content)
     || extractProviderContentText(value.content)
     || extractProviderContentText(value.response)
@@ -124,6 +140,7 @@ export function extractProviderResponseText(value = '') {
 export function extractProviderResponseReasoning(value = '') {
   if (!value || typeof value !== 'object') return '';
   const choice = Array.isArray(value.choices) ? value.choices[0] : null;
+  const candidate = Array.isArray(value.candidates) ? value.candidates[0] : null;
   const message = choice?.message || value.message || value || {};
   const parts = [];
   const direct = [
@@ -137,6 +154,10 @@ export function extractProviderResponseReasoning(value = '') {
     const text = extractProviderContentText(item);
     if (text) parts.push(text);
   }
+  const candidateThoughts = extractProviderThoughtText(candidate?.content);
+  if (candidateThoughts) parts.push(candidateThoughts);
+  const responseContentThoughts = extractProviderThoughtText(value.responseContent);
+  if (responseContentThoughts) parts.push(responseContentThoughts);
   const details = message.reasoning_details
     || message.reasoningDetails
     || choice?.message?.reasoning_details

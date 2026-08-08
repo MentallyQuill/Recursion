@@ -147,6 +147,37 @@ assertEqual(extractProviderResponseText({
 }), 'candidate text', 'candidate content extracted');
 
 assertEqual(extractProviderResponseText({
+  candidates: [{ content: { role: 'model', parts: [{ text: '{"ok":true}' }] } }]
+}), '{"ok":true}', 'Gemini candidate content parts extracted');
+
+const geminiThoughtResponse = {
+  candidates: [{
+    content: {
+      role: 'model',
+      parts: [
+        { thought: true, text: 'private model reasoning' },
+        { text: '{"ok":true}' }
+      ]
+    }
+  }]
+};
+assertEqual(extractProviderResponseText(geminiThoughtResponse), '{"ok":true}', 'Gemini thought parts stay out of visible content');
+assertEqual(extractProviderResponseReasoning(geminiThoughtResponse), 'private model reasoning', 'Gemini thought parts are diagnosed separately');
+
+const sillyTavernGeminiResponse = {
+  choices: [{ message: { content: '{"ok":true}' } }],
+  responseContent: {
+    role: 'model',
+    parts: [
+      { thought: true, text: 'private model reasoning' },
+      { text: '{"ok":true}' }
+    ]
+  }
+};
+assertEqual(extractProviderResponseText(sillyTavernGeminiResponse), '{"ok":true}', 'SillyTavern Gemini envelope preserves visible content');
+assertEqual(extractProviderResponseReasoning(sillyTavernGeminiResponse), 'private model reasoning', 'SillyTavern Gemini responseContent thoughts are diagnosed separately');
+
+assertEqual(extractProviderResponseText({
   outputs: [{ content: [{ value: 'output text' }] }]
 }), 'output text', 'output content extracted');
 

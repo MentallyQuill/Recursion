@@ -6,6 +6,8 @@ import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert
 
 const CASES = Object.freeze([
   'chat-content',
+  'gemini-candidate-parts',
+  'sillytavern-gemini-envelope',
   'text-completion',
   'direct-structured-object',
   'message-parsed-object',
@@ -85,6 +87,13 @@ function wrapped(raw, {
 
 const FIXTURES = Object.freeze({
   'chat-content': () => wrapped({ choices: [{ message: { content: CARD_JSON } }] }, { completionMode: 'chat' }),
+  'gemini-candidate-parts': () => wrapped({
+    candidates: [{ content: { role: 'model', parts: [{ thought: true, text: RAW_OUTPUT }, { text: CARD_JSON }] } }]
+  }, { completionMode: 'chat' }),
+  'sillytavern-gemini-envelope': () => wrapped({
+    choices: [{ message: { content: CARD_JSON } }],
+    responseContent: { role: 'model', parts: [{ thought: true, text: RAW_OUTPUT }, { text: CARD_JSON }] }
+  }, { completionMode: 'chat' }),
   'text-completion': () => wrapped({ choices: [{ text: CARD_JSON }] }),
   'direct-structured-object': () => wrapped(CARD),
   'message-parsed-object': () => wrapped({ choices: [{ message: { parsed: CARD } }] }),

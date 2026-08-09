@@ -11,6 +11,7 @@ const labels = [
   'nanogpt deepseek/deepseek-v4-pro-cheaper:thinking - Celia V5.4',
   'nanogpt gemma-4-31B-Fabled - RedRising-1.3'
 ];
+const glmLabel = 'nanogpt zai-org/glm-5.2:thinking - Celia V5.4';
 
 assertEqual(module.PROFILE_LABELS.length, 4, 'runner owns exactly four requested Utility profiles');
 assertDeepEqual(module.PROFILE_LABELS, labels, 'runner preserves the requested profile order');
@@ -67,6 +68,20 @@ assertRejects(
   'milestone swap refuses a partially accepted ledger'
 );
 assertEqual(typeof module.recoverPendingArbiterRetry, 'function', 'runner exports natural Arbiter Retry recovery');
+const incompatibleCheckpoint = {
+  status: 'ready',
+  acceptedNewTurns: [],
+  assignments: { 'stop-resume': labels[1], 'retry-stage': labels[0], 'fused-fallback': labels[2], 'queued-reprocess': labels[3] },
+  assignmentAdaptations: { naturalArbiterRetry: true, repairedArbiterRetryAttempted: true }
+};
+module.replaceIncompatibleFlash(incompatibleCheckpoint, {
+  label: glmLabel,
+  model: 'zai-org/glm-5.2:thinking',
+  certification: { status: 'pass', checks: { connectivity: 'pass', singleCard: 'pass', fusedCards: 'pass' } }
+});
+assertEqual(incompatibleCheckpoint.assignments['retry-stage'], glmLabel, 'GLM fallback owns Retry after Flash incompatibility');
+assertDeepEqual(incompatibleCheckpoint.effectiveProfileLabels, [glmLabel, labels[1], labels[2], labels[3]], 'effective endurance rotation replaces only incompatible Flash');
+assertEqual(incompatibleCheckpoint.modelIncompatibilities[0].failureCode, 'RECURSION_PROVIDER_CONTEXT_LIMIT', 'Flash incompatibility records only its bounded failure code');
 assertDeepEqual(module.summarizeArbiterFailure({
   state: 'paused',
   pauseReason: 'stage-failed:preprocess.arbiter',
@@ -213,6 +228,7 @@ checkpoint.assignments = {
   'fused-fallback': labels[2],
   'queued-reprocess': labels[3]
 };
+checkpoint.effectiveProfileLabels = labels;
 checkpoint.status = 'ready';
 assertDeepEqual(module.nextResilienceWork(checkpoint), {
   kind: 'milestone',

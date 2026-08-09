@@ -34,6 +34,7 @@ const STATE_SCHEMA = 'recursion.liveResilienceMatrix.v1';
 const STATE_ROOT = resolve('artifacts', 'live-resilience-matrix');
 const DEFAULT_TIMEOUT_MS = 300000;
 const PREFERRED_FUSED_LABEL = PROFILE_LABELS[2];
+export const GLM_CELIA_LABEL = 'nanogpt zai-org/glm-5.2:thinking - Celia V5.4';
 
 function boundedText(value, length = 500) {
   return String(value ?? '').slice(0, length);
@@ -152,7 +153,10 @@ export function nextResilienceWork(checkpoint = {}) {
     }
   }
   const index = (checkpoint.acceptedNewTurns || []).length - MILESTONE_ORDER.length;
-  return { kind: 'endurance', index, profileLabel: PROFILE_LABELS[index] || '' };
+  const rotation = Array.isArray(checkpoint.effectiveProfileLabels)
+    ? checkpoint.effectiveProfileLabels
+    : PROFILE_LABELS;
+  return { kind: 'endurance', index, profileLabel: rotation[index] || '' };
 }
 
 export function acceptResilienceTurn(checkpoint, {
@@ -287,6 +291,33 @@ export function authorizeRepairedArbiterRetry(checkpoint) {
     throw new Error('Repaired Arbiter Retry was already attempted.');
   }
   checkpoint.assignmentAdaptations.repairedArbiterRetryPending = true;
+  return checkpoint;
+}
+
+export function replaceIncompatibleFlash(checkpoint, qualification = {}) {
+  if ((checkpoint.acceptedNewTurns || []).length !== 0) throw new Error('Flash replacement requires zero accepted turns.');
+  if (checkpoint.assignmentAdaptations?.repairedArbiterRetryAttempted !== true) {
+    throw new Error('Flash replacement requires an exhausted repaired Arbiter Retry.');
+  }
+  if (checkpoint.modelIncompatibilities?.some((entry) => entry?.label === PROFILE_LABELS[0])) {
+    throw new Error('Flash incompatibility is already recorded.');
+  }
+  checkpoint.assignments['retry-stage'] = GLM_CELIA_LABEL;
+  checkpoint.effectiveProfileLabels = [GLM_CELIA_LABEL, ...PROFILE_LABELS.slice(1)];
+  checkpoint.fallbackQualifications = [{
+    label: boundedText(qualification.label, 180),
+    model: boundedText(qualification.model, 180),
+    certification: qualification.certification || null
+  }];
+  checkpoint.modelIncompatibilities = [{
+    label: PROFILE_LABELS[0],
+    stageId: 'preprocess.arbiter',
+    failureCode: 'RECURSION_PROVIDER_CONTEXT_LIMIT',
+    attempts: 3,
+    replacementLabel: GLM_CELIA_LABEL
+  }];
+  checkpoint.currentMilestone = 'stop-resume';
+  checkpoint.defect = null;
   return checkpoint;
 }
 
@@ -1051,6 +1082,25 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
           ...identity,
           baselineCounts: { user: chat.userCount, assistant: chat.assistantCount }
         });
+        saveCheckpoint(args.statePath, checkpoint);
+      }
+      if (
+        checkpoint
+        && env.RECURSION_RESILIENCE_REPLACE_INCOMPATIBLE_FLASH === '1'
+        && !(checkpoint.modelIncompatibilities || []).length
+      ) {
+        const selected = await selectUtilityProfileByLabel(page, GLM_CELIA_LABEL, timeoutMs);
+        const certification = await certifyUtilityProfile(page, timeoutMs);
+        replaceIncompatibleFlash(checkpoint, {
+          label: selected.label,
+          model: selected.model || certification.model,
+          certification: {
+            status: certification.status,
+            checks: certification.checks,
+            capability: certification.capability
+          }
+        });
+        pendingRecovery = '';
         saveCheckpoint(args.statePath, checkpoint);
       }
       if (checkpoint.qualifications?.length !== PROFILE_LABELS.length || !Object.keys(checkpoint.assignments || {}).length) {

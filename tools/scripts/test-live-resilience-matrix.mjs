@@ -70,12 +70,20 @@ assertEqual(typeof module.recoverPendingArbiterRetry, 'function', 'runner export
 assertDeepEqual(module.summarizeArbiterFailure({
   state: 'paused',
   pauseReason: 'stage-failed:preprocess.arbiter',
-  stages: [{ stageId: 'preprocess.arbiter', state: 'failed', attemptCount: 4, diagnosticCodes: ['SAFE_CODE'] }]
+  stages: [{
+    stageId: 'preprocess.arbiter', state: 'failed', attemptCount: 4, attemptWindow: 2, attemptsUsed: 2,
+    failureCode: 'SAFE_FAILURE', failureCategory: 'provider-length', lastAttemptAction: 'stop', diagnosticCodes: ['SAFE_CODE']
+  }]
 }), {
   operationState: 'paused',
   pauseReason: 'stage-failed:preprocess.arbiter',
   stageState: 'failed',
   attemptCount: 4,
+  attemptWindow: 2,
+  attemptsUsed: 2,
+  failureCode: 'SAFE_FAILURE',
+  failureCategory: 'provider-length',
+  lastAttemptAction: 'stop',
   diagnosticCodes: ['SAFE_CODE']
 }, 'Arbiter exhaustion summary contains only bounded failure metadata');
 const repairCheckpoint = { status: 'fail', branchSha: 'old', acceptedNewTurns: [], defect: { code: 'failed' } };

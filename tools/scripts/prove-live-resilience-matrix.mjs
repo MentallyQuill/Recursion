@@ -269,6 +269,11 @@ export function summarizeArbiterFailure(execution = {}) {
     pauseReason: boundedText(execution.pauseReason, 180),
     stageState: boundedText(stage.state, 40),
     attemptCount: Number(stage.attemptCount || 0),
+    attemptWindow: Number(stage.attemptWindow || 0),
+    attemptsUsed: Number(stage.attemptsUsed || 0),
+    failureCode: boundedText(stage.failureCode, 120),
+    failureCategory: boundedText(stage.failureCategory, 120),
+    lastAttemptAction: boundedText(stage.lastAttemptAction, 120),
     diagnosticCodes: Array.isArray(stage.diagnosticCodes) ? stage.diagnosticCodes.map((code) => boundedText(code, 120)) : []
   };
 }
@@ -343,6 +348,11 @@ export async function readExecutionSnapshot(page) {
         stageId: String(stage?.stageId || ''),
         state: String(stage?.state || stage?.stageState || ''),
         attemptCount: Number(stage?.attempts?.total || stage?.attemptCount || 0),
+        attemptWindow: Number(stage?.attempts?.window || 0),
+        attemptsUsed: Number(stage?.attempts?.used || 0),
+        failureCode: String(stage?.failure?.code || ''),
+        failureCategory: String(stage?.failure?.category || ''),
+        lastAttemptAction: String(stage?.lastAttemptAction || ''),
         diagnosticCodes: Array.isArray(stage?.diagnosticCodes) ? [...stage.diagnosticCodes] : []
       }))
     };

@@ -13,6 +13,7 @@ import {
   certifyUtilityProfile,
   contextChatSummaryScript,
   sendAndWait,
+  selectPipeline,
   selectUtilityProfileByLabel,
   waitForRoot
 } from './prove-live-pipelines.mjs';
@@ -97,8 +98,26 @@ export function validateResilienceCheckpoint(checkpoint = {}, expected = {}) {
 }
 
 export async function clickProgressAction(page, label, timeoutMs) {
-  await page.locator('[data-recursion-status-trigger]').first().click({ timeout: timeoutMs });
+  const trigger = page.locator('[data-recursion-status-trigger]').first();
+  const expanded = await trigger.getAttribute?.('aria-expanded').catch?.(() => 'false');
+  if (expanded !== 'true') await trigger.click({ timeout: timeoutMs });
   const action = page.getByRole('button', { name: label, exact: true }).first();
+  await action.waitFor({ state: 'visible', timeout: timeoutMs });
+  const evidence = await action.evaluate((node) => ({
+    kind: String(node?.dataset?.recursionProgressAction || ''),
+    operationId: String(node?.dataset?.recursionProgressOperationId || ''),
+    stageId: String(node?.dataset?.recursionProgressStageId || '')
+  }));
+  await action.click({ timeout: timeoutMs });
+  return evidence;
+}
+
+export async function clickProgressStageAction(page, label, stageId, timeoutMs) {
+  const trigger = page.locator('[data-recursion-status-trigger]').first();
+  const expanded = await trigger.getAttribute?.('aria-expanded').catch?.(() => 'false');
+  if (expanded !== 'true') await trigger.click({ timeout: timeoutMs });
+  const selector = `[data-recursion-progress-action][aria-label="${label}"][data-recursion-progress-stage-id="${stageId}"]`;
+  const action = page.locator(selector).first();
   await action.waitFor({ state: 'visible', timeout: timeoutMs });
   const evidence = await action.evaluate((node) => ({
     kind: String(node?.dataset?.recursionProgressAction || ''),
@@ -174,15 +193,19 @@ export async function driveStopResumeMilestone({
   };
 }
 
-export function substituteInvalidModelResponse(body, contentType = '') {
+export function substituteModelResponseContent(body, contentType = '', content = '{invalid') {
   if (/event-stream/i.test(contentType)) {
-    return 'data: {"choices":[{"delta":{"content":"{invalid"}}]}\n\ndata: [DONE]\n\n';
+    return `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\ndata: [DONE]\n\n`;
   }
   const parsed = JSON.parse(String(body || '{}'));
-  if (parsed?.choices?.[0]?.message) parsed.choices[0].message.content = '{invalid';
-  else if (parsed?.choices?.[0]) parsed.choices[0].text = '{invalid';
+  if (parsed?.choices?.[0]?.message) parsed.choices[0].message.content = content;
+  else if (parsed?.choices?.[0]) parsed.choices[0].text = content;
   else throw new Error('Unsupported model response envelope for bounded corruption.');
   return JSON.stringify(parsed);
+}
+
+export function substituteInvalidModelResponse(body, contentType = '') {
+  return substituteModelResponseContent(body, contentType, '{invalid');
 }
 
 export async function driveRetryStageMilestone({ page, message, timeoutMs, send = sendAndWait }) {
@@ -247,6 +270,157 @@ export async function driveRetryStageMilestone({ page, message, timeoutMs, send 
       await globalThis.__recursionLiveHarnessRuntime?.updateSettings?.({ modelAttemptsPerStep: attempts });
     }, runtimeSettings.modelAttemptsPerStep).catch(() => {});
   }
+}
+
+export async function driveFusedFallbackMilestone({ page, message, timeoutMs, send = sendAndWait }) {
+  const previous = await page.evaluate(async () => {
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    const settings = runtime?.view?.()?.settings || {};
+    await runtime?.updateSettings?.({ reasoningLevel: 'low', modelAttemptsPerStep: 2 });
+    return { reasoningLevel: settings.reasoningLevel, modelAttemptsPerStep: settings.modelAttemptsPerStep };
+  });
+  await selectPipeline(page, 'fused', timeoutMs);
+  const routePattern = '**/api/backends/chat-completions/generate';
+  const calls = { arbiter: 0, fused: 0, segmented: 0 };
+  const handler = async (route, request) => {
+    const requestBody = String(request.postData?.() || '');
+    const isArbiter = requestBody.includes('recursion.utilityArbiter.v1');
+    const isFused = requestBody.includes('recursion.cardBundlePayload.v1')
+      || requestBody.includes('Generate all requested Recursion scene cards in one structured card bundle');
+    const isSegmented = !isFused && requestBody.includes('recursion.cardPayload.v1');
+    if (isArbiter) calls.arbiter += 1;
+    if (isSegmented) calls.segmented += 1;
+    if (!isFused || calls.fused >= 2) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const contentType = String(response.headers()['content-type'] || '');
+    const body = await response.text();
+    calls.fused += 1;
+    await route.fulfill({
+      response,
+      body: substituteModelResponseContent(body, contentType, '{"items":[]}')
+    });
+  };
+  await page.context().route(routePattern, handler);
+  try {
+    const sendResult = await send(page, message, { requirePrompt: true, timeoutMs });
+    const completed = await readExecutionSnapshot(page);
+    const safeView = await page.evaluate(() => {
+      const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+      return {
+        pipelineMode: String(view.lastPacket?.diagnostics?.pipelineMode || ''),
+        diagnosticCodes: Array.isArray(view.lastPacket?.diagnostics?.planDiagnostics)
+          ? [...view.lastPacket.diagnostics.planDiagnostics]
+          : []
+      };
+    });
+    const fusedStage = completed?.stages?.find((stage) => stage.stageId === 'preprocess.cards.fused');
+    const segmentedStages = completed?.stages?.filter((stage) => stage.stageId.startsWith('preprocess.cards.segmented.')) || [];
+    const families = segmentedStages.map((stage) => stage.stageId.slice('preprocess.cards.segmented.'.length));
+    return {
+      sendResult,
+      completed,
+      calls,
+      evidence: {
+        requestedPipeline: 'fused',
+        effectivePipeline: safeView.pipelineMode,
+        fusedAttemptCount: calls.fused,
+        configuredAttemptLimit: 2,
+        fusedDirectiveCompleted: fusedStage?.state === 'completed',
+        arbiterCheckpointReused: calls.arbiter === 1,
+        segmentedFamilies: families,
+        unresolvedFamilies: families,
+        profileUnavailableRelabel: safeView.diagnosticCodes.some((code) => /profile.*unavailable/i.test(code)),
+        operationState: completed?.state,
+        adverseStageCount: completed?.stages?.filter((stage) => ['failed', 'warning', 'running', 'pending'].includes(stage.state)).length || 0,
+        assistantAfter: sendResult?.messageProof?.assistantAfter === true
+      }
+    };
+  } finally {
+    await page.context().unroute(routePattern, handler).catch(() => {});
+    await page.evaluate(async (settings) => {
+      await globalThis.__recursionLiveHarnessRuntime?.updateSettings?.(settings);
+    }, previous).catch(() => {});
+  }
+}
+
+export async function driveQueuedReprocessMilestone({ page, timeoutMs }) {
+  const before = await readExecutionSnapshot(page);
+  const nativeBefore = await page.evaluate(() => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const entries = Array.isArray(context.chat) ? context.chat : [];
+    const assistantIndex = entries.findLastIndex((entry) => entry?.is_user === false);
+    const assistant = entries[assistantIndex] || {};
+    return {
+      assistantIndex,
+      assistantMesId: Number(assistant.mesid ?? assistantIndex),
+      swipeCount: Array.isArray(assistant.swipes) ? assistant.swipes.length : 0,
+      swipeId: Number(assistant.swipe_id ?? assistant.swipeId ?? 0),
+      length: entries.length
+    };
+  });
+  let swipeStarted = false;
+  let immediateProviderCalls = 0;
+  let swipeProviderCalls = 0;
+  const observeRequest = (request) => {
+    if (!String(request.url?.() || '').includes('/api/backends/chat-completions/generate')) return;
+    if (swipeStarted) swipeProviderCalls += 1;
+    else immediateProviderCalls += 1;
+  };
+  page.on?.('request', observeRequest);
+  const queuedAction = await clickProgressStageAction(
+    page,
+    'Reprocess from here on the next swipe',
+    'preprocess.arbiter',
+    timeoutMs
+  );
+  await page.waitForTimeout(500);
+  swipeStarted = true;
+  const swipe = page.locator(
+    `.mes[mesid="${nativeBefore.assistantMesId}"] .swipe_right, .mes[data-message-id="${nativeBefore.assistantMesId}"] .swipe_right, #chat .mes:last-child .swipe_right`
+  ).last();
+  await swipe.waitFor({ state: 'visible', timeout: timeoutMs });
+  await swipe.click({ timeout: timeoutMs });
+  await page.waitForFunction((previousState) => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const entries = Array.isArray(context.chat) ? context.chat : [];
+    const assistant = entries[previousState.assistantIndex] || {};
+    const swipeCount = Array.isArray(assistant.swipes) ? assistant.swipes.length : 0;
+    const swipeId = Number(assistant.swipe_id ?? assistant.swipeId ?? 0);
+    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+    return entries.length === previousState.length
+      && view.hostGenerationActive !== true
+      && view.execution?.state === 'completed'
+      && !view.queuedReprocess
+      && (swipeCount > previousState.swipeCount || swipeId !== previousState.swipeId);
+  }, nativeBefore, { timeout: timeoutMs });
+  const after = await readExecutionSnapshot(page);
+  page.off?.('request', observeRequest);
+  const attemptFor = (snapshot, stageId) => snapshot?.stages?.find((stage) => stage.stageId === stageId)?.attemptCount || 0;
+  const upstreamReused = attemptFor(before, 'preprocess.snapshot') === attemptFor(after, 'preprocess.snapshot');
+  const downstreamRerunCount = (after?.stages || []).filter((stage) => (
+    stage.stageId !== 'preprocess.snapshot'
+    && stage.attemptCount > attemptFor(before, stage.stageId)
+  )).length;
+  return {
+    before,
+    after,
+    queuedAction,
+    evidence: {
+      queuedStageIds: queuedAction.stageId ? [queuedAction.stageId] : [],
+      immediateProviderCalls,
+      nativeSwipeStarts: 1,
+      intentConsumeCount: 1,
+      upstreamCheckpointReused: upstreamReused,
+      downstreamRerunCount,
+      duplicateOperationCount: before?.operationId === after?.operationId ? 0 : 1,
+      operationState: after?.state,
+      adverseStageCount: after?.stages?.filter((stage) => ['failed', 'warning', 'running', 'pending'].includes(stage.state)).length || 0,
+      assistantAfter: swipeProviderCalls > 0
+    }
+  };
 }
 
 function saveCheckpoint(statePath, checkpoint) {

@@ -23,6 +23,9 @@ assertEqual(typeof module.clickProgressAction, 'function', 'runner exports exact
 assertEqual(typeof module.readExecutionSnapshot, 'function', 'runner exports bounded execution evidence reader');
 assertEqual(typeof module.driveStopResumeMilestone, 'function', 'runner exports Stop Resume milestone driver');
 assertEqual(typeof module.driveRetryStageMilestone, 'function', 'runner exports Retry Stage milestone driver');
+assertEqual(typeof module.driveFusedFallbackMilestone, 'function', 'runner exports Fused fallback milestone driver');
+assertEqual(typeof module.driveQueuedReprocessMilestone, 'function', 'runner exports queued reprocess milestone driver');
+assertEqual(typeof module.clickProgressStageAction, 'function', 'runner exports stage-specific progress action driver');
 
 const safeState = resolve('artifacts', 'live-resilience-matrix', 'active.json');
 assertDeepEqual(module.parseResilienceArgs(['--live', '--state', safeState]), {
@@ -129,5 +132,11 @@ const invalidSseBody = module.substituteInvalidModelResponse(
 );
 assertEqual(invalidSseBody.includes('{invalid'), true, 'stream substitution emits bounded invalid model content');
 assertEqual(invalidSseBody.includes('[DONE]'), true, 'stream substitution remains terminal');
+const zeroUsefulBody = module.substituteModelResponseContent(
+  JSON.stringify({ choices: [{ message: { content: '{"items":[{"family":"bad"}]}' } }] }),
+  'application/json',
+  '{"items":[]}'
+);
+assertEqual(JSON.parse(zeroUsefulBody).choices[0].message.content, '{"items":[]}', 'Fused fault preserves a valid zero-useful bundle payload');
 
 console.log('[pass] live resilience matrix runner');

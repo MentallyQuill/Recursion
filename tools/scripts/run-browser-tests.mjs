@@ -4,7 +4,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const scripts = [
   'test-live-harness.mjs',
-  'test-live-pipeline-proof.mjs'
+  'test-live-pipeline-proof.mjs',
+  'test-live-resilience-matrix.mjs'
 ];
 
 for (const script of scripts) {

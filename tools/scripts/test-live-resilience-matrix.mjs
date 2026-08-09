@@ -1,0 +1,89 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
+
+const module = await import('./prove-live-resilience-matrix.mjs');
+const source = readFileSync(new URL('./prove-live-resilience-matrix.mjs', import.meta.url), 'utf8');
+
+const labels = [
+  'nanogpt deepseek/deepseek-v4-flash:thinking - Provider',
+  'nanogpt minimax/minimax-m3:thinking - Freaky Frankenstein 5 - Internal States - Fast',
+  'nanogpt deepseek/deepseek-v4-pro-cheaper:thinking - Celia V5.4',
+  'nanogpt gemma-4-31B-Fabled - RedRising-1.3'
+];
+
+assertEqual(module.PROFILE_LABELS.length, 4, 'runner owns exactly four requested Utility profiles');
+assertDeepEqual(module.PROFILE_LABELS, labels, 'runner preserves the requested profile order');
+assertEqual(typeof module.parseResilienceArgs, 'function', 'runner exports CLI parser');
+assertEqual(typeof module.assertResiliencePreflight, 'function', 'runner exports preflight');
+assertEqual(typeof module.createResilienceCheckpoint, 'function', 'runner exports checkpoint creator');
+assertEqual(typeof module.validateResilienceCheckpoint, 'function', 'runner exports checkpoint validator');
+assertEqual(typeof module.runLiveResilienceMatrix, 'function', 'runner exports live entrypoint');
+
+const safeState = resolve('artifacts', 'live-resilience-matrix', 'active.json');
+assertDeepEqual(module.parseResilienceArgs(['--live', '--state', safeState]), {
+  live: true,
+  statePath: safeState
+}, 'CLI parser accepts a live run and safe JSON checkpoint');
+assertRejects(
+  () => Promise.resolve(module.parseResilienceArgs(['--state', safeState])),
+  /--live/,
+  'CLI requires explicit live mutation opt-in'
+);
+assertRejects(
+  () => Promise.resolve(module.parseResilienceArgs(['--live', '--state', resolve('artifacts', 'escape.json')])),
+  /live-resilience-matrix/,
+  'CLI rejects state paths outside the bounded artifact directory'
+);
+assertRejects(
+  () => Promise.resolve(module.parseResilienceArgs(['--live', '--state', resolve('artifacts', 'live-resilience-matrix', 'active.txt')])),
+  /\.json/,
+  'CLI requires JSON checkpoint paths'
+);
+assertRejects(
+  () => Promise.resolve(module.assertResiliencePreflight({ user: 'default-user', baseUrl: 'http://localhost:8000' })),
+  /recursion-soak/,
+  'preflight rejects non-soak users'
+);
+
+const checkpoint = module.createResilienceCheckpoint({
+  runId: 'resilience-safe-run',
+  user: 'recursion-soak-a',
+  branchSha: 'abc123',
+  profileLabels: labels,
+  chatIdHash: 'chat-hash'
+});
+assertEqual(checkpoint.schema, 'recursion.liveResilienceMatrix.v1', 'checkpoint uses versioned schema');
+assertEqual(checkpoint.status, 'qualifying', 'new checkpoint starts qualification');
+assertDeepEqual(checkpoint.acceptedNewTurns, [], 'new checkpoint has no accepted turns');
+assertDeepEqual(checkpoint.swipeRecords, [], 'new checkpoint has no swipe records');
+assertDeepEqual(module.validateResilienceCheckpoint(checkpoint, {
+  user: 'recursion-soak-a',
+  branchSha: 'abc123',
+  profileLabels: labels,
+  chatIdHash: 'chat-hash'
+}), { ok: true, errors: [] }, 'matching checkpoint may resume');
+assertEqual(module.validateResilienceCheckpoint(checkpoint, {
+  user: 'recursion-soak-a',
+  branchSha: 'different',
+  profileLabels: labels,
+  chatIdHash: 'chat-hash'
+}).ok, false, 'changed branch SHA refuses resume');
+assertEqual(module.validateResilienceCheckpoint(checkpoint, {
+  user: 'recursion-soak-a',
+  branchSha: 'abc123',
+  profileLabels: [...labels].reverse(),
+  chatIdHash: 'chat-hash'
+}).ok, false, 'changed profile ordering refuses resume');
+assertEqual(module.validateResilienceCheckpoint(checkpoint, {
+  user: 'recursion-soak-a',
+  branchSha: 'abc123',
+  profileLabels: labels,
+  chatIdHash: 'other-chat'
+}).ok, false, 'changed chat identity refuses resume');
+
+assertEqual(/post[- ]?process/i.test(source), false, 'runner does not invoke or import Post-process');
+assertEqual(/\.screenshot\s*\(|tracing\./.test(source), false, 'runner cannot create screenshots or traces');
+assertEqual(/connectionProfileId\s*:\s*[^'"\[]/.test(source), false, 'runner does not persist profile ids');
+
+console.log('[pass] live resilience matrix runner');

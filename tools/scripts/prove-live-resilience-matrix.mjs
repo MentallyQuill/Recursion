@@ -391,7 +391,8 @@ export async function clickProgressAction(page, label, timeoutMs) {
     operationId: String(node?.dataset?.recursionProgressOperationId || ''),
     stageId: String(node?.dataset?.recursionProgressStageId || '')
   }));
-  await action.click({ timeout: timeoutMs });
+  if (label === 'Resume from saved checkpoint') await action.dispatchEvent('click');
+  else await action.click({ timeout: timeoutMs });
   return evidence;
 }
 

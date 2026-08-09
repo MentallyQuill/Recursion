@@ -21,6 +21,7 @@ assertEqual(typeof module.createResilienceCheckpoint, 'function', 'runner export
 assertEqual(typeof module.validateResilienceCheckpoint, 'function', 'runner exports checkpoint validator');
 assertEqual(typeof module.runLiveResilienceMatrix, 'function', 'runner exports live entrypoint');
 assertEqual(typeof module.clickProgressAction, 'function', 'runner exports exact-label progress action driver');
+assertEqual(source.includes("label === 'Resume from saved checkpoint'"), true, 'Resume proof dispatches the validated control without waiting on the host overlay');
 assertEqual(typeof module.readExecutionSnapshot, 'function', 'runner exports bounded execution evidence reader');
 assertEqual(typeof module.driveStopResumeMilestone, 'function', 'runner exports Stop Resume milestone driver');
 assertEqual(module.classifyGenerationRequest('{"messages":[{"content":"recursion.utilityArbiter.v1"}]}'), 'recursion', 'request classifier recognizes Recursion provider work');
@@ -346,6 +347,7 @@ const actionCalls = [];
 const fakeAction = {
   async waitFor(options) { actionCalls.push(['waitFor', options]); },
   async evaluate() { return { kind: 'resume', operationId: 'operation-safe', stageId: 'preprocess.arbiter' }; },
+  async dispatchEvent(name) { actionCalls.push(['dispatchEvent', name]); },
   async click(options) { actionCalls.push(['click', options]); }
 };
 const fakePage = {
@@ -372,7 +374,7 @@ assertDeepEqual(actionCalls.find((call) => call[0] === 'getByRole'), [
   'button',
   { name: 'Resume from saved checkpoint', exact: true }
 ], 'progress driver requires the exact accessible label');
-assertEqual(actionCalls.filter((call) => call[0] === 'click').length, 1, 'progress driver clicks exactly once');
+assertDeepEqual(actionCalls.find((call) => call[0] === 'dispatchEvent'), ['dispatchEvent', 'click'], 'Resume driver dispatches the exact validated control once');
 assertEqual(actionCalls.filter((call) => call[0] === 'open').length, 1, 'progress driver opens a hidden popover even when aria-expanded is stale');
 
 const invalidJsonBody = module.substituteInvalidModelResponse(

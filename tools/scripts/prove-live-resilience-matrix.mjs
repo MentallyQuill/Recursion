@@ -465,6 +465,29 @@ async function waitForExecution(page, predicate, timeoutMs) {
   return readExecutionSnapshot(page);
 }
 
+export function classifyGenerationRequest(body = '') {
+  return String(body).includes('recursion.') ? 'recursion' : 'writer';
+}
+
+async function readBoundedHostState(page) {
+  return page.evaluate(() => {
+    const safe = (value, length) => String(value || '').slice(0, length);
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const chat = Array.isArray(context.chat) ? context.chat : [];
+    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+    return {
+      userCount: chat.filter((entry) => entry?.is_user === true).length,
+      assistantCount: chat.filter((entry) => entry?.is_user === false).length,
+      hostGenerationActive: view.hostGenerationActive === true,
+      executionState: String(view.execution?.state || ''),
+      activitySeverity: safe(view.activity?.severity, 40),
+      activityLabel: safe(view.activity?.label, 160),
+      sendDisabled: document.querySelector('#send_but')?.disabled === true,
+      stopVisible: Boolean(document.querySelector('.mes_stop:not([style*="display: none"]), #mes_stop:not([style*="display: none"])'))
+    };
+  });
+}
+
 export async function driveStopResumeMilestone({
   page,
   message,
@@ -472,9 +495,13 @@ export async function driveStopResumeMilestone({
   send = sendAndWait
 }) {
   let pausedWindow = false;
+  let resumedWindow = false;
   let detachedProviderCalls = 0;
+  const resumedProviderCalls = { recursion: 0, writer: 0 };
   const observeRequest = (request) => {
-    if (pausedWindow && String(request.url?.() || '').includes('/api/backends/chat-completions/generate')) detachedProviderCalls += 1;
+    if (!String(request.url?.() || '').includes('/api/backends/chat-completions/generate')) return;
+    if (pausedWindow) detachedProviderCalls += 1;
+    if (resumedWindow) resumedProviderCalls[classifyGenerationRequest(request.postData?.())] += 1;
   };
   page.on?.('request', observeRequest);
   const promptClearsBefore = await page.evaluate(() => (globalThis.__recursionSmokePromptEvents || []).filter((entry) => entry?.cleared === true).length);
@@ -492,9 +519,17 @@ export async function driveStopResumeMilestone({
   const paused = await waitForExecution(page, () => globalThis.__recursionLiveHarnessRuntime?.view?.()?.execution?.state === 'paused', timeoutMs);
   pausedWindow = true;
   const promptClearsAfter = await page.evaluate(() => (globalThis.__recursionSmokePromptEvents || []).filter((entry) => entry?.cleared === true).length);
+  resumedWindow = true;
   const resumeAction = await clickProgressAction(page, 'Resume from saved checkpoint', timeoutMs);
   pausedWindow = false;
-  const sendResult = await sendPromise;
+  let sendResult;
+  try {
+    sendResult = await sendPromise;
+  } catch (error) {
+    const host = await readBoundedHostState(page).catch(() => null);
+    throw new Error(`Stop Resume host settlement timed out: ${JSON.stringify({ host, resumedProviderCalls })}`);
+  }
+  resumedWindow = false;
   const completed = await waitForExecution(page, () => globalThis.__recursionLiveHarnessRuntime?.view?.()?.execution?.state === 'completed', timeoutMs);
   page.off?.('request', observeRequest);
   return {

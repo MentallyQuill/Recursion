@@ -23,6 +23,8 @@ assertEqual(typeof module.runLiveResilienceMatrix, 'function', 'runner exports l
 assertEqual(typeof module.clickProgressAction, 'function', 'runner exports exact-label progress action driver');
 assertEqual(typeof module.readExecutionSnapshot, 'function', 'runner exports bounded execution evidence reader');
 assertEqual(typeof module.driveStopResumeMilestone, 'function', 'runner exports Stop Resume milestone driver');
+assertEqual(module.classifyGenerationRequest('{"messages":[{"content":"recursion.utilityArbiter.v1"}]}'), 'recursion', 'request classifier recognizes Recursion provider work');
+assertEqual(module.classifyGenerationRequest('{"messages":[{"content":"continue the scene"}]}'), 'writer', 'request classifier recognizes native Writer work without exposing its body');
 assertEqual(typeof module.driveRetryStageMilestone, 'function', 'runner exports Retry Stage milestone driver');
 assertEqual(typeof module.driveFusedFallbackMilestone, 'function', 'runner exports Fused fallback milestone driver');
 assertEqual(typeof module.driveQueuedReprocessMilestone, 'function', 'runner exports queued reprocess milestone driver');

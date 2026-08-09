@@ -30,6 +30,17 @@ assertEqual(contextDirective.action, 'reduce-output-budget', 'context overflow c
 assertEqual(contextDirective.nextRequest.responseLength, 675, 'context overflow reduces output by 25 percent');
 assertEqual(contextDirective.nextRequest.roleId, 'sceneFrameCard', 'budget reduction preserves the rest of the request');
 
+const wrappedContextDirective = resolveModelRetryDirective({
+  failure: { code: 'RECURSION_PROVIDER_CONTEXT_LIMIT', retryable: false },
+  request: { roleId: 'utilityArbiter', request: { lane: 'utility', prompt: 'safe prompt' } },
+  attempt: 1,
+  limit: 2
+});
+assertEqual(wrappedContextDirective.action, 'reduce-output-budget', 'wrapped durable request chooses budget reduction');
+assertEqual(wrappedContextDirective.nextRequest.request.responseLength, 900, 'wrapped Arbiter budget reduces from its role default');
+assertEqual(wrappedContextDirective.nextRequest.responseLength, undefined, 'wrapped budget is not patched onto the ignored outer envelope');
+assertEqual(wrappedContextDirective.nextRequest.request.prompt, 'safe prompt', 'wrapped reduction preserves provider request fields');
+
 assertDeepEqual(resolveModelRetryDirective({
   failure: { code: 'RECURSION_PROFILE_UNAVAILABLE', retryable: false },
   request: { roleId: 'sceneFrameCard', responseLength: 900 },

@@ -1,6 +1,6 @@
 import { failureFrom } from '../failures.mjs';
 import { normalizeProviderError } from '../providers/provider-errors.mjs';
-import { minimumOutputBudgetForRole } from '../providers/stage-output-budgets.mjs';
+import { minimumOutputBudgetForRole, outputBudgetForRequest } from '../providers/stage-output-budgets.mjs';
 
 const ATTEMPT_MIN = 1;
 const ATTEMPT_MAX = 5;
@@ -104,13 +104,20 @@ export function resolveModelRetryDirective({ failure, request, attempt, limit })
   }
 
   if (failure?.code === 'RECURSION_PROVIDER_CONTEXT_LIMIT') {
-    const floor = minimumOutputBudgetForRole(request?.roleId);
-    const current = Number(request?.responseLength) || floor;
+    const wrapped = request?.request && typeof request.request === 'object' && !Array.isArray(request.request);
+    const providerRequest = wrapped ? request.request : request;
+    const roleId = request?.roleId || providerRequest?.roleId;
+    const floor = minimumOutputBudgetForRole(roleId);
+    const current = Number(providerRequest?.responseLength)
+      || outputBudgetForRequest(roleId, providerRequest);
     const reduced = Math.max(floor, Math.floor(current * 0.75));
     if (reduced >= current) return stopDirective('output-budget-at-floor');
+    const nextRequest = wrapped
+      ? { ...request, request: { ...providerRequest, responseLength: reduced } }
+      : { ...request, responseLength: reduced };
     return retryDirective('reduce-output-budget', {
       diagnosticCode: 'output-budget-reduced',
-      nextRequest: { ...request, responseLength: reduced }
+      nextRequest
     });
   }
 

@@ -3626,10 +3626,33 @@ try {
   assert(root.querySelector('[data-recursion-provider-sampler-mode-reasoner]'), 'Reasoner provider exposes sampler policy');
   assert(root.querySelector('[data-recursion-provider-structured-output-mode-reasoner]'), 'Reasoner provider exposes structured-output policy');
 
+  const reasonerPresetMode = root.querySelector('[data-recursion-provider-preset-mode-reasoner]');
+  const reasonerInstructMode = root.querySelector('[data-recursion-provider-instruct-mode-reasoner]');
+  const reasonerStructuredOutputMode = root.querySelector('[data-recursion-provider-structured-output-mode-reasoner]');
+  assertDeepEqual(
+    [...reasonerPresetMode.children].map((option) => option.value),
+    ['isolated', 'full-profile'],
+    'Behavioral Preset remains an explicit choice without Auto'
+  );
+  assertEqual(
+    reasonerPresetMode.getAttribute('title'),
+    "Controls whether Recursion includes the Connection Profile's complete generation preset in model calls. Isolated (recommended) excludes its behavioral prompts, style instructions, and wrappers, reducing interference with structured responses. Full Profile includes the entire preset; use it only when the preset is known to be compatible with Recursion's JSON-oriented requests.",
+    'Behavioral Preset tooltip explains the control and every option'
+  );
+  assertEqual(
+    reasonerInstructMode.getAttribute('title'),
+    "Controls whether SillyTavern applies the profile's instruct template. Auto (recommended) enables it for text-completion profiles and disables it for chat-completion profiles using the detected completion mode. On always applies the template. Off never applies it; use Off when the backend or preset already formats prompts and another template would duplicate the framing.",
+    'Instruct Formatting tooltip explains Auto, On, and Off'
+  );
+  assertEqual(
+    reasonerStructuredOutputMode.getAttribute('title'),
+    "Controls how Recursion requests machine-readable JSON. Auto (recommended) uses Prompt JSON before certification, then uses Native Schema only after the current profile passes native-schema certification. Native Schema always sends the schema and does not silently downgrade. Prompt JSON omits native-schema metadata and relies on explicit prompt instructions plus Recursion's parser and validation.",
+    'Structured Output tooltip explains certification-backed Auto and both forced modes'
+  );
+
   const dispatchProviderSettingsChange = (control) => {
     control.dispatchEvent({ type: 'change', target: control });
   };
-  const reasonerPresetMode = root.querySelector('[data-recursion-provider-preset-mode-reasoner]');
   const providerUpdatesBeforeReasonerAutosave = providerUpdates.length;
   reasonerPresetMode.value = 'full-profile';
   dispatchProviderSettingsChange(reasonerPresetMode);

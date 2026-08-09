@@ -115,6 +115,22 @@ assertDeepEqual(resolveGenerationPolicy({
   structuredOutputMethod: 'prompt-json'
 }, 'text auto preserves instruct but not full preset');
 assertEqual(resolveGenerationPolicy({
+  provider: { generationPolicy: { instructMode: 'auto' } },
+  completionMode: 'chat'
+}).includeInstruct, false, 'Instruct Auto skips formatting for chat completion');
+assertEqual(resolveGenerationPolicy({
+  provider: {
+    generationPolicy: { structuredOutputMode: 'auto' },
+    certification: { structuredOutput: 'unknown' }
+  }
+}).structuredOutputMethod, 'prompt-json', 'Structured Output Auto is conservative before certification');
+assertEqual(resolveGenerationPolicy({
+  provider: {
+    generationPolicy: { structuredOutputMode: 'auto' },
+    certification: { structuredOutput: 'native-schema' }
+  }
+}).structuredOutputMethod, 'native-schema', 'Structured Output Auto uses certified native schema support');
+assertEqual(resolveGenerationPolicy({
   provider: {
     generationPolicy: {
       presetMode: 'full-profile',

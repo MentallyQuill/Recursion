@@ -290,10 +290,10 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   clearRunJournal: 'Clear local Recursion activity history for this chat. This does not change cards, settings, or SillyTavern messages.',
   exportDiagnostics: 'Copy sanitized Recursion diagnostics for debugging. API keys, raw provider prompts, and hidden reasoning are excluded.',
   providerProfile: 'Saved SillyTavern Connection Profile for this lane. Recursion stores only the profile ID; routing, model access, presets, and credentials remain in SillyTavern.',
-  providerPresetMode: 'Isolated excludes the profile preset from Recursion prompts. Full profile preset is advanced and may affect structured output.',
-  providerInstructMode: 'Auto retains instruct formatting for text-completion profiles and disables it for chat-completion profiles.',
+  providerPresetMode: "Controls whether Recursion includes the Connection Profile's complete generation preset in model calls. Isolated (recommended) excludes its behavioral prompts, style instructions, and wrappers, reducing interference with structured responses. Full Profile includes the entire preset; use it only when the preset is known to be compatible with Recursion's JSON-oriented requests.",
+  providerInstructMode: "Controls whether SillyTavern applies the profile's instruct template. Auto (recommended) enables it for text-completion profiles and disables it for chat-completion profiles using the detected completion mode. On always applies the template. Off never applies it; use Off when the backend or preset already formats prompts and another template would duplicate the framing.",
   providerSamplerMode: 'Connection Profile copies only allowlisted sampler values. Recursion override uses the temperature and top-p controls below.',
-  providerStructuredOutputMode: 'Auto uses certified native schema support and otherwise requests prompt-only JSON.',
+  providerStructuredOutputMode: "Controls how Recursion requests machine-readable JSON. Auto (recommended) uses Prompt JSON before certification, then uses Native Schema only after the current profile passes native-schema certification. Native Schema always sends the schema and does not silently downgrade. Prompt JSON omits native-schema metadata and relies on explicit prompt instructions plus Recursion's parser and validation.",
   providerOutputTokenCeiling: 'Hard ceiling for structured Recursion responses on this lane. Individual stages use smaller budgets.',
   providerTest: 'Run staged profile certification for connectivity, one card, and Fused card output.'
 });

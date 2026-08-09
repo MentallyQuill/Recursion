@@ -8782,7 +8782,40 @@ export function createRecursionRuntime({
     });
     if (result?.state) executionView = result;
     if (result?.state !== 'completed') return result;
-    return advanceDurablePreprocess(context, result);
+    const advanced = await advanceDurablePreprocess(context, result);
+    if (
+      advanced?.ok !== true
+      || advanced.continuePrimaryGeneration !== true
+      || result.hostOwned !== true
+      || !['normal', 'swipe', 'regenerate'].includes(result.nativeGenerationType)
+    ) {
+      return advanced;
+    }
+    const started = await requestHostGenerationStart({
+      type: result.nativeGenerationType,
+      source: 'recursion-ui',
+      reason: 'retry-stage'
+    });
+    if (started?.ok !== true || started?.started !== true) {
+      updateTurnScope(lastTurnScope, {
+        generationClassification: lastTurnScope?.generationClassification || 'compatible-paused-same-turn',
+        operationId: id,
+        diagnosticCodes: ['host-retry-start-failed']
+      });
+      settleRuntimeActivity({
+        runId: id,
+        outcome: 'warning',
+        phase: 'settled',
+        severity: 'warning',
+        label: 'Retry completed, but SillyTavern generation could not start.',
+        chips: ['Retry'],
+        detail: {
+          diagnosticCodes: ['host-retry-start-failed'],
+          errorCode: safeText(started?.error?.code || 'RECURSION_HOST_GENERATION_FAILED', 120)
+        }
+      });
+    }
+    return { ...advanced, hostGeneration: started };
   }
 
   async function queueStageReprocess({ operationId: requestedOperationId, stageId } = {}) {

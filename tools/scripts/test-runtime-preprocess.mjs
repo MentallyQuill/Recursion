@@ -453,6 +453,53 @@ function roleCounts(calls = []) {
 }
 
 {
+  const hostGenerationStarts = [];
+  let arbiterCalls = 0;
+  const harness = createHarness({
+    settings: { modelAttemptsPerStep: 1 },
+    provider: {
+      async generate(roleId, request = {}) {
+        if (roleId === 'utilityArbiter') {
+          arbiterCalls += 1;
+          if (arbiterCalls === 1) {
+            throw Object.assign(new Error('first Arbiter window failed'), {
+              code: 'RECURSION_TEST_ARBITER_FAILED',
+              retryable: false
+            });
+          }
+          return arbiterResponse(request);
+        }
+        if (roleId === 'sceneFrameCard') return cardResponse(roleId, request);
+        throw new Error(`unexpected provider role ${roleId}`);
+      }
+    },
+    hostGeneration: {
+      async start(details) {
+        hostGenerationStarts.push(clone(details));
+        return { ok: true, started: true, completed: false };
+      }
+    }
+  });
+  await harness.runtime.prepareForGeneration({
+    userMessage: null,
+    hostGeneration: true,
+    generationType: 'swipe'
+  });
+  const failed = await harness.storage.loadPipelineRun('chat-preprocess');
+  assertEqual(failed.state, 'paused', 'blocking Arbiter failure pauses before manual Retry');
+  const retried = await harness.runtime.retryStage({
+    operationId: failed.operationId,
+    stageId: 'preprocess.arbiter'
+  });
+  assertEqual(retried.execution.state, 'completed', 'manual Retry completes the durable pre-process operation');
+  assertDeepEqual(hostGenerationStarts, [{
+    type: 'swipe',
+    source: 'recursion-ui',
+    reason: 'retry-stage'
+  }], 'completed Retry restarts the owning native host generation');
+}
+
+{
   const storage = createStorageRepository({ storage: createMemoryStorageAdapter() });
   const cardGate = deferred();
   const firstCalls = [];

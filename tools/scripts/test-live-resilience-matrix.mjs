@@ -242,9 +242,13 @@ const fakeAction = {
   async click(options) { actionCalls.push(['click', options]); }
 };
 const fakePage = {
+  async evaluate() { return false; },
   locator(selector) {
     actionCalls.push(['locator', selector]);
-    return { first: () => ({ click: async (options) => actionCalls.push(['open', options]) }) };
+    return { first: () => ({
+      getAttribute: async () => 'true',
+      click: async (options) => actionCalls.push(['open', options])
+    }) };
   },
   getByRole(role, options) {
     actionCalls.push(['getByRole', role, options]);
@@ -262,6 +266,7 @@ assertDeepEqual(actionCalls.find((call) => call[0] === 'getByRole'), [
   { name: 'Resume from saved checkpoint', exact: true }
 ], 'progress driver requires the exact accessible label');
 assertEqual(actionCalls.filter((call) => call[0] === 'click').length, 1, 'progress driver clicks exactly once');
+assertEqual(actionCalls.filter((call) => call[0] === 'open').length, 1, 'progress driver opens a hidden popover even when aria-expanded is stale');
 
 const invalidJsonBody = module.substituteInvalidModelResponse(
   JSON.stringify({ choices: [{ message: { content: '{"schema":"recursion.utilityArbiter.v1"}' } }] }),

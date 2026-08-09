@@ -267,10 +267,18 @@ export async function startFreshSyntheticChat(page, timeoutMs) {
   return page.evaluate(contextChatSummaryScript());
 }
 
+async function ensureProgressPopoverOpen(page, timeoutMs) {
+  const visible = await page.evaluate(() => {
+    const popover = document.querySelector('[data-recursion-status-popover]');
+    if (!popover || popover.hidden === true) return false;
+    const style = globalThis.getComputedStyle?.(popover);
+    return style?.display !== 'none' && style?.visibility !== 'hidden';
+  }).catch(() => false);
+  if (!visible) await page.locator('[data-recursion-status-trigger]').first().click({ timeout: timeoutMs });
+}
+
 export async function clickProgressAction(page, label, timeoutMs) {
-  const trigger = page.locator('[data-recursion-status-trigger]').first();
-  const expanded = await trigger.getAttribute?.('aria-expanded').catch?.(() => 'false');
-  if (expanded !== 'true') await trigger.click({ timeout: timeoutMs });
+  await ensureProgressPopoverOpen(page, timeoutMs);
   const action = page.getByRole('button', { name: label, exact: true }).first();
   await action.waitFor({ state: 'visible', timeout: timeoutMs });
   const evidence = await action.evaluate((node) => ({
@@ -283,9 +291,7 @@ export async function clickProgressAction(page, label, timeoutMs) {
 }
 
 export async function clickProgressStageAction(page, label, stageId, timeoutMs) {
-  const trigger = page.locator('[data-recursion-status-trigger]').first();
-  const expanded = await trigger.getAttribute?.('aria-expanded').catch?.(() => 'false');
-  if (expanded !== 'true') await trigger.click({ timeout: timeoutMs });
+  await ensureProgressPopoverOpen(page, timeoutMs);
   const selector = `[data-recursion-progress-action][aria-label="${label}"][data-recursion-progress-stage-id="${stageId}"]`;
   const action = page.locator(selector).first();
   await action.waitFor({ state: 'visible', timeout: timeoutMs });

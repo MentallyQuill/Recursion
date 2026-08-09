@@ -497,6 +497,7 @@ export function summarizeProviderResponse(body = '', contentType = '') {
     : (() => { try { return [JSON.parse(text || '{}')]; } catch { return []; } })();
   let choices = 0;
   let contentChars = 0;
+  let visibleChars = 0;
   let reasoningChars = 0;
   let finishReason = '';
   let errorCode = '';
@@ -505,13 +506,15 @@ export function summarizeProviderResponse(body = '', contentType = '') {
     choices = Math.max(choices, entries.length);
     for (const choice of entries) {
       const payload = choice?.message || choice?.delta || {};
-      contentChars += String(payload.content || choice?.text || '').length;
+      const content = String(payload.content || choice?.text || '');
+      contentChars += content.length;
+      visibleChars += content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim().length;
       reasoningChars += String(payload.reasoning_content || payload.reasoning || '').length;
       finishReason ||= boundedText(choice?.finish_reason, 80);
     }
     errorCode ||= boundedText(envelope?.error?.code || envelope?.error?.type, 120);
   }
-  return { envelope: stream ? 'stream' : 'json', choices, contentChars, reasoningChars, finishReason, errorCode };
+  return { envelope: stream ? 'stream' : 'json', choices, contentChars, visibleChars, reasoningChars, finishReason, errorCode };
 }
 
 async function readBoundedHostState(page) {
@@ -593,13 +596,14 @@ export async function driveStopResumeMilestone({
     const writerResponses = resumedProviderResponses
       .filter((entry) => entry.kind === 'writer')
       .map((entry) => ({
-        status: entry.status,
-        envelope: entry.envelope,
-        choices: entry.choices,
-        contentChars: entry.contentChars,
-        reasoningChars: entry.reasoningChars,
-        finishReason: entry.finishReason,
-        errorCode: entry.errorCode
+        s: entry.status,
+        e: entry.envelope,
+        n: entry.choices,
+        c: entry.contentChars,
+        v: entry.visibleChars,
+        r: entry.reasoningChars,
+        f: entry.finishReason,
+        x: entry.errorCode
       }));
     throw new Error(`Stop Resume host settlement timed out: ${JSON.stringify({ host, resumedProviderCalls, writerResponses })}`);
   }

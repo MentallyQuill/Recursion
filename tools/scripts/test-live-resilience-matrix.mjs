@@ -34,11 +34,13 @@ assertDeepEqual(module.summarizeProviderResponse(JSON.stringify({
   envelope: 'json',
   choices: 1,
   contentChars: 0,
+  visibleChars: 0,
   reasoningChars: 16,
   finishReason: 'stop',
   errorCode: ''
 }, 'provider response classifier reports lengths without retaining content');
 assertEqual(JSON.stringify(module.summarizeProviderResponse('data: {"choices":[{"delta":{"content":"CANARY"}}]}\n\ndata: [DONE]\n', 'text/event-stream')).includes('CANARY'), false, 'stream classifier never retains response text');
+assertEqual(module.summarizeProviderResponse(JSON.stringify({ choices: [{ message: { content: '<think>hidden</think>' } }] })).visibleChars, 0, 'response classifier detects thinking-only visible content');
 const crashedCheckpoint = { status: 'running', acceptedNewTurns: [], defect: null };
 module.recoverCrashedHarnessCheckpoint(crashedCheckpoint);
 assertDeepEqual(crashedCheckpoint, {

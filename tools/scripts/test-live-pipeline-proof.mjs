@@ -31,6 +31,22 @@ for (const helper of [
   assertEqual(typeof module[helper], 'function', `${helper} is exported for the resilience coordinator`);
 }
 
+const previousSillyTavern = globalThis.SillyTavern;
+globalThis.SillyTavern = {
+  getContext: () => ({
+    chat: [{ is_user: true }, { is_user: false }],
+    getCurrentChatId: () => 'getter-only-live-chat'
+  })
+};
+assertDeepEqual(module.contextChatSummaryScript()(), {
+  length: 2,
+  assistantCount: 1,
+  userCount: 1,
+  lastIsUser: false,
+  chatId: 'getter-only-live-chat'
+}, 'live summary uses SillyTavern current-chat getter when direct fields are absent');
+globalThis.SillyTavern = previousSillyTavern;
+
 assertDeepEqual(module.resolveExactUtilityProfile([
   { name: 'nanogpt DeepSeek Flash - Provider', model: 'deepseek-flash' },
   { name: 'nanogpt DeepSeek Flash 0731 - Celia', model: 'deepseek-flash-0731' }

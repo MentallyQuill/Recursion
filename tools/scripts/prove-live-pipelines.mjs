@@ -312,12 +312,15 @@ export function contextChatSummaryScript() {
   return () => {
     const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
     const chat = Array.isArray(context.chat) ? context.chat : [];
+    const currentChatId = typeof context.getCurrentChatId === 'function'
+      ? context.getCurrentChatId()
+      : (context.chatId || context.currentChatId || '');
     return {
       length: chat.length,
       assistantCount: chat.filter((message) => message && message.is_user === false).length,
       userCount: chat.filter((message) => message && message.is_user === true).length,
       lastIsUser: chat.length ? chat[chat.length - 1]?.is_user === true : null,
-      chatId: String(context.chatId || context.currentChatId || '')
+      chatId: String(currentChatId || '')
     };
   };
 }

@@ -28,6 +28,10 @@ assertEqual(typeof module.driveQueuedReprocessMilestone, 'function', 'runner exp
 assertEqual(typeof module.clickProgressStageAction, 'function', 'runner exports stage-specific progress action driver');
 assertEqual(typeof module.nextResilienceWork, 'function', 'runner exports bounded scheduler');
 assertEqual(typeof module.acceptResilienceTurn, 'function', 'runner exports accepted-turn ledger writer');
+assertEqual(typeof module.ensureSyntheticChat, 'function', 'runner exports synthetic chat opener');
+assertEqual(module.selectSyntheticCharacterIndex([], null), -1, 'chat opener reports no available character');
+assertEqual(module.selectSyntheticCharacterIndex([{ name: 'Story' }], null), 0, 'chat opener selects the first soak character');
+assertEqual(module.selectSyntheticCharacterIndex([{ name: 'One' }, { name: 'Two' }], 1), 1, 'chat opener preserves a valid active character');
 
 const safeState = resolve('artifacts', 'live-resilience-matrix', 'active.json');
 assertDeepEqual(module.parseResilienceArgs(['--live', '--state', safeState]), {

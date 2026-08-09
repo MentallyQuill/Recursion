@@ -74,6 +74,52 @@ export function assertResiliencePreflight({ user, baseUrl } = {}) {
   return { user: userVerdict.user, baseUrl: String(baseUrl).trim() };
 }
 
+export function selectSyntheticCharacterIndex(characters = [], currentId = null) {
+  if (!Array.isArray(characters) || characters.length === 0) return -1;
+  const current = Number(currentId);
+  return Number.isInteger(current) && current >= 0 && current < characters.length ? current : 0;
+}
+
+export async function ensureSyntheticChat(page, timeoutMs) {
+  await page.waitForFunction(() => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    return Array.isArray(context.characters) && context.characters.length > 0;
+  }, null, { timeout: timeoutMs });
+  const result = await page.evaluate(async () => {
+    const readContext = () => globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    let context = readContext();
+    const characters = Array.isArray(context.characters) ? context.characters : [];
+    let index = Number(context.characterId);
+    if (!Number.isInteger(index) || index < 0 || index >= characters.length) index = 0;
+    if (Number(context.characterId) !== index && typeof context.selectCharacterById === 'function') {
+      await context.selectCharacterById(index);
+      context = readContext();
+    }
+    const character = (Array.isArray(context.characters) ? context.characters : characters)[index] || characters[index];
+    const directChatId = typeof context.getCurrentChatId === 'function'
+      ? context.getCurrentChatId()
+      : (context.chatId || context.currentChatId || '');
+    const fileName = String(character?.chat || directChatId || '').replace(/\.jsonl$/i, '');
+    if (fileName && typeof context.openCharacterChat === 'function') {
+      await context.openCharacterChat(fileName);
+      context = readContext();
+    }
+    const chatId = typeof context.getCurrentChatId === 'function'
+      ? context.getCurrentChatId()
+      : (context.chatId || context.currentChatId || fileName || '');
+    const entries = Array.isArray(context.chat) ? context.chat : [];
+    return {
+      ok: Boolean(chatId),
+      chatId: String(chatId || ''),
+      characterName: String(character?.name || '').slice(0, 180),
+      userCount: entries.filter((entry) => entry?.is_user === true).length,
+      assistantCount: entries.filter((entry) => entry?.is_user === false).length
+    };
+  });
+  if (!result?.ok) throw new Error('Unable to create or reopen a synthetic soak chat.');
+  return result;
+}
+
 export function createResilienceCheckpoint({ runId, user, branchSha, profileLabels, chatIdHash, baselineCounts = {} }) {
   return {
     schema: STATE_SCHEMA,
@@ -670,8 +716,9 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
       const page = await context.newPage();
       await page.goto(preflight.baseUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
       await waitForRoot(page, timeoutMs);
+      await ensureSyntheticChat(page, timeoutMs);
       const chat = await page.evaluate(contextChatSummaryScript());
-      if (!chat.chatId) throw new Error('The soak user must have one active synthetic chat before the matrix starts.');
+      if (!chat.chatId) throw new Error('Unable to resolve the active synthetic soak chat identity.');
       const identity = {
         user: preflight.user,
         branchSha: currentBranchSha(),

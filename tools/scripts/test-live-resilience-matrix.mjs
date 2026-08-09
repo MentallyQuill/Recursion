@@ -95,6 +95,10 @@ const v4Checkpoint = {
 module.replaceIncompatibleV4(v4Checkpoint);
 assertEqual(v4Checkpoint.assignments['fused-fallback'], nemotronLabel, 'Nemotron replaces incompatible V4 Pro for Fused');
 assertDeepEqual(v4Checkpoint.effectiveProfileLabels, [glmLabel, labels[1], nemotronLabel, labels[3]], 'endurance rotation retains four distinct effective profiles');
+v4Checkpoint.status = 'fail';
+module.fallbackFusedToGlm(v4Checkpoint);
+assertEqual(v4Checkpoint.assignments['fused-fallback'], glmLabel, 'GLM owns Fused after Nemotron context incompatibility');
+assertDeepEqual(v4Checkpoint.effectiveProfileLabels, [glmLabel, labels[1], glmLabel, labels[3]], 'planned rotation reflects the three viable models');
 assertDeepEqual(module.classifyHostTurnCounts({
   baselineCounts: { user: 0, assistant: 0 },
   acceptedNewTurns: [],

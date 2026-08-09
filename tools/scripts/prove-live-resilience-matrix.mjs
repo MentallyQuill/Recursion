@@ -289,6 +289,27 @@ export function replaceIncompatibleV4(checkpoint) {
   return checkpoint;
 }
 
+export function fallbackFusedToGlm(checkpoint) {
+  if (checkpoint?.status !== 'fail' || checkpoint.currentMilestone !== 'fused-fallback') {
+    throw new Error('GLM Fused fallback requires the failed Fused milestone boundary.');
+  }
+  checkpoint.assignments['fused-fallback'] = GLM_CELIA_LABEL;
+  checkpoint.effectiveProfileLabels = (checkpoint.effectiveProfileLabels || [])
+    .map((label) => label === NEMOTRON_LABEL ? GLM_CELIA_LABEL : label);
+  checkpoint.modelIncompatibilities = [
+    ...(checkpoint.modelIncompatibilities || []),
+    {
+      label: NEMOTRON_LABEL,
+      stageId: 'preprocess.arbiter',
+      failureCode: 'RECURSION_PROVIDER_CONTEXT_LIMIT',
+      replacementLabel: GLM_CELIA_LABEL
+    }
+  ];
+  checkpoint.status = 'ready';
+  checkpoint.defect = null;
+  return checkpoint;
+}
+
 async function repairMissingAcceptedAssistant(page, checkpoint, timeoutMs) {
   const chat = await page.evaluate(() => {
     const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
@@ -1122,7 +1143,11 @@ async function executeResilienceWork(page, checkpoint, statePath, timeoutMs) {
         swipeRecords: checkpoint.swipeRecords,
         queuedReprocess: false,
         pausedOperationCount: finalExecution?.state === 'paused' ? 1 : 0,
-        runningStageCount: finalExecution?.stages?.filter((stage) => stage.state === 'running').length || 0
+        runningStageCount: finalExecution?.stages?.filter((stage) => stage.state === 'running').length || 0,
+        expectedProfileLabels: [
+          ...MILESTONE_ORDER.map((milestone) => checkpoint.assignments[milestone]),
+          ...(checkpoint.effectiveProfileLabels || [])
+        ]
       });
       if (!endurance.ok) throw new Error(`Endurance ledger failed: ${endurance.errors.join(', ')}`);
       checkpoint.status = 'complete';
@@ -1392,6 +1417,12 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
         if (env.RECURSION_RESILIENCE_REPLACE_INCOMPATIBLE_V4 === '1') {
           await removeUnacceptedCompletedPair(page, checkpoint, timeoutMs);
           replaceIncompatibleV4(checkpoint);
+          chat = await page.evaluate(contextChatSummaryScript());
+          saveCheckpoint(args.statePath, checkpoint);
+        }
+        if (env.RECURSION_RESILIENCE_FALLBACK_FUSED_GLM === '1') {
+          await removeUnacceptedCompletedPair(page, checkpoint, timeoutMs);
+          fallbackFusedToGlm(checkpoint);
           chat = await page.evaluate(contextChatSummaryScript());
           saveCheckpoint(args.statePath, checkpoint);
         }

@@ -156,6 +156,15 @@ assertDeepEqual(inspectEnduranceLedger({
   acceptedNewTurns: 8,
   profileCounts: Object.fromEntries(labels.map((label) => [label, 2]))
 }, 'endurance ledger accepts eight monotonic turns and one non-counting swipe');
+const adaptedLabels = [labels[0], labels[1], labels[0], labels[2], labels[0], labels[1], labels[0], labels[2]];
+assertEqual(inspectEnduranceLedger({
+  acceptedNewTurns: turns.map((turn, index) => ({ ...turn, profileLabel: adaptedLabels[index] })),
+  expectedProfileLabels: adaptedLabels,
+  swipeRecords: [],
+  queuedReprocess: null,
+  pausedOperationCount: 0,
+  runningStageCount: 0
+}).ok, true, 'endurance ledger accepts the explicit adapted profile rotation after incompatibilities');
 
 assertEqual(inspectEnduranceLedger({
   acceptedNewTurns: turns.map((turn, index) => index === 7 ? { ...turn, chatIdHash: 'other-chat' } : turn),

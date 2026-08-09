@@ -129,7 +129,14 @@ export function inspectEnduranceLedger(ledger = {}) {
     if (label) counts[label] = (counts[label] || 0) + 1;
     return counts;
   }, {});
-  if (Object.keys(profileCounts).length !== 4 || Object.values(profileCounts).some((count) => count !== 2)) {
+  const plannedLabels = list(ledger.expectedProfileLabels).map((label) => text(label)).filter(Boolean);
+  if (plannedLabels.length === 8) {
+    const expectedCounts = plannedLabels.reduce((counts, label) => {
+      counts[label] = (counts[label] || 0) + 1;
+      return counts;
+    }, {});
+    if (JSON.stringify(profileCounts) !== JSON.stringify(expectedCounts)) errors.push('profile-rotation-count');
+  } else if (Object.keys(profileCounts).length !== 4 || Object.values(profileCounts).some((count) => count !== 2)) {
     errors.push('profile-rotation-count');
   }
   if (list(ledger.swipeRecords).some((record) => record?.countsAsNewTurn !== false)) errors.push('swipe-counted-as-turn');

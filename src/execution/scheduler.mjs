@@ -1025,15 +1025,21 @@ export function createExecutionScheduler({
   }
 
   function retry({ operationId, stageId, graph, context = {}, provenance } = {}) {
-    const runtime = runtimeForOperation(operationId);
-    if (!runtime) return Promise.reject(new Error('Pipeline operation is unavailable for Retry.'));
     if (resumeTransitions.has(operationId)) return resumeTransitions.get(operationId);
     const transition = (async () => {
-      const loaded = await repository.loadPipelineRun(runtime.manifest.chatKey);
+      let runtime = runtimeForOperation(operationId);
+      const expectedProvenance = normalizeExecutionProvenance(provenance);
+      const chatKey = runtime?.manifest.chatKey || expectedProvenance.chatKey;
+      const loaded = chatKey ? await repository.loadPipelineRun(chatKey) : null;
       if (!loaded || loaded.operationId !== operationId) {
         throw new Error('Pipeline operation is unavailable for Retry.');
       }
-      const expectedProvenance = normalizeExecutionProvenance(provenance);
+      if (!runtime) {
+        if (!graph) throw new Error('Pipeline operation graph is unavailable for Retry.');
+        runtime = makeRuntime(loaded, graph, context, expectedProvenance);
+        operations.set(operationId, runtime);
+        operationByChat.set(runtime.manifest.chatKey, operationId);
+      }
       const status = compareRunProvenance(expectedProvenance, loaded.provenance);
       if (!status.reusable) {
         const stale = await saveStandalone(loaded, {

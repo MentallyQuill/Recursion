@@ -878,6 +878,41 @@ function createIds() {
 
 {
   const repository = createRepository();
+  let calls = 0;
+  const graph = createExecutionGraph({
+    stages: [stage('root', [], async () => {
+      calls += 1;
+      if (calls === 1) throw Object.assign(new Error('first process failed'), { code: 'SAFE_FAIL' });
+      return { value: 'restored retry' };
+    })]
+  });
+  const firstProcess = createExecutionScheduler({
+    repository,
+    now: createClock(),
+    createId: createIds(),
+    attemptsPerStep: 1
+  });
+  await firstProcess.start({ manifest: manifest({ operationId: 'restored-retry-run' }), graph, context: {} });
+  const restoredProcess = createExecutionScheduler({
+    repository,
+    now: createClock(),
+    createId: createIds(),
+    attemptsPerStep: 1
+  });
+  await restoredProcess.retry({
+    operationId: 'restored-retry-run',
+    stageId: 'root',
+    graph,
+    context: {},
+    provenance
+  });
+  const saved = await repository.loadPipelineRun('chat-a');
+  assertEqual(saved.state, 'completed', 'manual Retry reconstructs scheduler runtime after reload');
+  assertEqual(saved.stageRecords.root.attempts.total, 2, 'restored Retry consumes one new attempt window');
+}
+
+{
+  const repository = createRepository();
   let deckDependencies = null;
   const graph = createExecutionGraph({
     stages: [

@@ -26,6 +26,8 @@ assertEqual(typeof module.driveRetryStageMilestone, 'function', 'runner exports 
 assertEqual(typeof module.driveFusedFallbackMilestone, 'function', 'runner exports Fused fallback milestone driver');
 assertEqual(typeof module.driveQueuedReprocessMilestone, 'function', 'runner exports queued reprocess milestone driver');
 assertEqual(typeof module.clickProgressStageAction, 'function', 'runner exports stage-specific progress action driver');
+assertEqual(typeof module.nextResilienceWork, 'function', 'runner exports bounded scheduler');
+assertEqual(typeof module.acceptResilienceTurn, 'function', 'runner exports accepted-turn ledger writer');
 
 const safeState = resolve('artifacts', 'live-resilience-matrix', 'active.json');
 assertDeepEqual(module.parseResilienceArgs(['--live', '--state', safeState]), {
@@ -88,6 +90,74 @@ assertEqual(module.validateResilienceCheckpoint(checkpoint, {
   profileLabels: labels,
   chatIdHash: 'other-chat'
 }).ok, false, 'changed chat identity refuses resume');
+
+checkpoint.assignments = {
+  'stop-resume': labels[0],
+  'retry-stage': labels[1],
+  'fused-fallback': labels[2],
+  'queued-reprocess': labels[3]
+};
+checkpoint.status = 'ready';
+assertDeepEqual(module.nextResilienceWork(checkpoint), {
+  kind: 'milestone',
+  milestone: 'stop-resume',
+  profileLabel: labels[0]
+}, 'scheduler starts with Stop Resume');
+for (const milestone of ['stop-resume', 'retry-stage', 'fused-fallback', 'queued-reprocess']) {
+  checkpoint.milestones[milestone] = { ok: true };
+  checkpoint.acceptedNewTurns.push({ profileLabel: checkpoint.assignments[milestone] });
+}
+assertDeepEqual(module.nextResilienceWork(checkpoint), {
+  kind: 'endurance',
+  index: 0,
+  profileLabel: labels[0]
+}, 'scheduler rotates into the first endurance profile after four resilience turns');
+checkpoint.acceptedNewTurns.push({ profileLabel: labels[0] });
+assertDeepEqual(module.nextResilienceWork(checkpoint), {
+  kind: 'endurance',
+  index: 1,
+  profileLabel: labels[1]
+}, 'scheduler rotates Utility profile order without a ninth turn');
+while (checkpoint.acceptedNewTurns.length < 8) checkpoint.acceptedNewTurns.push({ profileLabel: labels[checkpoint.acceptedNewTurns.length - 4] });
+assertDeepEqual(module.nextResilienceWork(checkpoint), { kind: 'complete' }, 'scheduler stops exactly at eight accepted new turns');
+
+const ledgerCheckpoint = module.createResilienceCheckpoint({
+  runId: 'ledger-run',
+  user: 'recursion-soak-a',
+  branchSha: 'abc123',
+  profileLabels: labels,
+  chatIdHash: 'chat-hash',
+  baselineCounts: { user: 6, assistant: 6 }
+});
+module.acceptResilienceTurn(ledgerCheckpoint, {
+  profileLabel: labels[0],
+  execution: { operationId: 'operation-one', turnKeyHash: 'turn-hash', state: 'completed' },
+  sendResult: { after: { userCount: 7, assistantCount: 7 } },
+  promptKeyCount: 3,
+  preparedReuse: false
+});
+assertDeepEqual(ledgerCheckpoint.acceptedNewTurns[0], {
+  turnId: 'operation-one',
+  turnKeyHash: 'turn-hash',
+  chatIdHash: 'chat-hash',
+  profileLabel: labels[0],
+  userCount: 1,
+  assistantCount: 1,
+  operationState: 'completed',
+  promptKeyCount: 3,
+  preparedReuse: false
+}, 'accepted turn stores only soak-relative counts and bounded identifiers');
+assertRejects(
+  () => Promise.resolve(module.acceptResilienceTurn(ledgerCheckpoint, {
+    profileLabel: labels[1],
+    execution: { operationId: 'operation-two', turnKeyHash: 'turn-two', state: 'completed' },
+    sendResult: { after: { userCount: 9, assistantCount: 8 } },
+    promptKeyCount: 3,
+    preparedReuse: false
+  })),
+  /monotonic/,
+  'ledger rejects skipped or non-monotonic message counts'
+);
 
 assertEqual(/post[- ]?process/i.test(source), false, 'runner does not invoke or import Post-process');
 assertEqual(/\.screenshot\s*\(|tracing\./.test(source), false, 'runner cannot create screenshots or traces');

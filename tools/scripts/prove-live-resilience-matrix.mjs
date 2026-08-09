@@ -6,15 +6,21 @@ import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import { createSillyTavernHttpSession, validateSoakUserHandle } from './lib/sillytavern-live-harness.mjs';
 import {
+  inspectEnduranceLedger,
+  inspectLifecycleMilestone,
   qualifyUtilityProfiles,
   sanitizeResilienceReport
 } from './lib/live-resilience-matrix-contract.mjs';
 import {
   certifyUtilityProfile,
   contextChatSummaryScript,
+  ensureRunnableDeckFixture,
   sendAndWait,
+  selectInjectionSettings,
+  selectMode,
   selectPipeline,
   selectUtilityProfileByLabel,
+  setPower,
   waitForRoot
 } from './prove-live-pipelines.mjs';
 
@@ -68,7 +74,7 @@ export function assertResiliencePreflight({ user, baseUrl } = {}) {
   return { user: userVerdict.user, baseUrl: String(baseUrl).trim() };
 }
 
-export function createResilienceCheckpoint({ runId, user, branchSha, profileLabels, chatIdHash }) {
+export function createResilienceCheckpoint({ runId, user, branchSha, profileLabels, chatIdHash, baselineCounts = {} }) {
   return {
     schema: STATE_SCHEMA,
     runId: boundedText(runId, 180),
@@ -76,6 +82,10 @@ export function createResilienceCheckpoint({ runId, user, branchSha, profileLabe
     branchSha: boundedText(branchSha, 80),
     profileLabels: [...profileLabels],
     chatIdHash: boundedText(chatIdHash, 80),
+    baselineCounts: {
+      user: Number(baselineCounts.user || 0),
+      assistant: Number(baselineCounts.assistant || 0)
+    },
     status: 'qualifying',
     qualifications: [],
     assignments: {},
@@ -85,6 +95,54 @@ export function createResilienceCheckpoint({ runId, user, branchSha, profileLabe
     swipeRecords: [],
     defect: null
   };
+}
+
+const MILESTONE_ORDER = Object.freeze(['stop-resume', 'retry-stage', 'fused-fallback', 'queued-reprocess']);
+
+export function nextResilienceWork(checkpoint = {}) {
+  if ((checkpoint.acceptedNewTurns || []).length >= 8) return { kind: 'complete' };
+  for (const milestone of MILESTONE_ORDER) {
+    if (checkpoint.milestones?.[milestone]?.ok !== true) {
+      return { kind: 'milestone', milestone, profileLabel: checkpoint.assignments?.[milestone] || '' };
+    }
+  }
+  const index = (checkpoint.acceptedNewTurns || []).length - MILESTONE_ORDER.length;
+  return { kind: 'endurance', index, profileLabel: PROFILE_LABELS[index] || '' };
+}
+
+export function acceptResilienceTurn(checkpoint, {
+  profileLabel,
+  execution,
+  sendResult,
+  promptKeyCount,
+  preparedReuse
+}) {
+  if ((checkpoint.acceptedNewTurns || []).length >= 8) throw new Error('The eight-turn limit is already complete.');
+  const nextCount = checkpoint.acceptedNewTurns.length + 1;
+  const userCount = Number(sendResult?.after?.userCount || 0) - Number(checkpoint.baselineCounts?.user || 0);
+  const assistantCount = Number(sendResult?.after?.assistantCount || 0) - Number(checkpoint.baselineCounts?.assistant || 0);
+  if (userCount !== nextCount || assistantCount !== nextCount) {
+    throw new Error('Accepted turn counts must be monotonic and increase by exactly one.');
+  }
+  const turn = {
+    turnId: boundedText(execution?.operationId, 180),
+    turnKeyHash: boundedText(execution?.turnKeyHash, 180),
+    chatIdHash: checkpoint.chatIdHash,
+    profileLabel: boundedText(profileLabel, 180),
+    userCount,
+    assistantCount,
+    operationState: boundedText(execution?.state, 40),
+    promptKeyCount: Number(promptKeyCount || 0),
+    preparedReuse: preparedReuse === true
+  };
+  if (!turn.turnId || !turn.turnKeyHash || turn.operationState !== 'completed') {
+    throw new Error('Accepted turn requires a completed operation and bounded turn identifiers.');
+  }
+  if (checkpoint.acceptedNewTurns.some((entry) => entry.turnId === turn.turnId || entry.turnKeyHash === turn.turnKeyHash)) {
+    throw new Error('Accepted turn identifiers must be unique.');
+  }
+  checkpoint.acceptedNewTurns.push(turn);
+  return turn;
 }
 
 export function validateResilienceCheckpoint(checkpoint = {}, expected = {}) {
@@ -130,10 +188,12 @@ export async function clickProgressStageAction(page, label, stageId, timeoutMs) 
 
 export async function readExecutionSnapshot(page) {
   return page.evaluate(() => {
-    const execution = globalThis.__recursionLiveHarnessRuntime?.view?.()?.execution || null;
+    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+    const execution = view.execution || null;
     if (!execution) return null;
     return {
       operationId: String(execution.operationId || ''),
+      turnKeyHash: String(view.turnScope?.turnKeyHash || ''),
       state: String(execution.state || ''),
       pauseReason: String(execution.pauseReason || ''),
       frontierStageIds: Array.isArray(execution.frontierStageIds) ? [...execution.frontierStageIds] : [],
@@ -470,6 +530,122 @@ async function qualifyProfiles(page, checkpoint, statePath, timeoutMs) {
   saveCheckpoint(statePath, checkpoint);
 }
 
+function messageForWork(work, runId) {
+  const label = work.kind === 'milestone' ? work.milestone : `endurance-${work.index + 1}`;
+  return `Recursion resilience ${label} ${runId}: I keep the archive door open, ask Mara what changed since the last answer, and wait for one concise continuation.`;
+}
+
+async function configureLiveMatrixSurface(page, timeoutMs) {
+  await setPower(page, true, timeoutMs);
+  await selectMode(page, 'auto', timeoutMs);
+  await selectInjectionSettings(page, { placement: 'in_prompt', depth: 1, role: 'system' }, timeoutMs);
+  await ensureRunnableDeckFixture(page, { mode: 'auto', families: [] }, timeoutMs);
+  await page.evaluate(async () => {
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    const settings = runtime?.view?.()?.settings || {};
+    await runtime?.updateSettings?.({
+      mode: 'auto',
+      minCards: 2,
+      maxCards: 2,
+      reasoningLevel: 'medium',
+      ['post' + 'Process']: { ...(settings['post' + 'Process'] || {}), enabled: false }
+    });
+  });
+}
+
+async function safeTurnEvidence(page) {
+  return page.evaluate(() => {
+    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+    return {
+      promptKeyCount: Array.isArray(view.lastPacket?.injectedBlocks) ? view.lastPacket.injectedBlocks.length : 0,
+      preparedReuse: view.lastCacheDecision?.kind === 'prepared-generation'
+        && view.lastCacheDecision?.decision === 'hit'
+    };
+  });
+}
+
+async function executeResilienceWork(page, checkpoint, statePath, timeoutMs) {
+  await configureLiveMatrixSurface(page, timeoutMs);
+  while (true) {
+    const work = nextResilienceWork(checkpoint);
+    if (work.kind === 'complete') {
+      const finalExecution = await readExecutionSnapshot(page);
+      const endurance = inspectEnduranceLedger({
+        acceptedNewTurns: checkpoint.acceptedNewTurns,
+        swipeRecords: checkpoint.swipeRecords,
+        queuedReprocess: false,
+        pausedOperationCount: finalExecution?.state === 'paused' ? 1 : 0,
+        runningStageCount: finalExecution?.stages?.filter((stage) => stage.state === 'running').length || 0
+      });
+      if (!endurance.ok) throw new Error(`Endurance ledger failed: ${endurance.errors.join(', ')}`);
+      checkpoint.status = 'complete';
+      checkpoint.currentMilestone = '';
+      checkpoint.defect = null;
+      checkpoint.endurance = endurance;
+      saveCheckpoint(statePath, checkpoint);
+      return;
+    }
+    checkpoint.status = 'running';
+    checkpoint.currentMilestone = work.kind === 'milestone' ? work.milestone : `endurance-${work.index + 1}`;
+    checkpoint.defect = null;
+    saveCheckpoint(statePath, checkpoint);
+    await selectUtilityProfileByLabel(page, work.profileLabel, timeoutMs);
+    if (work.kind === 'endurance') await certifyUtilityProfile(page, timeoutMs);
+    if (work.milestone !== 'fused-fallback') await selectPipeline(page, 'segmented', timeoutMs);
+    const message = messageForWork(work, checkpoint.runId);
+    let sendResult;
+    let execution;
+    let queuedTurnEvidence = null;
+    if (work.kind === 'endurance') {
+      sendResult = await sendAndWait(page, message, { requirePrompt: true, timeoutMs });
+      execution = await readExecutionSnapshot(page);
+    } else if (work.milestone === 'stop-resume') {
+      const result = await driveStopResumeMilestone({ page, message, timeoutMs });
+      const verdict = inspectLifecycleMilestone(work.milestone, result.evidence);
+      if (!verdict.ok) throw new Error(`Stop Resume verdict failed: ${verdict.errors.join(', ')}`);
+      checkpoint.milestones[work.milestone] = verdict;
+      sendResult = result.sendResult;
+      execution = result.completed;
+    } else if (work.milestone === 'retry-stage') {
+      const result = await driveRetryStageMilestone({ page, message, timeoutMs });
+      const verdict = inspectLifecycleMilestone(work.milestone, result.evidence);
+      if (!verdict.ok) throw new Error(`Retry Stage verdict failed: ${verdict.errors.join(', ')}`);
+      checkpoint.milestones[work.milestone] = verdict;
+      sendResult = result.sendResult;
+      execution = result.completed;
+    } else if (work.milestone === 'fused-fallback') {
+      const result = await driveFusedFallbackMilestone({ page, message, timeoutMs });
+      const verdict = inspectLifecycleMilestone(work.milestone, result.evidence);
+      if (!verdict.ok) throw new Error(`Fused fallback verdict failed: ${verdict.errors.join(', ')}`);
+      checkpoint.milestones[work.milestone] = verdict;
+      sendResult = result.sendResult;
+      execution = result.completed;
+    } else {
+      sendResult = await sendAndWait(page, message, { requirePrompt: true, timeoutMs });
+      execution = await readExecutionSnapshot(page);
+      queuedTurnEvidence = await safeTurnEvidence(page);
+      const result = await driveQueuedReprocessMilestone({ page, timeoutMs });
+      const verdict = inspectLifecycleMilestone(work.milestone, result.evidence);
+      if (!verdict.ok) throw new Error(`Queued reprocess verdict failed: ${verdict.errors.join(', ')}`);
+      checkpoint.milestones[work.milestone] = verdict;
+      checkpoint.swipeRecords.push({
+        countsAsNewTurn: false,
+        operationId: boundedText(result.after?.operationId, 180),
+        profileLabel: work.profileLabel,
+        settled: result.after?.state === 'completed'
+      });
+    }
+    const turnEvidence = queuedTurnEvidence || await safeTurnEvidence(page);
+    acceptResilienceTurn(checkpoint, {
+      profileLabel: work.profileLabel,
+      execution,
+      sendResult,
+      ...turnEvidence
+    });
+    saveCheckpoint(statePath, checkpoint);
+  }
+}
+
 export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), env = process.env } = {}) {
   const args = parseResilienceArgs(argv);
   const preflight = assertResiliencePreflight({
@@ -509,12 +685,17 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
       } else {
         checkpoint = createResilienceCheckpoint({
           runId: `resilience-${Date.now().toString(36)}`,
-          ...identity
+          ...identity,
+          baselineCounts: { user: chat.userCount, assistant: chat.assistantCount }
         });
         saveCheckpoint(args.statePath, checkpoint);
       }
-      if (checkpoint.status === 'qualifying') {
+      if (checkpoint.qualifications?.length !== PROFILE_LABELS.length || !Object.keys(checkpoint.assignments || {}).length) {
+        checkpoint.status = 'qualifying';
         await qualifyProfiles(page, checkpoint, args.statePath, timeoutMs);
+      }
+      if (checkpoint.status !== 'complete') {
+        await executeResilienceWork(page, checkpoint, args.statePath, timeoutMs);
       }
       return sanitizeResilienceReport(checkpoint);
     } catch (error) {

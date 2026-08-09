@@ -48,6 +48,37 @@ assertRejects(
   /failed checkpoint/,
   'repair adoption refuses a non-failed checkpoint'
 );
+assertEqual(typeof module.startFreshSyntheticChat, 'function', 'runner exports native fresh-chat isolation');
+const resetCheckpoint = {
+  status: 'fail',
+  branchSha: 'old',
+  chatIdHash: 'old-chat',
+  baselineCounts: { user: 1, assistant: 1 },
+  acceptedNewTurns: [],
+  defect: { code: 'missed-stop' },
+  currentMilestone: 'stop-resume'
+};
+module.resetUnacceptedChat(resetCheckpoint, {
+  branchSha: 'repaired',
+  chatIdHash: 'fresh-chat',
+  baselineCounts: { user: 0, assistant: 1 }
+});
+assertDeepEqual(resetCheckpoint, {
+  status: 'ready',
+  branchSha: 'repaired',
+  chatIdHash: 'fresh-chat',
+  baselineCounts: { user: 0, assistant: 1 },
+  acceptedNewTurns: [],
+  defect: null,
+  currentMilestone: 'stop-resume'
+}, 'fresh chat reset preserves the zero-turn ledger and clears only failed-boundary state');
+assertRejects(
+  () => Promise.resolve(module.resetUnacceptedChat({ status: 'fail', acceptedNewTurns: [{}] }, {
+    branchSha: 'new', chatIdHash: 'fresh', baselineCounts: { user: 0, assistant: 0 }
+  })),
+  /zero accepted turns/,
+  'fresh chat reset refuses any accepted soak progress'
+);
 
 const safeState = resolve('artifacts', 'live-resilience-matrix', 'active.json');
 assertDeepEqual(module.parseResilienceArgs(['--live', '--state', safeState]), {

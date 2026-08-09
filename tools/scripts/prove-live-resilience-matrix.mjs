@@ -217,6 +217,38 @@ export function adoptRepairSha(checkpoint, branchSha) {
   return checkpoint;
 }
 
+export function resetUnacceptedChat(checkpoint, { branchSha, chatIdHash, baselineCounts }) {
+  if (checkpoint?.status !== 'fail') throw new Error('Fresh chat reset requires a failed checkpoint.');
+  if ((checkpoint.acceptedNewTurns || []).length !== 0) throw new Error('Fresh chat reset requires zero accepted turns.');
+  checkpoint.status = 'ready';
+  checkpoint.branchSha = boundedText(branchSha, 80);
+  checkpoint.chatIdHash = boundedText(chatIdHash, 80);
+  checkpoint.baselineCounts = {
+    user: Number(baselineCounts?.user || 0),
+    assistant: Number(baselineCounts?.assistant || 0)
+  };
+  checkpoint.currentMilestone = 'stop-resume';
+  checkpoint.defect = null;
+  return checkpoint;
+}
+
+export async function startFreshSyntheticChat(page, timeoutMs) {
+  const before = await page.evaluate(contextChatSummaryScript());
+  await page.evaluate(async () => {
+    const module = await import('/script.js');
+    if (typeof module.doNewChat !== 'function') throw new Error('SillyTavern doNewChat is unavailable.');
+    await module.doNewChat({ deleteCurrentChat: false });
+  });
+  await page.waitForFunction((previousChatId) => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const chatId = typeof context.getCurrentChatId === 'function'
+      ? context.getCurrentChatId()
+      : (context.chatId || context.currentChatId || '');
+    return Boolean(chatId) && String(chatId) !== previousChatId;
+  }, before.chatId, { timeout: timeoutMs });
+  return page.evaluate(contextChatSummaryScript());
+}
+
 export async function clickProgressAction(page, label, timeoutMs) {
   const trigger = page.locator('[data-recursion-status-trigger]').first();
   const expanded = await trigger.getAttribute?.('aria-expanded').catch?.(() => 'false');
@@ -742,16 +774,26 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
       await page.goto(preflight.baseUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
       await waitForRoot(page, timeoutMs);
       await ensureSyntheticChat(page, timeoutMs);
-      const chat = await page.evaluate(contextChatSummaryScript());
+      let chat = await page.evaluate(contextChatSummaryScript());
       if (!chat.chatId) throw new Error('Unable to resolve the active synthetic soak chat identity.');
+      const branchSha = currentBranchSha();
+      if (existsSync(args.statePath)) checkpoint = loadCheckpoint(args.statePath);
+      if (checkpoint && env.RECURSION_RESILIENCE_FRESH_CHAT === '1') {
+        chat = await startFreshSyntheticChat(page, timeoutMs);
+        resetUnacceptedChat(checkpoint, {
+          branchSha,
+          chatIdHash: hashIdentity(chat.chatId),
+          baselineCounts: { user: chat.userCount, assistant: chat.assistantCount }
+        });
+        saveCheckpoint(args.statePath, checkpoint);
+      }
       const identity = {
         user: preflight.user,
-        branchSha: currentBranchSha(),
+        branchSha,
         profileLabels: PROFILE_LABELS,
         chatIdHash: hashIdentity(chat.chatId)
       };
-      if (existsSync(args.statePath)) {
-        checkpoint = loadCheckpoint(args.statePath);
+      if (checkpoint) {
         if (env.RECURSION_RESILIENCE_ADOPT_REPAIR_SHA === '1' && checkpoint.branchSha !== identity.branchSha) {
           adoptRepairSha(checkpoint, identity.branchSha);
           saveCheckpoint(args.statePath, checkpoint);

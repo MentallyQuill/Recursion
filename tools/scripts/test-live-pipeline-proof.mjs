@@ -47,6 +47,15 @@ assertDeepEqual(module.contextChatSummaryScript()(), {
 }, 'live summary uses SillyTavern current-chat getter when direct fields are absent');
 globalThis.SillyTavern = previousSillyTavern;
 
+let alreadySelectedPipelineClicks = 0;
+await module.selectPipeline({
+  evaluate: async () => 'segmented',
+  locator: () => ({
+    first: () => ({ click: async () => { alreadySelectedPipelineClicks += 1; } })
+  })
+}, 'segmented', 1000);
+assertEqual(alreadySelectedPipelineClicks, 0, 'pipeline selector is a no-op when the requested pipeline is already active');
+
 assertDeepEqual(module.resolveExactUtilityProfile([
   { name: 'nanogpt DeepSeek Flash - Provider', model: 'deepseek-flash' },
   { name: 'nanogpt DeepSeek Flash 0731 - Celia', model: 'deepseek-flash-0731' }
@@ -372,8 +381,14 @@ assertEqual(
       calls.push('segmented-choice-click');
     }
   };
+  let evaluateCount = 0;
   const page = {
     async evaluate(fn) {
+      evaluateCount += 1;
+      if (evaluateCount === 1) {
+        calls.push('evaluate-current-pipeline');
+        return '';
+      }
       calls.push('evaluate-close-viewer');
       const fakeDocument = {
         querySelector(selector) {
@@ -413,9 +428,10 @@ assertEqual(
 
   await module.selectPipeline(page, 'segmented', 1000);
 
-  assertEqual(calls[0], 'evaluate-close-viewer', 'selectPipeline closes an open viewer before clicking Pipeline');
-  assertEqual(calls[1], 'viewer-close', 'open viewer close method is invoked before Pipeline click');
-  assertEqual(calls[2], 'pipeline-click', 'Pipeline click happens after viewer cleanup');
+  assertEqual(calls[0], 'evaluate-current-pipeline', 'selectPipeline checks current state before opening the menu');
+  assertEqual(calls[1], 'evaluate-close-viewer', 'selectPipeline closes an open viewer before clicking Pipeline');
+  assertEqual(calls[2], 'viewer-close', 'open viewer close method is invoked before Pipeline click');
+  assertEqual(calls[3], 'pipeline-click', 'Pipeline click happens after viewer cleanup');
 }
 
 console.log('[pass] live pipeline proof');

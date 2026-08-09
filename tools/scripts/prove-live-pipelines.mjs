@@ -425,6 +425,12 @@ async function closeViewerIfOpen(page) {
 }
 
 export async function selectPipeline(page, pipeline, timeoutMs) {
+  const currentPipeline = await page.evaluate(() => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const settings = context?.extensionSettings?.recursion || globalThis.extension_settings?.recursion || {};
+    return String(settings.pipelineMode || '');
+  }).catch(() => '');
+  if (currentPipeline === pipeline) return;
   await closeViewerIfOpen(page);
   const pipelineButton = page.locator('[data-recursion-pipeline-button]').first();
   await pipelineButton.click({ timeout: timeoutMs });

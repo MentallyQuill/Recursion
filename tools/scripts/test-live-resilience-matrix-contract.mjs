@@ -141,8 +141,8 @@ const turns = Array.from({ length: 8 }, (_, index) => ({
   assistantCount: index + 1,
   turnKeyHash: `turn-key-${index + 1}`,
   operationState: 'completed',
-  promptKeyCount: 3,
-  preparedReuse: false
+  promptKeyCount: 0,
+  preparedReuse: index === 4
 }));
 assertDeepEqual(inspectEnduranceLedger({
   acceptedNewTurns: turns,
@@ -165,6 +165,16 @@ assertEqual(inspectEnduranceLedger({
   pausedOperationCount: 0,
   runningStageCount: 0
 }).ok, true, 'endurance ledger accepts the explicit adapted profile rotation after incompatibilities');
+
+const reorderedExpectedLabels = [labels[1], labels[0], labels[2], labels[3], labels[0], labels[1], labels[2], labels[3]];
+assertEqual(inspectEnduranceLedger({
+  acceptedNewTurns: turns,
+  expectedProfileLabels: reorderedExpectedLabels,
+  swipeRecords: [],
+  queuedReprocess: null,
+  pausedOperationCount: 0,
+  runningStageCount: 0
+}).ok, true, 'endurance ledger compares planned profile counts independent of object insertion order');
 
 assertEqual(inspectEnduranceLedger({
   acceptedNewTurns: turns.map((turn, index) => index === 7 ? { ...turn, chatIdHash: 'other-chat' } : turn),

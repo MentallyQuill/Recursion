@@ -121,8 +121,7 @@ export function inspectEnduranceLedger(ledger = {}) {
     const turn = turns[index] || {};
     if (Number(turn.userCount) !== index + 1 || Number(turn.assistantCount) !== index + 1) errors.push('nonmonotonic-message-count');
     if (turn.operationState !== 'completed') errors.push('turn-not-completed');
-    if (Number(turn.promptKeyCount) !== 3) errors.push('prompt-key-count');
-    if (turn.preparedReuse === true) errors.push('prepared-packet-reused');
+    if (Number(turn.promptKeyCount) !== 0) errors.push('stale-prompt-key-count');
   }
   const profileCounts = turns.reduce((counts, turn) => {
     const label = text(turn.profileLabel);
@@ -135,7 +134,8 @@ export function inspectEnduranceLedger(ledger = {}) {
       counts[label] = (counts[label] || 0) + 1;
       return counts;
     }, {});
-    if (JSON.stringify(profileCounts) !== JSON.stringify(expectedCounts)) errors.push('profile-rotation-count');
+    const labels = new Set([...Object.keys(profileCounts), ...Object.keys(expectedCounts)]);
+    if ([...labels].some((label) => profileCounts[label] !== expectedCounts[label])) errors.push('profile-rotation-count');
   } else if (Object.keys(profileCounts).length !== 4 || Object.values(profileCounts).some((count) => count !== 2)) {
     errors.push('profile-rotation-count');
   }

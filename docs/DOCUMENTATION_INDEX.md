@@ -5,6 +5,7 @@ This is the canonical map for Recursion documentation. Undated manuals and specs
 ## Release Notes
 
 - [Release Notes Directory](release/README.md)
+- [0.2.0-alpha.3](release/0.2.0-alpha.3.md)
 - [0.2.0-alpha.2](release/0.2.0-alpha.2.md)
 - [0.2.0-alpha.1](release/0.2.0-alpha.1.md)
 - [0.1.0-pre-alpha.6](release/0.1.0-pre-alpha.6.md)

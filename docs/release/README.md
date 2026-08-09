@@ -4,6 +4,7 @@ Release notes capture the current alpha scope, Pre-process/Post-process recovery
 
 ## Releases
 
+- [0.2.0-alpha.3](0.2.0-alpha.3.md)
 - [0.2.0-alpha.2](0.2.0-alpha.2.md)
 - [0.2.0-alpha.1](0.2.0-alpha.1.md)
 - [0.1.0-pre-alpha.6](0.1.0-pre-alpha.6.md)

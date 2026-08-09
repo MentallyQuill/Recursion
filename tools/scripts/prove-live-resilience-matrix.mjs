@@ -220,6 +220,44 @@ export function isLateDuplicateAssistant(checkpoint = {}, chat = {}) {
     && JSON.stringify(chat.trailingRoles || []) === JSON.stringify(['assistant', 'assistant']);
 }
 
+export function isMissingAcceptedAssistant(checkpoint = {}, chat = {}) {
+  const accepted = Array.isArray(checkpoint.acceptedNewTurns) ? checkpoint.acceptedNewTurns.length : 0;
+  const expectedUser = Number(checkpoint.baselineCounts?.user || 0) + accepted;
+  const expectedAssistant = Number(checkpoint.baselineCounts?.assistant || 0) + accepted;
+  const roles = Array.isArray(chat.roles) ? chat.roles : [];
+  return Number(chat.userCount || 0) === expectedUser
+    && Number(chat.assistantCount || 0) === expectedAssistant - 1
+    && roles.at(-1) === 'user';
+}
+
+async function repairMissingAcceptedAssistant(page, checkpoint, timeoutMs) {
+  const chat = await page.evaluate(() => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const entries = Array.isArray(context.chat) ? context.chat : [];
+    return {
+      userCount: entries.filter((entry) => entry?.is_user === true).length,
+      assistantCount: entries.filter((entry) => entry?.is_user === false).length,
+      roles: entries.map((entry) => entry?.is_user === true ? 'user' : 'assistant')
+    };
+  });
+  if (!isMissingAcceptedAssistant(checkpoint, chat)) {
+    throw new Error('Missing assistant repair refused: host turn shape is not the exact guarded pending user.');
+  }
+  await page.evaluate(async () => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    if (typeof context.generate !== 'function') throw new Error('SillyTavern native Generate is unavailable.');
+    await context.generate('normal');
+  });
+  await page.waitForFunction((expected) => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const entries = Array.isArray(context.chat) ? context.chat : [];
+    return entries.filter((entry) => entry?.is_user === false).length === expected;
+  }, Number(checkpoint.baselineCounts?.assistant || 0) + checkpoint.acceptedNewTurns.length, { timeout: timeoutMs });
+  checkpoint.status = 'ready';
+  checkpoint.defect = null;
+  return checkpoint;
+}
+
 async function removeLateDuplicateAssistant(page, checkpoint, timeoutMs) {
   const chat = await page.evaluate(() => {
     const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
@@ -1274,6 +1312,11 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
         }
         if (env.RECURSION_RESILIENCE_REMOVE_LATE_DUPLICATE === '1') {
           await removeLateDuplicateAssistant(page, checkpoint, timeoutMs);
+          chat = await page.evaluate(contextChatSummaryScript());
+          saveCheckpoint(args.statePath, checkpoint);
+        }
+        if (env.RECURSION_RESILIENCE_REPAIR_MISSING_ASSISTANT === '1') {
+          await repairMissingAcceptedAssistant(page, checkpoint, timeoutMs);
           chat = await page.evaluate(contextChatSummaryScript());
           saveCheckpoint(args.statePath, checkpoint);
         }

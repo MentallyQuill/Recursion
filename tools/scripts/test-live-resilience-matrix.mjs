@@ -75,6 +75,10 @@ assertEqual(module.isLateDuplicateAssistant({
   baselineCounts: { user: 0, assistant: 0 },
   acceptedNewTurns: [{}, {}]
 }, { userCount: 2, assistantCount: 4, trailingRoles: ['assistant', 'assistant'] }), false, 'late duplicate repair refuses broader assistant drift');
+assertEqual(module.isMissingAcceptedAssistant({
+  baselineCounts: { user: 0, assistant: 0 },
+  acceptedNewTurns: [{}, {}]
+}, { userCount: 2, assistantCount: 1, roles: ['user', 'assistant', 'user'] }), true, 'missing accepted assistant repair recognizes one trailing unmatched user');
 assertDeepEqual(module.classifyHostTurnCounts({
   baselineCounts: { user: 0, assistant: 0 },
   acceptedNewTurns: [],

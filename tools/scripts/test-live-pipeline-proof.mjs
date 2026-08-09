@@ -117,10 +117,16 @@ const sanitizedReport = module.sanitizeLiveProofReport({
   connectionProfileId: 'PROFILE_SECRET',
   request: { prompt: 'RAW_PROMPT_SECRET' },
   response: { content: 'RAW_RESPONSE_SECRET' },
+  messageProof: { message: 'TRANSCRIPT_SECRET', userIndex: 2, assistantAfter: true },
   details: { operationId: 'operation-safe', providerLabel: 'bounded-label' }
 });
 assertEqual(JSON.stringify(sanitizedReport).includes('SECRET'), false, 'live proof sanitizer removes profiles and raw request/response content');
 assertEqual(sanitizedReport.details.operationId, 'operation-safe', 'live proof sanitizer preserves bounded execution identity');
+assertDeepEqual(
+  sanitizedReport.messageProof,
+  { message: '[redacted]', userIndex: 2, assistantAfter: true },
+  'live proof sanitizer removes transcript text while preserving message-boundary evidence'
+);
 
 const deckFixture = {
   version: 1,

@@ -190,7 +190,7 @@ export function inspectMilestoneVerdict({ pipeline, mode, requestedFamilies = []
   };
 }
 
-const PRIVATE_REPORT_KEYS = /^(?:connectionProfileId|request|response|prompt|promptText|content|messages|transcript|reasoning|headers|cookie|authorization|apiKey|secret|excerpts|packet|promptPacketPreview|chat)$/i;
+const PRIVATE_REPORT_KEYS = /^(?:connectionProfileId|request|response|prompt|promptText|content|message|messages|transcript|reasoning|headers|cookie|authorization|apiKey|secret|excerpts|packet|promptPacketPreview|chat)$/i;
 
 export function sanitizeLiveProofReport(value, key = '') {
   if (PRIVATE_REPORT_KEYS.test(key)) return '[redacted]';

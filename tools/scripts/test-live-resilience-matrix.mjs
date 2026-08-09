@@ -19,6 +19,10 @@ assertEqual(typeof module.assertResiliencePreflight, 'function', 'runner exports
 assertEqual(typeof module.createResilienceCheckpoint, 'function', 'runner exports checkpoint creator');
 assertEqual(typeof module.validateResilienceCheckpoint, 'function', 'runner exports checkpoint validator');
 assertEqual(typeof module.runLiveResilienceMatrix, 'function', 'runner exports live entrypoint');
+assertEqual(typeof module.clickProgressAction, 'function', 'runner exports exact-label progress action driver');
+assertEqual(typeof module.readExecutionSnapshot, 'function', 'runner exports bounded execution evidence reader');
+assertEqual(typeof module.driveStopResumeMilestone, 'function', 'runner exports Stop Resume milestone driver');
+assertEqual(typeof module.driveRetryStageMilestone, 'function', 'runner exports Retry Stage milestone driver');
 
 const safeState = resolve('artifacts', 'live-resilience-matrix', 'active.json');
 assertDeepEqual(module.parseResilienceArgs(['--live', '--state', safeState]), {
@@ -85,5 +89,45 @@ assertEqual(module.validateResilienceCheckpoint(checkpoint, {
 assertEqual(/post[- ]?process/i.test(source), false, 'runner does not invoke or import Post-process');
 assertEqual(/\.screenshot\s*\(|tracing\./.test(source), false, 'runner cannot create screenshots or traces');
 assertEqual(/connectionProfileId\s*:\s*[^'"\[]/.test(source), false, 'runner does not persist profile ids');
+
+const actionCalls = [];
+const fakeAction = {
+  async waitFor(options) { actionCalls.push(['waitFor', options]); },
+  async evaluate() { return { kind: 'resume', operationId: 'operation-safe', stageId: 'preprocess.arbiter' }; },
+  async click(options) { actionCalls.push(['click', options]); }
+};
+const fakePage = {
+  locator(selector) {
+    actionCalls.push(['locator', selector]);
+    return { first: () => ({ click: async (options) => actionCalls.push(['open', options]) }) };
+  },
+  getByRole(role, options) {
+    actionCalls.push(['getByRole', role, options]);
+    return { first: () => fakeAction };
+  }
+};
+assertDeepEqual(await module.clickProgressAction(fakePage, 'Resume from saved checkpoint', 4321), {
+  kind: 'resume',
+  operationId: 'operation-safe',
+  stageId: 'preprocess.arbiter'
+}, 'progress action returns bounded dataset evidence');
+assertDeepEqual(actionCalls.find((call) => call[0] === 'getByRole'), [
+  'getByRole',
+  'button',
+  { name: 'Resume from saved checkpoint', exact: true }
+], 'progress driver requires the exact accessible label');
+assertEqual(actionCalls.filter((call) => call[0] === 'click').length, 1, 'progress driver clicks exactly once');
+
+const invalidJsonBody = module.substituteInvalidModelResponse(
+  JSON.stringify({ choices: [{ message: { content: '{"schema":"recursion.utilityArbiter.v1"}' } }] }),
+  'application/json'
+);
+assertEqual(JSON.parse(invalidJsonBody).choices[0].message.content, '{invalid', 'JSON response substitution preserves envelope but corrupts model content');
+const invalidSseBody = module.substituteInvalidModelResponse(
+  'data: {"choices":[{"delta":{"content":"valid"}}]}\n\ndata: [DONE]\n\n',
+  'text/event-stream'
+);
+assertEqual(invalidSseBody.includes('{invalid'), true, 'stream substitution emits bounded invalid model content');
+assertEqual(invalidSseBody.includes('[DONE]'), true, 'stream substitution remains terminal');
 
 console.log('[pass] live resilience matrix runner');

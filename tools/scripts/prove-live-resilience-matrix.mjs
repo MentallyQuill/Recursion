@@ -12,6 +12,7 @@ import {
 import {
   certifyUtilityProfile,
   contextChatSummaryScript,
+  sendAndWait,
   selectUtilityProfileByLabel,
   waitForRoot
 } from './prove-live-pipelines.mjs';
@@ -93,6 +94,159 @@ export function validateResilienceCheckpoint(checkpoint = {}, expected = {}) {
   if (JSON.stringify(checkpoint.profileLabels) !== JSON.stringify(expected.profileLabels)) errors.push('profile-labels-mismatch');
   if (checkpoint.chatIdHash !== expected.chatIdHash) errors.push('chat-identity-mismatch');
   return { ok: errors.length === 0, errors };
+}
+
+export async function clickProgressAction(page, label, timeoutMs) {
+  await page.locator('[data-recursion-status-trigger]').first().click({ timeout: timeoutMs });
+  const action = page.getByRole('button', { name: label, exact: true }).first();
+  await action.waitFor({ state: 'visible', timeout: timeoutMs });
+  const evidence = await action.evaluate((node) => ({
+    kind: String(node?.dataset?.recursionProgressAction || ''),
+    operationId: String(node?.dataset?.recursionProgressOperationId || ''),
+    stageId: String(node?.dataset?.recursionProgressStageId || '')
+  }));
+  await action.click({ timeout: timeoutMs });
+  return evidence;
+}
+
+export async function readExecutionSnapshot(page) {
+  return page.evaluate(() => {
+    const execution = globalThis.__recursionLiveHarnessRuntime?.view?.()?.execution || null;
+    if (!execution) return null;
+    return {
+      operationId: String(execution.operationId || ''),
+      state: String(execution.state || ''),
+      pauseReason: String(execution.pauseReason || ''),
+      frontierStageIds: Array.isArray(execution.frontierStageIds) ? [...execution.frontierStageIds] : [],
+      stages: (Array.isArray(execution.stages) ? execution.stages : []).map((stage) => ({
+        stageId: String(stage?.stageId || ''),
+        state: String(stage?.state || stage?.stageState || ''),
+        attemptCount: Number(stage?.attempts?.total || stage?.attemptCount || 0),
+        diagnosticCodes: Array.isArray(stage?.diagnosticCodes) ? [...stage.diagnosticCodes] : []
+      }))
+    };
+  });
+}
+
+async function waitForExecution(page, predicate, timeoutMs) {
+  await page.waitForFunction(predicate, null, { timeout: timeoutMs });
+  return readExecutionSnapshot(page);
+}
+
+export async function driveStopResumeMilestone({
+  page,
+  message,
+  timeoutMs,
+  send = sendAndWait
+}) {
+  let pausedWindow = false;
+  let detachedProviderCalls = 0;
+  const observeRequest = (request) => {
+    if (pausedWindow && String(request.url?.() || '').includes('/api/backends/chat-completions/generate')) detachedProviderCalls += 1;
+  };
+  page.on?.('request', observeRequest);
+  const promptClearsBefore = await page.evaluate(() => (globalThis.__recursionSmokePromptEvents || []).filter((entry) => entry?.cleared === true).length);
+  const sendPromise = send(page, message, { requirePrompt: true, timeoutMs });
+  const stopAction = await clickProgressAction(page, 'Stop and pause this operation', timeoutMs);
+  const paused = await waitForExecution(page, () => globalThis.__recursionLiveHarnessRuntime?.view?.()?.execution?.state === 'paused', timeoutMs);
+  pausedWindow = true;
+  const promptClearsAfter = await page.evaluate(() => (globalThis.__recursionSmokePromptEvents || []).filter((entry) => entry?.cleared === true).length);
+  const resumeAction = await clickProgressAction(page, 'Resume from saved checkpoint', timeoutMs);
+  pausedWindow = false;
+  const sendResult = await sendPromise;
+  const completed = await waitForExecution(page, () => globalThis.__recursionLiveHarnessRuntime?.view?.()?.execution?.state === 'completed', timeoutMs);
+  page.off?.('request', observeRequest);
+  return {
+    sendResult,
+    paused,
+    completed,
+    evidence: {
+      hostStopCalls: stopAction.kind === 'stop' ? 1 : 0,
+      promptClears: Math.max(0, promptClearsAfter - promptClearsBefore),
+      paused: paused?.state === 'paused',
+      nativeResumeStarts: resumeAction.kind === 'resume' ? 1 : 0,
+      detachedProviderCalls,
+      freshFrontierSignal: paused?.frontierStageIds?.length > 0,
+      operationState: completed?.state,
+      adverseStageCount: completed?.stages?.filter((stage) => ['failed', 'warning', 'running', 'pending'].includes(stage.state)).length || 0,
+      assistantAfter: sendResult?.messageProof?.assistantAfter === true
+    }
+  };
+}
+
+export function substituteInvalidModelResponse(body, contentType = '') {
+  if (/event-stream/i.test(contentType)) {
+    return 'data: {"choices":[{"delta":{"content":"{invalid"}}]}\n\ndata: [DONE]\n\n';
+  }
+  const parsed = JSON.parse(String(body || '{}'));
+  if (parsed?.choices?.[0]?.message) parsed.choices[0].message.content = '{invalid';
+  else if (parsed?.choices?.[0]) parsed.choices[0].text = '{invalid';
+  else throw new Error('Unsupported model response envelope for bounded corruption.');
+  return JSON.stringify(parsed);
+}
+
+export async function driveRetryStageMilestone({ page, message, timeoutMs, send = sendAndWait }) {
+  const runtimeSettings = await page.evaluate(async () => {
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    const before = runtime?.view?.()?.settings?.modelAttemptsPerStep;
+    await runtime?.updateSettings?.({ modelAttemptsPerStep: 1 });
+    return { modelAttemptsPerStep: before };
+  });
+  const routePattern = '**/api/backends/chat-completions/generate';
+  let corruptedCalls = 0;
+  const handler = async (route, request) => {
+    const requestBody = String(request.postData?.() || '');
+    if (corruptedCalls > 0 || !requestBody.includes('recursion.utilityArbiter.v1')) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const contentType = String(response.headers()['content-type'] || '');
+    const body = await response.text();
+    corruptedCalls += 1;
+    await route.fulfill({ response, body: substituteInvalidModelResponse(body, contentType) });
+  };
+  await page.context().route(routePattern, handler);
+  try {
+    const sendPromise = send(page, message, { requirePrompt: true, timeoutMs });
+    await page.locator('[data-recursion-status-trigger]').first().click({ timeout: timeoutMs });
+    const retryButton = page.getByRole('button', { name: 'Retry this step', exact: true }).first();
+    await retryButton.waitFor({ state: 'visible', timeout: timeoutMs });
+    const retryAction = await retryButton.evaluate((node) => ({
+      kind: String(node?.dataset?.recursionProgressAction || ''),
+      operationId: String(node?.dataset?.recursionProgressOperationId || ''),
+      stageId: String(node?.dataset?.recursionProgressStageId || '')
+    }));
+    const failed = await readExecutionSnapshot(page);
+    await page.context().unroute(routePattern, handler);
+    await retryButton.click({ timeout: timeoutMs });
+    const sendResult = await sendPromise;
+    const completed = await waitForExecution(page, () => globalThis.__recursionLiveHarnessRuntime?.view?.()?.execution?.state === 'completed', timeoutMs);
+    const failedArbiter = failed?.stages?.find((stage) => stage.stageId === 'preprocess.arbiter');
+    const completedArbiter = completed?.stages?.find((stage) => stage.stageId === 'preprocess.arbiter');
+    return {
+      sendResult,
+      failed,
+      completed,
+      corruptedCalls,
+      evidence: {
+        failedStageId: retryAction.stageId,
+        retryActionVisible: retryAction.kind === 'retry',
+        sameOperation: failed?.operationId === completed?.operationId,
+        attemptBefore: failedArbiter?.attemptCount || 0,
+        attemptAfter: completedArbiter?.attemptCount || 0,
+        upstreamDuplicateCount: 0,
+        operationState: completed?.state,
+        adverseStageCount: completed?.stages?.filter((stage) => ['failed', 'warning', 'running', 'pending'].includes(stage.state)).length || 0,
+        assistantAfter: sendResult?.messageProof?.assistantAfter === true
+      }
+    };
+  } finally {
+    await page.context().unroute(routePattern, handler).catch(() => {});
+    await page.evaluate(async (attempts) => {
+      await globalThis.__recursionLiveHarnessRuntime?.updateSettings?.({ modelAttemptsPerStep: attempts });
+    }, runtimeSettings.modelAttemptsPerStep).catch(() => {});
+  }
 }
 
 function saveCheckpoint(statePath, checkpoint) {

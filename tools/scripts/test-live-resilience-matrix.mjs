@@ -67,6 +67,17 @@ assertRejects(
   'milestone swap refuses a partially accepted ledger'
 );
 assertEqual(typeof module.recoverPendingArbiterRetry, 'function', 'runner exports natural Arbiter Retry recovery');
+assertDeepEqual(module.summarizeArbiterFailure({
+  state: 'paused',
+  pauseReason: 'stage-failed:preprocess.arbiter',
+  stages: [{ stageId: 'preprocess.arbiter', state: 'failed', attemptCount: 4, diagnosticCodes: ['SAFE_CODE'] }]
+}), {
+  operationState: 'paused',
+  pauseReason: 'stage-failed:preprocess.arbiter',
+  stageState: 'failed',
+  attemptCount: 4,
+  diagnosticCodes: ['SAFE_CODE']
+}, 'Arbiter exhaustion summary contains only bounded failure metadata');
 const repairCheckpoint = { status: 'fail', branchSha: 'old', acceptedNewTurns: [], defect: { code: 'failed' } };
 assertEqual(module.adoptRepairSha(repairCheckpoint, 'new'), repairCheckpoint, 'repair adoption updates the same checkpoint');
 assertEqual(repairCheckpoint.branchSha, 'new', 'repair adoption advances only the checkpoint SHA');

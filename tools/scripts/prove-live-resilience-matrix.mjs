@@ -262,6 +262,17 @@ export function swapStopRetryAssignments(checkpoint) {
   return checkpoint;
 }
 
+export function summarizeArbiterFailure(execution = {}) {
+  const stage = execution?.stages?.find((entry) => entry.stageId === 'preprocess.arbiter') || {};
+  return {
+    operationState: boundedText(execution.state, 40),
+    pauseReason: boundedText(execution.pauseReason, 180),
+    stageState: boundedText(stage.state, 40),
+    attemptCount: Number(stage.attemptCount || 0),
+    diagnosticCodes: Array.isArray(stage.diagnosticCodes) ? stage.diagnosticCodes.map((code) => boundedText(code, 120)) : []
+  };
+}
+
 export async function startFreshSyntheticChat(page, timeoutMs) {
   const before = await page.evaluate(contextChatSummaryScript());
   await page.evaluate(async () => {
@@ -884,6 +895,9 @@ export async function recoverPendingArbiterRetry(page, checkpoint, statePath, ti
   const failed = await readExecutionSnapshot(page);
   if (failed?.state !== 'paused' || failed.pauseReason !== 'stage-failed:preprocess.arbiter') {
     throw new Error(`Pending Retry requires a failed Arbiter; observed ${failed?.pauseReason || failed?.state || 'missing'}.`);
+  }
+  if (checkpoint.assignmentAdaptations?.naturalArbiterRetry === true) {
+    throw new Error(`Natural Arbiter Retry exhausted: ${JSON.stringify(summarizeArbiterFailure(failed))}`);
   }
   let owningProfile = checkpoint.assignments['retry-stage'];
   if (checkpoint.assignmentAdaptations?.naturalArbiterRetry !== true) {

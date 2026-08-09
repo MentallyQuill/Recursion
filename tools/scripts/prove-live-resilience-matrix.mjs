@@ -1162,7 +1162,9 @@ async function executeResilienceWork(page, checkpoint, statePath, timeoutMs) {
     checkpoint.defect = null;
     saveCheckpoint(statePath, checkpoint);
     await selectUtilityProfileByLabel(page, work.profileLabel, timeoutMs);
-    if (work.kind === 'endurance') await certifyUtilityProfile(page, timeoutMs);
+    if (work.kind === 'endurance' || work.milestone === 'fused-fallback') {
+      await certifyUtilityProfile(page, timeoutMs);
+    }
     if (work.milestone !== 'fused-fallback') await selectPipeline(page, 'segmented', timeoutMs);
     const message = messageForWork(work, checkpoint.runId);
     let sendResult;
@@ -1423,6 +1425,13 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
         if (env.RECURSION_RESILIENCE_FALLBACK_FUSED_GLM === '1') {
           await removeUnacceptedCompletedPair(page, checkpoint, timeoutMs);
           fallbackFusedToGlm(checkpoint);
+          chat = await page.evaluate(contextChatSummaryScript());
+          saveCheckpoint(args.statePath, checkpoint);
+        }
+        if (env.RECURSION_RESILIENCE_REMOVE_UNACCEPTED_PAIR === '1') {
+          await removeUnacceptedCompletedPair(page, checkpoint, timeoutMs);
+          checkpoint.status = 'ready';
+          checkpoint.defect = null;
           chat = await page.evaluate(contextChatSummaryScript());
           saveCheckpoint(args.statePath, checkpoint);
         }

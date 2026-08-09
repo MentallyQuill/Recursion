@@ -68,6 +68,18 @@ assertRejects(
   'milestone swap refuses a partially accepted ledger'
 );
 assertEqual(typeof module.recoverPendingArbiterRetry, 'function', 'runner exports natural Arbiter Retry recovery');
+const retryArmCheckpoint = { assignmentAdaptations: {} };
+module.armNaturalArbiterRetry(retryArmCheckpoint, { stages: [{ stageId: 'preprocess.arbiter', attemptCount: 3 }] });
+assertDeepEqual(retryArmCheckpoint.assignmentAdaptations, {
+  naturalArbiterRetryAttempted: true,
+  naturalArbiterRetryAttemptBefore: 3
+}, 'natural Retry records the stage frontier before dispatch');
+module.armNaturalArbiterRetry(retryArmCheckpoint, { stages: [{ stageId: 'preprocess.arbiter', attemptCount: 3 }] });
+assertRejects(
+  () => Promise.resolve(module.armNaturalArbiterRetry(retryArmCheckpoint, { stages: [{ stageId: 'preprocess.arbiter', attemptCount: 4 }] })),
+  /exhausted/,
+  'natural Retry refuses reissue after the provider attempt advanced'
+);
 const incompatibleCheckpoint = {
   status: 'ready',
   acceptedNewTurns: [],

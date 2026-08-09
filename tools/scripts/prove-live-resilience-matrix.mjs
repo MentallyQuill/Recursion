@@ -282,6 +282,25 @@ export function summarizeArbiterFailure(execution = {}) {
   };
 }
 
+export function armNaturalArbiterRetry(checkpoint, execution = {}) {
+  const stage = execution?.stages?.find((entry) => entry.stageId === 'preprocess.arbiter') || {};
+  const attemptCount = Number(stage.attemptCount || 0);
+  const recorded = checkpoint.assignmentAdaptations?.naturalArbiterRetryAttemptBefore;
+  const attemptBefore = Number.isFinite(Number(recorded)) ? Number(recorded) : attemptCount;
+  if (
+    checkpoint.assignmentAdaptations?.naturalArbiterRetryAttempted === true
+    && attemptCount > attemptBefore
+  ) {
+    throw new Error(`Natural Arbiter Retry exhausted: ${JSON.stringify(summarizeArbiterFailure(execution))}`);
+  }
+  checkpoint.assignmentAdaptations = {
+    ...(checkpoint.assignmentAdaptations || {}),
+    naturalArbiterRetryAttempted: true,
+    naturalArbiterRetryAttemptBefore: attemptBefore
+  };
+  return checkpoint;
+}
+
 export function authorizeRepairedArbiterRetry(checkpoint) {
   if (checkpoint?.status !== 'fail') throw new Error('Repaired Arbiter Retry requires a failed checkpoint.');
   if (checkpoint.assignmentAdaptations?.naturalArbiterRetry !== true) {
@@ -961,10 +980,7 @@ export async function recoverPendingArbiterRetry(page, checkpoint, statePath, ti
     };
     saveCheckpoint(statePath, checkpoint);
   }
-  if (checkpoint.assignmentAdaptations?.naturalArbiterRetryAttempted === true) {
-    throw new Error(`Natural Arbiter Retry exhausted: ${JSON.stringify(summarizeArbiterFailure(failed))}`);
-  }
-  checkpoint.assignmentAdaptations.naturalArbiterRetryAttempted = true;
+  armNaturalArbiterRetry(checkpoint, failed);
   saveCheckpoint(statePath, checkpoint);
   const action = await clickProgressAction(page, 'Retry this step', timeoutMs);
   if (action.kind !== 'retry' || action.stageId !== 'preprocess.arbiter') {

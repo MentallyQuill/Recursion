@@ -5399,8 +5399,9 @@ export function createRecursionRuntime({
     return result;
   }
 
-  function testProvider(lane = 'utility') {
+  function testProvider(lane = 'utility', options = {}) {
     const resolvedLane = providerLane(lane);
+    const certificationScope = options?.scope === 'segmented' ? 'segmented' : 'full';
     if (activeProviderTests.has(resolvedLane)) return activeProviderTests.get(resolvedLane);
     if (activeProviderOperations.has(resolvedLane)) {
       return Promise.resolve(providerBusyResult(resolvedLane));
@@ -5468,6 +5469,7 @@ export function createRecursionRuntime({
           lane: resolvedLane,
           provider: providerSnapshot,
           profile,
+          includeFused: certificationScope !== 'segmented',
           generate: (roleId, request) => generationRouter.generate(roleId, {
             ...request,
             ...reasoningRequestMetadata({}, 'provider-test')

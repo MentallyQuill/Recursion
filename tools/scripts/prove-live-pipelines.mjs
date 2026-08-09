@@ -606,13 +606,14 @@ export async function selectUtilityProfileByLabel(page, requestedLabel, timeoutM
   return result;
 }
 
-export async function certifyUtilityProfile(page, timeoutMs) {
-  const result = await page.evaluate(async () => {
+export async function certifyUtilityProfile(page, timeoutMs, options = {}) {
+  const scope = options?.scope === 'segmented' ? 'segmented' : 'full';
+  const result = await page.evaluate(async (requestedScope) => {
     const runtime = globalThis.__recursionLiveHarnessRuntime;
     if (!runtime || typeof runtime.testProvider !== 'function') {
       return { ok: false, reason: 'runtime-provider-test-unavailable' };
     }
-    const testResult = await runtime.testProvider('utility');
+    const testResult = await runtime.testProvider('utility', { scope: requestedScope });
     const view = runtime.view?.() || {};
     const provider = view.settings?.providers?.utility || {};
     const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
@@ -629,7 +630,7 @@ export async function certifyUtilityProfile(page, timeoutMs) {
       checks: provider.certification?.checks || null,
       capability: String(view.settings?.providerCapabilities?.utility?.promptPacket?.state || '')
     };
-  });
+  }, scope);
   const segmentedReady = result?.ok === true
     && ['partial', 'pass'].includes(result.status)
     && result.checks?.connectivity === 'pass'

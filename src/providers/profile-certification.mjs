@@ -106,6 +106,7 @@ export async function certifyConnectionProfile({
   provider,
   profile,
   generate,
+  includeFused = true,
   now = () => new Date().toISOString()
 }) {
   if (typeof generate !== 'function') throw new TypeError('Profile certification requires generate.');
@@ -169,6 +170,17 @@ export async function certifyConnectionProfile({
         code: 'RECURSION_PROVIDER_SINGLE_CARD_INVALID',
         message: 'Profile single-card check returned invalid structured data.'
       }
+    });
+  }
+
+  if (includeFused !== true) {
+    return certificationResult({
+      status: 'partial',
+      checkedAt: now(),
+      completionMode,
+      structuredOutput: method,
+      checks,
+      diagnostics
     });
   }
 

@@ -6323,6 +6323,23 @@ for (const scenario of [
 }
 
 {
+  const routerCalls = [];
+  const { runtime, settingsStore } = createRuntimeHarness({
+    generationRouter: {
+      async generate(roleId) {
+        routerCalls.push(roleId);
+        return profileCertificationResponse(roleId);
+      }
+    }
+  });
+  const result = await runtime.testProvider('utility', { scope: 'segmented' });
+  assertEqual(result.ok, true, 'runtime Segmented-only profile certification succeeds');
+  assertEqual(result.certification.status, 'partial', 'runtime Segmented-only certification is Segmented-ready');
+  assertDeepEqual(routerCalls, ['providerTest', 'sceneFrameCard'], 'runtime Segmented-only certification makes no Fused call');
+  assertEqual(settingsStore.get().providers.utility.certification.checks.fusedCards, 'not-run', 'runtime persists an explicit untested Fused check');
+}
+
+{
   const providerGate = deferred();
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({

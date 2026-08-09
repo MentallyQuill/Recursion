@@ -51,6 +51,25 @@ assert(
   'Fused certification prompt specifies both exact families and the accepted item shape'
 );
 
+const segmentedCalls = [];
+const segmentedOnly = await certifyConnectionProfile({
+  lane: 'utility',
+  provider: { generationPolicy: { structuredOutputMode: 'prompt-json' } },
+  profile: { id: 'profile-segmented', completionMode: 'chat' },
+  includeFused: false,
+  generate: async (roleId) => {
+    segmentedCalls.push(roleId);
+    if (roleId === 'providerTest') return { ok: true, data: { schema: 'recursion.providerTest.v1', ok: true } };
+    return { ok: true, data: { promptText: 'Track the scene.', evidenceRefs: ['message:0'] } };
+  },
+  now: () => '2026-08-06T00:30:00.000Z'
+});
+assertEqual(segmentedOnly.status, 'partial', 'Segmented-only certification produces Segmented-ready status');
+assertDeepEqual(segmentedOnly.checks, {
+  connectivity: 'pass', singleCard: 'pass', fusedCards: 'not-run'
+}, 'Segmented-only certification records Fused as not run');
+assertDeepEqual(segmentedCalls, ['providerTest', 'sceneFrameCard'], 'Segmented-only certification never calls the Fused role');
+
 const partial = await certifyConnectionProfile({
   lane: 'reasoner',
   provider: { generationPolicy: { structuredOutputMode: 'prompt-json' } },

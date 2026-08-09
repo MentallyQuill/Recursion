@@ -35,7 +35,15 @@ The Utility matrix, in preferred order, is:
 3. `nanogpt deepseek/deepseek-v4-pro-cheaper:thinking - Celia V5.4`.
 4. `nanogpt gemma-4-31B-Fabled - RedRising-1.3`.
 
+The Drummer Cydonia is a fifth, Segmented-only compatibility add-on:
+
+5. `nanogpt TheDrummer/Cydonia-24B-v4.3 - Wandlight-1.3`.
+
+Cydonia does not alter or extend the completed eight-turn resilience ledger. It receives a separate fresh synthetic chat, connectivity plus single-card certification, and one accepted Segmented host turn. Its certification, request audit, and durable stage graph must all prove that no Fused bundle test or Fused pipeline stage ran. Prior Cydonia failures are treated as Recursion integration defects until request shaping, output parsing, and the live host boundary have been exhausted through the repair loop.
+
 The first, third, and fourth profiles already exist on `recursion-soak-a`. The MiniMax M3 profile exists only on `default-user`; preflight may copy that one complete Connection Manager profile record into the soak user's profile list after backing up `settings.json`. It must not mutate `default-user`, copy unrelated settings, expose the profile id or secret reference, or duplicate an equivalent model/profile already present.
+
+The Cydonia profile also originates on `default-user`. The same exact-profile, backup-first, shared-credential-reference guard applies when adding it to `recursion-soak-a`.
 
 Recursion uses isolated provider policy during the matrix. Saved SillyTavern presets identify the requested profiles but do not become hidden prompt dependencies.
 

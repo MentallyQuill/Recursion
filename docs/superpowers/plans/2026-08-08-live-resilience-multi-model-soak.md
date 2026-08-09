@@ -367,3 +367,28 @@
 - [ ] **Step 5: Report qualifications, assignments, eight accepted new-turn ids, swipe evidence, repaired defects, exact test results, and remaining Post-process scope**
 
   Do not push, merge, or open a pull request unless separately requested.
+
+### Task 10: The Drummer Cydonia Segmented-only add-on
+
+**Files:**
+
+- Modify: `src/providers/profile-certification.mjs`
+- Modify: `src/runtime.mjs`
+- Modify: `tools/scripts/prove-live-pipelines.mjs`
+- Create: `tools/scripts/prove-live-segmented-utility-profile.mjs`
+- Create: `tools/scripts/test-live-segmented-utility-profile.mjs`
+- Execute: `artifacts/live-segmented-utility/cydonia.json`
+
+- [ ] **Step 1: Back up soak settings and clone only the exact Cydonia profile from default-user**
+
+- [ ] **Step 2: Add Segmented-only certification**
+
+  Run connectivity and single-card checks, persist `fusedCards: not-run`, and preserve the existing full certification behavior for normal UI requests.
+
+- [ ] **Step 3: Run one fresh-chat Segmented host turn**
+
+  Require a completed Arbiter, at least one completed Segmented card stage, prompt installation, one user/assistant count delta, and zero Fused certification requests or durable stages.
+
+- [ ] **Step 4: Repair and retest the same Cydonia boundary until accepted**
+
+- [ ] **Step 5: Repeat full offline, alpha, browser, installed-copy parity, sanitization, and repository-state verification**

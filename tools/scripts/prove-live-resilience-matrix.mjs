@@ -1107,7 +1107,7 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
         if (!countVerdict.ok) throw new Error(`Checkpoint contains an unaccepted host turn: ${countVerdict.errors.join(', ')}`);
         pendingRecovery = countVerdict.state === 'pending-stop-resume' ? countVerdict.state : '';
         if (env.RECURSION_RESILIENCE_AUDIT_ONLY === '1') {
-          return readLiveResilienceAudit(page);
+          return await readLiveResilienceAudit(page);
         }
       } else {
         checkpoint = createResilienceCheckpoint({

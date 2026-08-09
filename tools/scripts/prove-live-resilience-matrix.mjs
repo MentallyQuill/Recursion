@@ -211,6 +211,44 @@ export function validateHostTurnCounts(checkpoint = {}, chat = {}) {
     : { ok: false, errors: classification.errors.length ? classification.errors : [classification.state] };
 }
 
+export function isLateDuplicateAssistant(checkpoint = {}, chat = {}) {
+  const accepted = Array.isArray(checkpoint.acceptedNewTurns) ? checkpoint.acceptedNewTurns.length : 0;
+  const expectedUser = Number(checkpoint.baselineCounts?.user || 0) + accepted;
+  const expectedAssistant = Number(checkpoint.baselineCounts?.assistant || 0) + accepted;
+  return Number(chat.userCount || 0) === expectedUser
+    && Number(chat.assistantCount || 0) === expectedAssistant + 1
+    && JSON.stringify(chat.trailingRoles || []) === JSON.stringify(['assistant', 'assistant']);
+}
+
+async function removeLateDuplicateAssistant(page, checkpoint, timeoutMs) {
+  const chat = await page.evaluate(() => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const entries = Array.isArray(context.chat) ? context.chat : [];
+    return {
+      userCount: entries.filter((entry) => entry?.is_user === true).length,
+      assistantCount: entries.filter((entry) => entry?.is_user === false).length,
+      trailingRoles: entries.slice(-2).map((entry) => entry?.is_user === true ? 'user' : 'assistant')
+    };
+  });
+  if (!isLateDuplicateAssistant(checkpoint, chat)) {
+    throw new Error('Late duplicate repair refused: host turn shape is not the exact guarded duplicate.');
+  }
+  await page.evaluate(async () => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    if (typeof context.deleteLastMessage !== 'function') throw new Error('SillyTavern deleteLastMessage is unavailable.');
+    await context.deleteLastMessage();
+    await context.saveChat?.();
+  });
+  await page.waitForFunction((expected) => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const entries = Array.isArray(context.chat) ? context.chat : [];
+    return entries.filter((entry) => entry?.is_user === false).length === expected;
+  }, Number(checkpoint.baselineCounts?.assistant || 0) + checkpoint.acceptedNewTurns.length, { timeout: timeoutMs });
+  checkpoint.status = 'ready';
+  checkpoint.defect = null;
+  return checkpoint;
+}
+
 export function classifyHostTurnCounts(checkpoint = {}, chat = {}) {
   const accepted = Array.isArray(checkpoint.acceptedNewTurns) ? checkpoint.acceptedNewTurns.length : 0;
   const expectedUser = Number(checkpoint.baselineCounts?.user || 0) + accepted;
@@ -1222,6 +1260,11 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
         }
         if (env.RECURSION_RESILIENCE_ADOPT_REPAIR_SHA === '1' && checkpoint.branchSha !== identity.branchSha) {
           adoptRepairSha(checkpoint, identity.branchSha);
+          saveCheckpoint(args.statePath, checkpoint);
+        }
+        if (env.RECURSION_RESILIENCE_REMOVE_LATE_DUPLICATE === '1') {
+          await removeLateDuplicateAssistant(page, checkpoint, timeoutMs);
+          chat = await page.evaluate(contextChatSummaryScript());
           saveCheckpoint(args.statePath, checkpoint);
         }
         if (env.RECURSION_RESILIENCE_RETRY_REPAIRED_ARBITER === '1') {

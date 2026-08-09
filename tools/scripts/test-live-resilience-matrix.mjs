@@ -67,6 +67,14 @@ assertEqual(module.validateHostTurnCounts({
   baselineCounts: { user: 1, assistant: 1 },
   acceptedNewTurns: []
 }, { userCount: 2, assistantCount: 2 }).ok, false, 'resume detects an unaccepted completed host turn');
+assertEqual(module.isLateDuplicateAssistant({
+  baselineCounts: { user: 0, assistant: 0 },
+  acceptedNewTurns: [{}, {}]
+}, { userCount: 2, assistantCount: 3, trailingRoles: ['assistant', 'assistant'] }), true, 'late duplicate repair recognizes exactly one excess trailing assistant');
+assertEqual(module.isLateDuplicateAssistant({
+  baselineCounts: { user: 0, assistant: 0 },
+  acceptedNewTurns: [{}, {}]
+}, { userCount: 2, assistantCount: 4, trailingRoles: ['assistant', 'assistant'] }), false, 'late duplicate repair refuses broader assistant drift');
 assertDeepEqual(module.classifyHostTurnCounts({
   baselineCounts: { user: 0, assistant: 0 },
   acceptedNewTurns: [],

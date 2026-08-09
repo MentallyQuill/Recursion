@@ -465,6 +465,13 @@ async function waitForExecution(page, predicate, timeoutMs) {
   return readExecutionSnapshot(page);
 }
 
+export function observePromise(promise) {
+  return Promise.resolve(promise).then(
+    (value) => ({ ok: true, value }),
+    (error) => ({ ok: false, error })
+  );
+}
+
 export function classifyGenerationRequest(body = '') {
   return String(body).includes('recursion.') ? 'recursion' : 'writer';
 }
@@ -515,7 +522,7 @@ export async function driveStopResumeMilestone({
   page.on?.('request', observeRequest);
   page.on?.('response', observeResponse);
   const promptClearsBefore = await page.evaluate(() => (globalThis.__recursionSmokePromptEvents || []).filter((entry) => entry?.cleared === true).length);
-  const sendPromise = send(page, message, { requirePrompt: true, timeoutMs });
+  const sendPromise = observePromise(send(page, message, { requirePrompt: true, timeoutMs }));
   await page.waitForFunction(() => {
     const state = globalThis.__recursionLiveHarnessRuntime?.view?.()?.execution?.state;
     return state === 'running' || state === 'completed';
@@ -534,7 +541,9 @@ export async function driveStopResumeMilestone({
   pausedWindow = false;
   let sendResult;
   try {
-    sendResult = await sendPromise;
+    const settlement = await sendPromise;
+    if (!settlement.ok) throw settlement.error;
+    sendResult = settlement.value;
   } catch (error) {
     const host = await readBoundedHostState(page).catch(() => null);
     throw new Error(`Stop Resume host settlement timed out: ${JSON.stringify({ host, resumedProviderCalls, resumedProviderResponses })}`);
@@ -599,7 +608,7 @@ export async function driveRetryStageMilestone({ page, message, timeoutMs, send 
   };
   await page.context().route(routePattern, handler);
   try {
-    const sendPromise = send(page, message, { requirePrompt: true, timeoutMs });
+    const sendPromise = observePromise(send(page, message, { requirePrompt: true, timeoutMs }));
     await page.locator('[data-recursion-status-trigger]').first().click({ timeout: timeoutMs });
     const retryButton = page.getByRole('button', { name: 'Retry this step', exact: true }).first();
     await retryButton.waitFor({ state: 'visible', timeout: timeoutMs });
@@ -611,7 +620,9 @@ export async function driveRetryStageMilestone({ page, message, timeoutMs, send 
     const failed = await readExecutionSnapshot(page);
     await page.context().unroute(routePattern, handler);
     await retryButton.click({ timeout: timeoutMs });
-    const sendResult = await sendPromise;
+    const settlement = await sendPromise;
+    if (!settlement.ok) throw settlement.error;
+    const sendResult = settlement.value;
     const completed = await waitForExecution(page, () => globalThis.__recursionLiveHarnessRuntime?.view?.()?.execution?.state === 'completed', timeoutMs);
     const failedArbiter = failed?.stages?.find((stage) => stage.stageId === 'preprocess.arbiter');
     const completedArbiter = completed?.stages?.find((stage) => stage.stageId === 'preprocess.arbiter');

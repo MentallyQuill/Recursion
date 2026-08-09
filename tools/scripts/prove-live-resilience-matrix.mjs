@@ -1283,12 +1283,12 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
         }
         const resumeVerdict = validateResilienceCheckpoint(checkpoint, identity);
         if (!resumeVerdict.ok) throw new Error(`Checkpoint resume refused: ${resumeVerdict.errors.join(', ')}`);
-        const countVerdict = classifyHostTurnCounts(checkpoint, chat);
-        if (!countVerdict.ok) throw new Error(`Checkpoint contains an unaccepted host turn: ${countVerdict.errors.join(', ')}`);
-        pendingRecovery = countVerdict.state === 'pending-stop-resume' ? countVerdict.state : '';
         if (env.RECURSION_RESILIENCE_AUDIT_ONLY === '1') {
           return await readLiveResilienceAudit(page);
         }
+        const countVerdict = classifyHostTurnCounts(checkpoint, chat);
+        if (!countVerdict.ok) throw new Error(`Checkpoint contains an unaccepted host turn: ${countVerdict.errors.join(', ')}`);
+        pendingRecovery = countVerdict.state === 'pending-stop-resume' ? countVerdict.state : '';
       } else {
         checkpoint = createResilienceCheckpoint({
           runId: `resilience-${Date.now().toString(36)}`,

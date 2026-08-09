@@ -3,7 +3,7 @@ import { assertDeepEqual } from '../../tests/helpers/assert.mjs';
 
 assertDeepEqual(resolveEffectivePipelineMode({
   requestedMode: 'fused',
-  utilityCapability: { fusedEligible: false, segmentedEligible: true }
+  selectedCapability: { fusedEligible: false, segmentedEligible: true }
 }), {
   requestedMode: 'fused',
   effectiveMode: 'segmented',
@@ -12,16 +12,16 @@ assertDeepEqual(resolveEffectivePipelineMode({
 
 assertDeepEqual(resolveEffectivePipelineMode({
   requestedMode: 'fused',
-  utilityCapability: { fusedEligible: true, segmentedEligible: true }
+  selectedCapability: { fusedEligible: true, segmentedEligible: true }
 }), {
   requestedMode: 'fused',
   effectiveMode: 'fused',
   reasonCode: ''
-}, 'certified profile keeps Fused');
+}, 'certified effective provider lane keeps Fused');
 
 assertDeepEqual(resolveEffectivePipelineMode({
   requestedMode: 'segmented',
-  utilityCapability: { fusedEligible: true, segmentedEligible: true }
+  selectedCapability: { fusedEligible: true, segmentedEligible: true }
 }), {
   requestedMode: 'segmented',
   effectiveMode: 'segmented',
@@ -30,7 +30,7 @@ assertDeepEqual(resolveEffectivePipelineMode({
 
 assertDeepEqual(resolveEffectivePipelineMode({
   requestedMode: 'unknown',
-  utilityCapability: {}
+  selectedCapability: {}
 }), {
   requestedMode: 'segmented',
   effectiveMode: 'segmented',

@@ -10,7 +10,7 @@ const full = await certifyConnectionProfile({
   provider,
   profile: { id: 'profile-a', completionMode: 'text' },
   generate: async (roleId, request) => {
-    calls.push([roleId, request.structuredOutputMethod]);
+    calls.push([roleId, request.structuredOutputMethod, request.responseLength]);
     if (roleId === 'sceneFrameCard' && request.structuredOutputMethod === 'native-schema') {
       return { ok: false, error: { code: 'RECURSION_STRUCTURED_OUTPUT_UNSUPPORTED' } };
     }
@@ -37,11 +37,11 @@ assertEqual(full.structuredOutput, 'prompt-json', 'fallback method is persisted'
 assertEqual(full.checks.fusedCards, 'pass', 'representative Fused bundle passes');
 assert(full.diagnosticCodes.includes('structured-output-downgraded'), 'native schema downgrade is recorded');
 assertDeepEqual(calls, [
-  ['providerTest', 'prompt-json'],
-  ['sceneFrameCard', 'native-schema'],
-  ['sceneFrameCard', 'prompt-json'],
-  ['fusedCardBundle', 'prompt-json']
-], 'certification runs connectivity, fallback single-card, and Fused checks in order');
+  ['providerTest', 'prompt-json', 900],
+  ['sceneFrameCard', 'native-schema', 900],
+  ['sceneFrameCard', 'prompt-json', 900],
+  ['fusedCardBundle', 'prompt-json', 1792]
+], 'certification runs connectivity, fallback single-card, and Fused checks with thinking-safe bounded budgets');
 
 const partial = await certifyConnectionProfile({
   lane: 'reasoner',

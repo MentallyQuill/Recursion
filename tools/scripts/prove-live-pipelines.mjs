@@ -203,6 +203,24 @@ export function sanitizeLiveProofReport(value, key = '') {
   return typeof value === 'string' ? value.slice(0, 500) : value;
 }
 
+export function inspectCertificationPreflight({ utility = {}, reasoner = {} } = {}) {
+  const errors = [];
+  const utilitySegmentedReady = utility.ok === true
+    && ['partial', 'pass'].includes(utility.status)
+    && utility.checks?.connectivity === 'pass'
+    && utility.checks?.singleCard === 'pass';
+  const reasonerFusedReady = reasoner.ok === true
+    && reasoner.status === 'pass'
+    && reasoner.checks?.fusedCards === 'pass';
+  if (!utilitySegmentedReady) errors.push('utility-not-segmented-ready');
+  if (!reasonerFusedReady) errors.push('reasoner-not-fused-ready');
+  return {
+    ok: errors.length === 0,
+    effectiveFusedLane: reasonerFusedReady ? 'reasoner' : '',
+    errors
+  };
+}
+
 export function inspectPacketInjectionMetadata(packet = {}, settings = {}) {
   const placement = String(settings.placement || '').trim().toLowerCase();
   const role = String(settings.role || 'system').trim().toLowerCase();
@@ -491,15 +509,16 @@ async function certifySelectedProfiles(page, timeoutMs) {
     };
     const utility = summary('utility', utilityResult);
     const reasoner = summary('reasoner', reasonerResult);
-    return { ok: utility.ok && reasoner.ok && utility.status === 'pass' && reasoner.status === 'pass', utility, reasoner };
+    return { utility, reasoner };
   });
-  if (!result?.ok) fail('selected-profile-certification-failed', 'Selected Utility and Reasoner profiles did not both reach Fused-ready certification.', result || {});
+  const verdict = inspectCertificationPreflight(result);
+  if (!verdict.ok) fail('selected-profile-certification-failed', 'Selected Utility and Reasoner profiles did not reach the required Segmented/Fused readiness.', { ...result, verdict });
   await page.waitForFunction(() => {
     const settings = globalThis.__recursionLiveHarnessRuntime?.view?.()?.settings || {};
-    return settings.providers?.utility?.certification?.status === 'pass'
+    return ['partial', 'pass'].includes(settings.providers?.utility?.certification?.status)
       && settings.providers?.reasoner?.certification?.status === 'pass';
   }, null, { timeout: timeoutMs });
-  return result;
+  return { ...result, verdict };
 }
 
 export async function selectInjectionSettings(page, settings, timeoutMs) {

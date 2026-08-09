@@ -13,6 +13,23 @@ assertEqual(typeof module.selectInjectionSettings, 'function', 'selectInjectionS
 assertEqual(typeof module.configureSoakDeckFixture, 'function', 'soak deck fixture is exported for focused harness tests');
 assertEqual(typeof module.inspectMilestoneVerdict, 'function', 'milestone verdict helper is exported for focused harness tests');
 assertEqual(typeof module.sanitizeLiveProofReport, 'function', 'live proof report sanitizer is exported for focused harness tests');
+assertEqual(typeof module.inspectCertificationPreflight, 'function', 'selected-profile certification verdict is exported for focused harness tests');
+assertDeepEqual(
+  module.inspectCertificationPreflight({
+    utility: { ok: true, status: 'partial', checks: { connectivity: 'pass', singleCard: 'pass', fusedCards: 'fail' } },
+    reasoner: { ok: true, status: 'pass', checks: { connectivity: 'pass', singleCard: 'pass', fusedCards: 'pass' } }
+  }),
+  { ok: true, effectiveFusedLane: 'reasoner', errors: [] },
+  'High-reasoning preflight accepts Segmented-ready Utility plus Fused-ready Reasoner'
+);
+assertEqual(
+  module.inspectCertificationPreflight({
+    utility: { ok: true, status: 'partial', checks: { connectivity: 'pass', singleCard: 'pass', fusedCards: 'fail' } },
+    reasoner: { ok: false, status: 'fail', checks: { connectivity: 'fail', singleCard: 'not-run', fusedCards: 'not-run' } }
+  }).ok,
+  false,
+  'certification preflight rejects a configuration without a Fused-ready effective lane'
+);
 
 const completedBaseStages = [
   'preprocess.snapshot',

@@ -6292,7 +6292,7 @@ for (const scenario of [
     'sceneFrameCard',
     'fusedCardBundle'
   ], 'runtime profile certification runs the three staged checks');
-  assertDeepEqual(certificationCalls.map((entry) => entry.request.responseLength), [128, 900, 1792], 'certification uses bounded stage budgets');
+  assertDeepEqual(certificationCalls.map((entry) => entry.request.responseLength), [900, 900, 1792], 'certification uses thinking-safe bounded stage budgets');
   assert(certificationCalls.every((entry) => entry.request.lane === 'utility'), 'certification targets the selected lane');
   assert(certificationCalls.every((entry) => entry.request.reasoningCategory === 'provider-test'), 'certification labels diagnostic provider calls');
   assert(certificationCalls.every((entry) => entry.request.reasoningIntent === 'minimal'), 'certification always uses minimal provider reasoning');

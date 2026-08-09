@@ -998,7 +998,7 @@ function fusedCardBundleLaneForSettings(settings, capabilityResolver = providerC
   const policy = reasoningPolicyForSettings(settings);
   if (
     (policy.level === 'high' || policy.level === 'ultra')
-    && capabilityResolver(settings, 'reasoner', 'prompt-packet').eligible
+    && capabilityResolver(settings, 'reasoner', 'prompt-packet').fusedEligible
   ) return 'reasoner';
   return 'utility';
 }
@@ -6022,9 +6022,10 @@ export function createRecursionRuntime({
     const requests = buildCardRequests(plan, requestContext).map((request) => applyReasoningLaneToCardRequest(request, settings, runtimeProviderCapability));
     if (!requests.length) return empty;
     if (typeof generationRouter.batch !== 'function' && typeof generationRouter.generate !== 'function') return empty;
+    const fusedLane = fusedCardBundleLaneForSettings(settings, runtimeProviderCapability);
     const pipelineDecision = resolveEffectivePipelineMode({
       requestedMode: settings.pipelineMode,
-      utilityCapability: runtimeProviderCapability(settings, 'utility', 'prompt-packet')
+      selectedCapability: runtimeProviderCapability(settings, fusedLane, 'prompt-packet')
     });
     if (pipelineDecision.effectiveMode === 'fused' && typeof generationRouter.generate === 'function') {
       return runFusedCardPipeline({
@@ -7609,9 +7610,10 @@ export function createRecursionRuntime({
     const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180)
       || DEFAULT_CHAT_ID;
     const initialCache = null;
+    const fusedLane = fusedCardBundleLaneForSettings(settings, runtimeProviderCapability);
     const pipelineDecision = resolveEffectivePipelineMode({
       requestedMode: settings.pipelineMode,
-      utilityCapability: runtimeProviderCapability(settings, 'utility', 'prompt-packet')
+      selectedCapability: runtimeProviderCapability(settings, fusedLane, 'prompt-packet')
     });
     const fallbackPlan = localFallbackPlan(snapshot, settings);
     fallbackPlan.source = {

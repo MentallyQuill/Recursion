@@ -1,6 +1,6 @@
 export function resolveEffectivePipelineMode({
   requestedMode = 'segmented',
-  utilityCapability = {}
+  selectedCapability = {}
 } = {}) {
   const requested = requestedMode === 'fused' ? 'fused' : 'segmented';
   if (requested === 'segmented') {
@@ -10,7 +10,7 @@ export function resolveEffectivePipelineMode({
       reasonCode: ''
     });
   }
-  if (utilityCapability?.fusedEligible === true) {
+  if (selectedCapability?.fusedEligible === true) {
     return Object.freeze({
       requestedMode: requested,
       effectiveMode: 'fused',

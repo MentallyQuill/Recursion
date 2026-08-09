@@ -5,7 +5,7 @@ function connectivityRequest(lane) {
     lane,
     certification: true,
     structuredOutputMethod: 'prompt-json',
-    responseLength: 128,
+    responseLength: 900,
     prompt: [
       'Return one JSON object only.',
       '{"schema":"recursion.providerTest.v1","ok":true}'

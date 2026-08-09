@@ -13,6 +13,18 @@ let settingsBootstrapUnsubscribers = [];
 let settingsLoadEventObserved = false;
 let runtimeRestorePromise = null;
 
+export function installHostGenerationProbe(module = {}) {
+  if (typeof module?.isGenerating !== 'function') return false;
+  globalThis.__recursionHostIsGenerating = module.isGenerating;
+  return true;
+}
+
+if (typeof window !== 'undefined') {
+  void import('/script.js').then((module) => {
+    installHostGenerationProbe(module);
+  }).catch(() => {});
+}
+
 let postProcessControlsLocked = false;
 let postProcessControlLockPromise = null;
 

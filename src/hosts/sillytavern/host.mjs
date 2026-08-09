@@ -884,7 +884,10 @@ function findStopButton(context) {
 }
 
 function nativeGenerationBusy(context = {}) {
-  if (typeof context?.isGenerating === 'function') return context.isGenerating() === true;
+  const probe = typeof context?.isGenerating === 'function'
+    ? context.isGenerating
+    : globalThis.__recursionHostIsGenerating;
+  if (typeof probe === 'function') return probe() === true;
   const documentRef = context?.document || globalThis.document;
   if (typeof documentRef?.querySelector !== 'function') return false;
   const stopButton = findStopButton(context);

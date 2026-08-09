@@ -60,6 +60,9 @@ function withSmokeConnectionManager(context, label = 'smoke') {
 }
 
 const extensionModule = await import('../../src/extension/index.js');
+assertEqual(extensionModule.installHostGenerationProbe({ isGenerating: () => true }), true, 'extension installs SillyTavern authoritative generation probe');
+assertEqual(globalThis.__recursionHostIsGenerating(), true, 'installed host generation probe remains callable');
+delete globalThis.__recursionHostIsGenerating;
 
 const placeholderPayload = [
   { mesid: 31, is_user: false, mes: 'Prior assistant response.' },

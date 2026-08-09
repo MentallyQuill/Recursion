@@ -114,6 +114,7 @@ assertDeepEqual(module.summarizeArbiterFailure({
   lastAttemptAction: 'stop',
   diagnosticCodes: ['SAFE_CODE']
 }, 'Arbiter exhaustion summary contains only bounded failure metadata');
+assertEqual(typeof module.readLiveResilienceAudit, 'function', 'runner exports a no-call bounded execution audit');
 const repairedRetryCheckpoint = { status: 'fail', assignmentAdaptations: { naturalArbiterRetry: true } };
 module.authorizeRepairedArbiterRetry(repairedRetryCheckpoint);
 assertEqual(repairedRetryCheckpoint.assignmentAdaptations.repairedArbiterRetryPending, true, 'repair authorization opens one bounded Retry');

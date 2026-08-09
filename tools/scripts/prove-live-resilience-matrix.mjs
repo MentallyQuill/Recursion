@@ -422,6 +422,16 @@ export async function readExecutionSnapshot(page) {
   });
 }
 
+export async function readLiveResilienceAudit(page) {
+  await page.evaluate(async () => {
+    await globalThis.__recursionLiveHarnessRuntime?.restoreExecutionState?.();
+  });
+  return {
+    status: 'audit',
+    arbiter: summarizeArbiterFailure(await readExecutionSnapshot(page))
+  };
+}
+
 export async function readResumeAvailability(page) {
   return page.evaluate(() => {
     const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
@@ -1096,6 +1106,9 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
         const countVerdict = classifyHostTurnCounts(checkpoint, chat);
         if (!countVerdict.ok) throw new Error(`Checkpoint contains an unaccepted host turn: ${countVerdict.errors.join(', ')}`);
         pendingRecovery = countVerdict.state === 'pending-stop-resume' ? countVerdict.state : '';
+        if (env.RECURSION_RESILIENCE_AUDIT_ONLY === '1') {
+          return readLiveResilienceAudit(page);
+        }
       } else {
         checkpoint = createResilienceCheckpoint({
           runId: `resilience-${Date.now().toString(36)}`,

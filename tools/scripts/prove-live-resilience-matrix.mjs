@@ -268,20 +268,20 @@ async function removeUnacceptedCompletedPair(page, checkpoint, timeoutMs) {
   return checkpoint;
 }
 
-export function replaceIncompatibleV4(checkpoint) {
-  if (checkpoint?.status !== 'fail' || checkpoint.currentMilestone !== 'fused-fallback') {
-    throw new Error('V4 replacement requires the failed Fused milestone boundary.');
+export function restoreRequiredPopularModelTargets(checkpoint) {
+  if (checkpoint?.status !== 'fail'
+      || checkpoint.currentMilestone !== 'endurance-2'
+      || (checkpoint.acceptedNewTurns || []).length !== 5) {
+    throw new Error('Popular-model repair requires the failed second endurance boundary after five accepted turns.');
   }
-  checkpoint.assignments['fused-fallback'] = NEMOTRON_LABEL;
-  checkpoint.effectiveProfileLabels = (checkpoint.effectiveProfileLabels || [])
-    .map((label) => label === PROFILE_LABELS[2] ? NEMOTRON_LABEL : label);
-  checkpoint.modelIncompatibilities = [
-    ...(checkpoint.modelIncompatibilities || []),
+  checkpoint.effectiveProfileLabels = [GLM_CELIA_LABEL, ...PROFILE_LABELS.slice(1)];
+  checkpoint.modelIncompatibilities = (checkpoint.modelIncompatibilities || [])
+    .filter((entry) => ![PROFILE_LABELS[1], PROFILE_LABELS[2]].includes(entry?.label));
+  checkpoint.compatibilityRepairs = [
+    ...(checkpoint.compatibilityRepairs || []),
     {
-      label: PROFILE_LABELS[2],
-      stageId: 'preprocess.arbiter',
-      failureCode: 'RECURSION_PROVIDER_CONTEXT_LIMIT',
-      replacementLabel: NEMOTRON_LABEL
+      defectCode: 'completion-token-limit-misclassified',
+      requiredLabels: [PROFILE_LABELS[1], PROFILE_LABELS[2]]
     }
   ];
   checkpoint.status = 'ready';
@@ -1416,9 +1416,9 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
           chat = await page.evaluate(contextChatSummaryScript());
           saveCheckpoint(args.statePath, checkpoint);
         }
-        if (env.RECURSION_RESILIENCE_REPLACE_INCOMPATIBLE_V4 === '1') {
+        if (env.RECURSION_RESILIENCE_RESTORE_REQUIRED_MODELS === '1') {
           await removeUnacceptedCompletedPair(page, checkpoint, timeoutMs);
-          replaceIncompatibleV4(checkpoint);
+          restoreRequiredPopularModelTargets(checkpoint);
           chat = await page.evaluate(contextChatSummaryScript());
           saveCheckpoint(args.statePath, checkpoint);
         }

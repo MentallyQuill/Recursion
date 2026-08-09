@@ -10,6 +10,7 @@ import {
 import {
   PROVIDER_RESPONSE_ERROR_CODES,
   assertProviderResponseText,
+  getProviderResponseFailure,
   normalizeProviderEnvelope
 } from './providers/provider-response-normalizer.mjs';
 import {
@@ -1543,8 +1544,17 @@ function responsePolicyDiagnostics(response = {}) {
 
 function normalizeProviderResponse(response, enriched) {
   const envelope = normalizeProviderEnvelope(response);
-  if (!envelope.structured && !String(envelope.text || '').trim()) {
-    providerVisibleText(response?.raw ?? response, enriched);
+  const raw = response?.raw ?? response;
+  const failure = getProviderResponseFailure(raw, {
+    providerTitle: enriched.providerSource || 'Provider',
+    maxTokens: providerRequestMaxTokens(enriched)
+  });
+  if (failure?.code === PROVIDER_RESPONSE_ERROR_CODES.TOKEN_LIMIT
+      || (!envelope.structured && !String(envelope.text || '').trim())) {
+    if (failure) {
+      providerResponseFailureError({ code: failure.code, details: failure }, enriched);
+    }
+    providerVisibleText(raw, enriched);
   }
   return {
     text: envelope.text,

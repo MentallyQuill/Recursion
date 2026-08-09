@@ -194,7 +194,7 @@ assertEqual(utility.ok, true, 'profile-backed Utility generation succeeds');
 assertEqual(utility.data.schema, 'recursion.utilityArbiter.v1', 'Utility response is parsed');
 assertEqual(calls[0].connectionProfileId, 'profile-utility', 'Utility request carries selected profile ID');
 assertEqual(calls[0].responseSchema, 'recursion.utilityArbiter.v1', 'Utility request carries role schema');
-assertEqual(calls[0].responseLength, 1200, 'Utility Arbiter receives its stage output budget');
+assertEqual(calls[0].responseLength, 4096, 'Utility Arbiter receives a thinking-safe stage output budget');
 assertEqual(Object.hasOwn(calls[0], 'providerSource'), false, 'legacy provider source is absent');
 assertEqual(calls[0].providerConfig.generationPolicy.structuredOutputMode, 'auto', 'structured output policy is explicit');
 
@@ -261,6 +261,33 @@ const malformed = await malformedRouter.generate('utilityArbiter', { prompt: 'Re
 assertEqual(malformed.ok, false, 'malformed JSON is rejected');
 assertEqual(malformed.error.code, 'RECURSION_JSON_PARSE_FAILED', 'malformed JSON has stable parse code');
 assertEqual(JSON.stringify(malformed).includes(malformedMarker), false, 'malformed raw output is absent from diagnostics');
+
+const truncatedStore = createStore();
+configureProfile(truncatedStore, 'utility', 'profile-utility');
+const truncatedRouter = createGenerationRouter({
+  client: createProviderClient({
+    host: {
+      providerProfiles: { list: () => PROFILES },
+      generation: {
+        async generate() {
+          return {
+            raw: {
+              choices: [{
+                message: { content: '{"schema":"recursion.utilityArbiter.v1"' },
+                finish_reason: 'length'
+              }],
+              usage: { completion_tokens: 4096 }
+            }
+          };
+        }
+      }
+    },
+    settingsStore: truncatedStore
+  })
+});
+const truncated = await truncatedRouter.generate('utilityArbiter', { prompt: 'Return complete JSON.' });
+assertEqual(truncated.ok, false, 'visible partial JSON stopped at the token limit is rejected before parsing');
+assertEqual(truncated.error.code, 'RECURSION_PROVIDER_TOKEN_LIMIT', 'visible completion truncation preserves its distinct failure code');
 
 const wrongSchemaRouter = createGenerationRouter({
   client: {

@@ -4,6 +4,8 @@
 
 **Goal:** Build and run a resumable real-model soak that exercises four requested Utility profiles across Stop/Resume, Retry Stage, forced Fused fallback, queued reprocess, and an eight-new-turn cumulative endurance chat, excluding Post-process.
 
+**Required compatibility correction:** MiniMax M3 and DeepSeek V4 Pro Cheaper are mandatory accepted-turn targets. If either truncates or fails, repair Recursion's request shaping and retry the same model; do not replace or classify it as incompatible.
+
 **Architecture:** Keep pure qualification, counting, lifecycle, and privacy verdicts in a small contract module. Extend the existing pipeline proof with reusable browser/profile helpers, then implement one Playwright coordinator that owns a persistent synthetic chat, bounded fault injection, visible progress actions, and a sanitized checkpoint ledger. The coordinator stops at the first defect and resumes at the failed milestone after a test-first repair.
 
 **Tech Stack:** Node.js ESM, Playwright, SillyTavern Connection Manager, repository-native assertions, PowerShell, Git.

@@ -83,22 +83,22 @@ assertEqual(module.isMissingAcceptedAssistant({
 assertEqual(module.isUnacceptedCompletedPair({ baselineCounts: { user: 0, assistant: 0 }, acceptedNewTurns: [{}, {}] }, {
   userCount: 3, assistantCount: 3, trailingRoles: ['user', 'assistant']
 }), true, 'unaccepted pair repair recognizes exactly one trailing diagnostic pair');
-const v4Checkpoint = {
+const popularModelRepairCheckpoint = {
   status: 'fail',
-  currentMilestone: 'fused-fallback',
-  acceptedNewTurns: [{}, {}],
-  assignments: { 'fused-fallback': labels[2] },
-  effectiveProfileLabels: [glmLabel, labels[1], labels[2], labels[3]],
-  modelIncompatibilities: [{ label: labels[0] }],
-  defect: { code: 'fused-failed' }
+  currentMilestone: 'endurance-2',
+  acceptedNewTurns: [{}, {}, {}, {}, {}],
+  effectiveProfileLabels: [glmLabel, labels[1], glmLabel, labels[3]],
+  modelIncompatibilities: [
+    { label: labels[0] },
+    { label: labels[2] },
+    { label: nemotronLabel }
+  ],
+  defect: { code: 'live-matrix-failed' }
 };
-module.replaceIncompatibleV4(v4Checkpoint);
-assertEqual(v4Checkpoint.assignments['fused-fallback'], nemotronLabel, 'Nemotron replaces incompatible V4 Pro for Fused');
-assertDeepEqual(v4Checkpoint.effectiveProfileLabels, [glmLabel, labels[1], nemotronLabel, labels[3]], 'endurance rotation retains four distinct effective profiles');
-v4Checkpoint.status = 'fail';
-module.fallbackFusedToGlm(v4Checkpoint);
-assertEqual(v4Checkpoint.assignments['fused-fallback'], glmLabel, 'GLM owns Fused after Nemotron context incompatibility');
-assertDeepEqual(v4Checkpoint.effectiveProfileLabels, [glmLabel, labels[1], glmLabel, labels[3]], 'planned rotation reflects the three viable models');
+module.restoreRequiredPopularModelTargets(popularModelRepairCheckpoint);
+assertDeepEqual(popularModelRepairCheckpoint.effectiveProfileLabels, [glmLabel, labels[1], labels[2], labels[3]], 'repaired endurance requires MiniMax and V4 Pro instead of excluding them');
+assertDeepEqual(popularModelRepairCheckpoint.modelIncompatibilities.map((entry) => entry.label), [labels[0], nemotronLabel], 'repair removes the invalid V4 Pro incompatibility classification');
+assertEqual(popularModelRepairCheckpoint.status, 'ready', 'required-model repair reopens the failed endurance boundary');
 assertDeepEqual(module.classifyHostTurnCounts({
   baselineCounts: { user: 0, assistant: 0 },
   acceptedNewTurns: [],

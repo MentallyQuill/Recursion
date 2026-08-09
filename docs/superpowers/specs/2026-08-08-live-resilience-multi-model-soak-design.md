@@ -51,7 +51,7 @@ Before a profile owns a host milestone:
 
 Connectivity and single-card success are required for every model. Full Fused certification is required only for the model assigned the forced-Fused-fallback scenario. Prefer DeepSeek V4 Pro Cheaper for that scenario; if it is only Segmented-ready, assign the scenario to the first requested model that is Fused-ready and give V4 Pro Cheaper the displaced scenario.
 
-A certification failure pauses progression for diagnosis. Transport, parsing, budgeting, schema, and harness defects are repairable. Genuine model incompatibility is recorded explicitly and is not hidden by switching models, but another Fused-ready requested model may own the fallback scenario.
+A certification failure pauses progression for diagnosis. Transport, parsing, budgeting, schema, and harness defects are repairable. MiniMax M3 and DeepSeek V4 Pro Cheaper are required Recursion integration targets: completion truncation, request-budget, schema, or transport failures must be diagnosed and repaired in Recursion rather than classified as model incompatibility. Another Fused-ready requested model may still own the injected fallback scenario, but both required models must complete accepted pipeline turns before the soak passes.
 
 ## Persistent chat contract
 

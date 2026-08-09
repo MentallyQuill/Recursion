@@ -37,9 +37,19 @@ const wrappedContextDirective = resolveModelRetryDirective({
   limit: 2
 });
 assertEqual(wrappedContextDirective.action, 'reduce-output-budget', 'wrapped durable request chooses budget reduction');
-assertEqual(wrappedContextDirective.nextRequest.request.responseLength, 900, 'wrapped Arbiter budget reduces from its role default');
+assertEqual(wrappedContextDirective.nextRequest.request.responseLength, 3072, 'wrapped Arbiter context retry reduces from its thinking-safe role default');
 assertEqual(wrappedContextDirective.nextRequest.responseLength, undefined, 'wrapped budget is not patched onto the ignored outer envelope');
 assertEqual(wrappedContextDirective.nextRequest.request.prompt, 'safe prompt', 'wrapped reduction preserves provider request fields');
+
+const wrappedTokenDirective = resolveModelRetryDirective({
+  failure: { code: 'RECURSION_PROVIDER_TOKEN_LIMIT', retryable: false },
+  request: { roleId: 'utilityArbiter', request: { lane: 'utility', prompt: 'safe prompt' } },
+  attempt: 1,
+  limit: 2
+});
+assertEqual(wrappedTokenDirective.action, 'increase-output-budget', 'completion truncation chooses budget expansion');
+assertEqual(wrappedTokenDirective.nextRequest.request.responseLength, 8192, 'wrapped Arbiter retry expands its thinking-safe role budget');
+assertEqual(wrappedTokenDirective.nextRequest.request.prompt, 'safe prompt', 'wrapped expansion preserves provider request fields');
 
 assertDeepEqual(resolveModelRetryDirective({
   failure: { code: 'RECURSION_PROFILE_UNAVAILABLE', retryable: false },

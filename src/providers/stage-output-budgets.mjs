@@ -1,6 +1,6 @@
 const STATIC_BUDGETS = Object.freeze({
   providerTest: 128,
-  utilityArbiter: 1200,
+  utilityArbiter: 4096,
   sceneFrameCard: 900,
   activeCastCard: 900,
   characterMotivationCard: 900,

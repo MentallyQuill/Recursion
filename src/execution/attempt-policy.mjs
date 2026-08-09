@@ -7,6 +7,7 @@ const ATTEMPT_MAX = 5;
 const MODEL_RETRY_ACTIONS = new Set([
   'stop',
   'downgrade-structured-output',
+  'increase-output-budget',
   'reduce-output-budget',
   'retry-corrected',
   'retry-same'
@@ -117,6 +118,27 @@ export function resolveModelRetryDirective({ failure, request, attempt, limit })
       : { ...request, responseLength: reduced };
     return retryDirective('reduce-output-budget', {
       diagnosticCode: 'output-budget-reduced',
+      nextRequest
+    });
+  }
+
+  if (failure?.code === 'RECURSION_PROVIDER_TOKEN_LIMIT') {
+    const wrapped = request?.request && typeof request.request === 'object' && !Array.isArray(request.request);
+    const providerRequest = wrapped ? request.request : request;
+    const roleId = request?.roleId || providerRequest?.roleId;
+    const current = Number(providerRequest?.responseLength)
+      || outputBudgetForRequest(roleId, providerRequest);
+    const configuredCeiling = Number(providerRequest?.providerConfig?.outputTokenCeiling);
+    const ceiling = Number.isFinite(configuredCeiling) && configuredCeiling > 0
+      ? configuredCeiling
+      : 8192;
+    const increased = Math.min(ceiling, Math.max(current + 1024, current * 2));
+    if (increased <= current) return stopDirective('output-budget-at-ceiling');
+    const nextRequest = wrapped
+      ? { ...request, request: { ...providerRequest, responseLength: increased } }
+      : { ...request, responseLength: increased };
+    return retryDirective('increase-output-budget', {
+      diagnosticCode: 'output-budget-increased',
       nextRequest
     });
   }

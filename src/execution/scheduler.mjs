@@ -11,6 +11,7 @@ import { runModelStageAttempts } from './attempt-policy.mjs';
 const MODEL_RETRY_ACTIONS = new Set([
   'stop',
   'downgrade-structured-output',
+  'increase-output-budget',
   'reduce-output-budget',
   'retry-corrected',
   'retry-same'

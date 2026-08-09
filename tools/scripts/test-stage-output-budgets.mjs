@@ -17,6 +17,7 @@ assertEqual(outputBudgetForRequest('editorialTransformer', {
 }, 8192), 4024, 'editorial transform scales from source size');
 assertEqual(outputBudgetForRequest('sceneFrameCard', { responseLength: 512 }, 8192), 512, 'explicit smaller budget survives');
 assertEqual(outputBudgetForRequest('sceneFrameCard', { responseLength: 12000 }, 4096), 4096, 'explicit budget cannot exceed lane ceiling');
+assertEqual(outputBudgetForRequest('utilityArbiter', {}, 8192), 4096, 'Utility Arbiter reserves enough output for thinking models');
 assertEqual(minimumOutputBudgetForRole('providerTest'), 64, 'provider test minimum is small');
 assertEqual(minimumOutputBudgetForRole('unknown'), 384, 'unknown role has conservative minimum');
 

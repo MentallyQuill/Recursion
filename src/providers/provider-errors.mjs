@@ -149,8 +149,16 @@ export function normalizeProviderError(error) {
     );
   }
 
+  if (codes.has('RECURSION_PROVIDER_TOKEN_LIMIT')) {
+    return providerFailureRecord(
+      'RECURSION_PROVIDER_TOKEN_LIMIT',
+      'The provider response reached its completion token limit.',
+      false,
+      { category: 'provider-length' }
+    );
+  }
+
   if (codes.has('RECURSION_PROVIDER_CONTEXT_LIMIT')
-      || codes.has('RECURSION_PROVIDER_TOKEN_LIMIT')
       || /context length|context window|too many tokens|maximum context|max(?:imum)?[_ -]?tokens/.test(text)) {
     return providerFailureRecord(
       'RECURSION_PROVIDER_CONTEXT_LIMIT',

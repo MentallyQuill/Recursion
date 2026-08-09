@@ -27,6 +27,8 @@ const TERMINAL_OPERATION_STATES = new Set(['completed', 'stale', 'abandoned']);
 
 export const CHECKPOINT_DIAGNOSTIC_CODES = Object.freeze([
   'structured-output-downgraded',
+  'output-budget-increased',
+  'output-budget-at-ceiling',
   'output-budget-reduced',
   'output-budget-at-floor',
   'model-output-corrected',
@@ -44,6 +46,7 @@ export const CHECKPOINT_DIAGNOSTIC_CODES = Object.freeze([
 export const CHECKPOINT_ATTEMPT_ACTIONS = Object.freeze([
   'stop',
   'downgrade-structured-output',
+  'increase-output-budget',
   'reduce-output-budget',
   'retry-corrected',
   'retry-same'

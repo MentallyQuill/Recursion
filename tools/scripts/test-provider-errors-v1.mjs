@@ -17,6 +17,14 @@ assertEqual(
 );
 
 assertEqual(
+  normalizeProviderError(Object.assign(new Error('response stopped at max_tokens'), {
+    code: 'RECURSION_PROVIDER_TOKEN_LIMIT'
+  })).code,
+  'RECURSION_PROVIDER_TOKEN_LIMIT',
+  'completion truncation is not mislabeled as input context overflow'
+);
+
+assertEqual(
   normalizeProviderError(Object.assign(new Error('rate limited'), { status: 429 })).code,
   'RECURSION_PROVIDER_RATE_LIMIT',
   '429 is classified'

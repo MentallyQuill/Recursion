@@ -35,6 +35,7 @@ const STATE_ROOT = resolve('artifacts', 'live-resilience-matrix');
 const DEFAULT_TIMEOUT_MS = 300000;
 const PREFERRED_FUSED_LABEL = PROFILE_LABELS[2];
 export const GLM_CELIA_LABEL = 'nanogpt zai-org/glm-5.2:thinking - Celia V5.4';
+export const NEMOTRON_LABEL = 'nanogpt nvidia/nemotron-3-ultra-550b-a55b:thinking - Provider';
 
 function boundedText(value, length = 500) {
   return String(value ?? '').slice(0, length);
@@ -228,6 +229,64 @@ export function isMissingAcceptedAssistant(checkpoint = {}, chat = {}) {
   return Number(chat.userCount || 0) === expectedUser
     && Number(chat.assistantCount || 0) === expectedAssistant - 1
     && roles.at(-1) === 'user';
+}
+
+export function isUnacceptedCompletedPair(checkpoint = {}, chat = {}) {
+  const accepted = Array.isArray(checkpoint.acceptedNewTurns) ? checkpoint.acceptedNewTurns.length : 0;
+  const expectedUser = Number(checkpoint.baselineCounts?.user || 0) + accepted;
+  const expectedAssistant = Number(checkpoint.baselineCounts?.assistant || 0) + accepted;
+  return Number(chat.userCount || 0) === expectedUser + 1
+    && Number(chat.assistantCount || 0) === expectedAssistant + 1
+    && JSON.stringify(chat.trailingRoles || []) === JSON.stringify(['user', 'assistant']);
+}
+
+async function removeUnacceptedCompletedPair(page, checkpoint, timeoutMs) {
+  const chat = await page.evaluate(() => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const entries = Array.isArray(context.chat) ? context.chat : [];
+    return {
+      userCount: entries.filter((entry) => entry?.is_user === true).length,
+      assistantCount: entries.filter((entry) => entry?.is_user === false).length,
+      trailingRoles: entries.slice(-2).map((entry) => entry?.is_user === true ? 'user' : 'assistant')
+    };
+  });
+  if (!isUnacceptedCompletedPair(checkpoint, chat)) {
+    throw new Error('Unaccepted pair repair refused: host turn shape is not the exact guarded diagnostic pair.');
+  }
+  await page.evaluate(async () => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    if (typeof context.deleteLastMessage !== 'function') throw new Error('SillyTavern deleteLastMessage is unavailable.');
+    await context.deleteLastMessage();
+    await context.deleteLastMessage();
+    await context.saveChat?.();
+  });
+  await page.waitForFunction((expected) => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const entries = Array.isArray(context.chat) ? context.chat : [];
+    return entries.length === expected;
+  }, Number(checkpoint.baselineCounts?.user || 0) + Number(checkpoint.baselineCounts?.assistant || 0) + checkpoint.acceptedNewTurns.length * 2, { timeout: timeoutMs });
+  return checkpoint;
+}
+
+export function replaceIncompatibleV4(checkpoint) {
+  if (checkpoint?.status !== 'fail' || checkpoint.currentMilestone !== 'fused-fallback') {
+    throw new Error('V4 replacement requires the failed Fused milestone boundary.');
+  }
+  checkpoint.assignments['fused-fallback'] = NEMOTRON_LABEL;
+  checkpoint.effectiveProfileLabels = (checkpoint.effectiveProfileLabels || [])
+    .map((label) => label === PROFILE_LABELS[2] ? NEMOTRON_LABEL : label);
+  checkpoint.modelIncompatibilities = [
+    ...(checkpoint.modelIncompatibilities || []),
+    {
+      label: PROFILE_LABELS[2],
+      stageId: 'preprocess.arbiter',
+      failureCode: 'RECURSION_PROVIDER_CONTEXT_LIMIT',
+      replacementLabel: NEMOTRON_LABEL
+    }
+  ];
+  checkpoint.status = 'ready';
+  checkpoint.defect = null;
+  return checkpoint;
 }
 
 async function repairMissingAcceptedAssistant(page, checkpoint, timeoutMs) {
@@ -1327,6 +1386,12 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
         }
         if (env.RECURSION_RESILIENCE_REPAIR_MISSING_ASSISTANT === '1') {
           await repairMissingAcceptedAssistant(page, checkpoint, timeoutMs);
+          chat = await page.evaluate(contextChatSummaryScript());
+          saveCheckpoint(args.statePath, checkpoint);
+        }
+        if (env.RECURSION_RESILIENCE_REPLACE_INCOMPATIBLE_V4 === '1') {
+          await removeUnacceptedCompletedPair(page, checkpoint, timeoutMs);
+          replaceIncompatibleV4(checkpoint);
           chat = await page.evaluate(contextChatSummaryScript());
           saveCheckpoint(args.statePath, checkpoint);
         }

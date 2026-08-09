@@ -12,6 +12,7 @@ const labels = [
   'nanogpt gemma-4-31B-Fabled - RedRising-1.3'
 ];
 const glmLabel = 'nanogpt zai-org/glm-5.2:thinking - Celia V5.4';
+const nemotronLabel = 'nanogpt nvidia/nemotron-3-ultra-550b-a55b:thinking - Provider';
 
 assertEqual(module.PROFILE_LABELS.length, 4, 'runner owns exactly four requested Utility profiles');
 assertDeepEqual(module.PROFILE_LABELS, labels, 'runner preserves the requested profile order');
@@ -79,6 +80,21 @@ assertEqual(module.isMissingAcceptedAssistant({
   baselineCounts: { user: 0, assistant: 0 },
   acceptedNewTurns: [{}, {}]
 }, { userCount: 2, assistantCount: 1, roles: ['user', 'assistant', 'user'] }), true, 'missing accepted assistant repair recognizes one trailing unmatched user');
+assertEqual(module.isUnacceptedCompletedPair({ baselineCounts: { user: 0, assistant: 0 }, acceptedNewTurns: [{}, {}] }, {
+  userCount: 3, assistantCount: 3, trailingRoles: ['user', 'assistant']
+}), true, 'unaccepted pair repair recognizes exactly one trailing diagnostic pair');
+const v4Checkpoint = {
+  status: 'fail',
+  currentMilestone: 'fused-fallback',
+  acceptedNewTurns: [{}, {}],
+  assignments: { 'fused-fallback': labels[2] },
+  effectiveProfileLabels: [glmLabel, labels[1], labels[2], labels[3]],
+  modelIncompatibilities: [{ label: labels[0] }],
+  defect: { code: 'fused-failed' }
+};
+module.replaceIncompatibleV4(v4Checkpoint);
+assertEqual(v4Checkpoint.assignments['fused-fallback'], nemotronLabel, 'Nemotron replaces incompatible V4 Pro for Fused');
+assertDeepEqual(v4Checkpoint.effectiveProfileLabels, [glmLabel, labels[1], nemotronLabel, labels[3]], 'endurance rotation retains four distinct effective profiles');
 assertDeepEqual(module.classifyHostTurnCounts({
   baselineCounts: { user: 0, assistant: 0 },
   acceptedNewTurns: [],

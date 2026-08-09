@@ -129,6 +129,77 @@ export function inspectStoredRecursionPrompts(store = {}, settings = {}) {
   };
 }
 
+function familyStageSuffix(family) {
+  return String(family || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+export function inspectMilestoneVerdict({ pipeline, mode, requestedFamilies = [], diagnostics = {} } = {}) {
+  const errors = [];
+  const settings = diagnostics?.settings || {};
+  const runtime = diagnostics?.runtime || {};
+  const execution = runtime.execution || {};
+  const stages = Array.isArray(execution.stages) ? execution.stages : [];
+  const cardStages = stages.filter((stage) => String(stage?.stageId || '').startsWith('preprocess.cards.'));
+  const segmentedStages = cardStages.filter((stage) => String(stage.stageId).startsWith('preprocess.cards.segmented.'));
+  const fusedStages = cardStages.filter((stage) => String(stage.stageId) === 'preprocess.cards.fused');
+  const handFamilies = Array.isArray(runtime?.hand?.families) ? runtime.hand.families : [];
+  const packetPipeline = String(runtime?.packet?.diagnostics?.pipelineMode || '');
+
+  if (settings.mode !== mode) errors.push('settings-mode-mismatch');
+  if (Number(settings.minCards) !== 2 || Number(settings.maxCards) !== 2) errors.push('two-card-budget-mismatch');
+  if (execution.operationState !== 'completed') errors.push('operation-not-completed');
+  if (packetPipeline !== pipeline) errors.push('effective-pipeline-mismatch');
+  if (Number(runtime?.hand?.selectedCount) !== 2 || new Set(handFamilies).size !== 2) errors.push('hand-not-two-unique-families');
+  if (stages.some((stage) => stage?.stageState !== 'completed')) errors.push('nonterminal-or-adverse-stage');
+  if (new Set(stages.map((stage) => stage?.stageId)).size !== stages.length) errors.push('duplicate-stage');
+
+  if (pipeline === 'fused') {
+    if (fusedStages.length !== 1) errors.push('fused-stage-count');
+    if (fusedStages[0]?.attemptCount !== 1) errors.push('fused-request-count');
+    if (segmentedStages.length) errors.push('segmented-fallback-started');
+  } else {
+    if (fusedStages.length) errors.push('unexpected-fused-stage');
+    if (segmentedStages.length !== 2) errors.push('segmented-stage-count');
+  }
+
+  if (mode === 'manual') {
+    const expectedFamilies = [...new Set(requestedFamilies)];
+    const expectedStageIds = expectedFamilies.map((family) => `preprocess.cards.segmented.${familyStageSuffix(family)}`).sort();
+    const actualStageIds = segmentedStages.map((stage) => stage.stageId).sort();
+    if (expectedFamilies.length !== 2) errors.push('manual-family-count');
+    if (JSON.stringify([...handFamilies].sort()) !== JSON.stringify([...expectedFamilies].sort())) errors.push('manual-hand-scope-mismatch');
+    if (JSON.stringify(actualStageIds) !== JSON.stringify(expectedStageIds)) errors.push('manual-stage-scope-mismatch');
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    operationId: String(execution.operationId || ''),
+    pipeline: packetPipeline,
+    mode: String(settings.mode || ''),
+    cardStageIds: cardStages.map((stage) => stage.stageId),
+    handFamilies
+  };
+}
+
+const PRIVATE_REPORT_KEYS = /^(?:connectionProfileId|request|response|prompt|promptText|content|messages|transcript|reasoning|headers|cookie|authorization|apiKey|secret|excerpts|packet|promptPacketPreview|chat)$/i;
+
+export function sanitizeLiveProofReport(value, key = '') {
+  if (PRIVATE_REPORT_KEYS.test(key)) return '[redacted]';
+  if (Array.isArray(value)) return value.map((entry) => sanitizeLiveProofReport(entry));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([entryKey, entryValue]) => [
+      entryKey,
+      sanitizeLiveProofReport(entryValue, entryKey)
+    ]));
+  }
+  return typeof value === 'string' ? value.slice(0, 500) : value;
+}
+
 export function inspectPacketInjectionMetadata(packet = {}, settings = {}) {
   const placement = String(settings.placement || '').trim().toLowerCase();
   const role = String(settings.role || 'system').trim().toLowerCase();
@@ -727,6 +798,16 @@ function assertPipelineProof(pipeline, proof, issues) {
   if (issues.console.length || issues.page.length) {
     fail(`${pipeline}-browser-issues`, 'Browser console/page issues were observed during pipeline proof.', issues);
   }
+  const milestoneVerdict = inspectMilestoneVerdict({
+    pipeline,
+    mode: proof.mode,
+    requestedFamilies: proof.requestedFamilies,
+    diagnostics: proof.diagnosticsExport
+  });
+  if (!milestoneVerdict.ok) {
+    fail(`${pipeline}-milestone-contract`, 'Current operation did not satisfy the live soak milestone contract.', { milestoneVerdict });
+  }
+  return milestoneVerdict;
 }
 
 function proofMessageFor(pipeline, placement, runId) {
@@ -737,7 +818,7 @@ function proofMessageFor(pipeline, placement, runId) {
   ].join(' ');
 }
 
-async function provePipeline(page, pipeline, placement, depth, role, mode, timeoutMs, runId) {
+async function provePipeline(page, pipeline, placement, depth, role, mode, requestedFamilies, timeoutMs, runId) {
   let phase = 'power-on';
   try {
     await setPower(page, true, timeoutMs);
@@ -759,7 +840,7 @@ async function provePipeline(page, pipeline, placement, depth, role, mode, timeo
     const diagnosticsExport = await exportDiagnosticsSnapshot(page, timeoutMs);
     phase = 'snapshot';
     const snapshot = await page.evaluate(liveSnapshotScript());
-    return { pipeline, placement, depth, role, mode, send, snapshot, diagnosticsExport };
+    return { pipeline, placement, depth, role, mode, requestedFamilies, send, snapshot, diagnosticsExport };
   } catch (error) {
     const snapshot = await page.evaluate(liveSnapshotScript()).catch(() => null);
     const chat = await page.evaluate(contextChatSummaryScript()).catch(() => null);
@@ -830,7 +911,7 @@ export async function runLivePipelineProof({ argv = process.argv.slice(2), env =
         for (const pipeline of args.pipelines) {
           const issueStart = { console: consoleIssues.length, page: pageIssues.length };
           const requestStart = serializedPromptRequests.length;
-          const proof = await provePipeline(page, pipeline, placement, args.depth, args.role, args.mode, timeoutMs, runId);
+          const proof = await provePipeline(page, pipeline, placement, args.depth, args.role, args.mode, args.families, timeoutMs, runId);
           const pipelineRequests = serializedPromptRequests.slice(requestStart);
           const selectedRequest = [...pipelineRequests].reverse().find((entry) => entry.evidence.complete)
             || pipelineRequests.at(-1)
@@ -850,11 +931,12 @@ export async function runLivePipelineProof({ argv = process.argv.slice(2), env =
             console: consoleIssues.slice(issueStart.console),
             page: pageIssues.slice(issueStart.page)
           };
-          assertPipelineProof(pipeline, proof, issues);
+          const milestoneVerdict = assertPipelineProof(pipeline, proof, issues);
           proofs.push({
             pipeline,
             mode: args.mode,
             requestedFamilies: args.families,
+            milestoneVerdict,
             placement,
             configuredDepth: args.depth,
             configuredRole: args.role,
@@ -895,7 +977,7 @@ export async function runLivePipelineProof({ argv = process.argv.slice(2), env =
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const report = await runLivePipelineProof();
-    console.log(JSON.stringify(report, null, 2));
+    console.log(JSON.stringify(sanitizeLiveProofReport(report), null, 2));
   } catch (error) {
     const report = {
       status: error?.result === 'dry-run' ? 'skipped' : 'fail',
@@ -903,7 +985,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
       error: String(error?.message || error),
       details: error?.details || null
     };
-    console.log(JSON.stringify(report, null, 2));
+    console.log(JSON.stringify(sanitizeLiveProofReport(report), null, 2));
     process.exitCode = report.status === 'skipped' ? 0 : 1;
   }
 }

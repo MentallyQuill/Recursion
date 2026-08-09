@@ -11,6 +11,98 @@ const scriptText = readFileSync(new URL('./prove-live-pipelines.mjs', import.met
 assertEqual(typeof module.selectPipeline, 'function', 'selectPipeline is exported for focused harness tests');
 assertEqual(typeof module.selectInjectionSettings, 'function', 'selectInjectionSettings is exported for focused harness tests');
 assertEqual(typeof module.configureSoakDeckFixture, 'function', 'soak deck fixture is exported for focused harness tests');
+assertEqual(typeof module.inspectMilestoneVerdict, 'function', 'milestone verdict helper is exported for focused harness tests');
+assertEqual(typeof module.sanitizeLiveProofReport, 'function', 'live proof report sanitizer is exported for focused harness tests');
+
+const completedBaseStages = [
+  'preprocess.snapshot',
+  'preprocess.arbiter',
+  'preprocess.deck',
+  'preprocess.hand',
+  'preprocess.guidance',
+  'preprocess.packet',
+  'preprocess.install'
+].map((stageId) => ({ stageId, stageState: 'completed', attemptCount: 1 }));
+const diagnosticsFor = ({ pipeline, cardStages, mode = 'auto', families = ['Scene Frame', 'Open Threads'], planDiagnostics = [] }) => ({
+  settings: { mode, minCards: 2, maxCards: 2 },
+  runtime: {
+    execution: {
+      operationId: 'operation-current',
+      operationState: 'completed',
+      diagnosticCodes: [],
+      stages: [...completedBaseStages, ...cardStages]
+    },
+    hand: { selectedCount: 2, families },
+    packet: { diagnostics: { pipelineMode: pipeline, planDiagnostics } }
+  }
+});
+
+assertEqual(
+  module.inspectMilestoneVerdict({
+    pipeline: 'segmented',
+    mode: 'manual',
+    requestedFamilies: ['Scene Frame', 'Open Threads'],
+    diagnostics: diagnosticsFor({
+      pipeline: 'segmented',
+      mode: 'manual',
+      cardStages: [
+        { stageId: 'preprocess.cards.segmented.scene-frame', stageState: 'completed', attemptCount: 1 },
+        { stageId: 'preprocess.cards.segmented.open-threads', stageState: 'completed', attemptCount: 1 }
+      ]
+    })
+  }).ok,
+  true,
+  'Manual Segmented verdict requires exactly the two requested completed card stages'
+);
+assertEqual(
+  module.inspectMilestoneVerdict({
+    pipeline: 'fused',
+    mode: 'auto',
+    diagnostics: diagnosticsFor({
+      pipeline: 'fused',
+      cardStages: [{ stageId: 'preprocess.cards.fused', stageState: 'completed', attemptCount: 1 }]
+    })
+  }).ok,
+  true,
+  'Fused verdict accepts one genuine completed fused bundle stage'
+);
+for (const [label, diagnostics] of [
+  ['segmented fallback', diagnosticsFor({
+    pipeline: 'fused',
+    cardStages: [
+      { stageId: 'preprocess.cards.fused', stageState: 'completed', attemptCount: 1 },
+      { stageId: 'preprocess.cards.segmented.open-threads', stageState: 'completed', attemptCount: 1 }
+    ],
+    planDiagnostics: ['fused-fallback-segmented']
+  })],
+  ['stranded stage', diagnosticsFor({
+    pipeline: 'fused',
+    cardStages: [{ stageId: 'preprocess.cards.fused', stageState: 'running', attemptCount: 1 }]
+  })],
+  ['duplicate fused stage', diagnosticsFor({
+    pipeline: 'fused',
+    cardStages: [
+      { stageId: 'preprocess.cards.fused', stageState: 'completed', attemptCount: 1 },
+      { stageId: 'preprocess.cards.fused', stageState: 'completed', attemptCount: 1 }
+    ]
+  })]
+]) {
+  assertEqual(
+    module.inspectMilestoneVerdict({ pipeline: 'fused', mode: 'auto', diagnostics }).ok,
+    false,
+    `Fused verdict rejects ${label}`
+  );
+}
+
+const sanitizedReport = module.sanitizeLiveProofReport({
+  status: 'fail',
+  connectionProfileId: 'PROFILE_SECRET',
+  request: { prompt: 'RAW_PROMPT_SECRET' },
+  response: { content: 'RAW_RESPONSE_SECRET' },
+  details: { operationId: 'operation-safe', providerLabel: 'bounded-label' }
+});
+assertEqual(JSON.stringify(sanitizedReport).includes('SECRET'), false, 'live proof sanitizer removes profiles and raw request/response content');
+assertEqual(sanitizedReport.details.operationId, 'operation-safe', 'live proof sanitizer preserves bounded execution identity');
 
 const deckFixture = {
   version: 1,

@@ -32,6 +32,14 @@ assertEqual(typeof module.ensureSyntheticChat, 'function', 'runner exports synth
 assertEqual(module.selectSyntheticCharacterIndex([], null), -1, 'chat opener reports no available character');
 assertEqual(module.selectSyntheticCharacterIndex([{ name: 'Story' }], null), 0, 'chat opener selects the first soak character');
 assertEqual(module.selectSyntheticCharacterIndex([{ name: 'One' }, { name: 'Two' }], 1), 1, 'chat opener preserves a valid active character');
+assertDeepEqual(module.validateHostTurnCounts({
+  baselineCounts: { user: 1, assistant: 1 },
+  acceptedNewTurns: []
+}, { userCount: 1, assistantCount: 1 }), { ok: true, errors: [] }, 'resume accepts exact checkpointed host counts');
+assertEqual(module.validateHostTurnCounts({
+  baselineCounts: { user: 1, assistant: 1 },
+  acceptedNewTurns: []
+}, { userCount: 2, assistantCount: 2 }).ok, false, 'resume detects an unaccepted completed host turn');
 
 const safeState = resolve('artifacts', 'live-resilience-matrix', 'active.json');
 assertDeepEqual(module.parseResilienceArgs(['--live', '--state', safeState]), {

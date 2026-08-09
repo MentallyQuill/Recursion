@@ -201,6 +201,16 @@ export function validateResilienceCheckpoint(checkpoint = {}, expected = {}) {
   return { ok: errors.length === 0, errors };
 }
 
+export function validateHostTurnCounts(checkpoint = {}, chat = {}) {
+  const accepted = Array.isArray(checkpoint.acceptedNewTurns) ? checkpoint.acceptedNewTurns.length : 0;
+  const expectedUser = Number(checkpoint.baselineCounts?.user || 0) + accepted;
+  const expectedAssistant = Number(checkpoint.baselineCounts?.assistant || 0) + accepted;
+  const errors = [];
+  if (Number(chat.userCount || 0) !== expectedUser) errors.push('unaccepted-user-turn');
+  if (Number(chat.assistantCount || 0) !== expectedAssistant) errors.push('unaccepted-assistant-turn');
+  return { ok: errors.length === 0, errors };
+}
+
 export async function clickProgressAction(page, label, timeoutMs) {
   const trigger = page.locator('[data-recursion-status-trigger]').first();
   const expanded = await trigger.getAttribute?.('aria-expanded').catch?.(() => 'false');
@@ -272,6 +282,15 @@ export async function driveStopResumeMilestone({
   page.on?.('request', observeRequest);
   const promptClearsBefore = await page.evaluate(() => (globalThis.__recursionSmokePromptEvents || []).filter((entry) => entry?.cleared === true).length);
   const sendPromise = send(page, message, { requirePrompt: true, timeoutMs });
+  await page.waitForFunction(() => {
+    const state = globalThis.__recursionLiveHarnessRuntime?.view?.()?.execution?.state;
+    return state === 'running' || state === 'completed';
+  }, null, { timeout: timeoutMs });
+  const started = await readExecutionSnapshot(page);
+  if (started?.state === 'completed') {
+    await sendPromise;
+    throw new Error('Stop window was missed because the operation completed before the visible action could be used.');
+  }
   const stopAction = await clickProgressAction(page, 'Stop and pause this operation', timeoutMs);
   const paused = await waitForExecution(page, () => globalThis.__recursionLiveHarnessRuntime?.view?.()?.execution?.state === 'paused', timeoutMs);
   pausedWindow = true;
@@ -729,6 +748,8 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
         checkpoint = loadCheckpoint(args.statePath);
         const resumeVerdict = validateResilienceCheckpoint(checkpoint, identity);
         if (!resumeVerdict.ok) throw new Error(`Checkpoint resume refused: ${resumeVerdict.errors.join(', ')}`);
+        const countVerdict = validateHostTurnCounts(checkpoint, chat);
+        if (!countVerdict.ok) throw new Error(`Checkpoint contains an unaccepted host turn: ${countVerdict.errors.join(', ')}`);
       } else {
         checkpoint = createResilienceCheckpoint({
           runId: `resilience-${Date.now().toString(36)}`,

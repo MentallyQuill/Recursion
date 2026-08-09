@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { assertDeepEqual, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
+import { createDefaultCardDeck } from '../../src/pre-process-decks.mjs';
 import {
   LIFECYCLE_PROOF_SECTIONS,
   validateLifecycleProof
@@ -147,6 +148,23 @@ assertDeepEqual(
     ['Active Cast', 'off']
   ],
   'Manual soak fixture activates exactly the requested families and disables every other family'
+);
+const bundledDeck = createDefaultCardDeck({ now: '2026-08-08T00:00:00.000Z' });
+const manualBundledFixture = module.configureSoakDeckFixture({
+  version: 1,
+  activeDeckId: 'default',
+  customDecks: {},
+  defaultCardStates: {}
+}, {
+  mode: 'manual',
+  families: ['Scene Frame', 'Open Threads']
+});
+assertDeepEqual(
+  [...new Set(Object.entries(bundledDeck.cards)
+    .filter(([cardId]) => manualBundledFixture.defaultCardStates[cardId] !== 'off')
+    .map(([, card]) => card.builtinFamily))],
+  ['Scene Frame', 'Open Threads'],
+  'Manual soak fixture constrains the bundled default deck to exactly the requested families'
 );
 assertDeepEqual(
   module.configureSoakDeckFixture(deckFixture, { mode: 'auto', families: [] }),

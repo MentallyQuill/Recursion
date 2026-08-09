@@ -5,6 +5,7 @@ import {
   inspectRecursionPromptRequest,
   validateSoakUserHandle
 } from './lib/sillytavern-live-harness.mjs';
+import { createDefaultCardDeck } from '../../src/pre-process-decks.mjs';
 
 const PIPELINES = new Set(['segmented', 'fused']);
 const PLACEMENTS = new Set(['in_prompt', 'in_chat']);
@@ -441,7 +442,23 @@ export function configureSoakDeckFixture(decks = {}, { mode = 'auto', families =
   const source = decks && typeof decks === 'object' ? decks : {};
   const customDecks = source.customDecks && typeof source.customDecks === 'object' ? source.customDecks : {};
   const activeDeck = customDecks[source.activeDeckId];
-  if (!activeDeck) return { ...source, activeDeckId: 'default' };
+  if (!activeDeck) {
+    const defaultDeck = createDefaultCardDeck();
+    const entries = Object.entries(defaultDeck.cards || {});
+    const existingStates = source.defaultCardStates && typeof source.defaultCardStates === 'object'
+      ? source.defaultCardStates
+      : {};
+    if (mode === 'auto' && entries.some(([id]) => existingStates[id] !== 'off')) {
+      return { ...source, activeDeckId: 'default' };
+    }
+    const requested = new Set(Array.isArray(families) ? families : []);
+    const defaultCardStates = Object.fromEntries(entries
+      .filter(([, card], index) => mode === 'manual'
+        ? !requested.has(card?.builtinFamily)
+        : index >= 2)
+      .map(([id]) => [id, 'off']));
+    return { ...source, activeDeckId: 'default', defaultCardStates };
+  }
   const entries = Object.entries(activeDeck.cards || {});
   if (mode === 'auto' && entries.some(([, card]) => card?.selectionState === 'active')) return source;
   const requested = new Set(Array.isArray(families) ? families : []);

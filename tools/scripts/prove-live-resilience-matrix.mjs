@@ -313,6 +313,7 @@ export async function readExecutionSnapshot(page) {
       operationId: String(execution.operationId || ''),
       turnKeyHash: String(view.turnScope?.turnKeyHash || ''),
       state: String(execution.state || ''),
+      resumable: execution.resumable === true,
       pauseReason: String(execution.pauseReason || ''),
       frontierStageIds: Array.isArray(execution.frontierStageIds) ? [...execution.frontierStageIds] : [],
       stages: (Array.isArray(execution.stages) ? execution.stages : []).map((stage) => ({
@@ -320,6 +321,31 @@ export async function readExecutionSnapshot(page) {
         state: String(stage?.state || stage?.stageState || ''),
         attemptCount: Number(stage?.attempts?.total || stage?.attemptCount || 0),
         diagnosticCodes: Array.isArray(stage?.diagnosticCodes) ? [...stage.diagnosticCodes] : []
+      }))
+    };
+  });
+}
+
+export async function readResumeAvailability(page) {
+  return page.evaluate(() => {
+    const view = globalThis.__recursionLiveHarnessRuntime?.view?.() || {};
+    const execution = view.execution || {};
+    return {
+      operationState: String(execution.state || ''),
+      resumable: execution.resumable === true,
+      pauseReason: String(execution.pauseReason || ''),
+      frontierStageIds: Array.isArray(execution.frontierStageIds) ? [...execution.frontierStageIds] : [],
+      stages: (Array.isArray(execution.stages) ? execution.stages : []).map((stage) => ({
+        stageId: String(stage?.stageId || ''),
+        state: String(stage?.state || ''),
+        executable: stage?.executable !== false
+      })),
+      progressOpen: document.querySelector('[data-recursion-status-popover]')?.hidden === false,
+      actions: [...document.querySelectorAll('[data-recursion-progress-action]')].map((node) => ({
+        label: String(node.getAttribute('aria-label') || ''),
+        kind: String(node.dataset?.recursionProgressAction || ''),
+        stageId: String(node.dataset?.recursionProgressStageId || ''),
+        hidden: node.hidden === true
       }))
     };
   });
@@ -790,6 +816,15 @@ export async function resumePendingStopResume(page, checkpoint, statePath, timeo
   const paused = await readExecutionSnapshot(page);
   if (paused?.state !== 'paused') {
     throw new Error(`Pending Stop Resume manifest is not paused; observed ${paused?.state || 'missing'}.`);
+  }
+  await ensureProgressPopoverOpen(page, timeoutMs);
+  const resumeVisible = await page.waitForFunction(() => [...document.querySelectorAll('[data-recursion-progress-action]')]
+    .some((node) => node.getAttribute('aria-label') === 'Resume from saved checkpoint' && node.hidden !== true), null, {
+    timeout: Math.min(timeoutMs, 5000)
+  }).then(() => true).catch(() => false);
+  if (!resumeVisible) {
+    const availability = await readResumeAvailability(page);
+    throw new Error(`Restored Resume action unavailable: ${JSON.stringify(availability)}`);
   }
   const resumeAction = await clickProgressAction(page, 'Resume from saved checkpoint', timeoutMs);
   if (resumeAction.kind !== 'resume') throw new Error('Pending Stop Resume did not expose the native Resume action.');

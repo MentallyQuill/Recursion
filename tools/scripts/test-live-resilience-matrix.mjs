@@ -50,6 +50,7 @@ assertDeepEqual(module.classifyHostTurnCounts({
   errors: []
 }, 'resume recognizes one interrupted Stop Resume user turn without replaying it');
 assertEqual(typeof module.resumePendingStopResume, 'function', 'runner exports durable pending Stop Resume recovery');
+assertEqual(typeof module.readResumeAvailability, 'function', 'runner exports bounded restored Resume diagnostics');
 const repairCheckpoint = { status: 'fail', branchSha: 'old', acceptedNewTurns: [], defect: { code: 'failed' } };
 assertEqual(module.adoptRepairSha(repairCheckpoint, 'new'), repairCheckpoint, 'repair adoption updates the same checkpoint');
 assertEqual(repairCheckpoint.branchSha, 'new', 'repair adoption advances only the checkpoint SHA');

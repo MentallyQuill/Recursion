@@ -86,6 +86,14 @@ assertDeepEqual(module.summarizeArbiterFailure({
   lastAttemptAction: 'stop',
   diagnosticCodes: ['SAFE_CODE']
 }, 'Arbiter exhaustion summary contains only bounded failure metadata');
+const repairedRetryCheckpoint = { status: 'fail', assignmentAdaptations: { naturalArbiterRetry: true } };
+module.authorizeRepairedArbiterRetry(repairedRetryCheckpoint);
+assertEqual(repairedRetryCheckpoint.assignmentAdaptations.repairedArbiterRetryPending, true, 'repair authorization opens one bounded Retry');
+assertRejects(
+  () => Promise.resolve(module.authorizeRepairedArbiterRetry({ status: 'ready', assignmentAdaptations: { naturalArbiterRetry: true } })),
+  /failed checkpoint/,
+  'repair Retry authorization refuses an active checkpoint'
+);
 const repairCheckpoint = { status: 'fail', branchSha: 'old', acceptedNewTurns: [], defect: { code: 'failed' } };
 assertEqual(module.adoptRepairSha(repairCheckpoint, 'new'), repairCheckpoint, 'repair adoption updates the same checkpoint');
 assertEqual(repairCheckpoint.branchSha, 'new', 'repair adoption advances only the checkpoint SHA');

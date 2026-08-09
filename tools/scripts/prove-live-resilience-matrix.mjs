@@ -278,6 +278,18 @@ export function summarizeArbiterFailure(execution = {}) {
   };
 }
 
+export function authorizeRepairedArbiterRetry(checkpoint) {
+  if (checkpoint?.status !== 'fail') throw new Error('Repaired Arbiter Retry requires a failed checkpoint.');
+  if (checkpoint.assignmentAdaptations?.naturalArbiterRetry !== true) {
+    throw new Error('Repaired Arbiter Retry requires a recorded natural Arbiter failure.');
+  }
+  if (checkpoint.assignmentAdaptations?.repairedArbiterRetryAttempted === true) {
+    throw new Error('Repaired Arbiter Retry was already attempted.');
+  }
+  checkpoint.assignmentAdaptations.repairedArbiterRetryPending = true;
+  return checkpoint;
+}
+
 export async function startFreshSyntheticChat(page, timeoutMs) {
   const before = await page.evaluate(contextChatSummaryScript());
   await page.evaluate(async () => {
@@ -906,7 +918,10 @@ export async function recoverPendingArbiterRetry(page, checkpoint, statePath, ti
   if (failed?.state !== 'paused' || failed.pauseReason !== 'stage-failed:preprocess.arbiter') {
     throw new Error(`Pending Retry requires a failed Arbiter; observed ${failed?.pauseReason || failed?.state || 'missing'}.`);
   }
-  if (checkpoint.assignmentAdaptations?.naturalArbiterRetry === true) {
+  if (
+    checkpoint.assignmentAdaptations?.naturalArbiterRetry === true
+    && checkpoint.assignmentAdaptations?.repairedArbiterRetryPending !== true
+  ) {
     throw new Error(`Natural Arbiter Retry exhausted: ${JSON.stringify(summarizeArbiterFailure(failed))}`);
   }
   let owningProfile = checkpoint.assignments['retry-stage'];
@@ -917,6 +932,10 @@ export async function recoverPendingArbiterRetry(page, checkpoint, statePath, ti
       ...(checkpoint.assignmentAdaptations || {}),
       naturalArbiterRetry: true
     };
+    saveCheckpoint(statePath, checkpoint);
+  } else {
+    checkpoint.assignmentAdaptations.repairedArbiterRetryPending = false;
+    checkpoint.assignmentAdaptations.repairedArbiterRetryAttempted = true;
     saveCheckpoint(statePath, checkpoint);
   }
   const action = await clickProgressAction(page, 'Retry this step', timeoutMs);
@@ -1015,6 +1034,10 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
       if (checkpoint) {
         if (env.RECURSION_RESILIENCE_ADOPT_REPAIR_SHA === '1' && checkpoint.branchSha !== identity.branchSha) {
           adoptRepairSha(checkpoint, identity.branchSha);
+          saveCheckpoint(args.statePath, checkpoint);
+        }
+        if (env.RECURSION_RESILIENCE_RETRY_REPAIRED_ARBITER === '1') {
+          authorizeRepairedArbiterRetry(checkpoint);
           saveCheckpoint(args.statePath, checkpoint);
         }
         const resumeVerdict = validateResilienceCheckpoint(checkpoint, identity);

@@ -453,6 +453,55 @@ function roleCounts(calls = []) {
 }
 
 {
+  const cardGate = deferred();
+  const hostStopGate = deferred();
+  const hostGenerationStarts = [];
+  let hostStopCalls = 0;
+  const harness = createHarness({
+    provider: {
+      async generate(roleId, request = {}) {
+        if (roleId === 'utilityArbiter') return arbiterResponse(request);
+        if (roleId === 'sceneFrameCard') return cardGate.promise;
+        throw new Error(`unexpected provider role ${roleId}`);
+      }
+    },
+    hostGeneration: {
+      async stop() {
+        hostStopCalls += 1;
+        return hostStopGate.promise;
+      },
+      async start(details) {
+        hostGenerationStarts.push(clone(details));
+        return { ok: true, started: true, completed: false };
+      }
+    }
+  });
+  const preparing = harness.runtime.prepareForGeneration({
+    userMessage: null,
+    hostGeneration: true,
+    generationType: 'normal'
+  });
+  await waitUntil(() => harness.runtime.getView().execution?.stages?.some((stage) => (
+    stage.stageId === 'preprocess.cards.segmented.scene-frame' && stage.state === 'running'
+  )), 'stop race setup did not reach the card stage');
+  const stopping = harness.runtime.stopGeneration({ source: 'recursion-progress-row' });
+  await waitUntil(() => harness.runtime.getView().execution?.state === 'paused', 'stop race did not expose paused state');
+  const pausedOperationId = harness.runtime.getView().execution.operationId;
+  const resuming = harness.runtime.resumeOperation({ operationId: pausedOperationId });
+  await Promise.resolve();
+  assertEqual(hostGenerationStarts.length, 0, 'Resume waits while native Stop cleanup is active');
+  cardGate.resolve(cardResponse('sceneFrameCard', { snapshotHash: 'stopped-result' }));
+  await waitUntil(() => hostStopCalls === 1, 'native Stop was not requested after provider settlement');
+  assertEqual(hostGenerationStarts.length, 0, 'Resume remains queued until native Stop settles');
+  hostStopGate.resolve({ ok: true, stopped: true, eventEmitted: true });
+  await stopping;
+  const resumed = await resuming;
+  assertEqual(resumed.started, true, 'queued Resume starts after native Stop cleanup settles');
+  assertEqual(hostGenerationStarts.length, 1, 'Stop cleanup cannot cancel a newly resumed host generation');
+  await preparing;
+}
+
+{
   const hostGenerationStarts = [];
   let arbiterCalls = 0;
   const harness = createHarness({

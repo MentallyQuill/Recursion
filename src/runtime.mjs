@@ -8700,6 +8700,7 @@ export function createRecursionRuntime({
 
   async function resumeOperation({ operationId = executionView?.operationId } = {}) {
     const id = safeText(operationId || '', 180);
+    if (stopGenerationPromise) await stopGenerationPromise;
     if (executionView?.phase === 'postprocess') {
       const result = await postProcessRuntime.resumeOperation({ operationId: id });
       if (result?.execution) executionView = result.execution;

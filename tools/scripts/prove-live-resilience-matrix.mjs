@@ -251,6 +251,9 @@ export function resetUnacceptedChat(checkpoint, { branchSha, chatIdHash, baselin
   };
   checkpoint.currentMilestone = 'stop-resume';
   checkpoint.defect = null;
+  checkpoint.assignmentAdaptations = checkpoint.assignmentAdaptations?.flashReplaced === true
+    ? { flashReplaced: true }
+    : {};
   return checkpoint;
 }
 

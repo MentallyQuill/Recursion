@@ -140,7 +140,13 @@ const resetCheckpoint = {
   baselineCounts: { user: 1, assistant: 1 },
   acceptedNewTurns: [],
   defect: { code: 'missed-stop' },
-  currentMilestone: 'stop-resume'
+  currentMilestone: 'stop-resume',
+  assignmentAdaptations: {
+    flashReplaced: true,
+    naturalArbiterRetryProfile: labels[1],
+    naturalArbiterRetryAttempted: true,
+    naturalArbiterRetryAttemptBefore: 3
+  }
 };
 module.resetUnacceptedChat(resetCheckpoint, {
   branchSha: 'repaired',
@@ -154,8 +160,9 @@ assertDeepEqual(resetCheckpoint, {
   baselineCounts: { user: 0, assistant: 1 },
   acceptedNewTurns: [],
   defect: null,
-  currentMilestone: 'stop-resume'
-}, 'fresh chat reset preserves the zero-turn ledger and clears only failed-boundary state');
+  currentMilestone: 'stop-resume',
+  assignmentAdaptations: { flashReplaced: true }
+}, 'fresh chat reset preserves the zero-turn ledger and clears chat-scoped retry state');
 assertRejects(
   () => Promise.resolve(module.resetUnacceptedChat({ status: 'fail', acceptedNewTurns: [{}] }, {
     branchSha: 'new', chatIdHash: 'fresh', baselineCounts: { user: 0, assistant: 0 }

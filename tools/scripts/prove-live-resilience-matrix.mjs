@@ -390,7 +390,13 @@ export function classifyHostTurnCounts(checkpoint = {}, chat = {}) {
 }
 
 export function adoptRepairSha(checkpoint, branchSha) {
-  if (checkpoint?.status !== 'fail') throw new Error('Repair SHA adoption requires a failed checkpoint.');
+  const completedLedger = checkpoint?.status === 'complete'
+    && (checkpoint.acceptedNewTurns || []).length === 8
+    && MILESTONE_ORDER.every((milestone) => checkpoint.milestones?.[milestone]?.ok === true)
+    && checkpoint.endurance?.ok === true;
+  if (checkpoint?.status !== 'fail' && !completedLedger) {
+    throw new Error('Repair SHA adoption requires a failed or completed checkpoint with a fully accepted ledger.');
+  }
   checkpoint.branchSha = boundedText(branchSha, 80);
   return checkpoint;
 }

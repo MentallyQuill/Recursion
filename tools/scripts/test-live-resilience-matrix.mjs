@@ -185,9 +185,16 @@ assertRejects(
 const repairCheckpoint = { status: 'fail', branchSha: 'old', acceptedNewTurns: [], defect: { code: 'failed' } };
 assertEqual(module.adoptRepairSha(repairCheckpoint, 'new'), repairCheckpoint, 'repair adoption updates the same checkpoint');
 assertEqual(repairCheckpoint.branchSha, 'new', 'repair adoption advances only the checkpoint SHA');
+const completedCheckpoint = {
+  status: 'complete', branchSha: 'old', acceptedNewTurns: Array.from({ length: 8 }, () => ({})),
+  milestones: Object.fromEntries(['stop-resume', 'retry-stage', 'fused-fallback', 'queued-reprocess'].map((key) => [key, { ok: true }])),
+  endurance: { ok: true }
+};
+module.adoptRepairSha(completedCheckpoint, 'final');
+assertEqual(completedCheckpoint.branchSha, 'final', 'completed accepted ledger may bind its final harness-only SHA');
 assertRejects(
   () => Promise.resolve(module.adoptRepairSha({ status: 'running', branchSha: 'old' }, 'new')),
-  /failed checkpoint/,
+  /failed or completed checkpoint/,
   'repair adoption refuses a non-failed checkpoint'
 );
 assertEqual(typeof module.startFreshSyntheticChat, 'function', 'runner exports native fresh-chat isolation');

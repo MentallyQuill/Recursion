@@ -8,6 +8,20 @@ import {
 
 const PIPELINES = new Set(['segmented', 'fused']);
 const PLACEMENTS = new Set(['in_prompt', 'in_chat']);
+const MODES = new Set(['auto', 'manual']);
+const CARD_FAMILIES = new Set([
+  'Scene Frame',
+  'Scene Constraints',
+  'Active Cast',
+  'Knowledge',
+  'Consequences',
+  'Character Motivation',
+  'Relationship',
+  'Open Threads',
+  'Environment',
+  'Tone',
+  'Continuity'
+]);
 const PLACEMENT_POSITIONS = Object.freeze({ in_prompt: 0, in_chat: 1 });
 const PROMPT_ROLE_VALUES = Object.freeze({ system: 0, user: 1, assistant: 2 });
 const RECURSION_PROMPT_KEYS = Object.freeze([
@@ -24,7 +38,9 @@ export function parseArgs(argv = []) {
     pipelines: ['segmented', 'fused'],
     placements: ['in_prompt', 'in_chat'],
     depth: 4,
-    role: 'system'
+    role: 'system',
+    mode: 'auto',
+    families: []
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -49,6 +65,15 @@ export function parseArgs(argv = []) {
     } else if (arg === '--depth') {
       args.depth = Number(argv[index + 1]);
       index += 1;
+    } else if (arg === '--mode') {
+      args.mode = String(argv[index + 1] || '').trim().toLowerCase();
+      index += 1;
+    } else if (arg === '--families') {
+      args.families = String(argv[index + 1] || '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      index += 1;
     }
   }
   for (const placement of args.placements) {
@@ -56,6 +81,16 @@ export function parseArgs(argv = []) {
   }
   if (!Number.isInteger(args.depth) || args.depth < 0 || args.depth > 10) {
     throw new Error('Injection depth must be an integer from 0 through 10.');
+  }
+  if (!MODES.has(args.mode)) throw new Error(`Unknown mode "${args.mode}". Use auto or manual.`);
+  if (args.mode === 'manual' && args.families.length !== 2) {
+    throw new Error('Manual live proof requires exactly two --families.');
+  }
+  if (args.mode === 'auto' && args.families.length) {
+    throw new Error('Auto live proof does not accept --families.');
+  }
+  for (const family of args.families) {
+    if (!CARD_FAMILIES.has(family)) throw new Error(`Unknown card family "${family}".`);
   }
   return args;
 }
@@ -310,33 +345,47 @@ export async function selectPipeline(page, pipeline, timeoutMs) {
   }, pipeline, { timeout: timeoutMs });
 }
 
-async function ensureRunnableDeckFixture(page, timeoutMs) {
-  await page.evaluate(async () => {
+export function configureSoakDeckFixture(decks = {}, { mode = 'auto', families = [] } = {}) {
+  const source = decks && typeof decks === 'object' ? decks : {};
+  const customDecks = source.customDecks && typeof source.customDecks === 'object' ? source.customDecks : {};
+  const activeDeck = customDecks[source.activeDeckId];
+  if (!activeDeck) return { ...source, activeDeckId: 'default' };
+  const entries = Object.entries(activeDeck.cards || {});
+  if (mode === 'auto' && entries.some(([, card]) => card?.selectionState === 'active')) return source;
+  const requested = new Set(Array.isArray(families) ? families : []);
+  const cards = Object.fromEntries(entries.map(([id, card], index) => [id, {
+    ...card,
+    selectionState: mode === 'manual'
+      ? (requested.has(card?.builtinFamily) ? 'active' : 'off')
+      : (index < 2 ? 'active' : 'off')
+  }]));
+  return {
+    ...source,
+    customDecks: {
+      ...customDecks,
+      [activeDeck.id]: { ...activeDeck, cards }
+    }
+  };
+}
+
+async function ensureRunnableDeckFixture(page, args, timeoutMs) {
+  const currentDecks = await page.evaluate(() => {
     const runtime = globalThis.__recursionLiveHarnessRuntime;
     const settings = runtime?.view?.()?.settings;
-    if (!runtime || !settings?.preProcessDecks) return;
-    const decks = settings.preProcessDecks;
-    const activeDeck = decks.customDecks?.[decks.activeDeckId];
-    if (activeDeck) {
-      const cards = Object.fromEntries(Object.entries(activeDeck.cards || {}).map(([id, card]) => [id, {
-        ...card,
-        selectionState: 'active'
-      }]));
-      await runtime.updateSettings({
-        preProcessDecks: {
-          ...decks,
-          customDecks: {
-            ...decks.customDecks,
-            [activeDeck.id]: { ...activeDeck, cards }
-          }
-        }
-      });
-      return;
-    }
-    await runtime.updateSettings({
-      preProcessDecks: { ...decks, activeDeckId: 'default' }
-    });
+    return settings?.preProcessDecks || null;
   });
+  if (!currentDecks) return;
+  const configuredDecks = configureSoakDeckFixture(currentDecks, args);
+  await page.evaluate(async ({ mode, preProcessDecks }) => {
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    if (!runtime) return;
+    await runtime.updateSettings({
+      mode,
+      minCards: 2,
+      maxCards: 2,
+      preProcessDecks
+    });
+  }, { mode: args.mode, preProcessDecks: configuredDecks });
   await page.waitForFunction(() => /Hand\s+\d+/.test(String(document.querySelector('[data-recursion-hand-count]')?.textContent || '')), null, { timeout: timeoutMs }).catch(() => {});
 }
 
@@ -645,8 +694,8 @@ function assertPipelineProof(pipeline, proof, issues) {
   if (!String(snapshot.pipelineButtonLabel || '').includes(expectedLabel)) {
     fail(`${pipeline}-pipeline-not-selected`, 'Pipeline button did not expose the expected selected pipeline.', { expectedLabel, snapshot });
   }
-  if (!String(snapshot.modeText || '').toLowerCase().includes('auto')) {
-    fail(`${pipeline}-mode-not-auto`, 'Mode button did not expose Auto mode.', { snapshot });
+  if (!String(snapshot.modeText || '').toLowerCase().includes(proof.mode)) {
+    fail(`${pipeline}-mode-not-selected`, 'Mode button did not expose the requested mode.', { expectedMode: proof.mode, snapshot });
   }
   const pipelineRect = snapshot.pipelineButtonRect;
   const modeRect = snapshot.modeButtonRect;
@@ -688,14 +737,14 @@ function proofMessageFor(pipeline, placement, runId) {
   ].join(' ');
 }
 
-async function provePipeline(page, pipeline, placement, depth, role, timeoutMs, runId) {
+async function provePipeline(page, pipeline, placement, depth, role, mode, timeoutMs, runId) {
   let phase = 'power-on';
   try {
     await setPower(page, true, timeoutMs);
     phase = 'pipeline-select';
     await selectPipeline(page, pipeline, timeoutMs);
     phase = 'mode-select';
-    await selectMode(page, 'auto', timeoutMs);
+    await selectMode(page, mode, timeoutMs);
     phase = 'injection-settings';
     const injection = { placement, depth, role };
     await selectInjectionSettings(page, injection, timeoutMs);
@@ -710,7 +759,7 @@ async function provePipeline(page, pipeline, placement, depth, role, timeoutMs, 
     const diagnosticsExport = await exportDiagnosticsSnapshot(page, timeoutMs);
     phase = 'snapshot';
     const snapshot = await page.evaluate(liveSnapshotScript());
-    return { pipeline, placement, depth, role, send, snapshot, diagnosticsExport };
+    return { pipeline, placement, depth, role, mode, send, snapshot, diagnosticsExport };
   } catch (error) {
     const snapshot = await page.evaluate(liveSnapshotScript()).catch(() => null);
     const chat = await page.evaluate(contextChatSummaryScript()).catch(() => null);
@@ -777,11 +826,11 @@ export async function runLivePipelineProof({ argv = process.argv.slice(2), env =
         });
         await page.goto(env.SILLYTAVERN_BASE_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
         await waitForRoot(page, timeoutMs);
-        await ensureRunnableDeckFixture(page, timeoutMs);
+        await ensureRunnableDeckFixture(page, args, timeoutMs);
         for (const pipeline of args.pipelines) {
           const issueStart = { console: consoleIssues.length, page: pageIssues.length };
           const requestStart = serializedPromptRequests.length;
-          const proof = await provePipeline(page, pipeline, placement, args.depth, args.role, timeoutMs, runId);
+          const proof = await provePipeline(page, pipeline, placement, args.depth, args.role, args.mode, timeoutMs, runId);
           const pipelineRequests = serializedPromptRequests.slice(requestStart);
           const selectedRequest = [...pipelineRequests].reverse().find((entry) => entry.evidence.complete)
             || pipelineRequests.at(-1)
@@ -804,6 +853,8 @@ export async function runLivePipelineProof({ argv = process.argv.slice(2), env =
           assertPipelineProof(pipeline, proof, issues);
           proofs.push({
             pipeline,
+            mode: args.mode,
+            requestedFamilies: args.families,
             placement,
             configuredDepth: args.depth,
             configuredRole: args.role,

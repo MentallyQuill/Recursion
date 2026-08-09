@@ -10,6 +10,40 @@ const scriptText = readFileSync(new URL('./prove-live-pipelines.mjs', import.met
 
 assertEqual(typeof module.selectPipeline, 'function', 'selectPipeline is exported for focused harness tests');
 assertEqual(typeof module.selectInjectionSettings, 'function', 'selectInjectionSettings is exported for focused harness tests');
+assertEqual(typeof module.configureSoakDeckFixture, 'function', 'soak deck fixture is exported for focused harness tests');
+
+const deckFixture = {
+  version: 1,
+  activeDeckId: 'soak-deck',
+  customDecks: {
+    'soak-deck': {
+      id: 'soak-deck',
+      cards: {
+        scene: { builtinFamily: 'Scene Frame', selectionState: 'active' },
+        threads: { builtinFamily: 'Open Threads', selectionState: 'off' },
+        cast: { builtinFamily: 'Active Cast', selectionState: 'active' }
+      }
+    }
+  }
+};
+const manualDeckFixture = module.configureSoakDeckFixture(deckFixture, {
+  mode: 'manual',
+  families: ['Scene Frame', 'Open Threads']
+});
+assertDeepEqual(
+  Object.values(manualDeckFixture.customDecks['soak-deck'].cards).map((card) => [card.builtinFamily, card.selectionState]),
+  [
+    ['Scene Frame', 'active'],
+    ['Open Threads', 'active'],
+    ['Active Cast', 'off']
+  ],
+  'Manual soak fixture activates exactly the requested families and disables every other family'
+);
+assertDeepEqual(
+  module.configureSoakDeckFixture(deckFixture, { mode: 'auto', families: [] }),
+  deckFixture,
+  'Auto soak fixture preserves an already-runnable deck selection'
+);
 assertDeepEqual(
   module.inspectPacketInjectionMetadata({
     injectedBlocks: [
@@ -45,9 +79,29 @@ assertDeepEqual(
     pipelines: ['segmented', 'fused'],
     placements: ['in_prompt', 'in_chat'],
     depth: 4,
-    role: 'system'
+    role: 'system',
+    mode: 'auto',
+    families: []
   },
   'live pipeline proof parses the complete placement matrix and configured depth'
+);
+assertDeepEqual(
+  module.parseArgs(['--mode', 'manual', '--families', 'Scene Frame,Open Threads']),
+  {
+    live: false,
+    pipelines: ['segmented', 'fused'],
+    placements: ['in_prompt', 'in_chat'],
+    depth: 4,
+    role: 'system',
+    mode: 'manual',
+    families: ['Scene Frame', 'Open Threads']
+  },
+  'live pipeline proof parses an exact two-family Manual contract'
+);
+await assertRejects(
+  async () => module.parseArgs(['--mode', 'manual', '--families', 'Scene Frame']),
+  /exactly two/,
+  'Manual live proof rejects an underspecified card scope'
 );
 await assertRejects(
   async () => module.parseArgs(['--placement', 'somewhere_else']),

@@ -257,6 +257,17 @@ export function resetUnacceptedChat(checkpoint, { branchSha, chatIdHash, baselin
   return checkpoint;
 }
 
+export function recoverCrashedHarnessCheckpoint(checkpoint) {
+  if (checkpoint?.status !== 'running') throw new Error('Harness crash recovery requires a running checkpoint.');
+  if ((checkpoint.acceptedNewTurns || []).length !== 0) throw new Error('Harness crash recovery requires zero accepted turns.');
+  checkpoint.status = 'fail';
+  checkpoint.defect = {
+    code: 'harness-process-exited',
+    summary: 'The live harness process exited before checkpoint settlement.'
+  };
+  return checkpoint;
+}
+
 export function swapStopRetryAssignments(checkpoint) {
   if ((checkpoint.acceptedNewTurns || []).length !== 0) throw new Error('Stop Retry assignment swap is allowed only before any accepted turn.');
   if (Object.values(checkpoint.milestones || {}).some((entry) => entry?.ok === true)) {
@@ -1130,6 +1141,10 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
       if (!chat.chatId) throw new Error('Unable to resolve the active synthetic soak chat identity.');
       const branchSha = currentBranchSha();
       if (existsSync(args.statePath)) checkpoint = loadCheckpoint(args.statePath);
+      if (checkpoint && env.RECURSION_RESILIENCE_RECOVER_CRASHED_RUN === '1') {
+        recoverCrashedHarnessCheckpoint(checkpoint);
+        saveCheckpoint(args.statePath, checkpoint);
+      }
       if (checkpoint && env.RECURSION_RESILIENCE_FRESH_CHAT === '1') {
         chat = await startFreshSyntheticChat(page, timeoutMs);
         resetUnacceptedChat(checkpoint, {

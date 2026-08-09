@@ -28,6 +28,13 @@ assertEqual(module.classifyGenerationRequest('{"messages":[{"content":"continue 
 assertEqual(source.includes('resumedProviderResponses.push({'), true, 'Stop Resume diagnostics retain response kind and status only');
 assertDeepEqual(await module.observePromise(Promise.resolve('ok')), { ok: true, value: 'ok' }, 'concurrent send observer preserves success');
 assertEqual((await module.observePromise(Promise.reject(new Error('bounded')))).ok, false, 'concurrent send observer captures rejection immediately');
+const crashedCheckpoint = { status: 'running', acceptedNewTurns: [], defect: null };
+module.recoverCrashedHarnessCheckpoint(crashedCheckpoint);
+assertDeepEqual(crashedCheckpoint, {
+  status: 'fail',
+  acceptedNewTurns: [],
+  defect: { code: 'harness-process-exited', summary: 'The live harness process exited before checkpoint settlement.' }
+}, 'zero-turn crashed harness state becomes an explicit repair boundary');
 assertEqual(typeof module.driveRetryStageMilestone, 'function', 'runner exports Retry Stage milestone driver');
 assertEqual(typeof module.driveFusedFallbackMilestone, 'function', 'runner exports Fused fallback milestone driver');
 assertEqual(typeof module.driveQueuedReprocessMilestone, 'function', 'runner exports queued reprocess milestone driver');

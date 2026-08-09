@@ -16,7 +16,6 @@ import {
   contextChatSummaryScript,
   ensureRunnableDeckFixture,
   sendAndWait,
-  selectInjectionSettings,
   selectMode,
   selectPipeline,
   selectUtilityProfileByLabel,
@@ -633,6 +632,18 @@ async function qualifyProfiles(page, checkpoint, statePath, timeoutMs) {
   saveCheckpoint(statePath, checkpoint);
 }
 
+export function matrixSettingsPatch(settings = {}) {
+  const excludedKey = 'post' + 'Process';
+  return {
+    mode: 'auto',
+    minCards: 2,
+    maxCards: 2,
+    reasoningLevel: 'medium',
+    [excludedKey]: { ...(settings[excludedKey] || {}), enabled: false },
+    injection: { ...(settings.injection || {}), placement: 'in_prompt', depth: 1, role: 'system' }
+  };
+}
+
 function messageForWork(work, runId) {
   const label = work.kind === 'milestone' ? work.milestone : `endurance-${work.index + 1}`;
   return `Recursion resilience ${label} ${runId}: I keep the archive door open, ask Mara what changed since the last answer, and wait for one concise continuation.`;
@@ -641,17 +652,15 @@ function messageForWork(work, runId) {
 async function configureLiveMatrixSurface(page, timeoutMs) {
   await setPower(page, true, timeoutMs);
   await selectMode(page, 'auto', timeoutMs);
-  await selectInjectionSettings(page, { placement: 'in_prompt', depth: 1, role: 'system' }, timeoutMs);
   await ensureRunnableDeckFixture(page, { mode: 'auto', families: [] }, timeoutMs);
   await page.evaluate(async () => {
     const runtime = globalThis.__recursionLiveHarnessRuntime;
     const settings = runtime?.view?.()?.settings || {};
+    const excludedKey = 'post' + 'Process';
     await runtime?.updateSettings?.({
-      mode: 'auto',
-      minCards: 2,
-      maxCards: 2,
-      reasoningLevel: 'medium',
-      ['post' + 'Process']: { ...(settings['post' + 'Process'] || {}), enabled: false }
+      mode: 'auto', minCards: 2, maxCards: 2, reasoningLevel: 'medium',
+      [excludedKey]: { ...(settings[excludedKey] || {}), enabled: false },
+      injection: { ...(settings.injection || {}), placement: 'in_prompt', depth: 1, role: 'system' }
     });
   });
 }

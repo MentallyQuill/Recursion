@@ -79,6 +79,17 @@ assertRejects(
   /zero accepted turns/,
   'fresh chat reset refuses any accepted soak progress'
 );
+assertDeepEqual(module.matrixSettingsPatch({
+  postProcess: { enabled: true, mode: 'automatic' },
+  injection: { placement: 'in_chat', depth: 4, role: 'user' }
+}), {
+  mode: 'auto',
+  minCards: 2,
+  maxCards: 2,
+  reasoningLevel: 'medium',
+  postProcess: { enabled: false, mode: 'automatic' },
+  injection: { placement: 'in_prompt', depth: 1, role: 'system' }
+}, 'matrix setup uses the runtime contract for exact injection and excluded processing settings');
 
 const safeState = resolve('artifacts', 'live-resilience-matrix', 'active.json');
 assertDeepEqual(module.parseResilienceArgs(['--live', '--state', safeState]), {

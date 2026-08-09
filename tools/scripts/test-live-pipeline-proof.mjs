@@ -15,6 +15,46 @@ assertEqual(typeof module.configureSoakDeckFixture, 'function', 'soak deck fixtu
 assertEqual(typeof module.inspectMilestoneVerdict, 'function', 'milestone verdict helper is exported for focused harness tests');
 assertEqual(typeof module.sanitizeLiveProofReport, 'function', 'live proof report sanitizer is exported for focused harness tests');
 assertEqual(typeof module.inspectCertificationPreflight, 'function', 'selected-profile certification verdict is exported for focused harness tests');
+for (const helper of [
+  'waitForRoot',
+  'setPower',
+  'selectMode',
+  'ensureRunnableDeckFixture',
+  'sendAndWait',
+  'exportDiagnosticsSnapshot',
+  'liveSnapshotScript',
+  'contextChatSummaryScript',
+  'selectUtilityProfileByLabel',
+  'certifyUtilityProfile',
+  'resolveExactUtilityProfile'
+]) {
+  assertEqual(typeof module[helper], 'function', `${helper} is exported for the resilience coordinator`);
+}
+
+assertDeepEqual(module.resolveExactUtilityProfile([
+  { name: 'nanogpt DeepSeek Flash - Provider', model: 'deepseek-flash' },
+  { name: 'nanogpt DeepSeek Flash 0731 - Celia', model: 'deepseek-flash-0731' }
+], 'nanogpt DeepSeek Flash - Provider'), {
+  ok: true,
+  index: 0,
+  label: 'nanogpt DeepSeek Flash - Provider',
+  model: 'deepseek-flash'
+}, 'Utility profile resolution requires one exact safe-label match');
+assertDeepEqual(module.resolveExactUtilityProfile([
+  { name: 'nanogpt DeepSeek Flash - Provider', model: 'deepseek-flash' }
+], 'DeepSeek Flash'), {
+  ok: false,
+  reason: 'profile-not-found',
+  requestedLabel: 'DeepSeek Flash'
+}, 'Utility profile resolution rejects partial matching');
+assertDeepEqual(module.resolveExactUtilityProfile([
+  { name: 'same-label', model: 'one' },
+  { name: 'same-label', model: 'two' }
+], 'same-label'), {
+  ok: false,
+  reason: 'profile-label-ambiguous',
+  requestedLabel: 'same-label'
+}, 'Utility profile resolution rejects ambiguous exact labels');
 assertDeepEqual(
   module.inspectCertificationPreflight({
     utility: { ok: true, status: 'partial', checks: { connectivity: 'pass', singleCard: 'pass', fusedCards: 'fail' } },

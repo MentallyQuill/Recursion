@@ -308,7 +308,7 @@ function assertPreflight(args, env) {
   return userResult.user;
 }
 
-function contextChatSummaryScript() {
+export function contextChatSummaryScript() {
   return () => {
     const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
     const chat = Array.isArray(context.chat) ? context.chat : [];
@@ -322,7 +322,7 @@ function contextChatSummaryScript() {
   };
 }
 
-function liveSnapshotScript() {
+export function liveSnapshotScript() {
   return () => {
     const text = (selector) => String(document.querySelector(selector)?.textContent || '').replace(/\s+/g, ' ').trim();
     const attr = (selector, name) => String(document.querySelector(selector)?.getAttribute(name) || '');
@@ -373,13 +373,13 @@ function liveSnapshotScript() {
   };
 }
 
-async function waitForRoot(page, timeoutMs) {
+export async function waitForRoot(page, timeoutMs) {
   await page.waitForSelector('#recursion-root', { timeout: timeoutMs });
   await page.waitForSelector('[data-recursion-pipeline-button]', { timeout: timeoutMs });
   await page.waitForSelector('[data-recursion-mode-button]', { timeout: timeoutMs });
 }
 
-async function setPower(page, enabled, timeoutMs) {
+export async function setPower(page, enabled, timeoutMs) {
   const selector = '[data-recursion-power-toggle]';
   const button = page.locator(selector).first();
   await button.waitFor({ timeout: timeoutMs });
@@ -393,7 +393,7 @@ async function setPower(page, enabled, timeoutMs) {
   }, enabled, { timeout: timeoutMs });
 }
 
-async function selectMode(page, mode, timeoutMs) {
+export async function selectMode(page, mode, timeoutMs) {
   const currentMode = await page.evaluate(() => String(document.querySelector('[data-recursion-mode]')?.textContent || '').toLowerCase()).catch(() => '');
   if (currentMode.includes(mode)) return;
   const modeButton = page.locator('[data-recursion-mode-button]').first();
@@ -477,7 +477,7 @@ export function configureSoakDeckFixture(decks = {}, { mode = 'auto', families =
   };
 }
 
-async function ensureRunnableDeckFixture(page, args, timeoutMs) {
+export async function ensureRunnableDeckFixture(page, args, timeoutMs) {
   const currentDecks = await page.evaluate(() => {
     const runtime = globalThis.__recursionLiveHarnessRuntime;
     const settings = runtime?.view?.()?.settings;
@@ -536,6 +536,105 @@ async function certifySelectedProfiles(page, timeoutMs) {
       && settings.providers?.reasoner?.certification?.status === 'pass';
   }, null, { timeout: timeoutMs });
   return { ...result, verdict };
+}
+
+export function resolveExactUtilityProfile(profiles = [], requestedLabel = '') {
+  const label = String(requestedLabel || '').trim();
+  const matches = (Array.isArray(profiles) ? profiles : [])
+    .map((profile, index) => ({ profile, index }))
+    .filter(({ profile }) => String(profile?.name || profile?.label || '').trim() === label);
+  if (matches.length === 0) {
+    return { ok: false, reason: 'profile-not-found', requestedLabel: label };
+  }
+  if (matches.length > 1) {
+    return { ok: false, reason: 'profile-label-ambiguous', requestedLabel: label };
+  }
+  const [{ profile, index }] = matches;
+  return {
+    ok: true,
+    index,
+    label: String(profile?.name || profile?.label || '').slice(0, 180),
+    model: String(profile?.model || '').slice(0, 180)
+  };
+}
+
+export async function selectUtilityProfileByLabel(page, requestedLabel, timeoutMs) {
+  const result = await page.evaluate(async (label) => {
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const extensionSettings = context.extensionSettings || globalThis.extension_settings || {};
+    const profiles = Array.isArray(extensionSettings.connectionManager?.profiles)
+      ? extensionSettings.connectionManager.profiles
+      : [];
+    const matches = profiles.filter((profile) => String(profile?.name || profile?.label || '').trim() === label);
+    if (matches.length === 0) return { ok: false, reason: 'profile-not-found', requestedLabel: label };
+    if (matches.length > 1) return { ok: false, reason: 'profile-label-ambiguous', requestedLabel: label };
+    if (!runtime || typeof runtime.updateProviderConfig !== 'function') {
+      return { ok: false, reason: 'runtime-provider-api-unavailable', requestedLabel: label };
+    }
+    const selected = matches[0];
+    await runtime.updateProviderConfig('utility', { connectionProfileId: selected.id });
+    return {
+      ok: true,
+      label: String(selected.name || selected.label || '').slice(0, 180),
+      model: String(selected.model || '').slice(0, 180)
+    };
+  }, String(requestedLabel || '').trim());
+  if (!result?.ok) {
+    fail('utility-profile-selection-failed', 'Failed to select the requested Utility connection profile by exact label.', result || {});
+  }
+  await page.waitForFunction((expectedLabel) => {
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const extensionSettings = context.extensionSettings || globalThis.extension_settings || {};
+    const profiles = Array.isArray(extensionSettings.connectionManager?.profiles)
+      ? extensionSettings.connectionManager.profiles
+      : [];
+    const selectedId = runtime?.view?.()?.settings?.providers?.utility?.connectionProfileId;
+    const selected = profiles.find((profile) => profile?.id === selectedId);
+    return String(selected?.name || selected?.label || '').trim() === expectedLabel;
+  }, result.label, { timeout: timeoutMs });
+  return result;
+}
+
+export async function certifyUtilityProfile(page, timeoutMs) {
+  const result = await page.evaluate(async () => {
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    if (!runtime || typeof runtime.testProvider !== 'function') {
+      return { ok: false, reason: 'runtime-provider-test-unavailable' };
+    }
+    const testResult = await runtime.testProvider('utility');
+    const view = runtime.view?.() || {};
+    const provider = view.settings?.providers?.utility || {};
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const extensionSettings = context.extensionSettings || globalThis.extension_settings || {};
+    const profiles = Array.isArray(extensionSettings.connectionManager?.profiles)
+      ? extensionSettings.connectionManager.profiles
+      : [];
+    const selected = profiles.find((profile) => profile?.id === provider.connectionProfileId);
+    return {
+      ok: testResult?.ok === true,
+      label: String(selected?.name || selected?.label || 'selected-profile').slice(0, 180),
+      model: String(selected?.model || '').slice(0, 180),
+      status: String(provider.certification?.status || 'not-run'),
+      checks: provider.certification?.checks || null,
+      capability: String(view.settings?.providerCapabilities?.utility?.promptPacket?.state || '')
+    };
+  });
+  const segmentedReady = result?.ok === true
+    && ['partial', 'pass'].includes(result.status)
+    && result.checks?.connectivity === 'pass'
+    && result.checks?.singleCard === 'pass';
+  if (!segmentedReady) {
+    fail('utility-profile-certification-failed', 'Utility profile did not pass connectivity and single-card certification.', result || {});
+  }
+  await page.waitForFunction(() => {
+    const certification = globalThis.__recursionLiveHarnessRuntime?.view?.()?.settings?.providers?.utility?.certification;
+    return ['partial', 'pass'].includes(certification?.status)
+      && certification?.checks?.connectivity === 'pass'
+      && certification?.checks?.singleCard === 'pass';
+  }, null, { timeout: timeoutMs });
+  return result;
 }
 
 export async function selectInjectionSettings(page, settings, timeoutMs) {
@@ -735,7 +834,7 @@ async function waitForChatSettled(page, { message = '', requirePrompt = false, t
   }, { message, requirePrompt, stableMs: CHAT_STABLE_MS }, { timeout: timeoutMs });
 }
 
-async function sendAndWait(page, message, { requirePrompt, timeoutMs }) {
+export async function sendAndWait(page, message, { requirePrompt, timeoutMs }) {
   const before = await page.evaluate(contextChatSummaryScript());
   const surface = await findSendSurface(page, timeoutMs);
   const generationEnded = await registerHostGenerationEnded(page);
@@ -778,7 +877,7 @@ async function openViewer(page, timeoutMs) {
   }, null, { timeout: Math.min(timeoutMs, 10000) }).catch(() => {});
 }
 
-async function exportDiagnosticsSnapshot(page, timeoutMs) {
+export async function exportDiagnosticsSnapshot(page, timeoutMs) {
   await page.evaluate(() => {
     globalThis.__recursionProofClipboard = '';
     const clipboard = globalThis.navigator?.clipboard;

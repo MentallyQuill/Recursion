@@ -386,13 +386,16 @@ export async function clickProgressAction(page, label, timeoutMs) {
   await ensureProgressPopoverOpen(page, timeoutMs);
   const action = page.getByRole('button', { name: label, exact: true }).first();
   await action.waitFor({ state: 'visible', timeout: timeoutMs });
-  const evidence = await action.evaluate((node) => ({
-    kind: String(node?.dataset?.recursionProgressAction || ''),
-    operationId: String(node?.dataset?.recursionProgressOperationId || ''),
-    stageId: String(node?.dataset?.recursionProgressStageId || '')
-  }));
-  if (label === 'Resume from saved checkpoint') await action.dispatchEvent('click');
-  else await action.click({ timeout: timeoutMs });
+  const evidence = await action.evaluate((node, direct) => {
+    const result = {
+      kind: String(node?.dataset?.recursionProgressAction || ''),
+      operationId: String(node?.dataset?.recursionProgressOperationId || ''),
+      stageId: String(node?.dataset?.recursionProgressStageId || '')
+    };
+    if (direct) node.click();
+    return result;
+  }, label === 'Resume from saved checkpoint');
+  if (label !== 'Resume from saved checkpoint') await action.click({ timeout: timeoutMs });
   return evidence;
 }
 

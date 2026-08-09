@@ -346,8 +346,16 @@ assertEqual(/connectionProfileId\s*:\s*[^'"\[]/.test(source), false, 'runner doe
 const actionCalls = [];
 const fakeAction = {
   async waitFor(options) { actionCalls.push(['waitFor', options]); },
-  async evaluate() { return { kind: 'resume', operationId: 'operation-safe', stageId: 'preprocess.arbiter' }; },
-  async dispatchEvent(name) { actionCalls.push(['dispatchEvent', name]); },
+  async evaluate(callback, direct) {
+    return callback({
+      dataset: {
+        recursionProgressAction: 'resume',
+        recursionProgressOperationId: 'operation-safe',
+        recursionProgressStageId: 'preprocess.arbiter'
+      },
+      click() { actionCalls.push(['directClick']); }
+    }, direct);
+  },
   async click(options) { actionCalls.push(['click', options]); }
 };
 const fakePage = {
@@ -374,7 +382,7 @@ assertDeepEqual(actionCalls.find((call) => call[0] === 'getByRole'), [
   'button',
   { name: 'Resume from saved checkpoint', exact: true }
 ], 'progress driver requires the exact accessible label');
-assertDeepEqual(actionCalls.find((call) => call[0] === 'dispatchEvent'), ['dispatchEvent', 'click'], 'Resume driver dispatches the exact validated control once');
+assertDeepEqual(actionCalls.find((call) => call[0] === 'directClick'), ['directClick'], 'Resume driver captures and dispatches the exact validated control atomically');
 assertEqual(actionCalls.filter((call) => call[0] === 'open').length, 1, 'progress driver opens a hidden popover even when aria-expanded is stale');
 
 const invalidJsonBody = module.substituteInvalidModelResponse(

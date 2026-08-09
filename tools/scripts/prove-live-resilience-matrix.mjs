@@ -482,9 +482,19 @@ export async function readLiveResilienceAudit(page) {
   await page.evaluate(async () => {
     await globalThis.__recursionLiveHarnessRuntime?.restoreExecutionState?.();
   });
+  const chat = await page.evaluate(() => {
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const entries = Array.isArray(context.chat) ? context.chat : [];
+    return {
+      userCount: entries.filter((entry) => entry?.is_user === true).length,
+      assistantCount: entries.filter((entry) => entry?.is_user === false).length,
+      roles: entries.map((entry) => entry?.is_user === true ? 'user' : 'assistant').slice(-12)
+    };
+  });
   return {
     status: 'audit',
-    arbiter: summarizeArbiterFailure(await readExecutionSnapshot(page))
+    arbiter: summarizeArbiterFailure(await readExecutionSnapshot(page)),
+    chat
   };
 }
 

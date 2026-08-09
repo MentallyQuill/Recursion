@@ -529,9 +529,19 @@ export async function readLiveResilienceAudit(page) {
       roles: entries.map((entry) => entry?.is_user === true ? 'user' : 'assistant').slice(-12)
     };
   });
+  const execution = await readExecutionSnapshot(page);
   return {
     status: 'audit',
-    arbiter: summarizeArbiterFailure(await readExecutionSnapshot(page)),
+    arbiter: summarizeArbiterFailure(execution),
+    stages: (execution?.stages || []).map((stage) => ({
+      stageId: stage.stageId,
+      state: stage.state,
+      attemptCount: stage.attemptCount,
+      attemptWindow: stage.attemptWindow,
+      failureCode: stage.failureCode,
+      lastAttemptAction: stage.lastAttemptAction,
+      diagnosticCodes: stage.diagnosticCodes
+    })),
     chat
   };
 }

@@ -40,12 +40,15 @@ export function parseArgs(argv = []) {
     depth: 4,
     role: 'system',
     mode: 'auto',
-    families: []
+    families: [],
+    certifyOnly: false
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--live') {
       args.live = true;
+    } else if (arg === '--certify-only') {
+      args.certifyOnly = true;
     } else if (arg === '--pipeline') {
       const value = String(argv[index + 1] || '').trim().toLowerCase();
       index += 1;
@@ -458,6 +461,45 @@ async function ensureRunnableDeckFixture(page, args, timeoutMs) {
     });
   }, { mode: args.mode, preProcessDecks: configuredDecks });
   await page.waitForFunction(() => /Hand\s+\d+/.test(String(document.querySelector('[data-recursion-hand-count]')?.textContent || '')), null, { timeout: timeoutMs }).catch(() => {});
+}
+
+async function certifySelectedProfiles(page, timeoutMs) {
+  const result = await page.evaluate(async () => {
+    const runtime = globalThis.__recursionLiveHarnessRuntime;
+    if (!runtime || typeof runtime.testProvider !== 'function') return { ok: false, reason: 'runtime-provider-test-unavailable' };
+    const utilityResult = await runtime.testProvider('utility');
+    const reasonerResult = await runtime.testProvider('reasoner');
+    const view = runtime.view?.() || {};
+    const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+    const extensionSettings = context.extensionSettings || globalThis.extension_settings || {};
+    const profiles = Array.isArray(extensionSettings.connectionManager?.profiles)
+      ? extensionSettings.connectionManager.profiles
+      : [];
+    const labelFor = (profileId) => {
+      const profile = profiles.find((entry) => entry?.id === profileId);
+      return String(profile?.name || profile?.label || profile?.model || 'selected-profile').slice(0, 180);
+    };
+    const summary = (lane, testResult) => {
+      const provider = view.settings?.providers?.[lane] || {};
+      return {
+        label: labelFor(provider.connectionProfileId),
+        ok: testResult?.ok === true,
+        status: String(provider.certification?.status || 'not-run'),
+        checks: provider.certification?.checks || null,
+        capability: String(view.settings?.providerCapabilities?.[lane]?.promptPacket?.state || '')
+      };
+    };
+    const utility = summary('utility', utilityResult);
+    const reasoner = summary('reasoner', reasonerResult);
+    return { ok: utility.ok && reasoner.ok && utility.status === 'pass' && reasoner.status === 'pass', utility, reasoner };
+  });
+  if (!result?.ok) fail('selected-profile-certification-failed', 'Selected Utility and Reasoner profiles did not both reach Fused-ready certification.', result || {});
+  await page.waitForFunction(() => {
+    const settings = globalThis.__recursionLiveHarnessRuntime?.view?.()?.settings || {};
+    return settings.providers?.utility?.certification?.status === 'pass'
+      && settings.providers?.reasoner?.certification?.status === 'pass';
+  }, null, { timeout: timeoutMs });
+  return result;
 }
 
 export async function selectInjectionSettings(page, settings, timeoutMs) {
@@ -875,6 +917,28 @@ export async function runLivePipelineProof({ argv = process.argv.slice(2), env =
   const pageIssues = [];
   const proofs = [];
   try {
+    if (args.certifyOnly) {
+      const context = await browser.newContext();
+      try {
+        await context.addInitScript(() => {
+          globalThis.__recursionLiveHarness = true;
+        });
+        await context.addCookies(session.playwrightCookies());
+        const page = await context.newPage();
+        await page.goto(env.SILLYTAVERN_BASE_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+        await waitForRoot(page, timeoutMs);
+        const certification = await certifySelectedProfiles(page, timeoutMs);
+        return {
+          status: 'pass',
+          result: 'selected-profile-certification-pass',
+          user,
+          runId,
+          certification
+        };
+      } finally {
+        await context.close().catch(() => {});
+      }
+    }
     for (const placement of args.placements) {
       const context = await browser.newContext();
       const serializedPromptRequests = [];

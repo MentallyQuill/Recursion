@@ -173,7 +173,8 @@ assertDeepEqual(
     depth: 4,
     role: 'system',
     mode: 'auto',
-    families: []
+    families: [],
+    certifyOnly: false
   },
   'live pipeline proof parses the complete placement matrix and configured depth'
 );
@@ -186,9 +187,15 @@ assertDeepEqual(
     depth: 4,
     role: 'system',
     mode: 'manual',
-    families: ['Scene Frame', 'Open Threads']
+    families: ['Scene Frame', 'Open Threads'],
+    certifyOnly: false
   },
   'live pipeline proof parses an exact two-family Manual contract'
+);
+assertEqual(
+  module.parseArgs(['--certify-only']).certifyOnly,
+  true,
+  'live pipeline proof supports a no-generation selected-profile certification preflight'
 );
 await assertRejects(
   async () => module.parseArgs(['--mode', 'manual', '--families', 'Scene Frame']),

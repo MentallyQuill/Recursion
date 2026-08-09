@@ -41,6 +41,8 @@ The Drummer Cydonia is a fifth, Segmented-only compatibility add-on:
 
 Cydonia does not alter or extend the completed eight-turn resilience ledger. It receives a separate fresh synthetic chat, connectivity plus single-card certification, and one accepted Segmented host turn. Its certification, request audit, and durable stage graph must all prove that no Fused bundle test or Fused pipeline stage ran. Prior Cydonia failures are treated as Recursion integration defects until request shaping, output parsing, and the live host boundary have been exhausted through the repair loop.
 
+Execution result on 2026-08-09: Cydonia passed the add-on at local SHA `981bb9ef`. Certification was `partial`/Segmented-ready with connectivity and single-card checks passing and `fusedCards: not-run`; the request audit observed zero Fused bundle requests. The fresh synthetic chat completed one nine-stage operation with exactly one new user turn and one native assistant continuation. Sanitized evidence is stored at `artifacts/live-segmented-utility/cydonia.json`.
+
 The first, third, and fourth profiles already exist on `recursion-soak-a`. The MiniMax M3 profile exists only on `default-user`; preflight may copy that one complete Connection Manager profile record into the soak user's profile list after backing up `settings.json`. It must not mutate `default-user`, copy unrelated settings, expose the profile id or secret reference, or duplicate an equivalent model/profile already present.
 
 The Cydonia profile also originates on `default-user`. The same exact-profile, backup-first, shared-credential-reference guard applies when adding it to `recursion-soak-a`.

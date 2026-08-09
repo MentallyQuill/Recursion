@@ -379,16 +379,16 @@
 - Create: `tools/scripts/test-live-segmented-utility-profile.mjs`
 - Execute: `artifacts/live-segmented-utility/cydonia.json`
 
-- [ ] **Step 1: Back up soak settings and clone only the exact Cydonia profile from default-user**
+- [x] **Step 1: Back up soak settings and clone only the exact Cydonia profile from default-user**
 
-- [ ] **Step 2: Add Segmented-only certification**
+- [x] **Step 2: Add Segmented-only certification**
 
   Run connectivity and single-card checks, persist `fusedCards: not-run`, and preserve the existing full certification behavior for normal UI requests.
 
-- [ ] **Step 3: Run one fresh-chat Segmented host turn**
+- [x] **Step 3: Run one fresh-chat Segmented host turn**
 
   Require a completed Arbiter, at least one completed Segmented card stage, prompt installation, one user/assistant count delta, and zero Fused certification requests or durable stages.
 
-- [ ] **Step 4: Repair and retest the same Cydonia boundary until accepted**
+- [x] **Step 4: Repair and retest the same Cydonia boundary until accepted**
 
-- [ ] **Step 5: Repeat full offline, alpha, browser, installed-copy parity, sanitization, and repository-state verification**
+- [x] **Step 5: Repeat full offline, alpha, browser, installed-copy parity, sanitization, and repository-state verification**

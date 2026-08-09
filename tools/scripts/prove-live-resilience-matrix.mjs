@@ -316,6 +316,7 @@ export function replaceIncompatibleFlash(checkpoint, qualification = {}) {
     attempts: 3,
     replacementLabel: GLM_CELIA_LABEL
   }];
+  checkpoint.assignmentAdaptations = { flashReplaced: true };
   checkpoint.currentMilestone = 'stop-resume';
   checkpoint.defect = null;
   return checkpoint;
@@ -949,26 +950,22 @@ export async function recoverPendingArbiterRetry(page, checkpoint, statePath, ti
   if (failed?.state !== 'paused' || failed.pauseReason !== 'stage-failed:preprocess.arbiter') {
     throw new Error(`Pending Retry requires a failed Arbiter; observed ${failed?.pauseReason || failed?.state || 'missing'}.`);
   }
-  if (
-    checkpoint.assignmentAdaptations?.naturalArbiterRetry === true
-    && checkpoint.assignmentAdaptations?.repairedArbiterRetryPending !== true
-  ) {
-    throw new Error(`Natural Arbiter Retry exhausted: ${JSON.stringify(summarizeArbiterFailure(failed))}`);
-  }
-  let owningProfile = checkpoint.assignments['retry-stage'];
-  if (checkpoint.assignmentAdaptations?.naturalArbiterRetry !== true) {
+  let owningProfile = checkpoint.assignmentAdaptations?.naturalArbiterRetryProfile || '';
+  if (!owningProfile) {
     owningProfile = checkpoint.assignments['stop-resume'];
     swapStopRetryAssignments(checkpoint);
     checkpoint.assignmentAdaptations = {
       ...(checkpoint.assignmentAdaptations || {}),
-      naturalArbiterRetry: true
+      naturalArbiterRetryProfile: owningProfile,
+      naturalArbiterRetryAttempted: false
     };
     saveCheckpoint(statePath, checkpoint);
-  } else {
-    checkpoint.assignmentAdaptations.repairedArbiterRetryPending = false;
-    checkpoint.assignmentAdaptations.repairedArbiterRetryAttempted = true;
-    saveCheckpoint(statePath, checkpoint);
   }
+  if (checkpoint.assignmentAdaptations?.naturalArbiterRetryAttempted === true) {
+    throw new Error(`Natural Arbiter Retry exhausted: ${JSON.stringify(summarizeArbiterFailure(failed))}`);
+  }
+  checkpoint.assignmentAdaptations.naturalArbiterRetryAttempted = true;
+  saveCheckpoint(statePath, checkpoint);
   const action = await clickProgressAction(page, 'Retry this step', timeoutMs);
   if (action.kind !== 'retry' || action.stageId !== 'preprocess.arbiter') {
     throw new Error('Pending Arbiter failure did not expose its exact Retry action.');
@@ -1063,6 +1060,13 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
         chatIdHash: hashIdentity(chat.chatId)
       };
       if (checkpoint) {
+        if (
+          (checkpoint.modelIncompatibilities || []).length
+          && checkpoint.assignmentAdaptations?.flashReplaced !== true
+        ) {
+          checkpoint.assignmentAdaptations = { flashReplaced: true };
+          saveCheckpoint(args.statePath, checkpoint);
+        }
         if (env.RECURSION_RESILIENCE_ADOPT_REPAIR_SHA === '1' && checkpoint.branchSha !== identity.branchSha) {
           adoptRepairSha(checkpoint, identity.branchSha);
           saveCheckpoint(args.statePath, checkpoint);

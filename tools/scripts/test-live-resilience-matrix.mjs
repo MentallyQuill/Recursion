@@ -82,6 +82,7 @@ module.replaceIncompatibleFlash(incompatibleCheckpoint, {
 assertEqual(incompatibleCheckpoint.assignments['retry-stage'], glmLabel, 'GLM fallback owns Retry after Flash incompatibility');
 assertDeepEqual(incompatibleCheckpoint.effectiveProfileLabels, [glmLabel, labels[1], labels[2], labels[3]], 'effective endurance rotation replaces only incompatible Flash');
 assertEqual(incompatibleCheckpoint.modelIncompatibilities[0].failureCode, 'RECURSION_PROVIDER_CONTEXT_LIMIT', 'Flash incompatibility records only its bounded failure code');
+assertDeepEqual(incompatibleCheckpoint.assignmentAdaptations, { flashReplaced: true }, 'Flash replacement clears stale model-specific retry flags');
 assertDeepEqual(module.summarizeArbiterFailure({
   state: 'paused',
   pauseReason: 'stage-failed:preprocess.arbiter',

@@ -1222,10 +1222,12 @@ assertEqual(quietCalls.length, 0, 'model stages never fall back to quiet generat
 
 {
   const generateCalls = [];
+  let nativeGenerationBusy = true;
   const startHost = createSillyTavernHost({
     contextFactory: () => ({
       currentChatId: 'start-chat',
       chat: [],
+      isGenerating: () => nativeGenerationBusy,
       generate: async (type, options) => {
         generateCalls.push({ type, options });
         return { native: true };
@@ -1234,7 +1236,11 @@ assertEqual(quietCalls.length, 0, 'model stages never fall back to quiet generat
     settingsRoot: {}
   });
   assertEqual(typeof startHost.generation.start, 'function', 'host exposes native generation start');
-  const startResult = await startHost.generation.start({ type: 'regenerate', source: 'recursion-ui' });
+  const starting = startHost.generation.start({ type: 'regenerate', source: 'recursion-ui' });
+  await Promise.resolve();
+  assertEqual(generateCalls.length, 0, 'host native generation start waits for the stopped Generate lifecycle to become idle');
+  nativeGenerationBusy = false;
+  const startResult = await starting;
   assertEqual(startResult.ok, true, 'host native generation start succeeds');
   assertEqual(startResult.started, true, 'host native generation start reports started');
   assertEqual(startResult.type, 'regenerate', 'host native generation start reports regenerate type');

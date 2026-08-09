@@ -883,6 +883,39 @@ function findStopButton(context) {
   return documentRef.querySelector('#mes_stop') || documentRef.querySelector('.mes_stop');
 }
 
+function nativeGenerationBusy(context = {}) {
+  if (typeof context?.isGenerating === 'function') return context.isGenerating() === true;
+  const documentRef = context?.document || globalThis.document;
+  if (typeof documentRef?.querySelector !== 'function') return false;
+  const stopButton = findStopButton(context);
+  const style = stopButton && typeof globalThis.getComputedStyle === 'function'
+    ? globalThis.getComputedStyle(stopButton)
+    : null;
+  const stopVisible = Boolean(
+    stopButton
+    && stopButton.hidden !== true
+    && style?.display !== 'none'
+    && style?.visibility !== 'hidden'
+  );
+  const sendButton = documentRef.querySelector('#send_but');
+  return stopVisible || sendButton?.disabled === true;
+}
+
+async function waitForNativeGenerationIdle(context, {
+  timeoutMs = 300000,
+  intervalMs = 25
+} = {}) {
+  const startedAt = Date.now();
+  while (nativeGenerationBusy(context)) {
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw Object.assign(new Error('SillyTavern generation did not become idle.'), {
+        code: 'RECURSION_HOST_GENERATION_BUSY'
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 function clickStopButton(button) {
   if (!button) return false;
   if (typeof button.click === 'function') {
@@ -1345,6 +1378,7 @@ export function createSillyTavernHost({
       const type = nativeGenerationType(details?.type);
       const options = asObject(details?.options);
       try {
+        await waitForNativeGenerationIdle(context);
         if (type === 'swipe') {
           if (typeof context.swipe?.right !== 'function') return startUnavailableResult();
           await context.swipe.right();

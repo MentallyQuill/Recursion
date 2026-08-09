@@ -40,6 +40,16 @@ assertEqual(module.validateHostTurnCounts({
   baselineCounts: { user: 1, assistant: 1 },
   acceptedNewTurns: []
 }, { userCount: 2, assistantCount: 2 }).ok, false, 'resume detects an unaccepted completed host turn');
+assertDeepEqual(module.classifyHostTurnCounts({
+  baselineCounts: { user: 0, assistant: 0 },
+  acceptedNewTurns: [],
+  currentMilestone: 'stop-resume'
+}, { userCount: 1, assistantCount: 0 }), {
+  ok: true,
+  state: 'pending-stop-resume',
+  errors: []
+}, 'resume recognizes one interrupted Stop Resume user turn without replaying it');
+assertEqual(typeof module.resumePendingStopResume, 'function', 'runner exports durable pending Stop Resume recovery');
 const repairCheckpoint = { status: 'fail', branchSha: 'old', acceptedNewTurns: [], defect: { code: 'failed' } };
 assertEqual(module.adoptRepairSha(repairCheckpoint, 'new'), repairCheckpoint, 'repair adoption updates the same checkpoint');
 assertEqual(repairCheckpoint.branchSha, 'new', 'repair adoption advances only the checkpoint SHA');

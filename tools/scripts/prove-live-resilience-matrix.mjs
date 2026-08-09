@@ -201,13 +201,32 @@ export function validateResilienceCheckpoint(checkpoint = {}, expected = {}) {
 }
 
 export function validateHostTurnCounts(checkpoint = {}, chat = {}) {
+  const classification = classifyHostTurnCounts(checkpoint, chat);
+  return classification.state === 'ready'
+    ? { ok: true, errors: [] }
+    : { ok: false, errors: classification.errors.length ? classification.errors : [classification.state] };
+}
+
+export function classifyHostTurnCounts(checkpoint = {}, chat = {}) {
   const accepted = Array.isArray(checkpoint.acceptedNewTurns) ? checkpoint.acceptedNewTurns.length : 0;
   const expectedUser = Number(checkpoint.baselineCounts?.user || 0) + accepted;
   const expectedAssistant = Number(checkpoint.baselineCounts?.assistant || 0) + accepted;
+  const actualUser = Number(chat.userCount || 0);
+  const actualAssistant = Number(chat.assistantCount || 0);
+  if (actualUser === expectedUser && actualAssistant === expectedAssistant) {
+    return { ok: true, state: 'ready', errors: [] };
+  }
+  if (
+    checkpoint.currentMilestone === 'stop-resume'
+    && actualUser === expectedUser + 1
+    && actualAssistant === expectedAssistant
+  ) {
+    return { ok: true, state: 'pending-stop-resume', errors: [] };
+  }
   const errors = [];
-  if (Number(chat.userCount || 0) !== expectedUser) errors.push('unaccepted-user-turn');
-  if (Number(chat.assistantCount || 0) !== expectedAssistant) errors.push('unaccepted-assistant-turn');
-  return { ok: errors.length === 0, errors };
+  if (actualUser !== expectedUser) errors.push('unaccepted-user-turn');
+  if (actualAssistant !== expectedAssistant) errors.push('unaccepted-assistant-turn');
+  return { ok: false, state: 'drift', errors };
 }
 
 export function adoptRepairSha(checkpoint, branchSha) {
@@ -758,6 +777,56 @@ async function executeResilienceWork(page, checkpoint, statePath, timeoutMs) {
   }
 }
 
+export async function resumePendingStopResume(page, checkpoint, statePath, timeoutMs) {
+  await page.evaluate(async () => {
+    await globalThis.__recursionLiveHarnessRuntime?.restoreExecutionState?.();
+  });
+  const paused = await readExecutionSnapshot(page);
+  if (paused?.state !== 'paused') {
+    throw new Error(`Pending Stop Resume manifest is not paused; observed ${paused?.state || 'missing'}.`);
+  }
+  const resumeAction = await clickProgressAction(page, 'Resume from saved checkpoint', timeoutMs);
+  if (resumeAction.kind !== 'resume') throw new Error('Pending Stop Resume did not expose the native Resume action.');
+  const expectedAssistant = Number(checkpoint.baselineCounts?.assistant || 0) + checkpoint.acceptedNewTurns.length + 1;
+  try {
+    await page.waitForFunction((expected) => {
+      const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+      const entries = Array.isArray(context.chat) ? context.chat : [];
+      const assistantCount = entries.filter((entry) => entry?.is_user === false).length;
+      const execution = globalThis.__recursionLiveHarnessRuntime?.view?.()?.execution;
+      return assistantCount === expected && execution?.state === 'completed';
+    }, expectedAssistant, { timeout: timeoutMs });
+  } catch {
+    const observed = await readExecutionSnapshot(page);
+    throw new Error(`Pending Stop Resume native completion timed out from ${observed?.state || 'missing'} state.`);
+  }
+  const completed = await readExecutionSnapshot(page);
+  const after = await page.evaluate(contextChatSummaryScript());
+  const verdict = inspectLifecycleMilestone('stop-resume', {
+    hostStopCalls: 1,
+    promptClears: 1,
+    paused: true,
+    nativeResumeStarts: 1,
+    detachedProviderCalls: 0,
+    freshFrontierSignal: (paused.frontierStageIds || []).length > 0,
+    operationState: completed?.state,
+    adverseStageCount: completed?.stages?.filter((stage) => ['failed', 'warning', 'running', 'pending'].includes(stage.state)).length || 0,
+    assistantAfter: after.assistantCount === expectedAssistant
+  });
+  if (!verdict.ok) throw new Error(`Recovered Stop Resume verdict failed: ${verdict.errors.join(', ')}`);
+  checkpoint.milestones['stop-resume'] = verdict;
+  const turnEvidence = await safeTurnEvidence(page);
+  acceptResilienceTurn(checkpoint, {
+    profileLabel: checkpoint.assignments['stop-resume'],
+    execution: completed,
+    sendResult: { after },
+    ...turnEvidence
+  });
+  checkpoint.status = 'ready';
+  checkpoint.defect = null;
+  saveCheckpoint(statePath, checkpoint);
+}
+
 export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), env = process.env } = {}) {
   const args = parseResilienceArgs(argv);
   const preflight = assertResiliencePreflight({
@@ -774,6 +843,7 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
   await session.login();
   const browser = await chromium.launch({ headless: env.RECURSION_SILLYTAVERN_HEADLESS !== '0' });
   let checkpoint;
+  let pendingRecovery = '';
   try {
     const context = await browser.newContext();
     try {
@@ -809,8 +879,9 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
         }
         const resumeVerdict = validateResilienceCheckpoint(checkpoint, identity);
         if (!resumeVerdict.ok) throw new Error(`Checkpoint resume refused: ${resumeVerdict.errors.join(', ')}`);
-        const countVerdict = validateHostTurnCounts(checkpoint, chat);
+        const countVerdict = classifyHostTurnCounts(checkpoint, chat);
         if (!countVerdict.ok) throw new Error(`Checkpoint contains an unaccepted host turn: ${countVerdict.errors.join(', ')}`);
+        pendingRecovery = countVerdict.state === 'pending-stop-resume' ? countVerdict.state : '';
       } else {
         checkpoint = createResilienceCheckpoint({
           runId: `resilience-${Date.now().toString(36)}`,
@@ -822,6 +893,9 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
       if (checkpoint.qualifications?.length !== PROFILE_LABELS.length || !Object.keys(checkpoint.assignments || {}).length) {
         checkpoint.status = 'qualifying';
         await qualifyProfiles(page, checkpoint, args.statePath, timeoutMs);
+      }
+      if (pendingRecovery === 'pending-stop-resume') {
+        await resumePendingStopResume(page, checkpoint, args.statePath, timeoutMs);
       }
       if (checkpoint.status !== 'complete') {
         await executeResilienceWork(page, checkpoint, args.statePath, timeoutMs);

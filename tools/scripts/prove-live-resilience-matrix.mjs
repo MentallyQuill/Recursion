@@ -590,7 +590,18 @@ export async function driveStopResumeMilestone({
   } catch (error) {
     await Promise.allSettled(resumedProviderResponseReads);
     const host = await readBoundedHostState(page).catch(() => null);
-    throw new Error(`Stop Resume host settlement timed out: ${JSON.stringify({ host, resumedProviderCalls, resumedProviderResponses })}`);
+    const writerResponses = resumedProviderResponses
+      .filter((entry) => entry.kind === 'writer')
+      .map((entry) => ({
+        status: entry.status,
+        envelope: entry.envelope,
+        choices: entry.choices,
+        contentChars: entry.contentChars,
+        reasoningChars: entry.reasoningChars,
+        finishReason: entry.finishReason,
+        errorCode: entry.errorCode
+      }));
+    throw new Error(`Stop Resume host settlement timed out: ${JSON.stringify({ host, resumedProviderCalls, writerResponses })}`);
   }
   resumedWindow = false;
   const completed = await waitForExecution(page, () => globalThis.__recursionLiveHarnessRuntime?.view?.()?.execution?.state === 'completed', timeoutMs);

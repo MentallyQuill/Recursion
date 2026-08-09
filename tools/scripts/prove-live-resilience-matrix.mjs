@@ -250,6 +250,18 @@ export function resetUnacceptedChat(checkpoint, { branchSha, chatIdHash, baselin
   return checkpoint;
 }
 
+export function swapStopRetryAssignments(checkpoint) {
+  if ((checkpoint.acceptedNewTurns || []).length !== 0) throw new Error('Stop Retry assignment swap is allowed only before any accepted turn.');
+  if (Object.values(checkpoint.milestones || {}).some((entry) => entry?.ok === true)) {
+    throw new Error('Stop Retry assignment swap is allowed only before any completed milestone.');
+  }
+  const stopLabel = checkpoint.assignments?.['stop-resume'];
+  const retryLabel = checkpoint.assignments?.['retry-stage'];
+  checkpoint.assignments['stop-resume'] = retryLabel;
+  checkpoint.assignments['retry-stage'] = stopLabel;
+  return checkpoint;
+}
+
 export async function startFreshSyntheticChat(page, timeoutMs) {
   const before = await page.evaluate(contextChatSummaryScript());
   await page.evaluate(async () => {
@@ -868,6 +880,69 @@ export async function resumePendingStopResume(page, checkpoint, statePath, timeo
   saveCheckpoint(statePath, checkpoint);
 }
 
+export async function recoverPendingArbiterRetry(page, checkpoint, statePath, timeoutMs) {
+  const failed = await readExecutionSnapshot(page);
+  if (failed?.state !== 'paused' || failed.pauseReason !== 'stage-failed:preprocess.arbiter') {
+    throw new Error(`Pending Retry requires a failed Arbiter; observed ${failed?.pauseReason || failed?.state || 'missing'}.`);
+  }
+  let owningProfile = checkpoint.assignments['retry-stage'];
+  if (checkpoint.assignmentAdaptations?.naturalArbiterRetry !== true) {
+    owningProfile = checkpoint.assignments['stop-resume'];
+    swapStopRetryAssignments(checkpoint);
+    checkpoint.assignmentAdaptations = {
+      ...(checkpoint.assignmentAdaptations || {}),
+      naturalArbiterRetry: true
+    };
+    saveCheckpoint(statePath, checkpoint);
+  }
+  const action = await clickProgressAction(page, 'Retry this step', timeoutMs);
+  if (action.kind !== 'retry' || action.stageId !== 'preprocess.arbiter') {
+    throw new Error('Pending Arbiter failure did not expose its exact Retry action.');
+  }
+  const expectedAssistant = Number(checkpoint.baselineCounts?.assistant || 0) + checkpoint.acceptedNewTurns.length + 1;
+  try {
+    await page.waitForFunction((expected) => {
+      const context = globalThis.SillyTavern?.getContext?.() || globalThis.getContext?.() || {};
+      const entries = Array.isArray(context.chat) ? context.chat : [];
+      const assistantCount = entries.filter((entry) => entry?.is_user === false).length;
+      const execution = globalThis.__recursionLiveHarnessRuntime?.view?.()?.execution;
+      return assistantCount === expected && execution?.state === 'completed';
+    }, expectedAssistant, { timeout: timeoutMs });
+  } catch {
+    const observed = await readExecutionSnapshot(page);
+    throw new Error(`Pending Arbiter Retry native completion timed out from ${observed?.state || 'missing'} state.`);
+  }
+  const completed = await readExecutionSnapshot(page);
+  const after = await page.evaluate(contextChatSummaryScript());
+  const stageFor = (snapshot, stageId) => snapshot?.stages?.find((stage) => stage.stageId === stageId);
+  const verdict = inspectLifecycleMilestone('retry-stage', {
+    failedStageId: action.stageId,
+    retryActionVisible: true,
+    sameOperation: failed.operationId === completed?.operationId,
+    attemptBefore: stageFor(failed, 'preprocess.arbiter')?.attemptCount || 0,
+    attemptAfter: stageFor(completed, 'preprocess.arbiter')?.attemptCount || 0,
+    upstreamDuplicateCount: Math.max(0,
+      (stageFor(completed, 'preprocess.snapshot')?.attemptCount || 0)
+      - (stageFor(failed, 'preprocess.snapshot')?.attemptCount || 0)),
+    operationState: completed?.state,
+    adverseStageCount: completed?.stages?.filter((stage) => ['failed', 'warning', 'running', 'pending'].includes(stage.state)).length || 0,
+    assistantAfter: after.assistantCount === expectedAssistant
+  });
+  if (!verdict.ok) throw new Error(`Recovered Arbiter Retry verdict failed: ${verdict.errors.join(', ')}`);
+  checkpoint.milestones['retry-stage'] = verdict;
+  const turnEvidence = await safeTurnEvidence(page);
+  acceptResilienceTurn(checkpoint, {
+    profileLabel: owningProfile,
+    execution: completed,
+    sendResult: { after },
+    ...turnEvidence
+  });
+  checkpoint.status = 'ready';
+  checkpoint.currentMilestone = 'stop-resume';
+  checkpoint.defect = null;
+  saveCheckpoint(statePath, checkpoint);
+}
+
 export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), env = process.env } = {}) {
   const args = parseResilienceArgs(argv);
   const preflight = assertResiliencePreflight({
@@ -936,7 +1011,15 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
         await qualifyProfiles(page, checkpoint, args.statePath, timeoutMs);
       }
       if (pendingRecovery === 'pending-stop-resume') {
-        await resumePendingStopResume(page, checkpoint, args.statePath, timeoutMs);
+        await page.evaluate(async () => {
+          await globalThis.__recursionLiveHarnessRuntime?.restoreExecutionState?.();
+        });
+        const pendingExecution = await readExecutionSnapshot(page);
+        if (pendingExecution?.pauseReason === 'stage-failed:preprocess.arbiter') {
+          await recoverPendingArbiterRetry(page, checkpoint, args.statePath, timeoutMs);
+        } else {
+          await resumePendingStopResume(page, checkpoint, args.statePath, timeoutMs);
+        }
       }
       if (checkpoint.status !== 'complete') {
         await executeResilienceWork(page, checkpoint, args.statePath, timeoutMs);

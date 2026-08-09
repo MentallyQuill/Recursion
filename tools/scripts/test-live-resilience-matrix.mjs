@@ -51,6 +51,22 @@ assertDeepEqual(module.classifyHostTurnCounts({
 }, 'resume recognizes one interrupted Stop Resume user turn without replaying it');
 assertEqual(typeof module.resumePendingStopResume, 'function', 'runner exports durable pending Stop Resume recovery');
 assertEqual(typeof module.readResumeAvailability, 'function', 'runner exports bounded restored Resume diagnostics');
+const swapCheckpoint = {
+  acceptedNewTurns: [],
+  milestones: {},
+  assignments: { 'stop-resume': labels[0], 'retry-stage': labels[1] }
+};
+module.swapStopRetryAssignments(swapCheckpoint);
+assertDeepEqual(swapCheckpoint.assignments, {
+  'stop-resume': labels[1],
+  'retry-stage': labels[0]
+}, 'natural Arbiter failure swaps Retry onto the owning profile and Stop onto the next profile');
+assertRejects(
+  () => Promise.resolve(module.swapStopRetryAssignments({ acceptedNewTurns: [{}], milestones: {}, assignments: {} })),
+  /before any accepted turn/,
+  'milestone swap refuses a partially accepted ledger'
+);
+assertEqual(typeof module.recoverPendingArbiterRetry, 'function', 'runner exports natural Arbiter Retry recovery');
 const repairCheckpoint = { status: 'fail', branchSha: 'old', acceptedNewTurns: [], defect: { code: 'failed' } };
 assertEqual(module.adoptRepairSha(repairCheckpoint, 'new'), repairCheckpoint, 'repair adoption updates the same checkpoint');
 assertEqual(repairCheckpoint.branchSha, 'new', 'repair adoption advances only the checkpoint SHA');

@@ -31,6 +31,8 @@ const runLiveEditorialEffectiveness = liveEditorialModule.runLiveEditorialEffect
 const validateLiveEditorialRuntime = liveEditorialModule.validateLiveEditorialRuntime;
 const liveEditorialStageTimeoutMs = liveEditorialModule.liveEditorialStageTimeoutMs;
 const swipeReuseProofSource = readFileSync(join(process.cwd(), 'tools', 'scripts', 'prove-live-swipe-reuse.mjs'), 'utf8');
+const soakUsersPreflightSource = readFileSync(join(process.cwd(), 'tools', 'scripts', 'check-sillytavern-soak-users.mjs'), 'utf8');
+assertEqual(soakUsersPreflightSource.includes('process.exit(code)'), false, 'soak-user preflight lets Node drain live HTTP handles before exit');
 assertEqual(typeof evaluateLiveRedirectScenarioArtifacts, 'function', 'live harness exposes strict Redirect scenario evaluator');
 assertEqual(typeof evaluateLiveRepairScenarioArtifacts, 'function', 'live harness exposes strict Repair scenario evaluator');
 assertEqual(typeof runLiveEditorialEffectiveness, 'function', 'live harness exposes reusable Redirect effectiveness runner');

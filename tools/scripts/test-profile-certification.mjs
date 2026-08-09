@@ -5,6 +5,7 @@ const provider = {
   generationPolicy: { structuredOutputMode: 'auto' }
 };
 const calls = [];
+const fusedPrompts = [];
 const full = await certifyConnectionProfile({
   lane: 'utility',
   provider,
@@ -20,6 +21,7 @@ const full = await certifyConnectionProfile({
     if (roleId === 'sceneFrameCard') {
       return { ok: true, data: { promptText: 'Track the immediate objective.', evidenceRefs: ['message:0'] } };
     }
+    fusedPrompts.push(request.prompt);
     return {
       ok: true,
       data: {
@@ -42,6 +44,12 @@ assertDeepEqual(calls, [
   ['sceneFrameCard', 'prompt-json', 900],
   ['fusedCardBundle', 'prompt-json', 1792]
 ], 'certification runs connectivity, fallback single-card, and Fused checks with thinking-safe bounded budgets');
+assert(
+  fusedPrompts[0].includes('"family":"Scene Frame"')
+    && fusedPrompts[0].includes('"family":"Scene Constraints"')
+    && fusedPrompts[0].includes('"evidenceRefs":["message:0"]'),
+  'Fused certification prompt specifies both exact families and the accepted item shape'
+);
 
 const partial = await certifyConnectionProfile({
   lane: 'reasoner',

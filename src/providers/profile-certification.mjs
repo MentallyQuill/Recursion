@@ -36,7 +36,12 @@ function fusedCardRequest(lane, method) {
       { role: 'sceneFrameCard', family: 'Scene Frame' },
       { role: 'sceneConstraintsCard', family: 'Scene Constraints' }
     ],
-    prompt: 'Return two requested card items in one JSON items array.'
+    prompt: [
+      'Return one JSON object only. Do not use markdown.',
+      'Return exactly two items, one for each requested family, using exactly this shape:',
+      '{"items":[{"family":"Scene Frame","promptText":"Track the immediate objective.","evidenceRefs":["message:0"]},{"family":"Scene Constraints","promptText":"Preserve the immediate boundary.","evidenceRefs":["message:0"]}]}',
+      'Use the exact family names Scene Frame and Scene Constraints. Do not add or omit items.'
+    ].join('\n')
   };
 }
 

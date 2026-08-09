@@ -28,6 +28,17 @@ assertEqual(module.classifyGenerationRequest('{"messages":[{"content":"continue 
 assertEqual(source.includes('resumedProviderResponses.push({'), true, 'Stop Resume diagnostics retain response kind and status only');
 assertDeepEqual(await module.observePromise(Promise.resolve('ok')), { ok: true, value: 'ok' }, 'concurrent send observer preserves success');
 assertEqual((await module.observePromise(Promise.reject(new Error('bounded')))).ok, false, 'concurrent send observer captures rejection immediately');
+assertDeepEqual(module.summarizeProviderResponse(JSON.stringify({
+  choices: [{ finish_reason: 'stop', message: { content: '', reasoning_content: 'CANARY_REASONING' } }]
+})), {
+  envelope: 'json',
+  choices: 1,
+  contentChars: 0,
+  reasoningChars: 16,
+  finishReason: 'stop',
+  errorCode: ''
+}, 'provider response classifier reports lengths without retaining content');
+assertEqual(JSON.stringify(module.summarizeProviderResponse('data: {"choices":[{"delta":{"content":"CANARY"}}]}\n\ndata: [DONE]\n', 'text/event-stream')).includes('CANARY'), false, 'stream classifier never retains response text');
 const crashedCheckpoint = { status: 'running', acceptedNewTurns: [], defect: null };
 module.recoverCrashedHarnessCheckpoint(crashedCheckpoint);
 assertDeepEqual(crashedCheckpoint, {

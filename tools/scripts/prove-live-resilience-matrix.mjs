@@ -487,6 +487,33 @@ export function classifyGenerationRequest(body = '') {
   return String(body).includes('recursion.') ? 'recursion' : 'writer';
 }
 
+export function summarizeProviderResponse(body = '', contentType = '') {
+  const text = String(body || '');
+  const stream = /event-stream/i.test(String(contentType || ''));
+  const envelopes = stream
+    ? text.split(/\r?\n/).filter((line) => line.startsWith('data: ') && line.slice(6).trim() !== '[DONE]').map((line) => {
+        try { return JSON.parse(line.slice(6)); } catch { return null; }
+      }).filter(Boolean)
+    : (() => { try { return [JSON.parse(text || '{}')]; } catch { return []; } })();
+  let choices = 0;
+  let contentChars = 0;
+  let reasoningChars = 0;
+  let finishReason = '';
+  let errorCode = '';
+  for (const envelope of envelopes) {
+    const entries = Array.isArray(envelope?.choices) ? envelope.choices : [];
+    choices = Math.max(choices, entries.length);
+    for (const choice of entries) {
+      const payload = choice?.message || choice?.delta || {};
+      contentChars += String(payload.content || choice?.text || '').length;
+      reasoningChars += String(payload.reasoning_content || payload.reasoning || '').length;
+      finishReason ||= boundedText(choice?.finish_reason, 80);
+    }
+    errorCode ||= boundedText(envelope?.error?.code || envelope?.error?.type, 120);
+  }
+  return { envelope: stream ? 'stream' : 'json', choices, contentChars, reasoningChars, finishReason, errorCode };
+}
+
 async function readBoundedHostState(page) {
   return page.evaluate(() => {
     const safe = (value, length) => String(value || '').slice(0, length);
@@ -517,6 +544,7 @@ export async function driveStopResumeMilestone({
   let detachedProviderCalls = 0;
   const resumedProviderCalls = { recursion: 0, writer: 0 };
   const resumedProviderResponses = [];
+  const resumedProviderResponseReads = [];
   const observeRequest = (request) => {
     if (!String(request.url?.() || '').includes('/api/backends/chat-completions/generate')) return;
     if (pausedWindow) detachedProviderCalls += 1;
@@ -525,10 +553,14 @@ export async function driveStopResumeMilestone({
   const observeResponse = (response) => {
     const request = response.request?.();
     if (!resumedWindow || !String(request?.url?.() || '').includes('/api/backends/chat-completions/generate')) return;
-    resumedProviderResponses.push({
-      kind: classifyGenerationRequest(request?.postData?.()),
-      status: Number(response.status?.() || 0)
-    });
+    const kind = classifyGenerationRequest(request?.postData?.());
+    const status = Number(response.status?.() || 0);
+    const contentType = String(response.headers?.()['content-type'] || '');
+    resumedProviderResponseReads.push(response.body().then((body) => {
+      resumedProviderResponses.push({ kind, status, ...summarizeProviderResponse(body, contentType) });
+    }).catch(() => {
+      resumedProviderResponses.push({ kind, status, envelope: 'unreadable' });
+    }));
   };
   page.on?.('request', observeRequest);
   page.on?.('response', observeResponse);
@@ -556,6 +588,7 @@ export async function driveStopResumeMilestone({
     if (!settlement.ok) throw settlement.error;
     sendResult = settlement.value;
   } catch (error) {
+    await Promise.allSettled(resumedProviderResponseReads);
     const host = await readBoundedHostState(page).catch(() => null);
     throw new Error(`Stop Resume host settlement timed out: ${JSON.stringify({ host, resumedProviderCalls, resumedProviderResponses })}`);
   }

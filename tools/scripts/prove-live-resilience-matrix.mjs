@@ -498,12 +498,22 @@ export async function driveStopResumeMilestone({
   let resumedWindow = false;
   let detachedProviderCalls = 0;
   const resumedProviderCalls = { recursion: 0, writer: 0 };
+  const resumedProviderResponses = [];
   const observeRequest = (request) => {
     if (!String(request.url?.() || '').includes('/api/backends/chat-completions/generate')) return;
     if (pausedWindow) detachedProviderCalls += 1;
     if (resumedWindow) resumedProviderCalls[classifyGenerationRequest(request.postData?.())] += 1;
   };
+  const observeResponse = (response) => {
+    const request = response.request?.();
+    if (!resumedWindow || !String(request?.url?.() || '').includes('/api/backends/chat-completions/generate')) return;
+    resumedProviderResponses.push({
+      kind: classifyGenerationRequest(request?.postData?.()),
+      status: Number(response.status?.() || 0)
+    });
+  };
   page.on?.('request', observeRequest);
+  page.on?.('response', observeResponse);
   const promptClearsBefore = await page.evaluate(() => (globalThis.__recursionSmokePromptEvents || []).filter((entry) => entry?.cleared === true).length);
   const sendPromise = send(page, message, { requirePrompt: true, timeoutMs });
   await page.waitForFunction(() => {
@@ -527,11 +537,12 @@ export async function driveStopResumeMilestone({
     sendResult = await sendPromise;
   } catch (error) {
     const host = await readBoundedHostState(page).catch(() => null);
-    throw new Error(`Stop Resume host settlement timed out: ${JSON.stringify({ host, resumedProviderCalls })}`);
+    throw new Error(`Stop Resume host settlement timed out: ${JSON.stringify({ host, resumedProviderCalls, resumedProviderResponses })}`);
   }
   resumedWindow = false;
   const completed = await waitForExecution(page, () => globalThis.__recursionLiveHarnessRuntime?.view?.()?.execution?.state === 'completed', timeoutMs);
   page.off?.('request', observeRequest);
+  page.off?.('response', observeResponse);
   return {
     sendResult,
     paused,

@@ -40,6 +40,14 @@ assertEqual(module.validateHostTurnCounts({
   baselineCounts: { user: 1, assistant: 1 },
   acceptedNewTurns: []
 }, { userCount: 2, assistantCount: 2 }).ok, false, 'resume detects an unaccepted completed host turn');
+const repairCheckpoint = { status: 'fail', branchSha: 'old', acceptedNewTurns: [], defect: { code: 'failed' } };
+assertEqual(module.adoptRepairSha(repairCheckpoint, 'new'), repairCheckpoint, 'repair adoption updates the same checkpoint');
+assertEqual(repairCheckpoint.branchSha, 'new', 'repair adoption advances only the checkpoint SHA');
+assertRejects(
+  () => Promise.resolve(module.adoptRepairSha({ status: 'running', branchSha: 'old' }, 'new')),
+  /failed checkpoint/,
+  'repair adoption refuses a non-failed checkpoint'
+);
 
 const safeState = resolve('artifacts', 'live-resilience-matrix', 'active.json');
 assertDeepEqual(module.parseResilienceArgs(['--live', '--state', safeState]), {

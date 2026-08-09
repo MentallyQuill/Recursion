@@ -211,6 +211,12 @@ export function validateHostTurnCounts(checkpoint = {}, chat = {}) {
   return { ok: errors.length === 0, errors };
 }
 
+export function adoptRepairSha(checkpoint, branchSha) {
+  if (checkpoint?.status !== 'fail') throw new Error('Repair SHA adoption requires a failed checkpoint.');
+  checkpoint.branchSha = boundedText(branchSha, 80);
+  return checkpoint;
+}
+
 export async function clickProgressAction(page, label, timeoutMs) {
   const trigger = page.locator('[data-recursion-status-trigger]').first();
   const expanded = await trigger.getAttribute?.('aria-expanded').catch?.(() => 'false');
@@ -746,6 +752,10 @@ export async function runLiveResilienceMatrix({ argv = process.argv.slice(2), en
       };
       if (existsSync(args.statePath)) {
         checkpoint = loadCheckpoint(args.statePath);
+        if (env.RECURSION_RESILIENCE_ADOPT_REPAIR_SHA === '1' && checkpoint.branchSha !== identity.branchSha) {
+          adoptRepairSha(checkpoint, identity.branchSha);
+          saveCheckpoint(args.statePath, checkpoint);
+        }
         const resumeVerdict = validateResilienceCheckpoint(checkpoint, identity);
         if (!resumeVerdict.ok) throw new Error(`Checkpoint resume refused: ${resumeVerdict.errors.join(', ')}`);
         const countVerdict = validateHostTurnCounts(checkpoint, chat);

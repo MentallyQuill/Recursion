@@ -8465,6 +8465,9 @@ export function createRecursionRuntime({
       return null;
     }
     if (manifest.state === 'running') {
+      const interruptedStageIds = Object.entries(manifest.stageRecords || {})
+        .filter(([, record]) => record?.state === 'running')
+        .map(([stageId]) => stageId);
       const stageRecords = Object.fromEntries(
         Object.entries(manifest.stageRecords || {}).map(([stageId, record]) => [
           stageId,
@@ -8486,7 +8489,7 @@ export function createRecursionRuntime({
         revision: Number(manifest.revision || 0) + 1,
         state: 'paused',
         pauseReason: 'restored-after-reload',
-        frontierStageIds: [],
+        frontierStageIds: interruptedStageIds,
         stageRecords,
         updatedAt: nowIso()
       });
@@ -8587,6 +8590,27 @@ export function createRecursionRuntime({
         manifest.state === 'paused' ? 'compatible-paused-same-turn' : 'same-turn-swipe'
       );
       const graph = await restoreDurablePreprocessGraph(manifest, context);
+      if (manifest.state === 'paused' && safeStringList(manifest.frontierStageIds, 180).length === 0) {
+        const runnablePendingStageIds = Object.values(asObject(manifest.stageRecords))
+          .filter((record) => {
+            if (record?.state !== 'pending') return false;
+            const stage = graph.getStage?.(record.stageId);
+            return stage?.executable !== false
+              && safeStringList(stage?.dependencies, 180).every((dependencyId) => (
+                ['completed', 'cached'].includes(manifest.stageRecords?.[dependencyId]?.state)
+              ));
+          })
+          .map((record) => record.stageId);
+        if (runnablePendingStageIds.length) {
+          manifest = await storage.savePipelineRun(chatKey, {
+            ...manifest,
+            revision: Number(manifest.revision || 0) + 1,
+            frontierStageIds: runnablePendingStageIds,
+            updatedAt: nowIso()
+          });
+          executionView = manifest;
+        }
+      }
       preprocessContexts.set(manifest.operationId, context);
       preprocessGraphs.set(manifest.operationId, graph);
     } else {

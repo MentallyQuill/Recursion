@@ -484,6 +484,7 @@ function roleCounts(calls = []) {
   await storage.savePipelineRun('chat-preprocess', {
     ...saved,
     state: 'running',
+    frontierStageIds: [],
     stageRecords: {
       ...saved.stageRecords,
       [stageId]: {
@@ -513,6 +514,7 @@ function roleCounts(calls = []) {
     'pending',
     'restore converts an interrupted running stage back to pending'
   );
+  assertDeepEqual(restored.frontierStageIds, [stageId], 'restore exposes the interrupted pending stage as the visible Resume frontier');
   assertEqual(restoredCalls.length, 0, 'restore never starts provider work');
   const started = await restoredRuntime.resumeOperation({
     operationId: restored.operationId

@@ -858,8 +858,10 @@ export function createExecutionScheduler({
     await Promise.allSettled([...runtime.activeStagePromises.values()]);
     await queueMutation(runtime, (draft) => {
       let changed = false;
+      const interruptedStageIds = [];
       for (const [stageId, record] of Object.entries(draft.stageRecords)) {
         if (record.state !== 'running') continue;
+        interruptedStageIds.push(stageId);
         draft.stageRecords[stageId] = {
           ...record,
           state: 'pending',
@@ -871,7 +873,9 @@ export function createExecutionScheduler({
         changed = true;
       }
       if (!changed && draft.frontierStageIds.length === 0) return null;
-      draft.frontierStageIds = [];
+      draft.frontierStageIds = [
+        ...new Set([...draft.frontierStageIds, ...interruptedStageIds])
+      ];
       return draft;
     });
     return clone(runtime.manifest);

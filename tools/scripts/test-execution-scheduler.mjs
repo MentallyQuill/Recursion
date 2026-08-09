@@ -231,6 +231,7 @@ function createIds() {
   assertDeepEqual(paused.stageRecords.arbiter.summary, { keys: ['selected'] }, 'completed stage persists only its adapter-provided safe summary');
   assertEqual(paused.stageRecords['card.a'].state, 'pending', 'pause returns interrupted child A to pending');
   assertEqual(paused.stageRecords['card.b'].state, 'pending', 'pause returns interrupted child B to pending');
+  assertDeepEqual(paused.frontierStageIds, ['card.a', 'card.b'], 'pause preserves interrupted pending stages as the resumable frontier');
   assertEqual(paused.stageRecords['card.a'].attempts.used, 1, 'interrupted attempt is recorded');
   assertEqual(paused.stageRecords['card.b'].attempts.used, 1, 'operation stop interrupts every running child');
 

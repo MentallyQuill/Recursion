@@ -12,6 +12,7 @@ import {
   requireConnectionManagerService
 } from './provider-profiles.mjs';
 import { projectProfileSamplerPayload } from './profile-samplers.mjs';
+import { profileSecretOverride, readSillyTavernSecretMetadata } from './profile-secrets.mjs';
 import { resolveGenerationPolicy } from '../../providers/generation-policy.mjs';
 
 const KNOWN_RECURSION_PROMPT_KEYS = Object.freeze([
@@ -991,7 +992,7 @@ function profileError(code, message) {
   return error;
 }
 
-async function sendViaConnectionProfile(context, request = {}) {
+async function sendViaConnectionProfile(context, request = {}, readSecretMetadata = readSillyTavernSecretMetadata) {
   const service = requireConnectionManagerService(context);
   const profileId = requestConnectionProfileId(request);
   if (!profileId) {
@@ -1034,6 +1035,7 @@ async function sendViaConnectionProfile(context, request = {}) {
   const schema = requestJsonSchema(request);
   const overridePayload = {
     ...samplerPayload,
+    ...await profileSecretOverride(profile, apiMap, readSecretMetadata),
     ...(policy.structuredOutputMethod === 'native-schema' && schema
       ? { json_schema: schema }
       : {})
@@ -1096,7 +1098,8 @@ export function createSillyTavernHost({
   settingsRoot = null,
   saveSettings = null,
   storageAdapter = null,
-  fetchImpl = globalThis.fetch
+  fetchImpl = globalThis.fetch,
+  secretMetadataFactory = readSillyTavernSecretMetadata
 } = {}) {
   const installedPromptKeys = new Set();
   const resolvedSettingsRoot = settingsRoot || createLiveSettingsRoot(() => {
@@ -1435,7 +1438,7 @@ export function createSillyTavernHost({
     },
     async generate(request = {}) {
       const context = currentContext(contextFactory);
-      return sendViaConnectionProfile(context, request);
+      return sendViaConnectionProfile(context, request, secretMetadataFactory);
     }
   };
   generation.capabilities = {

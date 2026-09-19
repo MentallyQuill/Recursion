@@ -109,6 +109,8 @@ Settings are stored under `extension_settings.recursion` and normalized through 
 
 Utility and Reasoner work has one supported transport: `ConnectionManagerRequestService.sendRequest`. The adapter requires `getSupportedProfiles`, `getProfile`, `validateProfile`, and `sendRequest`, validates the selected profile as chat or text completion, and fails with a stable non-retryable configuration error when the profile or host capability is missing. There is no current-model or direct-endpoint fallback.
 
+Before sending, the adapter reads SillyTavern's public key metadata. If the profile's saved key reference is absent from its provider's key list and that same provider has an active key, the request overrides `secret_id` with the active key reference. Existing saved references remain authoritative; provider authentication failures do not trigger retries with other keys. This mirrors ordinary profile activation retaining the active key when a saved reference cannot be resolved, without switching the active connection or modifying profiles. Credential values are never read. Missing metadata, missing active keys, and Vertex AI's auth-mode-dependent credential stores retain the host's original behavior.
+
 The request keeps four policies independent:
 
 - `includePreset` follows Behavioral Preset (`Isolated` or `Full Profile`);

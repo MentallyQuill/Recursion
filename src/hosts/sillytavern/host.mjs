@@ -14,6 +14,7 @@ import {
 import { projectProfileSamplerPayload } from './profile-samplers.mjs';
 import { profileSecretOverride, readSillyTavernSecretMetadata } from './profile-secrets.mjs';
 import { resolveGenerationPolicy } from '../../providers/generation-policy.mjs';
+import { normalizeReasoningIntent } from '../../reasoning-policy.mjs';
 
 const KNOWN_RECURSION_PROMPT_KEYS = Object.freeze([
   'recursion.guidance',
@@ -1033,8 +1034,14 @@ async function sendViaConnectionProfile(context, request = {}, readSecretMetadat
   }
 
   const schema = requestJsonSchema(request);
+  const reasoningIntent = normalizeReasoningIntent(request.reasoningIntent);
+  // SillyTavern maps NanoGPT's UI scale to none/minimal/low/medium/high.
+  const reasoningEffort = apiMap.source === 'nanogpt'
+    ? { minimal: 'low', medium: 'high', high: 'max' }[reasoningIntent]
+    : { minimal: 'min', medium: 'medium', high: 'high' }[reasoningIntent];
   const overridePayload = {
     ...samplerPayload,
+    ...(completionMode === 'chat' && reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     ...await profileSecretOverride(profile, apiMap, readSecretMetadata),
     ...(policy.structuredOutputMethod === 'native-schema' && schema
       ? { json_schema: schema }

@@ -1030,6 +1030,7 @@ function applyReasoningLaneToFusedCardBundleRequest(request, settings, capabilit
 }
 
 function reasonerRequestMetadata(settings, category, lane) {
+  if (lane === 'utility' && category === 'arbiter') return reasoningRequestMetadata('low', category);
   if (lane !== 'reasoner') return {};
   return reasoningRequestMetadata(settings, category);
 }

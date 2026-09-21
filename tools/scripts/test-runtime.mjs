@@ -3752,7 +3752,7 @@ function immediateDurableCardRouter() {
     settings: fusedReadyReasonerSettings({ mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'low' }),
     generationRouter: {
       async generate(roleId, request = {}) {
-        routerCalls.push({ roleId, lane: request.lane || 'utility' });
+        routerCalls.push({ roleId, lane: request.lane || 'utility', reasoningIntent: request.reasoningIntent });
         if (roleId === 'utilityArbiter') {
           return {
             ok: true,
@@ -3783,6 +3783,7 @@ function immediateDurableCardRouter() {
   assertEqual(view.lastPlan.budgets.maxCards, 3, 'low reasoning caps max selected cards to the most relevant few');
   assertEqual(view.lastHand.cards.length, 3, 'low reasoning selects only the capped hand size');
   assert(routerCalls.every((call) => call.lane === 'utility'), 'low reasoning routes Arbiter, cards, and composer work through Utility only');
+  assertEqual(routerCalls.find(call => call.roleId === 'utilityArbiter').reasoningIntent, 'minimal', 'utility planning explicitly limits reasoning');
 }
 
 for (const scenario of [

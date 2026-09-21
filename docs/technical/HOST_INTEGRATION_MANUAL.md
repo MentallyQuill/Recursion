@@ -120,6 +120,8 @@ The request keeps four policies independent:
 
 The adapter passes `extractData: false` so SillyTavern returns the provider envelope and Recursion performs its own canonical response extraction, JSON recovery, and role validation. Prompt text, raw response bodies, complete profile objects, endpoint fields, secret references, and hidden reasoning are not returned through diagnostics.
 
+Utility planning explicitly requests minimal reasoning. Chat-completion requests forward explicit reasoning intent even in isolated preset mode: minimal/medium/high map to SillyTavern's NanoGPT low/high/max values, or min/medium/high for other chat sources. SillyTavern performs the backend translation. Text-completion requests do not receive chat reasoning controls. Provider support determines whether effort is honored; this is not a hard reasoning-token cap. Stage output budgets remain bounded by the configured output-token ceiling.
+
 Every model request enters an abort-aware FIFO queue keyed by Connection Profile id. Calls sharing a profile never overlap; calls using distinct profiles may overlap. Stop aborts the active request where supported and removes queued work before it starts.
 
 Post-process prose rewriting is a separate host-owned operation. `generation.rewriteWithPostProcess()` temporarily installs the validated Recursion guidance packet, invokes SillyTavern's native quiet generation path, normalizes the resulting prose, and clears the temporary prompt key. This path writes prose; the Utility and Reasoner Connection Profile path returns structured Recursion data.

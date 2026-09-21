@@ -97,6 +97,20 @@ function markerHand(overrides = {}) {
   };
 }
 
+for (const [reasonerUse, footprint, expectedLane, intent] of [
+  ['always', 'normal', 'reasoner', 'medium'],
+  ['auto', 'rich', 'reasoner', 'medium'],
+  ['off', 'rich', 'utility', 'minimal'],
+  ['auto', 'normal', 'utility', 'minimal']
+]) {
+  const { roleId, request } = buildGuidanceStageRequest({
+    hand: markerHand(), settings: { reasonerUse, promptFootprint: footprint, reasoningLevel: 'medium' }
+  });
+  assertEqual(roleId, 'guidanceComposer', 'routing preserves the guidance schema role');
+  assertEqual(request.lane, expectedLane, `${reasonerUse}/${footprint} guidance lane`);
+  assertEqual(request.reasoningIntent, intent, `${reasonerUse}/${footprint} guidance reasoning`);
+}
+
 {
   const hand = markerHand();
   const snapshot = baseSnapshot();

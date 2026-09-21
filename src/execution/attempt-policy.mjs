@@ -109,8 +109,8 @@ export function resolveModelRetryDirective({ failure, request, attempt, limit })
     const providerRequest = wrapped ? request.request : request;
     const roleId = request?.roleId || providerRequest?.roleId;
     const floor = minimumOutputBudgetForRole(roleId);
-    const current = Number(providerRequest?.responseLength)
-      || outputBudgetForRequest(roleId, providerRequest);
+    const ceiling = outputBudgetForRequest('', {}, providerRequest?.providerConfig?.outputTokenCeiling);
+    const current = outputBudgetForRequest(roleId, providerRequest, ceiling);
     const reduced = Math.max(floor, Math.floor(current * 0.75));
     if (reduced >= current) return stopDirective('output-budget-at-floor');
     const nextRequest = wrapped
@@ -126,12 +126,8 @@ export function resolveModelRetryDirective({ failure, request, attempt, limit })
     const wrapped = request?.request && typeof request.request === 'object' && !Array.isArray(request.request);
     const providerRequest = wrapped ? request.request : request;
     const roleId = request?.roleId || providerRequest?.roleId;
-    const current = Number(providerRequest?.responseLength)
-      || outputBudgetForRequest(roleId, providerRequest);
-    const configuredCeiling = Number(providerRequest?.providerConfig?.outputTokenCeiling);
-    const ceiling = Number.isFinite(configuredCeiling) && configuredCeiling > 0
-      ? configuredCeiling
-      : 8192;
+    const ceiling = outputBudgetForRequest('', {}, providerRequest?.providerConfig?.outputTokenCeiling);
+    const current = outputBudgetForRequest(roleId, providerRequest, ceiling);
     const increased = Math.min(ceiling, Math.max(current + 1024, current * 2));
     if (increased <= current) return stopDirective('output-budget-at-ceiling');
     const nextRequest = wrapped

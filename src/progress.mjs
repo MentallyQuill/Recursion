@@ -82,7 +82,7 @@ const EXECUTION_LABELS = Object.freeze({
   'preprocess.cards.fused': 'Fused card bundle',
   'preprocess.deck': 'Building turn deck',
   'preprocess.hand': 'Selecting turn hand',
-  'preprocess.guidance': 'Reasoner guidance',
+  'preprocess.guidance': 'Guidance',
   'preprocess.packet': 'Composing prompt packet',
   'preprocess.install': 'Installing Recursion prompt',
   'postprocess.source-snapshot': 'Reading generated response',
@@ -1438,6 +1438,7 @@ function operationForProgress(execution, stages) {
 function progressStateForExecutionStage(stage, operation) {
   const state = cleanText(asObject(stage).state, 'pending').toLowerCase();
   if (state === 'completed') {
+    if (stage.summary?.status === 'fallback-raw-only') return 'warning';
     return operation.state === 'completed' ? 'done' : 'cached';
   }
   if (state === 'running') return 'running';
@@ -1453,7 +1454,9 @@ function executionProgressStep(stage, operation, queuedReprocess, overrides = {}
   const retryCount = normalizeRetryCount(source.attempts?.total);
   const reason = source.failure
     ? safeReasonText(source.failure.message || source.failure.code)
-    : '';
+    : (source.summary?.status === 'fallback-raw-only'
+        ? 'Guidance unavailable. Using raw card evidence.'
+        : '');
   return {
     id: executionStageId(source),
     executionStage: true,
@@ -1620,7 +1623,7 @@ export function progressFromExecution(execution, queuedReprocess = null) {
   }
   topLevel.sort((left, right) => left.order - right.order);
   const completedWithFailures = operation.state === 'completed'
-    && topLevel.some((step) => step.state === 'failed');
+    && topLevel.some((step) => ['failed', 'warning'].includes(step.state));
   const title = operation.state === 'running'
     ? 'Generating'
     : (operation.state === 'completed'

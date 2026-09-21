@@ -124,7 +124,7 @@ This protects local backends from request bursts while preserving durable stage 
 
 ## Output Budgets
 
-The lane Output Token Ceiling is a hard maximum. Individual stages use smaller role-specific budgets, such as 128 tokens for connectivity certification and 900 tokens for a card.
+The lane Output Token Ceiling is the default maximum output allowance for production requests, including planning, individual cards, fused bundles, and guidance. A value of 16000 sends a 16000-token allowance unless the caller explicitly requests less. It is an allowance, not a target response length. Connectivity certification remains a small 128-token probe. Utility requests default to minimal reasoning; Reasoner requests follow the selected reasoning policy.
 
 A context-limit retry lowers only the stage output budget. It does not change the profile, samplers, or prompt policy at the same time.
 

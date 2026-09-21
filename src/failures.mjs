@@ -100,7 +100,7 @@ function errorStatus(error = {}) {
 }
 
 function looksLikeProviderFailure(error = {}) {
-  const code = errorCode(error);
+  const code = safeCode(error?.code || error?.name || 'RECURSION_INTERNAL');
   const status = errorStatus(error);
   const message = String(error?.message || error || '').toLowerCase();
   return status >= 400
@@ -116,6 +116,14 @@ export function providerFailure(error = {}, context = {}) {
   const lower = rawMessage.toLowerCase();
   const stage = context.stage || 'provider-call';
 
+  if (['RECURSION_PROVIDER_CONFIG_STALE', 'RECURSION_PROVIDER_TEST_STALE', 'RECURSION_PROVIDER_CERTIFICATION_INVALID'].includes(code)) {
+    return createFailure({
+      code,
+      stage,
+      category: code === 'RECURSION_PROVIDER_CERTIFICATION_INVALID' ? 'validation' : 'stale-state',
+      message: rawMessage
+    });
+  }
   if (status === 402 || /insufficient funds|insufficient credit|credit balance|out of funds/.test(lower)) {
     return createFailure({
       code: 'RECURSION_PROVIDER_INSUFFICIENT_FUNDS',
@@ -144,7 +152,17 @@ export function providerFailure(error = {}, context = {}) {
       suggestedAction: 'Check the selected connection profile, then try again.'
     });
   }
-  if (code === 'RECURSION_PROVIDER_TOKEN_LIMIT' || /token limit|context length|finish_reason.?length|max_tokens/.test(lower)) {
+  if (code === 'RECURSION_PROVIDER_CONTEXT_LIMIT'
+    || (code !== 'RECURSION_PROVIDER_TOKEN_LIMIT' && /context length|context window|too many tokens|maximum context|max(?:imum)?[_ -]?tokens/.test(lower))) {
+    return createFailure({
+      code: 'RECURSION_PROVIDER_CONTEXT_LIMIT',
+      stage,
+      category: 'provider-request',
+      message: 'The request exceeded the model context limit.',
+      suggestedAction: 'Reduce the request context or select a model with a larger context window.'
+    });
+  }
+  if (code === 'RECURSION_PROVIDER_TOKEN_LIMIT' || /token limit|finish_reason.?length/.test(lower)) {
     return createFailure({
       code: 'RECURSION_PROVIDER_TOKEN_LIMIT',
       stage,
@@ -219,6 +237,9 @@ export function failureFrom(value, fallback = {}) {
   const source = value && typeof value === 'object'
     ? value
     : { message: value };
+  if (!source.category && looksLikeProviderFailure(source)) {
+    return providerFailure(source, { stage: source.stage || defaults.stage || 'runtime' });
+  }
   return createFailure({
     code: source.code || defaults.code || 'RECURSION_INTERNAL',
     stage: source.stage || defaults.stage || 'runtime',

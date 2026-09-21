@@ -80,7 +80,7 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'providerTest'
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer', 'postProcessGuidanceReasoner']);
-export const PROVIDER_CONTRACT_VERSION = 8;
+export const PROVIDER_CONTRACT_VERSION = 9;
 const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   utilityArbiter: 'recursion.utilityArbiter.v1',
   sceneFrameCard: 'recursion.cardPayload.v1',
@@ -2119,8 +2119,8 @@ export function createProviderClient({
       roleId: resolvedRoleId,
       lane,
       responseLength,
-      ...(normalizeReasoningIntent(request.reasoningIntent)
-        ? { reasoningIntent: normalizeReasoningIntent(request.reasoningIntent) }
+      ...((normalizeReasoningIntent(request.reasoningIntent) || lane === 'utility')
+        ? { reasoningIntent: normalizeReasoningIntent(request.reasoningIntent) || 'minimal' }
         : {}),
       ...(reasoningCategoryName(request.reasoningCategory)
         ? { reasoningCategory: reasoningCategoryName(request.reasoningCategory) }

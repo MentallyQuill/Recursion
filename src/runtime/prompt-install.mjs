@@ -1,5 +1,6 @@
 import { compact, redact, truncate } from '../core.mjs';
 import { asObject } from '../safe-values.mjs';
+import { createFailure } from '../failures.mjs';
 
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 
@@ -30,15 +31,20 @@ function sanitizePromptOutcome(value, { fallbackCode, fallbackMessage } = {}) {
   const source = asObject(value);
   const ok = source.ok !== false;
   const output = { ok };
+  if (source.settled !== undefined) output.settled = source.settled === true;
+  if (source.continuePrimaryGeneration !== undefined) output.continuePrimaryGeneration = source.continuePrimaryGeneration === true;
+  if (source.failureClass) output.failureClass = safeText(source.failureClass, 120);
   if (source.skipped !== undefined) output.skipped = Boolean(source.skipped);
   if (source.cleared !== undefined) output.cleared = Boolean(source.cleared);
   if (Array.isArray(source.installed)) {
     output.installed = source.installed.map((entry) => safeText(entry, 120)).filter(Boolean).slice(0, 16);
-  } else if (source.installed === true) {
-    output.installed = true;
+  } else if (typeof source.installed === 'boolean') {
+    output.installed = source.installed;
   }
   if (!ok) {
-    output.error = sanitizePromptError(source.error, fallbackCode, fallbackMessage);
+    output.error = source.failureClass === 'host-source-stale'
+      ? promptInstallFailure(source)
+      : sanitizePromptError(source.error, fallbackCode, fallbackMessage);
   }
   return output;
 }
@@ -83,9 +89,21 @@ export async function installPrompt(host, packet) {
   }
 }
 
+export function promptInstallFailure(install) {
+  const stale = install?.failureClass === 'host-source-stale';
+  return createFailure({
+    code: stale ? 'RECURSION_HOST_SOURCE_STALE' : install?.error?.code || 'RECURSION_PROMPT_INSTALL_FAILED',
+    stage: 'preprocess-install',
+    category: stale ? 'stale-state' : 'prompt-install',
+    message: stale
+      ? 'Chat changed before the Recursion prompt could be installed.'
+      : safeText(install?.error?.message || 'Prompt install failed.', 240)
+  });
+}
+
 export function installSummary(install) {
   if (install?.ok !== false) return 'Prompt installed';
-  return safeText(install.error?.message || install.error?.code || 'Prompt install failed', 300);
+  return promptInstallFailure(install).message;
 }
 
 export function installJournalDetails(install) {
@@ -95,10 +113,12 @@ export function installJournalDetails(install) {
       installedCount: Array.isArray(install?.installed) ? install.installed.length : undefined
     };
   }
+  const failure = promptInstallFailure(install);
   return {
     status: 'failed',
-    code: safeText(install?.error?.code || 'RECURSION_PROMPT_INSTALL_FAILED', 120),
-    message: safeText(install?.error?.message || 'Prompt install failed.', 240)
+    code: failure.code,
+    message: failure.message,
+    failure
   };
 }
 

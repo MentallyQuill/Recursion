@@ -37,13 +37,13 @@ const wrappedContextDirective = resolveModelRetryDirective({
   limit: 2
 });
 assertEqual(wrappedContextDirective.action, 'reduce-output-budget', 'wrapped durable request chooses budget reduction');
-assertEqual(wrappedContextDirective.nextRequest.request.responseLength, 3072, 'wrapped Arbiter context retry reduces from its thinking-safe role default');
+assertEqual(wrappedContextDirective.nextRequest.request.responseLength, 6144, 'wrapped Arbiter context retry reduces from lane ceiling');
 assertEqual(wrappedContextDirective.nextRequest.responseLength, undefined, 'wrapped budget is not patched onto the ignored outer envelope');
 assertEqual(wrappedContextDirective.nextRequest.request.prompt, 'safe prompt', 'wrapped reduction preserves provider request fields');
 
 const wrappedTokenDirective = resolveModelRetryDirective({
   failure: { code: 'RECURSION_PROVIDER_TOKEN_LIMIT', retryable: false },
-  request: { roleId: 'utilityArbiter', request: { lane: 'utility', prompt: 'safe prompt' } },
+  request: { roleId: 'utilityArbiter', request: { lane: 'utility', prompt: 'safe prompt', responseLength: 4096 } },
   attempt: 1,
   limit: 2
 });
@@ -272,3 +272,16 @@ assert(
 );
 
 console.log('Execution attempt policy tests passed.');
+
+for (const request of [
+  { roleId: 'sceneFrameCard', providerConfig: { outputTokenCeiling: 16000 } },
+  { roleId: 'sceneFrameCard', maxTokens: 16000, providerConfig: { outputTokenCeiling: 16000 } },
+  { roleId: 'sceneFrameCard', request: { providerConfig: { outputTokenCeiling: 16000 } } },
+  { roleId: 'sceneFrameCard', responseLength: 64000, providerConfig: { outputTokenCeiling: 64000 } }
+]) {
+  assertEqual(resolveModelRetryDirective({ failure: { code: 'RECURSION_PROVIDER_TOKEN_LIMIT' }, request, attempt: 1, limit: 2 }).action, 'stop', 'completion at effective ceiling never retries unchanged');
+}
+const reducedConfigured = resolveModelRetryDirective({ failure: { code: 'RECURSION_PROVIDER_CONTEXT_LIMIT' }, request: { roleId: 'sceneFrameCard', providerConfig: { outputTokenCeiling: 16000 } }, attempt: 1, limit: 2 });
+assertEqual(reducedConfigured.nextRequest.responseLength, 12000, 'context retry starts from configured effective budget');
+const increasedMaxTokens = resolveModelRetryDirective({ failure: { code: 'RECURSION_PROVIDER_TOKEN_LIMIT' }, request: { roleId: 'sceneFrameCard', maxTokens: 9000, providerConfig: { outputTokenCeiling: 16000 } }, attempt: 1, limit: 2 });
+assertEqual(increasedMaxTokens.nextRequest.responseLength, 16000, 'token retry respects maxTokens and lane ceiling');

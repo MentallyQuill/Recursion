@@ -921,6 +921,48 @@ function createRuntimeHarness({
   return { runtime, calls, installed, cleared, storage, settingsStore, activity, adapter };
 }
 
+for (const hostExcluded of [false, true]) {
+  for (const mutateSource of [false, true]) {
+    let reads = 0;
+    const requests = [];
+    const fallbackRouter = localFallbackCardRouter();
+    const sourceMessages = [
+      { mesid: 11, role: 'user', text: 'Continue the scene.', visible: true },
+      { mesid: 12, role: 'assistant', text: 'Preserve this earlier assistant.', visible: true }
+    ];
+    const { runtime, calls } = createRuntimeHarness({
+      settings: { reasoningLevel: 'medium', reasonerUse: 'always', providers: {
+        utility: { outputTokenCeiling: 16384 }, reasoner: { outputTokenCeiling: 24576 }
+      } },
+      snapshot() {
+        reads += 1;
+        const messages = clone(sourceMessages);
+        if (mutateSource && reads > 1) messages[1].text = 'A genuine source edit.';
+        if (!hostExcluded) messages.push({ mesid: 13, role: 'assistant', text: 'Replace only this assistant.', visible: true });
+        return { chatId: 'canonical-swipe', sceneKey: 'scene', sceneFingerprint: 'scene', messages,
+          latestMesId: hostExcluded ? 12 : 13, latestAssistantExcluded: hostExcluded };
+      },
+      generationRouter: {
+        async generate(roleId, request) {
+          requests.push({ roleId, request });
+          return fallbackRouter.generate(roleId, request);
+        }
+      }
+    });
+    const prepared = await runtime.prepareForGeneration({ generationType: 'swipe', hostGeneration: true });
+    assertEqual(calls.install, mutateSource ? 0 : 1, `swipe installs only unchanged canonical source (hostExcluded=${hostExcluded}, mutation=${mutateSource})`);
+    assertEqual(prepared.recursionPromptInstalled, !mutateSource, 'swipe result reports the actual prompt install');
+    assertEqual(prepared.packet.diagnostics.reasonerStatus, 'used', 'durable packet reports the completed Reasoner guidance');
+    const arbiter = requests.find(({ roleId }) => roleId === 'utilityArbiter');
+    assert(arbiter.request.prompt.includes('Preserve this earlier assistant.'), 'swipe source retains the preceding assistant');
+    const guidance = requests.find(({ roleId }) => roleId === 'guidanceComposer');
+    assertEqual(guidance.request.lane, 'reasoner', 'medium durable guidance uses the Reasoner');
+    assertEqual(guidance.request.reasoningIntent, 'medium', 'durable guidance carries requested reasoning intent');
+    assertEqual(arbiter.request.providerConfig?.outputTokenCeiling, 16384, 'durable Utility request carries configured ceiling for retry budgeting');
+    assertEqual(guidance.request.providerConfig?.outputTokenCeiling, 24576, 'durable Reasoner request carries its own configured ceiling');
+  }
+}
+
 function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   return {
     async generate(roleId, request) {
@@ -3844,9 +3886,9 @@ for (const scenario of [
   assertEqual(result.ok, true, `${scenario.level} custom card budget run installs`);
   assertEqual(view.lastPlan.budgets.maxCards, scenario.expectedMaxCards, `${scenario.level} reasoning uses configured card budget`);
   assertEqual(
-    routerCalls.filter((call) => call.roleId === 'guidanceComposer' && call.lane === 'utility').length,
+    routerCalls.filter((call) => call.roleId === 'guidanceComposer' && call.lane === (scenario.level === 'low' ? 'utility' : 'reasoner')).length,
     1,
-    `${scenario.level} custom card budget uses the canonical Utility guidance stage once`
+    `${scenario.level} custom card budget uses the configured guidance lane once`
   );
 }
 
@@ -4835,7 +4877,7 @@ for (const scenario of [
   const result = await runtime.prepareForGeneration({ userMessage: 'Recover from unusable fused bundle.' });
   assertEqual(result.ok, true, 'Fused fallback installs prompt');
   assertEqual(fusedRequest.lane, 'utility', 'Low Fused card bundle stays on Utility');
-  assertEqual(fusedRequest.reasoningIntent, undefined, 'Utility Fused card bundle does not carry Reasoner reasoning intent');
+  assertEqual(fusedRequest.reasoningIntent, 'minimal', 'Utility Fused card bundle explicitly limits reasoning');
   assertDeepEqual(roleCalls, ['utilityArbiter', 'fusedCardBundle', 'fusedCardBundle', 'sceneFrameCard', 'guidanceComposer'], 'unusable Fused bundle exhausts its bounded attempts before Segmented fallback');
   assert(result.packet.sections.cardEvidence.includes('FUSED_FALLBACK_STANDARD_CARD'), 'Segmented fallback card reaches packet evidence');
   assertEqual(result.packet.diagnostics.pipelineMode, 'fused', 'Fused fallback packet still records requested pipeline mode');

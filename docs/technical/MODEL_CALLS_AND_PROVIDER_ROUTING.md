@@ -77,10 +77,7 @@ Endpoint values, secret references, headers, and complete preset bodies are not 
 
 ## Request Construction
 
-The host adapter builds messages from either a request message array or the request's system/user prompt pair. It calculates the effective max token value as the minimum of:
-
-- the provider lane output ceiling;
-- the role-specific response budget.
+The host adapter builds messages from either a request message array or the request's system/user prompt pair. Production requests default to the provider lane output ceiling. An explicit per-request response allowance is capped at that ceiling; certification probes can request smaller allowances. Utility requests default to minimal reasoning, while explicitly supplied reasoning intent is preserved.
 
 The Connection Manager call is:
 

@@ -32,7 +32,7 @@ No runtime monetary billing configuration exists today. Source and docs use toke
 | `tokenCost` on cards | A card prompt-footprint estimate, not a provider bill. |
 | `tokenEstimate` in catalog entries | A planning estimate used for hand and budget shaping. |
 | Footprint section budgets | Character caps for Guidance, Card Evidence, and Guardrails. |
-| Provider output ceiling | Per-lane hard ceiling, default `8192`; each stage applies a smaller role-specific budget. |
+| Provider output ceiling | Per-lane default output allowance and hard ceiling, default `8192`; explicit requests and certification probes can use less. |
 | External multipliers | Provider- or subscription-specific accounting outside Recursion. |
 
 If a provider bills a model at 2x, Recursion does not know that natively. Operators should apply that multiplier externally when estimating budget consumption.
@@ -50,8 +50,8 @@ If a provider bills a model at 2x, Recursion does not know that natively. Operat
 | `sourceWindowMessages` | `20` | Recent visible messages considered for source freshness and evidence windows. |
 | `sourceWindowCharacters` | `12000` | Character cap for the source freshness window. |
 | `postProcess.enabled` / `postProcess.flow` / `postProcess.applyMode` | `false` / `unified` / `as-swipe` | Adds one structured Post-process guidance stage and one native host quiet rewrite after generation. Progressive may repeat the guidance/rewrite pair per enabled category. |
-| Utility output ceiling | `8192` | Hard ceiling; stage-specific budgets normally request substantially less. |
-| Reasoner output ceiling | `8192` | Hard ceiling; stage-specific budgets normally request substantially less. |
+| Utility output ceiling | `8192` | Default production output allowance and hard ceiling; actual generated usage may be lower. |
+| Reasoner output ceiling | `8192` | Default production output allowance and hard ceiling; actual generated usage may be lower. |
 
 ## Pipeline Call Shape
 

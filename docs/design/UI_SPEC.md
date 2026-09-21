@@ -1372,6 +1372,8 @@ Examples:
 
 Provider failures should fail soft. The UI should show the issue, preserve any usable cached scene state, and allow the main generation to continue without Recursion when needed.
 
+The Pre-process `Guidance` row uses a provider-neutral label. Raw-card fallback renders amber with `Guidance unavailable. Using raw card evidence.` and leaves the completed operation in `Needs attention`. If the chat changes before prompt installation, the failure reason is `Chat changed before the Recursion prompt could be installed.`; diagnostics retain its stale-state category.
+
 Provider fallback states should appear in the Hero Pixel Array Progress Menu and the Full Viewer Activity tab. Hero Pixel Array block color may indicate attention, but the bar should not become a fallback-message strip. Examples:
 
 - `Reasoner failed. Utility composed.`

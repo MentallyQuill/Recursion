@@ -104,6 +104,7 @@ import {
   clearWarningDetails,
   installJournalDetails,
   installPrompt,
+  promptInstallFailure,
   installSummary,
   sanitizePromptError
 } from './runtime/prompt-install.mjs';
@@ -987,7 +988,7 @@ function applyReasoningLaneToCardRequest(request, settings, capabilityResolver =
     ...request,
     lane: cardLaneForRequest(request, settings, capabilityResolver)
   };
-  if (routedRequest.lane !== 'reasoner') return routedRequest;
+  if (routedRequest.lane !== 'reasoner') return { ...routedRequest, ...reasoningRequestMetadata('low', 'card') };
   return {
     ...routedRequest,
     ...reasoningRequestMetadata(settings, 'card')
@@ -1022,7 +1023,7 @@ function applyReasoningLaneToFusedCardBundleRequest(request, settings, capabilit
     ...request,
     lane: fusedCardBundleLaneForSettings(settings, capabilityResolver)
   };
-  if (routedRequest.lane !== 'reasoner') return routedRequest;
+  if (routedRequest.lane !== 'reasoner') return { ...routedRequest, ...reasoningRequestMetadata('low', 'card') };
   return {
     ...routedRequest,
     ...reasoningRequestMetadata(settings, 'card')
@@ -5852,7 +5853,9 @@ export function createRecursionRuntime({
         ? await readSwipeSourceSnapshot()
         : await readSnapshot();
       const currentSnapshot = snapshotForPlan(
-        snapshotWithPendingUserMessage(sourceSnapshot, pendingUserMessage),
+        options.withoutLatestAssistant === true
+          ? sourceSnapshot
+          : snapshotWithPendingUserMessage(sourceSnapshot, pendingUserMessage),
         plan
       );
       if (!snapshotsMatchForPromptInstall(expectedSnapshot, currentSnapshot, pendingUserMessage, options)) {
@@ -6983,7 +6986,7 @@ export function createRecursionRuntime({
   function durableGuidanceStage(context, plan) {
     return {
       id: 'preprocess.guidance',
-      version: 1,
+      version: 2,
       kind: 'model',
       executable: true,
       dependencies: ['preprocess.snapshot', 'preprocess.arbiter', 'preprocess.hand'],
@@ -7022,11 +7025,12 @@ export function createRecursionRuntime({
           };
         }
         try {
-          return await generationRouter.generate(
+          const result = await generationRouter.generate(
             request.roleId,
             { ...request.request, signal },
             { runId: context.runId, signal }
           );
+          return { ...result, guidanceLane: request.request.lane };
         } catch (error) {
           return {
             ok: false,
@@ -7034,7 +7038,8 @@ export function createRecursionRuntime({
               error,
               'RECURSION_GUIDANCE_PROVIDER_FAILED',
               'Guidance provider failed.'
-            )
+            ),
+            guidanceLane: request.request.lane
           };
         }
       },
@@ -7051,12 +7056,16 @@ export function createRecursionRuntime({
           hand: validationContext.dependencies?.['preprocess.hand']?.artifact,
           snapshot: context.snapshot
         });
-        if (validation.ok === true) return validation;
+        if (validation.ok === true) return {
+          ...validation,
+          value: { ...validation.value, lane: result.guidanceLane }
+        };
         const fallbackReason = safeText(validation.error?.reason || 'guidance-invalid', 180);
         return {
           ok: true,
           value: {
             schema: PROMPT_GUIDANCE_SCHEMA,
+            lane: result?.guidanceLane,
             status: 'fallback-raw-only',
             text: 'Guidance unavailable; use the raw Recursion card evidence directly.',
             sourceCardIds: [],
@@ -7110,6 +7119,7 @@ export function createRecursionRuntime({
         };
       },
       async run({ dependencies }) {
+        const guidance = dependencies['preprocess.guidance'].artifact;
         const effectiveSettings = {
           ...settingsForPlan(context.settings, plan, runtimeProviderCapability),
           reasonerUse: 'off'
@@ -7121,7 +7131,7 @@ export function createRecursionRuntime({
           behaviorPolicy: runPolicyForEffectivePlan(context.settings, plan),
           generationRouter: null,
           runId: context.runId,
-          precomposedGuidance: dependencies['preprocess.guidance'].artifact,
+          precomposedGuidance: guidance,
           storyForm: plan.storyForm || UNKNOWN_STORY_FORM,
           pipelineMode: context.effectivePipelineMode,
           planDiagnostics: mergeDiagnostics(
@@ -7134,6 +7144,10 @@ export function createRecursionRuntime({
           pipelineMode: context.effectivePipelineMode,
           diagnostics: {
             ...packet.diagnostics,
+            composerLane: guidance.lane || 'utility',
+            reasonerStatus: guidance.lane === 'reasoner'
+              ? (guidance.status === 'used' ? 'used' : 'fallback')
+              : 'skipped',
             requestedPipelineMode: context.pipelineDecision.requestedMode,
             pipelineMode: context.pipelineDecision.effectiveMode,
             pipelineReasonCodes: context.pipelineDecision.reasonCode
@@ -7190,6 +7204,8 @@ export function createRecursionRuntime({
             installed: false,
             settled: true,
             failureClass: 'host-source-stale',
+            reason: freshness.reason,
+            comparison: freshness.comparison || null,
             continuePrimaryGeneration: true
           };
         }
@@ -7224,14 +7240,7 @@ export function createRecursionRuntime({
       },
       settledFailure(artifact) {
         return artifact?.installed === false
-          ? {
-              code: safeText(
-                artifact?.error?.code || 'RECURSION_PROMPT_INSTALL_FAILED',
-                120
-              ),
-              category: 'host',
-              retryable: false
-            }
+          ? promptInstallFailure(artifact)
           : null;
       },
       summarizeArtifact(artifact) {
@@ -7245,8 +7254,30 @@ export function createRecursionRuntime({
     };
   }
 
-  function durableBaseGraph(context) {
+  function createDurableExecutionGraph(context, { stages }) {
     return createExecutionGraph({
+      stages: stages.map((stage) => {
+        if (stage.kind !== 'model' || typeof stage.buildRequest !== 'function') return stage;
+        return {
+          ...stage,
+          async buildRequest(...args) {
+            const envelope = await stage.buildRequest(...args);
+            if (!envelope) return envelope;
+            const request = envelope.request || envelope;
+            const lane = request.lane === 'reasoner' ? 'reasoner' : 'utility';
+            const configuredRequest = {
+              ...request,
+              providerConfig: { outputTokenCeiling: context.settings.providers?.[lane]?.outputTokenCeiling }
+            };
+            return envelope.request ? { ...envelope, request: configuredRequest } : configuredRequest;
+          }
+        };
+      })
+    });
+  }
+
+  function durableBaseGraph(context) {
+    return createDurableExecutionGraph(context, {
       stages: [
         durableSnapshotStage(context),
         durableArbiterStage(context)
@@ -7302,7 +7333,7 @@ export function createRecursionRuntime({
 
   function durableCardWaveGraph(context, plan, options = {}) {
     const cardSet = durableCardStageSet(context, plan, options);
-    return createExecutionGraph({
+    return createDurableExecutionGraph(context, {
       stages: [
         durableSnapshotStage(context),
         durableArbiterStage(context),
@@ -7313,7 +7344,7 @@ export function createRecursionRuntime({
 
   function durableFullGraph(context, plan, options = {}) {
     const cardSet = durableCardStageSet(context, plan, options);
-    return createExecutionGraph({
+    return createDurableExecutionGraph(context, {
       stages: [
         durableSnapshotStage(context),
         durableArbiterStage(context),
@@ -7911,18 +7942,7 @@ export function createRecursionRuntime({
     }
     if (nativeGenerationType === 'swipe') {
       const swipeRetry = runState.takeLatestAssistantSwipeRetry();
-      const latestAssistant = latestVisibleAssistantEntry(hostSnapshot, { allowEmpty: true });
-      explicitSwipeMessageId = finiteNumberOrNull(swipeRetry?.messageId)
-        ?? finiteNumberOrNull(latestAssistant?.message?.mesid);
-      if (
-        latestAssistant
-        && (
-          explicitSwipeMessageId === null
-          || finiteNumberOrNull(latestAssistant.message?.mesid) === explicitSwipeMessageId
-        )
-      ) {
-        snapshot = snapshotWithoutLatestAssistant(hostSnapshot, latestAssistant) || hostSnapshot;
-      }
+      explicitSwipeMessageId = finiteNumberOrNull(swipeRetry?.messageId);
       const sourceUser = latestVisibleUserMessage(snapshot);
       pendingUserMessage = sourceUser
         ? normalizePendingUserMessage({ text: sourceUser.text, mesid: sourceUser.mesid })
@@ -7943,7 +7963,8 @@ export function createRecursionRuntime({
       snapshot: nativeGenerationType === 'swipe' ? hostSnapshot : snapshot,
       pendingUserMessage,
       generationType: nativeGenerationType,
-      swipeMessageId: explicitSwipeMessageId,
+      // The swipe source has already excluded its target exactly once.
+      swipeMessageId: nativeGenerationType === 'swipe' ? null : explicitSwipeMessageId,
       retention: settings.retention,
       contracts: durableTurnContracts(settings)
     });
@@ -8631,7 +8652,7 @@ export function createRecursionRuntime({
       'preprocess.cards.fused': 'Fused card bundle',
       'preprocess.deck': 'Updating scene deck',
       'preprocess.hand': 'Selecting turn hand',
-      'preprocess.guidance': 'Reasoner guidance',
+      'preprocess.guidance': 'Guidance',
       'preprocess.packet': 'Composing prompt packet',
       'preprocess.install': 'Installing Recursion prompt',
       'postprocess.source-snapshot': 'Reading generated response',

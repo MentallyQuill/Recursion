@@ -233,7 +233,7 @@ assertDeepEqual(chatPolicy, {
   instructApplied: false,
   samplerSource: 'profile',
   structuredOutputMethod: 'prompt-json',
-  responseLength: 900,
+  responseLength: 8192,
   queueConcurrency: 1,
   diagnosticCodes: []
 }, 'effective policy diagnostics expose only bounded operational metadata');

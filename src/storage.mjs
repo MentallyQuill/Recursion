@@ -447,6 +447,7 @@ function normalizeJournalEntry(entry = {}) {
     const cause = structuredDetails.failure
       || structuredDetails.error
       || structuredDetails.compactError
+      || (structuredDetails.code && structuredDetails.message ? structuredDetails : null)
       || structuredDetails.reason
       || structuredDetails.statusReason
       || structuredDetails.cautionReason;

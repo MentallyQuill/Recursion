@@ -194,14 +194,14 @@ assertEqual(utility.ok, true, 'profile-backed Utility generation succeeds');
 assertEqual(utility.data.schema, 'recursion.utilityArbiter.v1', 'Utility response is parsed');
 assertEqual(calls[0].connectionProfileId, 'profile-utility', 'Utility request carries selected profile ID');
 assertEqual(calls[0].responseSchema, 'recursion.utilityArbiter.v1', 'Utility request carries role schema');
-assertEqual(calls[0].responseLength, 4096, 'Utility Arbiter receives a thinking-safe stage output budget');
+assertEqual(calls[0].responseLength, 8192, 'Utility Arbiter receives lane ceiling');
 assertEqual(Object.hasOwn(calls[0], 'providerSource'), false, 'legacy provider source is absent');
 assertEqual(calls[0].providerConfig.generationPolicy.structuredOutputMode, 'auto', 'structured output policy is explicit');
 
 const reasoner = await router.generate('reasonerComposer', { prompt: 'Reason about the turn.' });
 assertEqual(reasoner.ok, true, 'profile-backed Reasoner generation succeeds');
 assertEqual(calls.at(-1).connectionProfileId, 'profile-reasoner', 'Reasoner request carries selected profile ID');
-assertEqual(calls.at(-1).responseLength, 1800, 'Reasoner Composer receives its stage output budget');
+assertEqual(calls.at(-1).responseLength, 8192, 'Reasoner Composer receives lane ceiling');
 
 const profileTest = await router.generate('providerTest', { prompt: 'Connectivity check.' });
 assertEqual(profileTest.ok, true, 'provider test is allowed before certification');
@@ -220,7 +220,7 @@ assertEqual(card.diagnostics.effectivePolicy.presetMode, 'isolated', 'provider d
 assertEqual(card.diagnostics.effectivePolicy.instructApplied, true, 'provider diagnostics record instruct application');
 assertEqual(card.diagnostics.effectivePolicy.samplerSource, 'profile', 'provider diagnostics record sampler source');
 assertEqual(card.diagnostics.effectivePolicy.structuredOutputMethod, 'prompt-json', 'provider diagnostics record structured-output method');
-assertEqual(card.diagnostics.effectivePolicy.responseLength, 900, 'provider diagnostics record the stage output budget');
+assertEqual(card.diagnostics.effectivePolicy.responseLength, 8192, 'provider diagnostics record lane ceiling');
 assertEqual(card.diagnostics.effectivePolicy.queueConcurrency, 1, 'provider diagnostics record queue concurrency');
 assertEqual(JSON.stringify(card.diagnostics).includes('profile-utility'), false, 'provider diagnostics omit the raw profile ID');
 
@@ -229,7 +229,7 @@ const fused = await router.generate('fusedCardBundle', {
   requestedCards: [{ family: 'Scene Frame' }, { family: 'Active Cast' }]
 });
 assertEqual(fused.ok, true, 'compact Fused bundle succeeds');
-assertEqual(calls.at(-1).responseLength, 1792, 'Fused output budget scales from requested family count');
+assertEqual(calls.at(-1).responseLength, 8192, 'Fused output budget uses lane ceiling');
 
 const guidance = await router.generate('postProcessGuidanceUtility', {
   prompt: 'Return guidance.',
@@ -370,3 +370,13 @@ assertEqual(timedOut.ok, false, 'explicit provider timeout is enforced');
 assertEqual(timedOut.error.code, 'RECURSION_PROVIDER_TIMEOUT', 'timeout has stable code');
 
 console.log('[pass] providers');
+
+store.updateProviderConfig('utility', { outputTokenCeiling: 16000 });
+await client.generate('sceneFrameCard', { prompt: 'Return JSON.' });
+assertEqual(calls.at(-1).responseLength, 16000, 'configured ceiling reaches production transport');
+assertEqual(calls.at(-1).reasoningIntent, 'minimal', 'utility transport defaults to minimal reasoning');
+await client.generate('sceneFrameCard', { prompt: 'Return JSON.', responseLength: 700, reasoningIntent: 'high' });
+assertEqual(calls.at(-1).responseLength, 700, 'explicit smaller transport limit survives');
+assertEqual(calls.at(-1).reasoningIntent, 'high', 'explicit reasoning intent survives');
+await client.generate('reasonerComposer', { prompt: 'Return JSON.', reasoningIntent: 'high' });
+assertEqual(calls.at(-1).reasoningIntent, 'high', 'reasoner intent survives central utility default');

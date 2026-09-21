@@ -479,10 +479,13 @@ export function buildGuidanceStageRequest({
   const promptRunId = safePromptId(runId, 'prompt-run') || makeId('prompt-run');
   const sourceSnapshotHash = snapshotHash(snapshot);
   const policy = behaviorPolicyFrom(settings, behaviorPolicy);
+  const useReasoner = normalizeReasonerUse(settings) !== 'off'
+    && (normalizeReasonerUse(settings) === 'always' || footprintForPolicy(settings, policy) === 'rich');
   return {
     roleId: 'guidanceComposer',
     request: {
-      lane: 'utility',
+      lane: useReasoner ? 'reasoner' : 'utility',
+      ...reasoningRequestMetadata(useReasoner ? settings : 'low', 'final-brief'),
       runId: promptRunId,
       snapshotHash: sourceSnapshotHash,
       prompt: buildGuidancePrompt({

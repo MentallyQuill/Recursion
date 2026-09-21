@@ -167,6 +167,8 @@ Recursion inherits SillyTavern theme variables for the real background, foregrou
 - **Warning (#ffd479):** review, fallback, repair, retry, or attention states that are not hard failures. Routine cache inspection after source changes is not a warning by itself.
 - **Error (#ff8a8a):** provider failures, blocked states, and prompt-install failures.
 
+The Pre-process guidance row is labeled `Guidance` regardless of provider lane. A completed stage that falls back to raw card evidence remains amber with a visible explanation. A stale-chat prompt-install failure states that the chat changed before installation.
+
 Warning and error colors apply to the corresponding user-facing status message
 text as well as Hero Pixel Array blocks and progress dots. This includes the
 desktop current-step text, mobile status drawer, progress header, and affected

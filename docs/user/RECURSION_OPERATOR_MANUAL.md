@@ -487,3 +487,5 @@ Automated soak evidence uses dedicated `recursion-soak-*` users. An explicitly a
 - [UI Spec](../design/UI_SPEC.md)
 - [Prompt Composition Spec](../architecture/PROMPT_COMPOSITION_SPEC.md)
 - [Storage And Diagnostics](../architecture/STORAGE_AND_DIAGNOSTICS.md)
+
+Export Diagnostics downloads a timestamped `recursion-diagnostics-*.json` file on desktop and mobile. It exports the runtime-sanitized payload without clipboard access or operating-system-specific behavior. The browser controls where the file is saved.

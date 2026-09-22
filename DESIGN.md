@@ -254,3 +254,5 @@ Both card phases bind one shared pointer-drag engine for mouse, pen, and short-h
 - Don't add decorative gradient blobs, broad purple-blue gradients, neon-heavy cyberpunk styling, ornate fantasy styling, or orange status branding.
 - Don't put cards inside cards or make page sections look like floating cards.
 - Don't let compact button text, chip text, row labels, or prompt packet text overflow their containers on mobile.
+
+Export Diagnostics downloads a timestamped `recursion-diagnostics-*.json` file on desktop and mobile. It exports the runtime-sanitized payload without clipboard access or operating-system-specific behavior. The browser controls where the file is saved.

@@ -1,4 +1,5 @@
 import { nowIso, redact, stableStringify } from './core.mjs';
+import { downloadDiagnostics } from './ui/diagnostics-download.mjs';
 import {
   defaultCardScope,
   enforceManualSelectionCap,
@@ -288,7 +289,7 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   includeExcerpts: 'Include short sanitized excerpts in exported diagnostics. Leave off for privacy unless a bug report needs bounded text evidence.',
   resetTurnCache: "Delete Recursion's generated work for the active turn without changing SillyTavern messages.",
   clearRunJournal: 'Clear local Recursion activity history for this chat. This does not change cards, settings, or SillyTavern messages.',
-  exportDiagnostics: 'Copy sanitized Recursion diagnostics for debugging. API keys, raw provider prompts, and hidden reasoning are excluded.',
+  exportDiagnostics: 'Download sanitized Recursion diagnostics as a JSON file. API keys, raw provider prompts, and hidden reasoning are excluded.',
   providerProfile: 'Saved SillyTavern Connection Profile for this lane. Recursion stores only the profile ID; routing, model access, presets, and credentials remain in SillyTavern.',
   providerPresetMode: "Controls whether Recursion includes the Connection Profile's complete generation preset in model calls. Isolated (recommended) excludes its behavioral prompts, style instructions, and wrappers, reducing interference with structured responses. Full Profile includes the entire preset; use it only when the preset is known to be compatible with Recursion's JSON-oriented requests.",
   providerInstructMode: "Controls whether SillyTavern applies the profile's instruct template. Auto (recommended) enables it for text-completion profiles and disables it for chat-completion profiles using the detected completion mode. On always applies the template. Off never applies it; use Off when the backend or preset already formats prompts and another template would duplicate the framing.",
@@ -1817,7 +1818,7 @@ function syncStaticTooltips(root, model) {
   setTooltip(root.querySelector('[data-recursion-prompt-packet-button]'), true, 'Open injected prompt packet');
   setTooltip(root.querySelector('[data-recursion-reset-scene-cache]'), true, 'Reset the current scene cache so Recursion rebuilds cards from the active chat.');
   setTooltip(root.querySelector('[data-recursion-clear-run-journal]'), true, 'Clear the local Recursion run journal.');
-  setTooltip(root.querySelector('[data-recursion-export-diagnostics]'), true, 'Copy sanitized Recursion diagnostics.');
+  setTooltip(root.querySelector('[data-recursion-export-diagnostics]'), true, 'Download sanitized Recursion diagnostics as a JSON file.');
 }
 
 function briefCardDomId(card, index) {
@@ -6555,7 +6556,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (control('recursionExportDiagnostics')) {
       runAction(Promise.resolve(runtime?.exportDiagnostics?.()).then((result) => {
         const payload = result?.diagnostics || result || {};
-        return globalThis.navigator?.clipboard?.writeText?.(safeJson(payload, { maxString: 5000 }));
+        return downloadDiagnostics(payload);
       }), null, 'Export diagnostics failed.');
     }
     const modeChoice = control('recursionModeChoice');

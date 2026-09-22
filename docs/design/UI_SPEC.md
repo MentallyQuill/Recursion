@@ -1427,3 +1427,5 @@ Do not ship these in V1:
 - Popup-based progress spam for normal invisible work.
 
 The first UI should build trust by showing what Recursion did, not by making users operate it manually.
+
+Export Diagnostics downloads a timestamped `recursion-diagnostics-*.json` file on desktop and mobile. It exports the runtime-sanitized payload without clipboard access or operating-system-specific behavior. The browser controls where the file is saved.

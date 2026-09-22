@@ -3834,10 +3834,20 @@ try {
   assertEqual(resetTurnCacheCalls, 1, 'Reset Turn Cache action calls runtime');
   root.querySelector('[data-recursion-clear-run-journal]').click();
   assertEqual(clearRunJournalCalls, 1, 'Clear Run Journal action calls runtime');
-  root.querySelector('[data-recursion-export-diagnostics]').click();
-  await Promise.resolve();
-  assertEqual(exportDiagnosticsCalls, 1, 'Export Diagnostics action calls runtime');
-  assert(copied.at(-1).includes('recursion.diagnostics.v1'), 'Export Diagnostics copies sanitized diagnostics JSON');
+  const diagnosticsBlobs = [];
+  const originalCreateObjectURL = URL.createObjectURL;
+  const copiedBeforeDiagnostics = copied.length;
+  URL.createObjectURL = (blob) => { diagnosticsBlobs.push(blob); return originalCreateObjectURL(blob); };
+  try {
+    root.querySelector('[data-recursion-export-diagnostics]').click();
+    await Promise.resolve();
+    assertEqual(exportDiagnosticsCalls, 1, 'Export Diagnostics action calls runtime');
+    assertEqual(diagnosticsBlobs.length, 1, 'Export Diagnostics creates a JSON file');
+    assert((await diagnosticsBlobs[0].text()).includes('recursion.diagnostics.v1'), 'download contains sanitized diagnostics');
+    assertEqual(copied.length, copiedBeforeDiagnostics, 'Export Diagnostics never writes clipboard');
+  } finally {
+    URL.createObjectURL = originalCreateObjectURL;
+  }
   assert(root.querySelector('[data-recursion-provider-grid]'), 'Providers pane renders the compact reference provider grid');
   assertEqual(root.querySelectorAll('[data-recursion-provider-section]').length, 2, 'Providers pane renders Utility plus collapsed Reasoner sections');
   assert(root.querySelector('[data-recursion-provider-profile-reasoner]'), 'Reasoner provider section owns a Connection Profile control when expanded');

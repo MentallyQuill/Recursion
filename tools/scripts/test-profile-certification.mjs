@@ -1,9 +1,32 @@
 import { certifyConnectionProfile } from '../../src/providers/profile-certification.mjs';
+import { createGenerationRouter, createProviderClient } from '../../src/providers.mjs';
+import { createSettingsStore } from '../../src/settings.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 const provider = {
   generationPolicy: { structuredOutputMode: 'auto' }
 };
+
+// Qualification uses real queue dispatch evidence, not a configured number.
+const probeStore = createSettingsStore({root: {recursion: {providers: {
+  utility: {connectionProfileId: 'probe', maxConcurrentRequests: 2}
+}}}, save() {}});
+const probeRouter = createGenerationRouter({client: createProviderClient({settingsStore: probeStore, host: {
+  providerProfiles: {list: () => [{id: 'probe', completionMode: 'chat'}]},
+  generation: {async generate(request) {
+    await Promise.resolve();
+    return {raw: JSON.stringify(request.roleId === 'providerTest'
+      ? {schema: 'recursion.providerTest.v1', ok: true, probeId: request.concurrencyProbe?.id}
+      : {promptText: 'Track the scene.', evidenceRefs: ['message:0']})};
+  }}
+}})});
+const probeCertification = await certifyConnectionProfile({
+  lane: 'utility', provider: probeStore.get().providers.utility,
+  profile: {id: 'probe', completionMode: 'chat'}, includeFused: false,
+  generate: (role, request) => probeRouter.generate(role, request)
+});
+assertEqual(probeCertification.safeConcurrency, 2, 'certification proves two overlapping requests');
+assertEqual(probeCertification.checks.concurrency, 'pass', 'concurrency proof is recorded');
 const calls = [];
 const fusedPrompts = [];
 const full = await certifyConnectionProfile({
@@ -66,7 +89,7 @@ const segmentedOnly = await certifyConnectionProfile({
 });
 assertEqual(segmentedOnly.status, 'partial', 'Segmented-only certification produces Segmented-ready status');
 assertDeepEqual(segmentedOnly.checks, {
-  connectivity: 'pass', singleCard: 'pass', fusedCards: 'not-run'
+  connectivity: 'pass', singleCard: 'pass', fusedCards: 'not-run', concurrency: 'not-run'
 }, 'Segmented-only certification records Fused as not run');
 assertDeepEqual(segmentedCalls, ['providerTest', 'sceneFrameCard'], 'Segmented-only certification never calls the Fused role');
 

@@ -1,5 +1,7 @@
-import { createProviderClient } from '../../src/providers.mjs';
-import { createSettingsStore } from '../../src/settings.mjs';
+import { createGenerationRouter, createProviderClient } from '../../src/providers.mjs';
+import { createSettingsStore, normalizeSettings } from '../../src/settings.mjs';
+import { providerConfigHash } from '../../src/provider-capability.mjs';
+import { createProfileRequestQueue } from '../../src/providers/profile-request-queue.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 const profile = {
@@ -113,3 +115,77 @@ assertEqual(peakProfileCalls, 1, 'same-profile provider client calls serialize')
 assertEqual(queueCallCount, 1, 'second same-profile request remains queued');
 queueRelease.resolve();
 await Promise.all([queuedFirst, queuedSecond]);
+
+const parallelSettings = normalizeSettings({providers: {
+  utility: {connectionProfileId: 'profile-a', maxConcurrentRequests: 2},
+  reasoner: {connectionProfileId: 'profile-a', maxConcurrentRequests: 2}
+}});
+for (const lane of ['utility', 'reasoner']) {
+  const provider = parallelSettings.providers[lane];
+  provider.certification = {
+    status: 'pass', configHash: providerConfigHash(provider), safeConcurrency: 2,
+    checks: {connectivity: 'pass', singleCard: 'pass', fusedCards: 'pass', concurrency: 'pass'}
+  };
+}
+const parallelStore = createSettingsStore({root: {recursion: parallelSettings}, save: () => {}});
+const parallelRelease = deferred();
+let parallelActive = 0;
+let parallelPeak = 0;
+const parallelClient = createProviderClient({settingsStore: parallelStore, host: {
+  providerProfiles: host.providerProfiles,
+  generation: {async generate() {
+    parallelActive += 1;
+    parallelPeak = Math.max(parallelPeak, parallelActive);
+    await parallelRelease.promise;
+    parallelActive -= 1;
+    return {raw: '{"schema":"recursion.providerTest.v1","ok":true}'};
+  }}
+}});
+const parallelCalls = [
+  parallelClient.generate('providerTest', {lane: 'utility'}),
+  parallelClient.generate('providerTest', {lane: 'reasoner'}),
+  parallelClient.generate('providerTest', {lane: 'utility'})
+];
+await new Promise(resolve => setTimeout(resolve, 0));
+assertEqual(parallelPeak, 2, 'qualified lanes share one two-slot profile queue');
+parallelRelease.resolve();
+const parallelResults = await Promise.all(parallelCalls);
+assertEqual(Number.isFinite(parallelResults[2].timings.queueWaitMs), true, 'client preserves queue timing');
+
+const usageRouter = createGenerationRouter({client: createProviderClient({settingsStore, host: {
+  providerProfiles: host.providerProfiles,
+  generation: {async generate() { return {raw: {
+    choices: [{message: {content: '{"schema":"recursion.providerTest.v1","ok":true}'}, finish_reason: 'stop'}],
+    usage: {prompt_tokens: 40, completion_tokens: 12, completion_tokens_details: {reasoning_tokens: 3}}
+  }}; }}
+}})});
+const usageResult = await usageRouter.generate('providerTest', {lane: 'utility'});
+assertEqual(usageResult.diagnostics.promptTokens, 40, 'successful calls retain input usage');
+assertEqual(usageResult.diagnostics.reasoningTokens, 3, 'successful calls retain reasoning usage');
+assertEqual(Number.isFinite(usageResult.diagnostics.timings.queueWaitMs), true, 'router retains dispatch timing');
+
+let rateClock = 0;
+let rateTimer;
+const rateQueue = createProfileRequestQueue({now: () => rateClock,
+  setTimer(callback) { rateTimer = callback; return 1; }, clearTimer() {}});
+let rateCalls = 0;
+const rateClient = createProviderClient({settingsStore, requestQueue: rateQueue, host: {
+  providerProfiles: host.providerProfiles,
+  generation: {async generate() {
+    rateCalls += 1;
+    if (rateCalls === 1) throw Object.assign(new Error('limited'), {
+      status: 429, response: {headers: {'retry-after': '2'}}
+    });
+    return {raw: '{"schema":"recursion.providerTest.v1","ok":true}'};
+  }}
+}});
+const limitedCall = rateClient.generate('providerTest', {lane: 'utility'}).catch(error => error);
+const afterLimit = rateClient.generate('providerTest', {lane: 'utility'});
+await limitedCall;
+await new Promise(resolve => setTimeout(resolve, 0));
+assertEqual(rateCalls, 1, 'rate limit prevents pending dispatch');
+assertEqual(rateQueue.stats('profile-a').cooldownRemainingMs, 2000, 'provider retry-after governs cooldown');
+rateClock = 2000;
+rateTimer();
+await afterLimit;
+assertEqual(rateCalls, 2, 'pending work resumes after rate cooldown');

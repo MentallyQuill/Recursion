@@ -196,6 +196,7 @@ assertDeepEqual(Object.keys(providerWithUnknownFields).sort(), [
   'connectionProfileId',
   'generationPolicy',
   'lane',
+  'maxConcurrentRequests',
   'outputTokenCeiling',
   'samplerOverrides'
 ].sort(), 'normalized provider emits only the profile-only contract');
@@ -224,6 +225,7 @@ assertDeepEqual(Object.keys(providerContract).sort(), [
   'generationPolicy',
   'lane',
   'outputTokenCeiling',
+  'maxConcurrentRequests',
   'samplerOverrides'
 ].sort(), 'provider contract excludes unknown fields');
 

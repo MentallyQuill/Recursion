@@ -213,6 +213,8 @@ const settingsStore = createSettingsStore({
 });
 const client = createProviderClient({ host, settingsStore, fetchImpl: () => { throw new Error('direct HTTP forbidden'); } });
 const providerResult = await client.generate('providerTest', { prompt: 'Return the provider test object.' });
+assertEqual(Number.isFinite(providerResult.timings.hostPreparationMs), true, 'host setup has its own timing');
+assertEqual(Number.isFinite(providerResult.timings.transportMs), true, 'transport time excludes queue and setup');
 assertEqual(JSON.parse(providerResult.text).ok, true, 'provider client uses the host profile transport');
 assertEqual(Object.hasOwn(client, 'fetchModels'), false, 'provider client exposes no direct model discovery');
 

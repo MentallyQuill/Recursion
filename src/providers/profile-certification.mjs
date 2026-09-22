@@ -84,6 +84,7 @@ function certificationResult({
   structuredOutput,
   checks,
   diagnostics,
+  safeConcurrency = 1,
   error = null
 }) {
   const normalizedError = error ? normalizeProviderError(error) : null;
@@ -93,7 +94,7 @@ function certificationResult({
     completionMode: ['chat', 'text'].includes(completionMode) ? completionMode : 'unknown',
     structuredOutput,
     checks: Object.freeze({ ...checks }),
-    safeConcurrency: 1,
+    safeConcurrency,
     diagnosticCodes: Object.freeze([...new Set(diagnostics)].slice(0, 12)),
     compactError: normalizedError
       ? `${normalizedError.code}: ${normalizedError.message}`.slice(0, 300)
@@ -111,7 +112,7 @@ export async function certifyConnectionProfile({
 }) {
   if (typeof generate !== 'function') throw new TypeError('Profile certification requires generate.');
   const diagnostics = [];
-  const checks = { connectivity: 'not-run', singleCard: 'not-run', fusedCards: 'not-run' };
+  const checks = { connectivity: 'not-run', singleCard: 'not-run', fusedCards: 'not-run', concurrency: 'not-run' };
   const completionMode = profile?.completionMode || 'unknown';
 
   let connectivity;
@@ -173,6 +174,32 @@ export async function certifyConnectionProfile({
     });
   }
 
+  let safeConcurrency = 1;
+  const requestedConcurrency = Math.min(3, Math.max(1, Math.trunc(Number(provider?.maxConcurrentRequests) || 1)));
+  if (requestedConcurrency > 1) {
+    const probes = await Promise.all(Array.from({length: requestedConcurrency}, async (_, index) => {
+      const id = `concurrency-${index + 1}`;
+      try {
+        const result = await generate('providerTest', {
+          ...connectivityRequest(lane),
+          concurrencyProbe: {id, limit: requestedConcurrency},
+          prompt: `Return only {"schema":"recursion.providerTest.v1","ok":true,"probeId":"${id}"}.`
+        });
+        return {id, result};
+      } catch { return {id, result: {ok: false}}; }
+    }));
+    const valid = probes.every(({id, result}) => validConnectivity(result)
+      && result.data.probeId === id
+      && Number.isFinite(result.diagnostics?.timings?.transportStartedAt)
+      && Number.isFinite(result.diagnostics?.timings?.transportCompletedAt));
+    const overlapped = valid
+      && Math.max(...probes.map(({result}) => result.diagnostics.timings.transportStartedAt))
+        < Math.min(...probes.map(({result}) => result.diagnostics.timings.transportCompletedAt));
+    checks.concurrency = overlapped ? 'pass' : 'fail';
+    if (overlapped) safeConcurrency = requestedConcurrency;
+    else diagnostics.push('profile-concurrency-unverified');
+  }
+
   if (includeFused !== true) {
     return certificationResult({
       status: 'partial',
@@ -180,7 +207,8 @@ export async function certifyConnectionProfile({
       completionMode,
       structuredOutput: method,
       checks,
-      diagnostics
+      diagnostics,
+      safeConcurrency
     });
   }
 
@@ -198,6 +226,7 @@ export async function certifyConnectionProfile({
     structuredOutput: method,
     checks,
     diagnostics,
+    safeConcurrency,
     error: checks.fusedCards === 'fail'
       ? (fused?.error || {
           code: 'RECURSION_PROVIDER_FUSED_INVALID',

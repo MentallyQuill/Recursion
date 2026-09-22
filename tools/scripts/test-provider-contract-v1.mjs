@@ -33,6 +33,7 @@ assertDeepEqual(Object.keys(provider).sort(), [
   'connectionProfileId',
   'generationPolicy',
   'lane',
+  'maxConcurrentRequests',
   'outputTokenCeiling',
   'samplerOverrides'
 ].sort(), 'provider normalization emits only the profile-only contract');

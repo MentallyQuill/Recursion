@@ -120,8 +120,22 @@ export function providerConfigHash(provider = {}) {
       topP: finiteNumber(provider.samplerOverrides?.topP, 0.95)
     },
     outputTokenCeiling: Math.max(128, Math.trunc(finiteNumber(provider.outputTokenCeiling, 8192))),
+    maxConcurrentRequests: Math.min(3, Math.max(1, Math.trunc(finiteNumber(provider.maxConcurrentRequests, 2)))),
     configRevision: Math.max(0, Math.trunc(finiteNumber(provider.configRevision)))
   });
+}
+
+export function effectiveProfileConcurrency(settings = {}, profileId = '') {
+  const providers = Object.values(settings.providers || {})
+    .filter((provider) => provider.connectionProfileId === profileId);
+  if (!providers.length) return 1;
+  return Math.min(...providers.map((provider) => {
+    const certification = provider.certification || {};
+    if (certification.configHash !== providerConfigHash(provider)
+        || certification.checks?.concurrency !== 'pass') return 1;
+    return Math.min(3, Math.max(1, Math.trunc(Number(provider.maxConcurrentRequests) || 2)),
+      Math.max(1, Math.trunc(Number(certification.safeConcurrency) || 1)));
+  }));
 }
 
 export function resolveProviderCapability({
@@ -168,7 +182,7 @@ export function resolveProviderCapability({
     fusedEligible,
     completionMode: text(certification.completionMode) || 'unknown',
     structuredOutput: text(certification.structuredOutput) || 'unknown',
-    safeConcurrency: 1,
+    safeConcurrency: effectiveProfileConcurrency(settings, provider.connectionProfileId),
     required,
     selectedByPolicy,
     eligible,
@@ -198,7 +212,7 @@ export function sanitizeProviderCapability(capability = {}) {
     fusedEligible: capability.fusedEligible === true,
     completionMode: ['chat', 'text'].includes(text(capability.completionMode)) ? text(capability.completionMode) : 'unknown',
     structuredOutput: ['native-schema', 'prompt-json'].includes(text(capability.structuredOutput)) ? text(capability.structuredOutput) : 'unknown',
-    safeConcurrency: 1,
+    safeConcurrency: Math.min(3, Math.max(1, Math.trunc(Number(capability.safeConcurrency) || 1))),
     required,
     selectedByPolicy: capability.selectedByPolicy === true,
     eligible: capability.eligible === true,

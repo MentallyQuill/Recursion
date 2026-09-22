@@ -151,3 +151,17 @@ Live artifacts must follow [Artifact Contract](../testing/ARTIFACT_CONTRACT.md) 
 ## Deferred Host Boundary
 
 The runtime is host-neutral where that keeps the model, cache, prompt, storage, and activity contracts clean. SillyTavern is the only active V1 host integration. Additional host ports are deferred boundary work and should connect through the same adapter responsibilities rather than importing host APIs into runtime modules.
+## Bounded profile execution
+
+Recursion schedules independent requests through one queue per Connection
+Profile. Requested concurrency is bounded to 1–3, and execution remains at one
+until the exact provider configuration passes the explicit concurrency probe.
+The probe verifies separately identified responses and overlapping transport
+intervals. It cannot raise the concurrency of ordinary queued work. When lanes
+share a profile, the lower qualified limit applies.
+
+Queued cancellation removes work before dispatch. An active transport retains
+its slot until it settles, even if an outer timeout or caller has stopped waiting.
+Rate-limit responses impose a profile cooldown, using a bounded Retry-After when
+available and one second otherwise. Queue, host preparation, transport, and
+normalization timings are distinct; successful calls retain reported token usage.

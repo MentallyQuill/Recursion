@@ -511,6 +511,7 @@ export function createProviderJournal(storage, currentHost) {
             totalTokens: entry.totalTokens,
             visibleContentLength: entry.visibleContentLength,
             latencyMs: entry.latencyMs,
+            timings: entry.timings,
             status: entry.status,
             error: entry.error
           },

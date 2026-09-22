@@ -97,6 +97,7 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
       },
       samplerOverrides: { temperature: 0.1, topP: 0.95 },
       outputTokenCeiling: 8192,
+      maxConcurrentRequests: 2,
       configRevision: 0,
       certification: { status: 'not-run' }
     },
@@ -111,6 +112,7 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
       },
       samplerOverrides: { temperature: 0.4, topP: 0.95 },
       outputTokenCeiling: 8192,
+      maxConcurrentRequests: 2,
       configRevision: 0,
       certification: { status: 'not-run' }
     }
@@ -282,9 +284,11 @@ function normalizeProviderCertification(value = {}) {
     checks: {
       connectivity: enumValue(source.checks?.connectivity, CHECK_STATUS, 'not-run'),
       singleCard: enumValue(source.checks?.singleCard, CHECK_STATUS, 'not-run'),
-      fusedCards: enumValue(source.checks?.fusedCards, CHECK_STATUS, 'not-run')
+      fusedCards: enumValue(source.checks?.fusedCards, CHECK_STATUS, 'not-run'),
+      concurrency: enumValue(source.checks?.concurrency, CHECK_STATUS, 'not-run')
     },
-    safeConcurrency: 1,
+    safeConcurrency: source.checks?.concurrency === 'pass'
+      ? Math.round(numberInRange(source.safeConcurrency, 1, 1, 3)) : 1,
     diagnosticCodes: [...new Set(
       (Array.isArray(source.diagnosticCodes) ? source.diagnosticCodes : [])
         .map((code) => String(code || '').slice(0, 120))
@@ -308,6 +312,7 @@ function providerConfiguration(provider = {}) {
       topP: Number(provider.samplerOverrides?.topP)
     },
     outputTokenCeiling: Number(provider.outputTokenCeiling),
+    maxConcurrentRequests: Number(provider.maxConcurrentRequests),
     configRevision: nonNegativeInteger(provider.configRevision)
   };
 }
@@ -323,6 +328,7 @@ function changedProviderConfigKeys(current = {}, next = {}) {
   if (before.samplerOverrides.temperature !== after.samplerOverrides.temperature) changed.push('samplerOverrides.temperature');
   if (before.samplerOverrides.topP !== after.samplerOverrides.topP) changed.push('samplerOverrides.topP');
   if (before.outputTokenCeiling !== after.outputTokenCeiling) changed.push('outputTokenCeiling');
+  if (before.maxConcurrentRequests !== after.maxConcurrentRequests) changed.push('maxConcurrentRequests');
   return changed;
 }
 
@@ -351,6 +357,9 @@ function pickProviderConfigPatch(patch = {}) {
   }
   if (Object.prototype.hasOwnProperty.call(source, 'outputTokenCeiling')) {
     result.outputTokenCeiling = source.outputTokenCeiling;
+  }
+  if (Object.prototype.hasOwnProperty.call(source, 'maxConcurrentRequests')) {
+    result.maxConcurrentRequests = source.maxConcurrentRequests;
   }
   return result;
 }
@@ -384,6 +393,7 @@ export function normalizeProviderSettings(lane, value = {}) {
       topP: numberInRange(samplerOverrides.topP, defaults.samplerOverrides.topP, 0, 1)
     },
     outputTokenCeiling: Math.round(numberInRange(source.outputTokenCeiling, defaults.outputTokenCeiling, 128, 32768)),
+    maxConcurrentRequests: Math.round(numberInRange(source.maxConcurrentRequests, defaults.maxConcurrentRequests, 1, 3)),
     configRevision: nonNegativeInteger(source.configRevision),
     certification: { status: 'not-run' }
   };

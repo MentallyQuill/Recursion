@@ -994,6 +994,7 @@ function profileError(code, message) {
 }
 
 async function sendViaConnectionProfile(context, request = {}, readSecretMetadata = readSillyTavernSecretMetadata) {
+  const preparationStartedAt = performance.now();
   const service = requireConnectionManagerService(context);
   const profileId = requestConnectionProfileId(request);
   if (!profileId) {
@@ -1051,7 +1052,10 @@ async function sendViaConnectionProfile(context, request = {}, readSecretMetadat
     if (value === undefined) delete overridePayload[key];
   }
 
-  const raw = await service.sendRequest(
+  const transportStartedAt = performance.now();
+  let raw;
+  try {
+    raw = await service.sendRequest(
     profileId,
     requestMessages(request),
     requestMaxTokens(request),
@@ -1063,9 +1067,20 @@ async function sendViaConnectionProfile(context, request = {}, readSecretMetadat
       includeInstruct: policy.includeInstruct
     },
     overridePayload
-  );
+    );
+  } catch (error) {
+    error.providerDiagnostics = {...error.providerDiagnostics, timings: {
+      hostPreparationMs: transportStartedAt - preparationStartedAt,
+      transportMs: performance.now() - transportStartedAt
+    }};
+    throw error;
+  }
   return {
     raw,
+    timings: {
+      hostPreparationMs: transportStartedAt - preparationStartedAt,
+      transportMs: performance.now() - transportStartedAt
+    },
     providerId: 'sillytavern-connection-profile',
     model: stringValue(profile.model).trim(),
     completionMode,

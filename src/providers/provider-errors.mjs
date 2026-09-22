@@ -172,12 +172,20 @@ export function normalizeProviderError(error) {
       || codes.has('RECURSION_PROVIDER_RATE_LIMITED')
       || status === 429
       || /rate limit|too many requests/.test(text)) {
-    return providerFailureRecord(
+    const retryAfter = chain.map((entry) => {
+      if (Number.isFinite(entry.retryAfterMs)) return entry.retryAfterMs;
+      const headers = entry.response?.headers || entry.headers;
+      const value = headers?.get?.('retry-after') ?? headers?.['retry-after'];
+      if (value === undefined || value === null) return null;
+      const seconds = Number(value);
+      return Number.isFinite(seconds) ? seconds * 1000 : Date.parse(value) - Date.now();
+    }).find((value) => Number.isFinite(value) && value >= 0);
+    return Object.freeze({ ...providerFailureRecord(
       'RECURSION_PROVIDER_RATE_LIMIT',
       'The selected profile is rate limited.',
       true,
       { category: 'capacity' }
-    );
+    ), retryAfterMs: Math.min(60000, Math.max(0, retryAfter ?? 1000)) });
   }
 
   if (codes.has('RECURSION_PROVIDER_AUTH_FAILED') || status === 401 || status === 403) {

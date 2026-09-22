@@ -22,7 +22,8 @@ import { normalizeProviderError } from './providers/provider-errors.mjs';
 import { outputBudgetForRequest } from './providers/stage-output-budgets.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
 import {
-  resolveProviderCapability
+  resolveProviderCapability,
+  effectiveProfileConcurrency
 } from './provider-capability.mjs';
 import {
   EDITORIAL_EFFECTIVENESS_SCHEMA,
@@ -1747,6 +1748,10 @@ function responseIdentityDiagnostics(response = {}) {
   const visibleContentLength = String(source.text || '').length;
   return sanitize({
     ...responsePolicyDiagnostics(source),
+    ...(plainObject(source.usage) ? source.usage : {}),
+    ...(plainObject(source.timings) ? {timings: source.timings} : {}),
+    ...(source.finishReasons?.length ? {finishReason: source.finishReasons[0]} : {}),
+    ...(source.effectivePolicy?.responseLength ? {effectiveMaxTokens: source.effectivePolicy.responseLength} : {}),
     ...(providerSource ? { providerSource } : {}),
     ...(providerId ? { providerId } : {}),
     ...(model ? { model } : {}),
@@ -1768,7 +1773,8 @@ function providerFailureDiagnostics(error) {
     reasoningTokens: source.reasoningTokens,
     totalTokens: source.totalTokens,
     visibleContentLength: source.visibleContentLength,
-    reasoningLength: source.reasoningLength
+    reasoningLength: source.reasoningLength,
+    timings: source.timings
   }, 300);
 }
 
@@ -2139,16 +2145,50 @@ export function createProviderClient({
         { retryable: false }
       );
     }
+    const concurrencyLimit = () =>
+      enriched.certification === true && enriched.roleId === 'providerTest' && enriched.concurrencyProbe
+        ? Math.min(3, Math.max(1, Number(enriched.concurrencyProbe.limit) || 1))
+        : effectiveProfileConcurrency(readSettings(settingsStore), enriched.connectionProfileId);
+    requestQueue.setConcurrency?.(enriched.connectionProfileId, concurrencyLimit());
+    let dispatchTiming = {};
     return requestQueue.run(
       enriched.connectionProfileId,
       async () => {
-        const response = await host.generation.generate(enriched);
-        return normalizeProviderResponse(response, {
-          ...enriched,
-          queueConcurrency: requestQueue.stats(enriched.connectionProfileId).concurrency
-        });
+        const startedAt = Date.now();
+        const transportStartedAt = performance.now();
+        try {
+          const response = await host.generation.generate(enriched);
+          const transportCompletedAt = performance.now();
+          const providerCompletedAt = Date.now();
+          const normalized = normalizeProviderResponse(response, {
+            ...enriched,
+            queueConcurrency: dispatchTiming.concurrency || requestQueue.stats(enriched.connectionProfileId).concurrency
+          });
+          return { ...normalized, timings: {
+            ...dispatchTiming,
+            ...response?.timings,
+            transportStartedAt,
+            transportCompletedAt,
+            providerCompletedAt,
+            providerMs: providerCompletedAt - startedAt,
+            normalizationMs: Date.now() - providerCompletedAt
+          } };
+        } catch (error) {
+          const failure = normalizeProviderError(error);
+          if (failure.code === 'RECURSION_PROVIDER_RATE_LIMIT') {
+            error.retryAfterMs = failure.retryAfterMs;
+            requestQueue.cooldown?.(enriched.connectionProfileId, failure.retryAfterMs);
+          }
+          error.providerDiagnostics = { ...error.providerDiagnostics, timings: {
+            ...dispatchTiming, ...error.providerDiagnostics?.timings, providerMs: Date.now() - startedAt
+          } };
+          throw error;
+        } finally {
+          if (enriched.concurrencyProbe) requestQueue.setConcurrency?.(enriched.connectionProfileId,
+            effectiveProfileConcurrency(readSettings(settingsStore), enriched.connectionProfileId));
+        }
       },
-      { signal: enriched.signal ?? null }
+      { signal: enriched.signal ?? null, concurrencyLimit, onDispatch: (timing) => { dispatchTiming = timing; } }
     );
   }
 
@@ -2285,6 +2325,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         ...parsed.diagnostics,
         ...normalized.diagnostics,
         ...reasoningDiagnostics(raw),
+        ...responseIdentityDiagnostics(raw),
         ...responsePolicyDiagnostics(raw),
         providerSource: raw.providerSource,
         providerId: raw.providerId,
@@ -2481,6 +2522,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
       validateRoleResponseSchema(entry.roleId, data);
       const diagnostics = sanitize({
         ...entry.diagnostics,
+        ...responseIdentityDiagnostics(raw),
         ...parsed.diagnostics,
         ...normalized.diagnostics,
         ...reasoningDiagnostics(raw),

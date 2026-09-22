@@ -84,4 +84,70 @@ assertEqual((await pendingClear).code, 'RECURSION_PROVIDER_ABORTED', 'cleared en
 releaseClear.resolve();
 await activeClear;
 
+// The queue owns real transports even when a caller has already aborted.
+const bounded = createProfileRequestQueue();
+assertEqual(typeof bounded.setConcurrency, 'function', 'profile limits can be configured');
+bounded.setConcurrency('shared', 2);
+const heldOne = deferred();
+const heldTwo = deferred();
+const activeController = new AbortController();
+const dispatched = [];
+const one = bounded.run('shared', () => heldOne.promise, {
+  signal: activeController.signal,
+  onDispatch: (timing) => dispatched.push(timing)
+});
+const two = bounded.run('shared', () => heldTwo.promise);
+let thirdStarted = false;
+const three = bounded.run('shared', async () => { thirdStarted = true; });
+await tick();
+assertEqual(bounded.stats('shared').active, 2, 'two transports overlap');
+assertEqual(thirdStarted, false, 'third transport waits');
+activeController.abort();
+bounded.setConcurrency('shared', 1);
+await tick();
+assertEqual(bounded.stats('shared').active, 2, 'abort does not free an unsettled transport');
+heldOne.resolve();
+await one;
+await tick();
+assertEqual(thirdStarted, false, 'lower limit waits for remaining transport');
+heldTwo.resolve();
+await Promise.all([two, three]);
+assertEqual(thirdStarted, true, 'pending transport starts after ownership releases');
+assertEqual(dispatched.length, 1, 'one dispatch timing per request');
+assertEqual(dispatched[0].concurrency, 2, 'timing records effective dispatch concurrency');
+assertEqual(Number.isFinite(dispatched[0].queueWaitMs), true, 'queue time is measured');
+
+let clock = 100;
+let nextTimer = 0;
+const timers = new Map();
+const cooling = createProfileRequestQueue({
+  now: () => clock,
+  setTimer: (callback) => { timers.set(++nextTimer, callback); return nextTimer; },
+  clearTimer: (id) => timers.delete(id)
+});
+assertEqual(typeof cooling.cooldown, 'function', 'rate limits can cool a profile');
+cooling.cooldown('limited', 500);
+let cooledCallStarted = false;
+const cooledCall = cooling.run('limited', async () => { cooledCallStarted = true; });
+await tick();
+assertEqual(cooledCallStarted, false, 'cooldown survives an initially empty queue');
+assertEqual(cooling.stats('limited').cooldownRemainingMs, 500, 'remaining cooldown is visible');
+clock = 600;
+for (const callback of [...timers.values()]) callback();
+await cooledCall;
+assertEqual(cooledCallStarted, true, 'cooldown expiry releases the pending call');
+
+const probeShared = createProfileRequestQueue({concurrency: 3});
+const probeRelease = deferred();
+const probeWork = [
+  probeShared.run('profile', () => probeRelease.promise, {concurrencyLimit: () => 2}),
+  probeShared.run('profile', () => probeRelease.promise, {concurrencyLimit: () => 2})
+];
+let ordinaryStarted = false;
+const ordinary = probeShared.run('profile', async () => { ordinaryStarted = true; }, {concurrencyLimit: () => 1});
+await tick();
+assertEqual(ordinaryStarted, false, 'probe override cannot raise ordinary request concurrency');
+probeRelease.resolve();
+await Promise.all([...probeWork, ordinary]);
+
 console.log('[pass] profile request queue');

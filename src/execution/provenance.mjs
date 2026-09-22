@@ -1,3 +1,5 @@
+import { sha256Hex } from './sha256.mjs';
+
 function canonicalize(value) {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return value;
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -120,7 +122,9 @@ export function compareRunProvenance(expected = {}, actual = {}) {
 }
 
 export async function stableHash(value) {
-  const bytes = new TextEncoder().encode(JSON.stringify(canonicalize(value)));
+  const serialized = JSON.stringify(canonicalize(value));
+  if (typeof globalThis.crypto?.subtle?.digest !== 'function') return sha256Hex(serialized);
+  const bytes = new TextEncoder().encode(serialized);
   const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
   return Array.from(
     new Uint8Array(digest),

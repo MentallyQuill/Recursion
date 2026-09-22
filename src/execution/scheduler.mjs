@@ -1,3 +1,4 @@
+import { makeId } from '../core.mjs';
 import {
   createCheckpoint,
   createStageRecord,
@@ -126,7 +127,7 @@ function dependencyHash(value) {
 export function createExecutionScheduler({
   repository,
   now = () => new Date().toISOString(),
-  createId = (prefix = 'execution') => `${prefix}-${globalThis.crypto.randomUUID()}`,
+  createId = makeId,
   attemptsPerStep = 2,
   onViewChanged = null
 } = {}) {
@@ -399,7 +400,7 @@ export function createExecutionScheduler({
   }
 
   async function executeStage(runtime, stage) {
-    const executionToken = createId('stage');
+    let executionToken = null;
     const queuedIntentConsumed = runtime.queuedStageIds.has(stage.id);
     const controller = new AbortController();
     runtime.controllers.set(stage.id, controller);
@@ -408,6 +409,7 @@ export function createExecutionScheduler({
     let openedAttempts = null;
 
     try {
+      executionToken = createId('stage');
       dependencyArtifacts = await loadDependencyArtifacts(runtime, stage);
       const fingerprint = typeof stage.buildInputFingerprint === 'function'
         ? await stage.buildInputFingerprint(runtime.context, dependencyArtifacts)

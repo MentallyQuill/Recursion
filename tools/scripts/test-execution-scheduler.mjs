@@ -190,6 +190,57 @@ function createIds() {
 
 {
   const repository = createRepository();
+  let idCalls = 0;
+  let stageCalls = 0;
+  const scheduler = createExecutionScheduler({
+    repository,
+    createId() {
+      idCalls += 1;
+      if (idCalls === 1) throw new Error('Stage ID initialization failed');
+      return `stage-${idCalls}`;
+    }
+  });
+  await scheduler.start({
+    manifest: manifest(),
+    graph: createExecutionGraph({ stages: [stage('snapshot', [], () => {
+      stageCalls += 1;
+      return { ready: true };
+    }, { kind: 'local' })] }),
+    context: {}
+  });
+  const saved = await repository.loadPipelineRun('chat-a');
+  assertEqual(saved.state, 'paused', 'initialization failure pauses instead of spinning');
+  assertEqual(saved.stageRecords.snapshot.state, 'failed', 'initialization failure settles stage');
+  assertEqual(idCalls, 1, 'failed initialization is not retried indefinitely');
+  assertEqual(stageCalls, 0, 'failed initialization never invokes stage');
+}
+
+for (const insecureCrypto of [{}, undefined]) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  try {
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: insecureCrypto });
+    const repository = createRepository();
+    const calls = [];
+    const graph = createExecutionGraph({ stages: [
+      stage('snapshot', [], () => { calls.push('snapshot'); return { ready: true }; }, { kind: 'local' }),
+      stage('model', ['snapshot'], () => { calls.push('model'); return { card: true }; }),
+      stage('install', ['model'], () => { calls.push('install'); return { installed: true }; }, { kind: 'local' })
+    ] });
+    await createExecutionScheduler({ repository }).start({ manifest: manifest(), graph, context: {} });
+    const saved = await repository.loadPipelineRun('chat-a');
+    assertEqual(saved.state, 'completed', 'default scheduler completes without secure-context crypto');
+    assertDeepEqual(calls, ['snapshot', 'model', 'install'], 'HTTP stages run exactly once in dependency order');
+    const tokens = repository.manifestWrites.flatMap((write) => Object.values(write.stageRecords)
+      .filter((record) => record.executionToken).map((record) => record.executionToken));
+    assertEqual(new Set(tokens).size, 3, 'stage ownership tokens remain distinct');
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, 'crypto', descriptor);
+    else delete globalThis.crypto;
+  }
+}
+
+{
+  const repository = createRepository();
   const arbiter = deferred();
   const cardA = deferred();
   const cardB = deferred();

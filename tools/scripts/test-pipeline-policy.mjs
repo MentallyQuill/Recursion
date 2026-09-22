@@ -1,10 +1,12 @@
 import { resolveEffectivePipelineMode } from '../../src/runtime/pipeline-policy.mjs';
 import { assertDeepEqual } from '../../tests/helpers/assert.mjs';
+const unconfigured = { selectedLane: 'utility', profileIdHash: '', configHash: '', certificationState: 'not-run' };
 
 assertDeepEqual(resolveEffectivePipelineMode({
   requestedMode: 'fused',
   selectedCapability: { fusedEligible: false, segmentedEligible: true }
 }), {
+  ...unconfigured,
   requestedMode: 'fused',
   effectiveMode: 'segmented',
   reasonCode: 'profile-not-fused-certified'
@@ -14,6 +16,7 @@ assertDeepEqual(resolveEffectivePipelineMode({
   requestedMode: 'fused',
   selectedCapability: { fusedEligible: true, segmentedEligible: true }
 }), {
+  ...unconfigured,
   requestedMode: 'fused',
   effectiveMode: 'fused',
   reasonCode: ''
@@ -23,6 +26,7 @@ assertDeepEqual(resolveEffectivePipelineMode({
   requestedMode: 'segmented',
   selectedCapability: { fusedEligible: true, segmentedEligible: true }
 }), {
+  ...unconfigured,
   requestedMode: 'segmented',
   effectiveMode: 'segmented',
   reasonCode: ''
@@ -32,6 +36,7 @@ assertDeepEqual(resolveEffectivePipelineMode({
   requestedMode: 'unknown',
   selectedCapability: {}
 }), {
+  ...unconfigured,
   requestedMode: 'segmented',
   effectiveMode: 'segmented',
   reasonCode: ''

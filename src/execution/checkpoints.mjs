@@ -2,6 +2,8 @@ import {
   compareRunProvenance,
   normalizeExecutionProvenance
 } from './provenance.mjs';
+import { normalizeOperationBudget } from './operation-budget.mjs';
+import { normalizePipelineDecision } from '../runtime/pipeline-policy.mjs';
 
 export const PIPELINE_RUN_SCHEMA = 'recursion.pipelineRun.v2';
 export const CHECKPOINT_SCHEMA = 'recursion.stageCheckpoint.v2';
@@ -273,6 +275,7 @@ export function createStageRecord({
     state: 'pending',
     checkpoint: null,
     summary: null,
+    timings: null,
     failure: null,
     diagnosticCodes: [],
     lastAttemptAction: null,
@@ -301,6 +304,10 @@ export function normalizeStageRecord(value) {
     state: STAGE_STATES.includes(value.state) ? value.state : 'pending',
     checkpoint: normalizeCheckpoint(value.checkpoint),
     summary: normalizeStageSummary(value.summary),
+    timings: value.timings ? {
+      validationMs: Math.max(0, Number(value.timings.validationMs) || 0),
+      artifactPersistenceMs: Math.max(0, Number(value.timings.artifactPersistenceMs) || 0)
+    } : null,
     diagnosticCodes: normalizeCheckpointDiagnosticCodes(value.diagnosticCodes),
     lastAttemptAction: normalizeCheckpointAttemptAction(value.lastAttemptAction),
     failure: value.failure && typeof value.failure === 'object'
@@ -368,6 +375,8 @@ export function createPipelineRun({
     frontierStageIds: [],
     queuedStageIds: [],
     stageRecords: {},
+    recoveryBudget: null,
+    pipelineDecision: null,
     createdAt: cleanText(createdAt),
     updatedAt: cleanText(createdAt)
   };
@@ -401,6 +410,8 @@ export function normalizePipelineRun(value) {
     frontierStageIds: cleanStringList(value.frontierStageIds),
     queuedStageIds: cleanStringList(value.queuedStageIds),
     stageRecords: normalizeStageRecordMap(value.stageRecords),
+    recoveryBudget: value.recoveryBudget ? normalizeOperationBudget(value.recoveryBudget) : null,
+    pipelineDecision: value.pipelineDecision ? normalizePipelineDecision(value.pipelineDecision) : null,
     createdAt: cleanText(value.createdAt),
     updatedAt: cleanText(value.updatedAt)
   };

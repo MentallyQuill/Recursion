@@ -95,6 +95,10 @@ function stopDirective(diagnosticCode = '') {
 
 export function resolveModelRetryDirective({ failure, request, attempt, limit }) {
   if (attempt >= limit || failure?.kind === 'abort') return stopDirective();
+  if (['RECURSION_PROVIDER_REFUSAL', 'RECURSION_PROVIDER_CONTENT_FILTER',
+    'RECURSION_RECOVERY_BUDGET_EXHAUSTED', 'RECURSION_OPERATION_DEADLINE'].includes(failure?.code)) {
+    return stopDirective('provider-declined-request');
+  }
 
   if (failure?.code === 'RECURSION_STRUCTURED_OUTPUT_UNSUPPORTED'
       && request?.structuredOutputMethod === 'native-schema') {
@@ -148,7 +152,7 @@ export function resolveModelRetryDirective({ failure, request, attempt, limit })
   if (failure?.code === 'RECURSION_PROVIDER_RATE_LIMIT'
       || failure?.code === 'RECURSION_PROVIDER_TRANSIENT'
       || (failure?.kind === 'transport' && failure?.retryable === true)) {
-    const delayMs = attempt === 1 ? 250 : 750;
+    const delayMs = failure?.retryAfterMs ?? (attempt === 1 ? 250 : 750);
     const diagnosticCode = failure.code === 'RECURSION_PROVIDER_RATE_LIMIT'
       ? 'provider-rate-limit-retry'
       : failure.code === 'RECURSION_PROVIDER_TRANSIENT'

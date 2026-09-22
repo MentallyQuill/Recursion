@@ -35,5 +35,13 @@ const fused = createPreprocessCardGraph({
 });
 assertEqual(fused.getStage('preprocess.cards.fused').executable, true, 'Fused graph has one executable bundle parent');
 assertEqual(fused.getStage('preprocess.cards.fused').outcomeChildren[0].executable, false, 'Fused card child is a validation outcome');
+const fusedStage = fused.getStage('preprocess.cards.fused');
+const corrected = fusedStage.buildCorrectionRequest({ request: { prompt: 'Original snapshot' }, error: { message: 'Missing evidenceRefs' } });
+assertEqual(corrected.prompt.includes('Missing evidenceRefs'), true, 'correction includes concrete validation feedback');
+assertEqual(corrected.prompt.includes('Original snapshot'), true, 'correction preserves source context');
+const omitted = await fusedStage.settleExhausted({ failure: { code: 'RECURSION_PROVIDER_REFUSAL' } });
+assertEqual(omitted.ok, true, 'optional refusal permits downstream work');
+assertEqual(omitted.value.fallback, null, 'explicit refusal never becomes a segmented fallback');
+assertEqual(omitted.value.outcomes.character.reason, 'RECURSION_PROVIDER_REFUSAL', 'omission remains visible');
 
 console.log('preprocess graph tests passed');

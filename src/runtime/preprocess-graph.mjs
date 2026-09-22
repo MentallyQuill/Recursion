@@ -66,7 +66,7 @@ export function createSegmentedCardStages({
       executable: true,
       dependencies: Object.freeze(['preprocess.arbiter']),
       checkpoint: 'durable',
-      failurePolicy: 'continue',
+      failurePolicy: selectedCard?.forcedBy || selectedCardKey(selectedCard) === 'Scene Constraints' ? 'blocking' : 'continue',
       selectedCard,
       buildInputFingerprint(context, dependencies) {
         return {
@@ -180,6 +180,16 @@ export function createFusedCardStages({
         selectedCards: cards
       });
     },
+    buildCorrectionRequest({ request, error }) {
+      const feedback = [
+        'Correct the previous invalid bundle. Return JSON only with shape:',
+        '{"items":[{"family":"requested family","promptText":"grounded instruction","evidenceRefs":["message:0"],"coveredSourceCardIds":[]}]}',
+        `Requested families: ${cards.map(selectedCardKey).join(', ')}.`,
+        `Validation: ${String(error?.message || 'No valid grounded cards were returned.').slice(0, 600)}`,
+        'Use one item per requested family and only evidence references from the supplied snapshot.'
+      ].join('\n');
+      return { ...request, prompt: `${request.prompt || ''}\n\n${feedback}` };
+    },
     async validate(artifact, validationContext) {
       return validationResult(
         await validate(artifact, {
@@ -191,9 +201,22 @@ export function createFusedCardStages({
     },
     async settleExhausted({
       lastArtifact,
+      failure,
       context,
       dependencies
     } = {}) {
+      if (['RECURSION_PROVIDER_REFUSAL', 'RECURSION_PROVIDER_CONTENT_FILTER'].includes(failure?.code)
+          && !cards.some((card) => card?.forcedBy || selectedCardKey(card) === 'Scene Constraints')) {
+        return { ok: true, value: {
+          cards: {}, acceptedFamilies: [], unresolvedFamilies: cards.map(selectedCardKey), fallback: null,
+          outcomes: Object.fromEntries(cards.map((card) => [selectedCardKey(card), { state: 'failed', reason: failure.code }])),
+          diagnostics: [{ code: failure.code, message: 'Optional card work was omitted after a provider refusal.' }]
+        } };
+      }
+      if (['RECURSION_PROVIDER_REFUSAL', 'RECURSION_PROVIDER_CONTENT_FILTER',
+        'RECURSION_RECOVERY_BUDGET_EXHAUSTED', 'RECURSION_OPERATION_DEADLINE'].includes(failure?.code)) {
+        return { ok: false, failure };
+      }
       const validated = validationResult(
         await validate(lastArtifact, {
           context,

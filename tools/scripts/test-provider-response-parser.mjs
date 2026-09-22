@@ -3,6 +3,17 @@ import {
   assertDeepEqual,
   assertEqual
 } from '../../tests/helpers/assert.mjs';
+import { createGenerationRouter } from '../../src/providers.mjs';
+
+const siblingRouter = createGenerationRouter({ client: { generate: async () => ({
+  text: JSON.stringify({ items: [
+    { family: 'Scene Frame', promptText: 'Track the objective.', evidenceRefs: ['message:0'] },
+    { family: 'Active Cast', promptText: [], evidenceRefs: ['message:0'] }
+  ] })
+}) } });
+const siblings = await siblingRouter.generate('fusedCardBundle', {});
+assertEqual(siblings.ok, true, 'valid Fused envelope survives malformed sibling');
+assertEqual(siblings.data.items.length, 1, 'only valid sibling reaches grounding validation');
 import {
   PROVIDER_RESPONSE_ERROR_CODES,
   assertProviderResponseText,
@@ -43,6 +54,12 @@ const envelopeFixtures = [
     expectedStructured: { schema: 'recursion.providerTest.v1', ok: true }
   }
 ];
+assertEqual(getProviderResponseFailure({ choices: [{ message: { refusal: 'Declined' } }] }).code,
+  PROVIDER_RESPONSE_ERROR_CODES.REFUSAL, 'explicit refusal is distinct from malformed output');
+assertEqual(getProviderResponseFailure({ choices: [{ finish_reason: 'content_filter', message: { content: 'partial' } }] }).code,
+  PROVIDER_RESPONSE_ERROR_CODES.CONTENT_FILTER, 'filtered partial content is never accepted');
+assertEqual(getProviderResponseFailure({ text: 'A character refused the invitation.' }), null,
+  'narrative refusal words do not classify a provider refusal');
 for (const fixture of envelopeFixtures) {
   const envelope = normalizeProviderEnvelope(fixture.input);
   if (fixture.expectedText !== undefined) assertEqual(envelope.text, fixture.expectedText, `${fixture.name} text`);

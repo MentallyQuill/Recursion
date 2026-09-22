@@ -8,6 +8,7 @@ import {
   normalizeStageRecord
 } from './checkpoints.mjs';
 import { runModelStageAttempts } from './attempt-policy.mjs';
+import { normalizeOperationBudget, reserveRecoveryCall, remainingExecutionMs, settleOperationClock } from './operation-budget.mjs';
 
 const MODEL_RETRY_ACTIONS = new Set([
   'stop',
@@ -190,6 +191,9 @@ export function createExecutionScheduler({
       const draft = clone(current);
       const updated = await updater(draft);
       if (!updated) return current;
+      if (updated.recoveryBudget && updated.state !== current.state) {
+        updated.recoveryBudget = settleOperationClock(updated.recoveryBudget, updated.state === 'running', Date.parse(now()));
+      }
       const next = normalizePipelineRun({
         ...updated,
         operationId: current.operationId,
@@ -407,6 +411,7 @@ export function createExecutionScheduler({
     let dependencyArtifacts = {};
     let inputHash = '';
     let openedAttempts = null;
+    let validationMs = 0;
 
     try {
       executionToken = createId('stage');
@@ -486,15 +491,56 @@ export function createExecutionScheduler({
           attemptsPerStep: openedAttempts.limit,
           request,
           signal: controller.signal,
-          invoke: (attemptRequest, attemptContext) => invokeStage(
-            attemptRequest,
-            attemptContext.attempt
-          ),
-          validate: (artifact) => validateArtifact(stage, artifact, {
-            context: runtime.context,
-            dependencies: dependencyArtifacts,
-            reuse: false
-          }),
+          invoke: async (attemptRequest, attemptContext) => {
+            if (runtime.manifest.phase !== 'preprocess') return invokeStage(attemptRequest, attemptContext.attempt);
+            const paidRecovery = runtime.manifest.recoveryBudget?.reservationIds.includes(`initial:${stage.id}`)
+              || (stage.id.startsWith('preprocess.cards.segmented.') && Boolean(runtime.manifest.stageRecords['preprocess.cards.fused']));
+            if (stage.failurePolicy === 'continue' && paidRecovery) {
+              const requiredWork = runtime.graph.stages.filter((entry) =>
+                entry.id.startsWith('preprocess.cards.segmented.') && entry.failurePolicy !== 'continue')
+                .map((entry) => runtime.activeStagePromises.get(entry.id)).filter(Boolean);
+              await raceAbort(() => Promise.allSettled(requiredWork), controller.signal);
+            }
+            let reservation;
+            await queueMutation(runtime, (draft) => {
+              if (draft.state !== 'running' || draft.stageRecords[stage.id]?.executionToken !== executionToken) return null;
+              const selectedCount = Math.max(
+                runtime.graph.getStage('preprocess.cards.fused')?.outcomeChildren?.length || 0,
+                runtime.graph.stages.filter((entry) => entry.id.startsWith('preprocess.cards.segmented.')).length
+              );
+              const budget = normalizeOperationBudget(draft.recoveryBudget);
+              budget.recoveryLimit = Math.max(budget.recoveryLimit, 1 + selectedCount);
+              const initialId = `initial:${stage.id}`;
+              const isFallback = stage.id.startsWith('preprocess.cards.segmented.') && Boolean(draft.stageRecords['preprocess.cards.fused']);
+              const first = !budget.reservationIds.includes(initialId);
+              const cost = first && !isFallback ? 0 : 1;
+              const requiredPending = runtime.graph.stages.filter((entry) =>
+                entry.id.startsWith('preprocess.cards.segmented.') && entry.failurePolicy !== 'continue'
+                && !['completed', 'skipped'].includes(draft.stageRecords[entry.id]?.state)).length;
+              const protectedCalls = stage.failurePolicy === 'continue' && requiredPending
+                ? budget.recoveryLimit - budget.recoveryUsed : 0;
+              if (cost && budget.recoveryLimit - budget.recoveryUsed <= protectedCalls) {
+                reservation = { ok: false, code: 'RECURSION_RECOVERY_BUDGET_EXHAUSTED', budget };
+                return draft;
+              }
+              reservation = reserveRecoveryCall(budget, first ? initialId : `${executionToken}:${attemptContext.attempt}`,
+                { cost, now: Date.parse(now()) });
+              draft.recoveryBudget = reservation.budget;
+              return draft;
+            });
+            if (!reservation) throw abortFailure();
+            if (!reservation.ok) throw Object.assign(new Error('The operation recovery allowance is exhausted.'),
+              { code: reservation.code, retryable: false });
+            return invokeStage(attemptRequest, attemptContext.attempt);
+          },
+          validate: async (artifact) => {
+            const started = performance.now();
+            try {
+              return await validateArtifact(stage, artifact, {
+                context: runtime.context, dependencies: dependencyArtifacts, reuse: false
+              });
+            } finally { validationMs += performance.now() - started; }
+          },
           buildCorrectionRequest: typeof stage.buildCorrectionRequest === 'function'
             ? (details) => stage.buildCorrectionRequest({
                 ...details,
@@ -586,12 +632,14 @@ export function createExecutionScheduler({
       const artifact = attemptResult.value;
       const outputHash = await stableHash(artifact);
       const artifactId = `${stage.id}.${executionToken}`;
+      const persistenceStarted = performance.now();
       const savedRef = await repository.savePipelineArtifact(
         runtime.manifest.chatKey,
         runtime.manifest.operationId,
         artifactId,
         artifact
       );
+      const artifactPersistenceMs = performance.now() - persistenceStarted;
       if (!savedRef || savedRef.hash !== outputHash) {
         throw Object.assign(new Error('Pipeline artifact hash verification failed.'), {
           code: 'RECURSION_STAGE_ARTIFACT_WRITE_FAILED'
@@ -647,6 +695,7 @@ export function createExecutionScheduler({
         draft.stageRecords[stage.id] = {
           ...record,
           state: settledFailure ? 'failed' : 'completed',
+          timings: { validationMs, artifactPersistenceMs },
           checkpoint,
           summary,
           failure: settledFailure ? failureRecord(settledFailure) : null,
@@ -781,6 +830,9 @@ export function createExecutionScheduler({
       }
 
       if (ready.length > 0) {
+        if (runtime.manifest.phase === 'preprocess') {
+          ready.sort((a, b) => Number(a.failurePolicy === 'continue') - Number(b.failurePolicy === 'continue'));
+        }
         const wave = ready.map((stage) => {
           const promise = executeStage(runtime, stage);
           runtime.activeStagePromises.set(stage.id, promise);
@@ -838,8 +890,19 @@ export function createExecutionScheduler({
   function activate(runtime) {
     runtime.epoch += 1;
     const epoch = runtime.epoch;
+    clearTimeout(runtime.deadlineTimer);
+    runtime.deadlineTimer = runtime.manifest.recoveryBudget ? setTimeout(() => {
+      if (runtime.epoch !== epoch || runtime.manifest.state !== 'running') return;
+      void pauseRuntime(runtime, 'operation-deadline').catch(() => {
+        for (const controller of runtime.controllers.values()) controller.abort();
+      });
+    }, remainingExecutionMs(runtime.manifest.recoveryBudget, Date.parse(now()))) : null;
+    runtime.deadlineTimer?.unref?.();
     const promise = runOperation(runtime, epoch).finally(() => {
-      if (runtime.promise === promise) runtime.promise = null;
+      if (runtime.promise === promise) {
+        runtime.promise = null;
+        clearTimeout(runtime.deadlineTimer);
+      }
     });
     runtime.promise = promise;
     return promise;
@@ -889,6 +952,10 @@ export function createExecutionScheduler({
     if (!normalized) throw new TypeError('Scheduler requires a valid pipeline manifest.');
     const limit = attemptLimit();
     normalized.stageRecords = graphStageRecords(normalized, graph, limit, now());
+    normalized.recoveryBudget = normalized.phase === 'preprocess' ? normalizeOperationBudget(normalized.recoveryBudget, {
+      windowId: normalized.operationId,
+      deadlineMs: (context?.settings?.operationDeadlineSeconds || 300) * 1000
+    }) : null;
     return {
       manifest: normalized,
       graph,
@@ -930,6 +997,7 @@ export function createExecutionScheduler({
       const runtime = makeRuntime(incoming, graph, context, incoming.provenance);
       runtime.manifest = normalizePipelineRun({
         ...runtime.manifest,
+        recoveryBudget: runtime.manifest.recoveryBudget ? settleOperationClock(runtime.manifest.recoveryBudget, true, Date.parse(now())) : null,
         state: 'running',
         pauseReason: '',
         revision: Number(runtime.manifest.revision || 0) + 1,
@@ -1013,6 +1081,12 @@ export function createExecutionScheduler({
         draft.state = 'running';
         draft.pauseReason = '';
         draft.staleChangedFields = [];
+        if (draft.queuedStageIds.length && ['reprocess', 'full-fresh'].includes(runtime.manifest.pauseReason)) {
+          draft.recoveryBudget = draft.phase === 'preprocess' ? normalizeOperationBudget(null, {
+            windowId: createId('recovery-window'),
+            deadlineMs: draft.recoveryBudget?.deadlineMs
+          }) : null;
+        }
         return draft;
       });
       return activate(runtime);
@@ -1071,6 +1145,10 @@ export function createExecutionScheduler({
       runtime.forcedStageIds = new Set([stageId]);
       runtime.queuedStageIds = new Set();
       await queueMutation(runtime, (draft) => {
+        draft.recoveryBudget = draft.phase === 'preprocess' ? normalizeOperationBudget(null, {
+          windowId: createId('recovery-window'),
+          deadlineMs: draft.recoveryBudget?.deadlineMs
+        }) : null;
         draft.state = 'running';
         draft.pauseReason = '';
         draft.staleChangedFields = [];

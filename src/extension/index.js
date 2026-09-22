@@ -354,8 +354,9 @@ function registerHostEvents(nextRuntime, currentHost = host) {
     });
   }
   for (const eventName of resolveAssistantStreamingEvents(context)) {
-    registerRuntimeHostEvent(eventSource, eventName, () => {
+    registerRuntimeHostEvent(eventSource, eventName, (text) => {
       runtime ||= nextRuntime;
+      nextRuntime.handleHostVisibleToken?.(text);
       return { ok: true, skipped: true, reason: 'post-process-awaiting-final-response' };
     });
   }
@@ -593,6 +594,7 @@ export function bootstrapRecursion() {
     });
     const generationRouter = createGenerationRouter({
       client: nextHost.providerClient,
+      timeoutMs: () => nextHost.settingsStore.get().requestDeadlineSeconds * 1000,
       activity,
       journal: createProviderJournal(storage, nextHost)
     });

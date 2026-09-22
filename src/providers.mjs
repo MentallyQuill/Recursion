@@ -1041,6 +1041,21 @@ function normalizeNestedCardEnvelope(roleId, data, request = {}) {
 }
 
 function normalizeRoleResponse(roleId, data, request = {}) {
+  if (roleId === 'fusedCardBundle' && plainObject(data) && Array.isArray(data.items)) {
+    const requested = new Set((request.requestedCards || []).map((card) => card.family));
+    const counts = new Map();
+    for (const item of data.items) counts.set(item?.family, (counts.get(item?.family) || 0) + 1);
+    const rejections = [];
+    const items = data.items.filter((item) => {
+      const reason = !validateCardBundlePayload({ items: [item] }) ? 'invalid-item-shape'
+        : counts.get(item.family) > 1 ? 'duplicate-family'
+        : requested.size && !requested.has(item.family) ? 'unrequested-family' : '';
+      if (!reason) return true;
+      if (rejections.length < 40) rejections.push({ family: String(item?.family || '').slice(0, 120), reason });
+      return false;
+    });
+    return { data: { ...data, items }, diagnostics: { bundleItemRejections: rejections } };
+  }
   const nestedCard = normalizeNestedCardEnvelope(roleId, data, request);
   if (nestedCard) return nestedCard;
   return {
@@ -1436,6 +1451,11 @@ function providerResponseFailureError(error, enriched = {}) {
       providerDiagnostics
     });
   }
+  if ([PROVIDER_RESPONSE_ERROR_CODES.REFUSAL, PROVIDER_RESPONSE_ERROR_CODES.CONTENT_FILTER].includes(code)) {
+    throw providerError(code === PROVIDER_RESPONSE_ERROR_CODES.REFUSAL
+      ? 'RECURSION_PROVIDER_REFUSAL' : 'RECURSION_PROVIDER_CONTENT_FILTER',
+    'The provider declined this request.', { retryable: false, providerDiagnostics });
+  }
   if (code === PROVIDER_RESPONSE_ERROR_CODES.REASONING_ONLY) {
     throw providerError('RECURSION_PROVIDER_REASONING_ONLY', 'Provider returned hidden reasoning without visible JSON content.', {
       retryable: false
@@ -1550,7 +1570,8 @@ function normalizeProviderResponse(response, enriched) {
     providerTitle: enriched.providerSource || 'Provider',
     maxTokens: providerRequestMaxTokens(enriched)
   });
-  if (failure?.code === PROVIDER_RESPONSE_ERROR_CODES.TOKEN_LIMIT
+  if ([PROVIDER_RESPONSE_ERROR_CODES.TOKEN_LIMIT, PROVIDER_RESPONSE_ERROR_CODES.REFUSAL,
+    PROVIDER_RESPONSE_ERROR_CODES.CONTENT_FILTER].includes(failure?.code)
       || (!envelope.structured && !String(envelope.text || '').trim())) {
     if (failure) {
       providerResponseFailureError({ code: failure.code, details: failure }, enriched);
@@ -1726,6 +1747,7 @@ function sanitizedError(error, request = {}) {
     : [];
   return sanitize({
     code: scrubKnownRequestText(rawCode, request),
+    ...(Number.isFinite(normalizedFailure.retryAfterMs) ? { retryAfterMs: normalizedFailure.retryAfterMs } : {}),
     message: truncate(compact(message), 300),
     retryable: originalCode.startsWith('RECURSION_')
       ? retryableError(error)
@@ -1864,20 +1886,26 @@ function timeoutError(timeoutMs) {
   });
 }
 
-async function withTimeout(operation, request, timeoutMs, externalSignal = null) {
+async function withTimeout(operation, request, timeoutMs, externalSignal = null, deferUntilDispatch = false) {
   if (externalSignal?.aborted) throw abortError();
 
   const controller = typeof AbortController === 'function' ? new AbortController() : null;
   const requestWithSignal = controller ? { ...request, signal: controller.signal } : { ...request };
   let timeoutId = null;
   let removeAbortListener = () => {};
+  let settled = false;
 
   const timeoutPromise = Number.isFinite(timeoutMs) && timeoutMs > 0
     ? new Promise((_, reject) => {
-      timeoutId = setTimeout(() => {
-        controller?.abort?.();
-        reject(timeoutError(timeoutMs));
-      }, timeoutMs);
+      const startDeadline = () => {
+        if (settled || timeoutId !== null) return;
+        timeoutId = setTimeout(() => {
+          reject(timeoutError(timeoutMs));
+          controller?.abort?.();
+        }, timeoutMs);
+      };
+      if (deferUntilDispatch) requestWithSignal.onProviderDispatch = startDeadline;
+      else startDeadline();
     })
     : null;
 
@@ -1899,6 +1927,7 @@ async function withTimeout(operation, request, timeoutMs, externalSignal = null)
     if (abortPromise) racers.push(abortPromise);
     return await Promise.race(racers);
   } finally {
+    settled = true;
     if (timeoutId) clearTimeout(timeoutId);
     removeAbortListener();
   }
@@ -2188,7 +2217,10 @@ export function createProviderClient({
             effectiveProfileConcurrency(readSettings(settingsStore), enriched.connectionProfileId));
         }
       },
-      { signal: enriched.signal ?? null, concurrencyLimit, onDispatch: (timing) => { dispatchTiming = timing; } }
+      { signal: enriched.signal ?? null, concurrencyLimit, onDispatch: (timing) => {
+        dispatchTiming = timing;
+        enriched.onProviderDispatch?.();
+      } }
     );
   }
 
@@ -2239,10 +2271,10 @@ export function createProviderClient({
     return providerModelStatus(config, { ...options, host });
   }
 
-  return Object.freeze({ generate, batch, listProfiles, status });
+  return Object.freeze({ generate, batch, listProfiles, status, dispatchTiming: true });
 }
 
-export function createGenerationRouter({ client, activity = null, journal = null, timeoutMs = null } = {}) {
+export function createGenerationRouter({ client, activity = null, journal = null, timeoutMs = 180000 } = {}) {
   if (!client || typeof client.generate !== 'function') {
     throw new Error('createGenerationRouter requires a client with generate(roleId, request).');
   }
@@ -2259,7 +2291,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
     const lane = laneName(requestLane(roleId, request));
     const started = Date.now();
     const startedAt = nowIso();
-    const effectiveTimeoutMs = options.timeoutMs ?? timeoutMs;
+    const effectiveTimeoutMs = options.timeoutMs ?? (typeof timeoutMs === 'function' ? timeoutMs() : timeoutMs);
     let runId = String(options.runId || request.runId || makeId('provider'));
     let lastDiagnostics = diagnosticsBase({ roleId, lane, request, runId, startedAt, timeoutMs: effectiveTimeoutMs });
     const nestedActivityLifecycle = options.activityLifecycle === 'nested';
@@ -2314,7 +2346,8 @@ export function createGenerationRouter({ client, activity = null, journal = null
         (requestWithSignal) => client.generate(roleId, requestWithSignal),
         request,
         effectiveTimeoutMs,
-        composedExternalSignal.signal || null
+        composedExternalSignal.signal || null,
+        client.dispatchTiming === true
       );
       const parsed = parseProviderStructuredOutput(raw);
       const normalized = normalizeRoleResponse(roleId, parsed.data, request);
@@ -2406,7 +2439,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
   async function batch(requests = [], options = {}) {
     const rawRequests = Array.isArray(requests) ? requests : [];
     const batchRunId = String(options.runId || makeId('provider-batch'));
-    const effectiveTimeoutMs = options.timeoutMs ?? timeoutMs;
+    const effectiveTimeoutMs = options.timeoutMs ?? (typeof timeoutMs === 'function' ? timeoutMs() : timeoutMs);
     const results = new Array(rawRequests.length);
 
     function fallbackBatchRequest(entry) {

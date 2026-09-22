@@ -125,6 +125,7 @@ function summarizeExecutionStage(record) {
     attemptCount: boundedInteger(source.attempts?.total, 100000),
     attemptLimit: boundedInteger(source.attempts?.limit, 100000),
     elapsedMs: elapsedMilliseconds(source.startedAt, source.updatedAt),
+    ...(source.timings ? { timings: safeDiagnosticValue(source.timings) } : {}),
     failureClass: safeText(source.failure?.failureClass, 80),
     artifactHash: safeText(checkpoint.outputHash || artifactRef.hash, 180),
     artifactBytes: boundedInteger(
@@ -144,6 +145,13 @@ export function summarizeExecutionForDiagnostics(manifest) {
   return {
     operationId: safeText(source.operationId, 180),
     operationPhase: safeText(source.phase, 80),
+    ...(source.pipelineDecision ? { pipelineDecision: safeDiagnosticValue(source.pipelineDecision) } : {}),
+    ...(source.recoveryBudget ? { recoveryBudget: {
+      recoveryUsed: boundedInteger(source.recoveryBudget.recoveryUsed, 100),
+      recoveryLimit: boundedInteger(source.recoveryBudget.recoveryLimit, 100),
+      elapsedActiveMs: boundedInteger(source.recoveryBudget.elapsedActiveMs),
+      deadlineMs: boundedInteger(source.recoveryBudget.deadlineMs)
+    } } : {}),
     operationState: safeText(source.state, 40),
     turnKeyHash: safeText(source.turnKeyHash, 180),
     hostOwned: source.hostOwned === true,
@@ -404,6 +412,7 @@ export function buildDiagnosticsPayload({
     runtime: {
       activeRunId: runtime.activeRunId || null,
       hostGenerationActive: Boolean(runtime.hostGenerationActive),
+      ...(runtime.turnTiming ? { turnTiming: safeDiagnosticValue(runtime.turnTiming) } : {}),
       activity: mapActivityEntry(runtime.activity),
       activityHistory: asArray(runtime.activityHistory).slice(-20).map(mapActivityEntry).filter(Boolean),
       freshNextGeneration: runtime.freshNextGeneration || null,

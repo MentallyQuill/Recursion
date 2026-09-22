@@ -966,6 +966,7 @@ for (const hostExcluded of [false, true]) {
 function localFallbackCardRouter(diagnostics = ['unit-local-fallback-cards']) {
   return {
     async generate(roleId, request) {
+      if (CARD_CATALOG.some((entry) => entry.role === roleId)) return cardProviderResponse(roleId, request);
       if (roleId === 'guidanceComposer') {
         return {
           ok: true,
@@ -5295,15 +5296,12 @@ for (const scenario of [
       }
     }
   });
-  await runtime.prepareForGeneration({ userMessage: 'Manual forced failure.' });
+  const outcome = await runtime.prepareForGeneration({ userMessage: 'Manual forced failure.' });
   const view = runtime.view();
-  assert(view.lastHand.cards.some((card) => card.family === 'Open Threads'), 'valid forced family remains selected');
-  assert(JSON.stringify(view.lastPacket).includes('Open Threads'), 'valid forced family reaches the packet');
-  assert(
-    view.lastPacket.omissions.some((entry) => entry.family === 'Scene Frame' && entry.reason === 'manual-forced-provider-failed'),
-    'failed forced family reaches packet omissions'
-  );
-  assert(JSON.stringify(view.lastPlan).includes('manual-forced-card:Scene Frame'), 'failed forced family is diagnosable');
+  assertEqual(outcome.ok, false, 'unresolved forced coverage blocks prompt installation');
+  assertEqual(view.execution.stageRecords['preprocess.cards.segmented.open-threads'].state, 'completed', 'valid forced sibling remains checkpointed');
+  assertEqual(view.execution.stageRecords['preprocess.cards.segmented.scene-frame'].state, 'failed', 'required failure remains visible');
+  assertEqual(view.lastPacket, null, 'incomplete required coverage never reaches the primary prompt');
 }
 
 {
@@ -6333,9 +6331,11 @@ for (const scenario of [
   assertDeepEqual(certificationCalls.map((entry) => entry.roleId), [
     'providerTest',
     'sceneFrameCard',
+    'providerTest',
+    'providerTest',
     'fusedCardBundle'
-  ], 'runtime profile certification runs the three staged checks');
-  assertDeepEqual(certificationCalls.map((entry) => entry.request.responseLength), [900, 900, 1792], 'certification uses thinking-safe bounded stage budgets');
+  ], 'runtime profile certification includes the bounded concurrency pair');
+  assertDeepEqual(certificationCalls.map((entry) => entry.request.responseLength), [900, 900, 900, 900, 1792], 'certification uses thinking-safe bounded stage budgets');
   assert(certificationCalls.every((entry) => entry.request.lane === 'utility'), 'certification targets the selected lane');
   assert(certificationCalls.every((entry) => entry.request.reasoningCategory === 'provider-test'), 'certification labels diagnostic provider calls');
   assert(certificationCalls.every((entry) => entry.request.reasoningIntent === 'minimal'), 'certification always uses minimal provider reasoning');
@@ -6378,7 +6378,7 @@ for (const scenario of [
   const result = await runtime.testProvider('utility', { scope: 'segmented' });
   assertEqual(result.ok, true, 'runtime Segmented-only profile certification succeeds');
   assertEqual(result.certification.status, 'partial', 'runtime Segmented-only certification is Segmented-ready');
-  assertDeepEqual(routerCalls, ['providerTest', 'sceneFrameCard'], 'runtime Segmented-only certification makes no Fused call');
+  assertDeepEqual(routerCalls, ['providerTest', 'sceneFrameCard', 'providerTest', 'providerTest'], 'runtime Segmented-only certification checks concurrency without a Fused call');
   assertEqual(settingsStore.get().providers.utility.certification.checks.fusedCards, 'not-run', 'runtime persists an explicit untested Fused check');
 }
 
@@ -6403,7 +6403,7 @@ for (const scenario of [
   const [firstResult, secondResult] = await Promise.all([first, second]);
   assertEqual(firstResult.ok, true, 'first single-flight profile certification succeeds');
   assertEqual(secondResult.ok, true, 'duplicate single-flight certification shares success');
-  assertEqual(routerCalls.length, 3, 'duplicate same-lane certification runs one staged sequence');
+  assertEqual(routerCalls.length, 5, 'duplicate same-lane certification runs one bounded sequence');
 }
 
 

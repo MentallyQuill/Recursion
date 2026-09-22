@@ -130,6 +130,8 @@ assertDeepEqual(run, {
   frontierStageIds: [],
   queuedStageIds: [],
   stageRecords: {},
+  recoveryBudget: null,
+  pipelineDecision: null,
   createdAt: '2026-07-29T12:00:00.000Z',
   updatedAt: '2026-07-29T12:00:00.000Z'
 }, 'createPipelineRun creates the canonical paused V2 manifest');
@@ -161,6 +163,7 @@ assertDeepEqual(stageRecord, {
   state: 'pending',
   checkpoint: null,
   summary: null,
+  timings: null,
   failure: null,
   diagnosticCodes: [],
   lastAttemptAction: null,

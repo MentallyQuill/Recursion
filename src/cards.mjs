@@ -1223,7 +1223,9 @@ export function cardsFromFusedProviderResult(result, context = {}) {
     const item = asObject(rawItem);
     const catalog = resolveCatalog({ family: item.family }, { strict: false });
     const diagnosticName = cleanOptionalText(item.family || 'unknown', 80) || 'unknown';
-    if (!catalog || !requested.has(catalog.family) || seen.has(catalog.family)) {
+    const duplicate = catalog && data.items.filter((candidate) =>
+      resolveCatalog({ family: candidate?.family }, { strict: false })?.family === catalog.family).length > 1;
+    if (!catalog || !requested.has(catalog.family) || seen.has(catalog.family) || duplicate) {
       if (catalog?.family) output.rejectedFamilies.push(catalog.family);
       output.diagnostics.push(`fused-item-rejected:${diagnosticName}`);
       continue;

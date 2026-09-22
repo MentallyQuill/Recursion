@@ -60,6 +60,7 @@ import { normalizeRetentionSettings } from './retention-policy.mjs';
 import { asObject } from './safe-values.mjs';
 import { createPostProcessRuntime } from './post-process-runtime.mjs';
 import { createPipelineRun } from './execution/checkpoints.mjs';
+import { settleOperationClock } from './execution/operation-budget.mjs';
 import { createExecutionScheduler } from './execution/scheduler.mjs';
 import { createExecutionGraph } from './execution/stage-registry.mjs';
 import {
@@ -123,6 +124,8 @@ import {
 } from './runtime/prepared-generation.mjs';
 import { createRuntimeRunState } from './runtime/run-state.mjs';
 import { resolveEffectivePipelineMode } from './runtime/pipeline-policy.mjs';
+import { compactArbiterScope } from './runtime/preprocess-policy.mjs';
+import { createTurnTimingTracker } from './runtime/turn-timing.mjs';
 import {
   classifyGeneration,
   createTurnIdentity,
@@ -231,6 +234,7 @@ export function preserveFusedProviderFailure(providerResult = {}) {
     code,
     ...(source.category ? { category: safeText(source.category, 100) } : {}),
     retryable: source.retryable === true,
+    ...(Number.isFinite(providerResult?.error?.retryAfterMs) ? { retryAfterMs: providerResult.error.retryAfterMs } : {}),
     message: safeText(source.message || 'Fused provider request failed.', 500)
   };
 }
@@ -293,7 +297,10 @@ export function validateFusedProviderResult(providerResult = {}, {
       code: 'RECURSION_FUSED_ZERO_USEFUL_CARDS',
       category: 'validation',
       retryable: true,
-      message: 'Fused bundle produced no useful cards.'
+      message: `Fused bundle produced no useful cards. ${
+        (providerResult?.diagnostics?.bundleItemRejections || [])
+          .slice(0, 8).map((item) => `${safeText(item.family, 60)}: ${safeText(item.reason, 60)}`).join('; ')
+      } ${parsed.diagnostics.slice(0, 8).map((entry) => safeText(entry, 80)).join('; ')}`.trim()
     }
   };
 }
@@ -340,6 +347,7 @@ function cacheProviderSettingsSignature(provider = {}) {
       topP: numberOr(samplers.topP, 0)
     },
     outputTokenCeiling: numberOr(source.outputTokenCeiling, 0),
+    maxConcurrentRequests: numberOr(source.maxConcurrentRequests, 2),
     configRevision: numberOr(source.configRevision, 0)
   };
 }
@@ -443,6 +451,8 @@ function cacheSettingsSignature(settings = {}) {
     minCards: normalized.minCards,
     maxCards: normalized.maxCards,
     modelAttemptsPerStep: normalized.modelAttemptsPerStep,
+    requestDeadlineSeconds: normalized.requestDeadlineSeconds,
+    operationDeadlineSeconds: normalized.operationDeadlineSeconds,
     reasoningLevel: normalized.reasoningLevel,
     promptFootprint: normalized.promptFootprint,
     focus: normalized.focus,
@@ -1470,6 +1480,8 @@ export function preparedGenerationSettingsSignature(settings = {}) {
     minCards: normalized.minCards,
     maxCards: normalized.maxCards,
     modelAttemptsPerStep: normalized.modelAttemptsPerStep,
+    requestDeadlineSeconds: normalized.requestDeadlineSeconds,
+    operationDeadlineSeconds: normalized.operationDeadlineSeconds,
     reasoningLevel: normalized.reasoningLevel,
     promptFootprint: normalized.promptFootprint,
     focus: normalized.focus,
@@ -1735,9 +1747,10 @@ function safeProviderCertification(value) {
     checks: {
       connectivity: safeText(checks.connectivity || 'not-run', 40) || 'not-run',
       singleCard: safeText(checks.singleCard || 'not-run', 40) || 'not-run',
-      fusedCards: safeText(checks.fusedCards || 'not-run', 40) || 'not-run'
+      fusedCards: safeText(checks.fusedCards || 'not-run', 40) || 'not-run',
+      concurrency: safeText(checks.concurrency || 'not-run', 40) || 'not-run'
     },
-    safeConcurrency: 1,
+    safeConcurrency: Math.min(3, Math.max(1, numberOr(source.safeConcurrency, 1))),
     diagnosticCodes: safeStringList(source.diagnosticCodes, 80).slice(0, 12),
     ...(safeText(source.compactError || '', 300) ? { compactError: safeText(source.compactError || '', 300) } : {})
   };
@@ -1761,6 +1774,7 @@ function safeProviderSettingsView(provider, settings, lane, capabilityResolver =
       topP: numberOr(samplerOverrides.topP, 0.95)
     },
     outputTokenCeiling: numberOr(source.outputTokenCeiling, 8192),
+    maxConcurrentRequests: numberOr(source.maxConcurrentRequests, 2),
     configRevision: numberOr(source.configRevision, 0),
     certification: safeProviderCertification(source.certification),
     capability: sanitizeProviderCapability(capabilityResolver(settings, lane, 'prompt-packet'))
@@ -1784,6 +1798,9 @@ function safeSettingsView(settings, capabilityResolver = providerCapability) {
     minCards: cardBudget.minCards,
     maxCards: cardBudget.maxCards,
     reasoningLevel: safeText(source.reasoningLevel || 'medium', 40),
+    modelAttemptsPerStep: normalizedSettings.modelAttemptsPerStep,
+    requestDeadlineSeconds: normalizedSettings.requestDeadlineSeconds,
+    operationDeadlineSeconds: normalizedSettings.operationDeadlineSeconds,
     promptFootprint: safeText(source.promptFootprint || 'compact', 40),
     focus: safeText(source.focus || 'balanced', 80),
     reasonerUse: safeText(source.reasonerUse || 'auto', 40),
@@ -2374,6 +2391,7 @@ export function createRecursionRuntime({
     };
   }
   let hostStopCleanupPromise = null;
+  const turnTiming = createTurnTimingTracker();
   let stopGenerationPromise = null;
   let recursionStopRequest = null;
   let lastPreparedGeneration = null;
@@ -3183,6 +3201,8 @@ export function createRecursionRuntime({
       'focus',
       'promptFootprint',
       'modelAttemptsPerStep',
+      'requestDeadlineSeconds',
+      'operationDeadlineSeconds',
       'injection',
       'ui',
       'postProcess',
@@ -3309,6 +3329,7 @@ export function createRecursionRuntime({
     };
     return {
       activeRunId: state.activeRunId,
+      turnTiming: turnTiming.snapshot(),
       hostGenerationActive: state.hostGenerationActive,
       activeAttempt: state.activeAttempt,
       lastPreparedGeneration,
@@ -3328,6 +3349,8 @@ export function createRecursionRuntime({
             chatKey: safeText(executionView.chatKey || '', 180),
             phase: safeText(executionView.phase || '', 80),
             state: safeText(executionView.state || '', 40),
+            pipelineDecision: executionView.pipelineDecision ? { ...executionView.pipelineDecision } : null,
+            recoveryBudget: executionView.recoveryBudget ? { ...executionView.recoveryBudget, reservationIds: undefined } : null,
             frontierStageIds: safeStringList(executionView.frontierStageIds, 180),
             resumable: executionView.state === 'paused'
               && !String(executionView.pauseReason || '').startsWith('stage-failed:')
@@ -3632,6 +3655,7 @@ export function createRecursionRuntime({
   }
 
   async function handleChatChanged() {
+    turnTiming.mark(turnTiming.snapshot()?.attemptId, 'invalidate', { reason: 'chat-changed' });
     return clearForHostEvent({
       idPrefix: 'chat-change',
       reason: 'chat-changed',
@@ -3642,6 +3666,7 @@ export function createRecursionRuntime({
   }
 
   async function handleSourceChanged() {
+    turnTiming.mark(turnTiming.snapshot()?.attemptId, 'invalidate', { reason: 'source-changed' });
     return clearForHostEvent({
       idPrefix: 'source-change',
       reason: 'source-changed',
@@ -3653,6 +3678,7 @@ export function createRecursionRuntime({
   }
 
   async function handleHostGenerationStopped(details = {}) {
+    turnTiming.mark(turnTiming.snapshot()?.attemptId, 'invalidate', { reason: 'generation-stopped' });
     if (hostStopCleanupPromise) return hostStopCleanupPromise;
     hostStopCleanupPromise = (async () => {
       const source = asObject(details);
@@ -3738,7 +3764,22 @@ export function createRecursionRuntime({
     return hostStopCleanupPromise;
   }
 
+  function recordTurnTiming(event) {
+    const timing = turnTiming.snapshot();
+    if (!timing?.chatKey) return;
+    void appendJournalSafe(timing.attemptId, timing.chatKey, {
+      event: `turn.timing.${event}`, severity: 'info', summary: 'Turn latency measured.',
+      runId: timing.attemptId, details: timing
+    });
+  }
+
+  function handleHostVisibleToken(text) {
+    if (typeof text !== 'string' || !text.trim() || !runState.current().hostGenerationActive || postProcessRuntime.postProcessRunning()) return;
+    if (turnTiming.mark(turnTiming.snapshot()?.attemptId, 'first-visible-token')) recordTurnTiming('first-visible-token');
+  }
+
   function handleHostGenerationEnded() {
+    if (turnTiming.mark(turnTiming.snapshot()?.attemptId, 'completed')) recordTurnTiming('completed');
     clearPendingProseEnhancement();
     setHostGenerationActive(false);
     runState.clearAttempt?.();
@@ -5984,7 +6025,7 @@ export function createRecursionRuntime({
           `Settings: ${JSON.stringify(arbiterSafeSettings(settings, runtimeProviderCapability))}`,
           behaviorPolicyPromptLines(influencePolicyForSettings(settings)),
           `Provider health: ${JSON.stringify(providerHealthForArbiter(settings, runtimeProviderCapability))}`,
-          `Card scope: ${JSON.stringify(cardScope)}`,
+          `Card scope: ${JSON.stringify(compactArbiterScope(cardScope))}`,
           cardScopePolicyLine(cardScope),
           ...(usesCardDeckEligibility(settings)
             ? [`Card Deck eligibility is a hard whitelist. Allowed families: ${JSON.stringify(eligibility.allowedFamilies)}. Inactive families are unavailable.`]
@@ -6031,6 +6072,7 @@ export function createRecursionRuntime({
     const fusedLane = fusedCardBundleLaneForSettings(settings, runtimeProviderCapability);
     const pipelineDecision = resolveEffectivePipelineMode({
       requestedMode: settings.pipelineMode,
+      selectedProfileId: settings.providers?.[fusedLane]?.connectionProfileId,
       selectedCapability: runtimeProviderCapability(settings, fusedLane, 'prompt-packet')
     });
     if (pipelineDecision.effectiveMode === 'fused' && typeof generationRouter.generate === 'function') {
@@ -6464,7 +6506,7 @@ export function createRecursionRuntime({
           `Settings: ${JSON.stringify(arbiterSafeSettings(settings, runtimeProviderCapability))}`,
           behaviorPolicyPromptLines(influencePolicyForSettings(settings)),
           `Provider health: ${JSON.stringify(providerHealthForArbiter(settings, runtimeProviderCapability))}`,
-          `Card scope: ${JSON.stringify(cardScope)}`,
+          `Card scope: ${JSON.stringify(compactArbiterScope(cardScope))}`,
           cardScopePolicyLine(cardScope),
           ...(usesCardDeckEligibility(settings)
             ? [`Card Deck eligibility is a hard whitelist. Allowed families: ${JSON.stringify(eligibility.allowedFamilies)}. Inactive families are unavailable.`]
@@ -7647,6 +7689,7 @@ export function createRecursionRuntime({
     const fusedLane = fusedCardBundleLaneForSettings(settings, runtimeProviderCapability);
     const pipelineDecision = resolveEffectivePipelineMode({
       requestedMode: settings.pipelineMode,
+      selectedProfileId: settings.providers?.[fusedLane]?.connectionProfileId,
       selectedCapability: runtimeProviderCapability(settings, fusedLane, 'prompt-packet')
     });
     const fallbackPlan = localFallbackPlan(snapshot, settings);
@@ -7855,6 +7898,7 @@ export function createRecursionRuntime({
       hostOwned: hostGeneration === true,
       nativeGenerationType
     });
+    manifest.pipelineDecision = context.pipelineDecision;
     updateTurnScope(turnIdentity, {
       generationClassification: diagnosticClassification,
       operationId,
@@ -8200,6 +8244,8 @@ export function createRecursionRuntime({
   }
 
   async function prepareForGeneration({ userMessage = '', refreshReason = '', hostGeneration = false, generationType = '' } = {}) {
+    const timingAttemptId = hostGeneration ? makeId('timing') : '';
+    if (timingAttemptId) turnTiming.start(timingAttemptId);
     const settings = settingsStore.get();
     const hostGenerationType = safeText(generationType, 40).toLowerCase();
     const explicitSwipe = hostGeneration === true && hostGenerationType === 'swipe';
@@ -8290,6 +8336,14 @@ export function createRecursionRuntime({
         });
       } else if (hostGeneration === true) {
         postProcessRuntime.cancelPostProcess('preprocess-not-ready');
+      }
+      if (timingAttemptId && durableResult?.continuePrimaryGeneration !== false && durableResult?.ok === true) {
+        turnTiming.mark(timingAttemptId, 'prepared', {
+          operationId: durableResult.execution?.operationId || executionView?.operationId,
+          chatKey: durableResult.execution?.chatKey || executionView?.chatKey,
+          turnKeyHash: preprocessTurnKeyHash
+        });
+        recordTurnTiming('prepared');
       }
       return durableResult;
     }
@@ -8513,6 +8567,10 @@ export function createRecursionRuntime({
         revision: Number(manifest.revision || 0) + 1,
         state: 'paused',
         pauseReason: 'restored-after-reload',
+        recoveryBudget: manifest.recoveryBudget
+          ? settleOperationClock(manifest.recoveryBudget, false,
+              Number.isFinite(Date.parse(manifest.updatedAt)) ? Date.parse(manifest.updatedAt) : manifest.recoveryBudget.activeSince)
+          : null,
         frontierStageIds: interruptedStageIds,
         stageRecords,
         updatedAt: nowIso()
@@ -8964,6 +9022,7 @@ export function createRecursionRuntime({
     handleLatestAssistantSwipeRetry: markLatestAssistantSwipeRetry,
     handleHostGenerationStopped,
     handleHostGenerationEnded,
+    handleHostVisibleToken,
     postProcessPending: postProcessRuntime.postProcessPending,
     postProcessRunning: postProcessRuntime.postProcessRunning,
     preparePostProcessTrigger: postProcessRuntime.preparePostProcessTrigger,

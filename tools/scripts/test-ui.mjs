@@ -4011,6 +4011,8 @@ try {
     maxCards: 12,
     promptFootprint: 'rich',
     focus: 'character',
+    requestDeadlineSeconds: 180,
+    operationDeadlineSeconds: 300,
     modelAttemptsPerStep: 4,
     ui: {
       progressChildVisibleLimit: 7,

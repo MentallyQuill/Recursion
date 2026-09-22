@@ -142,6 +142,10 @@ export function providerFailure(error = {}, context = {}) {
       suggestedAction: 'Check the provider credentials or connection profile.'
     });
   }
+  if (['RECURSION_PROVIDER_REFUSAL', 'RECURSION_PROVIDER_CONTENT_FILTER'].includes(code)) {
+    return createFailure({ code, stage, category: 'provider-request',
+      message: 'The provider declined this request.', retryable: false });
+  }
   if (code === 'RECURSION_PROVIDER_TIMEOUT' || /timed?\s*out|timeout/.test(lower)) {
     return createFailure({
       code: 'RECURSION_PROVIDER_TIMEOUT',

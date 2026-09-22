@@ -1,7 +1,9 @@
 export const PROVIDER_RESPONSE_ERROR_CODES = Object.freeze({
   EMPTY_CONTENT: 'provider_empty_content',
   REASONING_ONLY: 'provider_reasoning_only',
-  TOKEN_LIMIT: 'provider_token_limit'
+  TOKEN_LIMIT: 'provider_token_limit',
+  REFUSAL: 'provider_refusal',
+  CONTENT_FILTER: 'provider_content_filter'
 });
 
 function isObject(value) {
@@ -270,6 +272,18 @@ export function describeProviderResponse(value = '') {
 export function getProviderResponseFailure(value = '', options = {}) {
   const providerTitle = cleanProviderTitle(options.providerTitle || options.title || options.provider || '');
   const description = describeProviderResponse(value);
+  const message = value?.choices?.[0]?.message || value?.message || value;
+  const refusal = typeof message?.refusal === 'string' && message.refusal.trim()
+    || [value?.content, message?.content, ...(Array.isArray(value?.output) ? value.output : []).map((item) => item?.content)]
+      .some((parts) => Array.isArray(parts) && parts.some((part) => part?.type === 'refusal'));
+  const filtered = collectProviderResponseFinishReasons(value).some((reason) =>
+    ['content_filter', 'safety', 'blocklist', 'prohibited_content'].includes(reason));
+  if (refusal || filtered) return {
+    ...description,
+    code: filtered ? PROVIDER_RESPONSE_ERROR_CODES.CONTENT_FILTER : PROVIDER_RESPONSE_ERROR_CODES.REFUSAL,
+    providerTitle,
+    message: `${providerTitle} declined this request.`
+  };
   const tokenReason = collectProviderResponseFinishReasons(value).find(isProviderResponseTokenLimitFinishReason) || '';
   if (tokenReason) {
     const maxTokens = Math.max(0, Number(options.maxTokens || 0) || 0);

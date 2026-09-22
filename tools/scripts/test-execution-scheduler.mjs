@@ -183,6 +183,20 @@ function createClock() {
   return () => `2026-07-29T12:00:${String(tick++).padStart(2, '0')}.000Z`;
 }
 
+{
+  const repository = createRepository();
+  let calls = 0;
+  const failing = (id) => ({ ...stage(id, [], async () => { calls += 1; return null; }),
+    buildCorrectionRequest: ({ request }) => request });
+  const graph = createExecutionGraph({ stages: [failing('a'), failing('b')] });
+  const scheduler = createExecutionScheduler({ repository, attemptsPerStep: 5 });
+  const result = await scheduler.start({ manifest: manifest({ operationId: 'shared-recovery' }), graph });
+  assertEqual(calls, 3, 'concurrent stages share exactly one additional recovery dispatch');
+  assertEqual(result.recoveryBudget.recoveryUsed, 1, 'recovery spending is persisted');
+  await scheduler.resume({ operationId: 'shared-recovery', graph, provenance });
+  assertEqual(calls, 3, 'Resume cannot replenish exhausted recovery');
+}
+
 function createIds() {
   let id = 0;
   return (prefix = 'id') => `${prefix}-${++id}`;

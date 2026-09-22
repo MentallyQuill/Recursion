@@ -1,4 +1,5 @@
 import { compareRunProvenance } from './provenance.mjs';
+import { normalizeOperationBudget } from './operation-budget.mjs';
 
 export const QUEUED_REPROCESS_SCHEMA = 'recursion.queuedReprocess.v2';
 export const QUEUED_REPROCESS_ENVELOPE_SCHEMA = 'recursion.queuedReprocessEnvelope.v2';
@@ -212,9 +213,14 @@ export function bindQueuedReprocess({
     };
   }
 
+  const windowId = `reprocess:${normalized.queuedAt}`;
+  const recoveryBudget = manifest.phase !== 'preprocess' ? null : manifest.recoveryBudget?.windowId === windowId
+    ? manifest.recoveryBudget
+    : normalizeOperationBudget(null, { windowId, deadlineMs: manifest.recoveryBudget?.deadlineMs });
   return {
     manifest: {
       ...baseManifest,
+      recoveryBudget,
       queuedStageIds
     },
     intent: normalized.mode === 'stage'

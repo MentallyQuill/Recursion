@@ -1,4 +1,5 @@
 import { nowIso, redact, stableStringify } from './core.mjs';
+import { pipelineExecutionLabel } from './runtime/pipeline-policy.mjs';
 import { downloadDiagnostics } from './ui/diagnostics-download.mjs';
 import {
   defaultCardScope,
@@ -232,6 +233,9 @@ const INJECTION_DEPTH_OPTIONS = Object.freeze([
   ...Array.from({ length: 11 }, (_, index) => [String(index), String(index)])
 ]);
 const SETTINGS_AUTOSAVE_DATASETS = Object.freeze([
+  'recursionSettingModelAttemptsPerStep',
+  'recursionSettingRequestDeadlineSeconds',
+  'recursionSettingOperationDeadlineSeconds',
   'recursionSettingStrength',
   'recursionSettingMinCards',
   'recursionSettingMaxCards',
@@ -251,6 +255,7 @@ const SETTINGS_AUTOSAVE_DATASETS = Object.freeze([
   'recursionSettingIncludeExcerpts'
 ]);
 const PROVIDER_AUTOSAVE_DATASETS = Object.freeze([
+  'recursionProviderMaxConcurrentRequests',
   'recursionProviderProfile',
   'recursionProviderPresetMode',
   'recursionProviderInstructMode',
@@ -1958,6 +1963,8 @@ function renderHandDropdown(panel, view, model, options = {}) {
     }),
     packetButton
   ]));
+  const pipelineLabel = pipelineExecutionLabel(view.execution?.pipelineDecision);
+  if (pipelineLabel) panel.appendChild(el('p', { className: 'recursion-brief-summary', text: pipelineLabel }));
   const packetPreviewNode = previousPacketPreviewNode || el('pre', {
     className: 'recursion-packet-text',
     dataset: { recursionPromptPacketPreview: '' }
@@ -2973,6 +2980,14 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
     SETTINGS_TOOLTIPS.modelAttemptsPerStep
   );
   group.appendChild(settingsDisclosureSection('execution', 'Execution', [
+    controlRow('Request time limit (seconds)', integerInputControl({
+      value: settings.requestDeadlineSeconds ?? 180, min: 30, max: 600, step: 10,
+      dataset: { recursionSettingRequestDeadlineSeconds: '' }, ariaLabel: 'Request time limit in seconds'
+    }), 'Maximum time for one dispatched model request.'),
+    controlRow('Operation time limit (seconds)', integerInputControl({
+      value: settings.operationDeadlineSeconds ?? 300, min: 60, max: 1800, step: 30,
+      dataset: { recursionSettingOperationDeadlineSeconds: '' }, ariaLabel: 'Operation time limit in seconds'
+    }), 'Maximum active time for Recursion preparation, including queueing and recovery. Paused time is excluded.'),
     controlRow(
       'Attempts per step',
       modelAttemptsPerStepControl,
@@ -3412,6 +3427,12 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
   });
   setTooltip(outputCeilingControl, tooltipsEnabled, SETTINGS_TOOLTIPS.providerOutputTokenCeiling);
   grid.appendChild(providerField('Output Token Ceiling', outputCeilingControl));
+  grid.appendChild(providerField('Concurrent requests', integerInputControl({
+    value: source.maxConcurrentRequests ?? 2, min: 1, max: 3, step: 1,
+    dataset: providerDataset('MaxConcurrentRequests', lane), ariaLabel: `${title} concurrent requests`
+  })));
+  grid.appendChild(el('p', { className: 'recursion-help',
+    text: `Effective limit: ${capability.safeConcurrency || 1}. Test Profile verifies concurrency; shared profiles use the lower qualified limit.` }));
   presetControl.addEventListener?.('change', () => { warning.hidden = presetControl.value !== 'full-profile'; });
   samplerControl.addEventListener?.('change', () => { samplerOverrides.hidden = samplerControl.value !== 'recursion'; });
   body.appendChild(grid);
@@ -7133,6 +7154,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       ),
       promptFootprint: controlValue(sourceRoot, '[data-recursion-setting-footprint]'),
       focus: controlValue(sourceRoot, '[data-recursion-setting-focus]'),
+      requestDeadlineSeconds: integerInRange(controlNumber(sourceRoot, '[data-recursion-setting-request-deadline-seconds]', 180), 180, 30, 600),
+      operationDeadlineSeconds: integerInRange(controlNumber(sourceRoot, '[data-recursion-setting-operation-deadline-seconds]', 300), 300, 60, 1800),
       modelAttemptsPerStep: integerInRange(
         controlNumber(
           sourceRoot,
@@ -7217,6 +7240,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (has('StructuredOutputMode')) return { generationPolicy: { structuredOutputMode: value || 'auto' } };
     if (has('Temperature')) return { samplerOverrides: { temperature: Number(value) } };
     if (has('TopP')) return { samplerOverrides: { topP: Number(value) } };
+    if (has('MaxConcurrentRequests')) return { maxConcurrentRequests: integerInRange(Number(value), 2, 1, 3) };
     if (has('OutputTokenCeiling')) return {
       outputTokenCeiling: Number.isFinite(Number(value))
         ? Number(value)

@@ -1,0 +1,11 @@
+import { normalizeOperationBudget, reserveRecoveryCall, remainingExecutionMs, settleOperationClock } from '../../src/execution/operation-budget.mjs';
+import { assertEqual } from '../../tests/helpers/assert.mjs';
+let budget = normalizeOperationBudget({ recoveryLimit: 1, activeSince: 1000, deadlineMs: 60000 });
+budget = reserveRecoveryCall(budget, 'retry-a', { now: 2000 }).budget;
+assertEqual(reserveRecoveryCall(budget, 'retry-a').budget.recoveryUsed, 1, 'reservation is idempotent');
+assertEqual(reserveRecoveryCall(budget, 'retry-b', { now: 2000 }).ok, false, 'shared allowance cannot overspend');
+budget = settleOperationClock(budget, false, 3000);
+assertEqual(remainingExecutionMs(budget, 500000), 58000, 'paused time is not charged');
+budget = settleOperationClock(budget, true, 500000);
+assertEqual(remainingExecutionMs(budget, 558000), 0, 'resume preserves prior active time');
+console.log('Operation budget tests passed.');

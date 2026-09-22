@@ -53,6 +53,12 @@ export function normalizeProviderError(error) {
   const text = chainText(chain);
   const codes = chainCodes(chain);
   const status = chainStatus(chain);
+  const budgetCode = ['RECURSION_RECOVERY_BUDGET_EXHAUSTED', 'RECURSION_OPERATION_DEADLINE'].find((code) => codes.has(code));
+  if (budgetCode) return providerFailureRecord(budgetCode,
+    'The operation recovery or time allowance is exhausted.', false, { category: 'capacity' });
+  const refusalCode = ['RECURSION_PROVIDER_REFUSAL', 'RECURSION_PROVIDER_CONTENT_FILTER'].find((code) => codes.has(code));
+  if (refusalCode) return providerFailureRecord(refusalCode,
+    'The provider declined this request.', false, { category: 'provider-request' });
 
   if (chain.some((item) => item?.name === 'AbortError')
       || codes.has('ABORT_ERR')
@@ -188,7 +194,8 @@ export function normalizeProviderError(error) {
     ), retryAfterMs: Math.min(60000, Math.max(0, retryAfter ?? 1000)) });
   }
 
-  if (codes.has('RECURSION_PROVIDER_AUTH_FAILED') || status === 401 || status === 403) {
+  if (codes.has('RECURSION_PROVIDER_AUTH_FAILED') || status === 401 || status === 403
+      || /\bunauthori[sz]ed\b|invalid api key|incorrect api key/.test(text)) {
     return providerFailureRecord(
       'RECURSION_PROVIDER_AUTH_FAILED',
       'The selected profile could not authenticate.',

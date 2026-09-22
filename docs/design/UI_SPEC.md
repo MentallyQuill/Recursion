@@ -1262,7 +1262,7 @@ Every committed provider edit sends only the relevant allowlisted field plus the
 Advanced contains low-frequency controls grouped into collapsible sections:
 
 - Injection: placement, role, and depth controls for the composed prompt packet.
-- Execution: `Attempts per step`, a numeric one-through-five control with default two and helper copy `Total automatic model attempts for each Recursion step. Slow calls are not retried unless they fail.` Production model calls have no Recursion default timeout.
+- Execution: `Attempts per step` (one through five, default two), `Request time limit (seconds)` (30–600, default 180), and `Operation time limit (seconds)` (60–1800, default 300). A request limit starts at dispatch; operation active time includes queues and recovery, but excludes time while paused. Resume retains elapsed time and recovery spending; an explicit Retry or Reprocess opens a new recovery window.
 - UI: Tooltips, Sub-tier Rows, and Progress Rows. Tooltips are enabled by default on first install so new users can discover icon-only controls and compact status surfaces. Turning Tooltips off auto-saves immediately and removes Recursion tooltip and hover-help titles across the compact bar, popovers, card rows, settings, and diagnostics; normal buttons and click-open panels continue to work.
 - Context Windows: Post-process Evidence Messages, Source Freshness Messages, Source Freshness Text Budget, and Provider Analysis Messages. These controls bound Recursion-owned evidence and analysis windows; they do not replace or limit SillyTavern writer context.
 - Storage Retention: Journal Entries only. Generated turn work is scoped to the active turn and prior-turn artifacts are pruned automatically; this control never deletes SillyTavern chat.

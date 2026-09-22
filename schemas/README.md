@@ -1,5 +1,7 @@
 # Schemas
 
+Performance execution fields: `pipelineRun.v2` includes nullable `pipelineDecision` and `recoveryBudget`. The decision contains `{requestedMode,effectiveMode,selectedLane,profileIdHash,configHash,certificationState,reasonCode}`. Recovery contains `{windowId,recoveryLimit,recoveryUsed,reservationIds,elapsedActiveMs,activeSince,deadlineMs}`; reservations are durable before dispatch and Resume never resets them. Stage records carry optional `{validationMs,artifactPersistenceMs}` timings. Settings include `requestDeadlineSeconds` (180, range 30–600) and `operationDeadlineSeconds` (300, range 60–1800). Fused router diagnostics include bounded `bundleItemRejections` while retaining only item-valid siblings. Explicit refusal/content-filter codes are non-retryable.
+
 Standalone schema files are not required for the current pre-alpha runtime.
 
 Recursion V1 keeps its structured contracts close to the source modules that validate them:

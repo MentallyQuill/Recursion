@@ -145,6 +145,7 @@ assertDeepEqual(
     totalTokens: 9392,
     visibleContentLength: 48,
     latencyMs: undefined,
+    timings: undefined,
     status: 'success',
     error: undefined
   },

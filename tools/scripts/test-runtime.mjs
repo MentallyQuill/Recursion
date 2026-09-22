@@ -1424,6 +1424,88 @@ for (const applyMode of ['as-swipe', 'replace']) {
 
 // Replaced V1 contract: dialogue/prose pass fixtures are retained as historical
 // examples until the dedicated generation-review harness supersedes them.
+// Priority must survive both the authored-card boundary and Arbiter omissions.
+for (const pipelineMode of ['segmented', 'fused']) {
+  const deck = createDefaultCardDeck();
+  deck.id = 'realism-regression';
+  deck.readonly = false;
+  deck.bundled = false;
+  for (const card of Object.values(deck.cards)) card.selectionState = 'off';
+  const scene = Object.values(deck.cards).find((card) => card.builtinFamily === 'Scene Frame');
+  const environment = Object.values(deck.cards).find((card) => card.builtinFamily === 'Environment');
+  scene.selectionState = 'active';
+  environment.selectionState = 'priority';
+  deck.categories.realism = { id: 'realism', name: 'Realism' };
+  deck.categoryOrder.unshift('realism');
+  deck.cardOrderByCategory.realism = ['peak', 'disbelief', 'verbosity', 'disabled'];
+  for (const id of deck.cardOrderByCategory.realism) {
+    deck.cards[id] = {
+      id, categoryId: 'realism', name: id, kind: 'authored',
+      promptText: `Authored ${id} guidance.`,
+      selectionState: id === 'disabled' ? 'off' : 'priority'
+    };
+  }
+  const settings = {
+    mode: 'auto', pipelineMode, reasoningLevel: 'medium', minCards: 4, maxCards: 4, strength: 'balanced',
+    preProcessDecks: { activeDeckId: deck.id, customDecks: { [deck.id]: deck } }
+  };
+  const calls = [];
+  const { runtime, installed } = createRuntimeHarness({
+    settings,
+    generationRouter: {
+      async generate(roleId, request) {
+        calls.push({ roleId, request });
+        if (roleId === 'utilityArbiter') return {
+          ok: true, data: {
+            schema: UTILITY_ARBITER_SCHEMA, snapshotHash: request.snapshotHash,
+            action: 'refresh-cards', sceneStatus: 'same-scene',
+            cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard' }],
+            budgets: { maxCards: 4 }, reasonerDecision: { mode: 'skip', reason: 'fixture' }
+          }
+        };
+        if (roleId === 'guidanceComposer') return localFallbackCardRouter().generate(roleId, request);
+        if (roleId === 'fusedCardBundle') return {
+          ok: true, data: { items: [{ family: 'Environment', promptText: 'Environment guidance.', evidenceRefs: ['message:2'] }] }
+        };
+        return cardProviderResponse(roleId, request);
+      }
+    }
+  });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Continue.' });
+  assertEqual(result.ok, true, `${pipelineMode} priority run succeeds`);
+  const view = runtime.view();
+  assertDeepEqual(view.lastHand.cards.slice(0, 3).map((card) => card.id), ['peak', 'disbelief', 'verbosity'], `${pipelineMode} authored Priority cards lead the hand`);
+  assertEqual(view.lastHand.cards[3]?.family, 'Environment', `${pipelineMode} forces Priority family omitted by Arbiter`);
+  assert(calls.some((call) => call.roleId === (pipelineMode === 'fused' ? 'fusedCardBundle' : 'environmentAffordancesCard')), `${pipelineMode} executes its expected provider path`);
+  assertDeepEqual(view.lastPlan.cardJobs.map((job) => job.family), ['Environment'], `${pipelineMode} reserves authored slots before provider work`);
+  const evidence = packetToPromptBlocks(installed[0]).find((block) => block.id === 'cardEvidence')?.text || '';
+  for (const id of ['peak', 'disbelief', 'verbosity']) {
+    assert(evidence.includes(`Authored ${id} guidance.`), `${pipelineMode} installs authored ${id} text`);
+    assert(calls.find((call) => call.roleId === 'guidanceComposer')?.request.prompt.includes(`Authored ${id} guidance.`), `${pipelineMode} composer receives authored ${id}`);
+  }
+  assert(!evidence.includes('Authored disabled guidance.'), 'disabled authored card excluded');
+  const edited = clone(settings);
+  edited.preProcessDecks.customDecks[deck.id].cards.peak.promptText = 'Changed authored guidance.';
+  assertNotEqual(activeDeckRevisionHash(settings), activeDeckRevisionHash(edited), 'authored edits invalidate deck revision');
+}
+
+for (const mode of ['auto', 'manual']) {
+  const cards = Object.fromEntries(['first', 'second', 'third', 'draft', 'off'].map((id) => [id, {
+    id, categoryId: 'realism', name: id, kind: 'authored',
+    promptText: id === 'draft' ? '' : `Use ${id} authored guidance.`,
+    selectionState: id === 'off' ? 'off' : mode === 'auto' ? 'priority' : 'active'
+  }]));
+  const deck = { id: 'authored-only', name: 'Authored only', categoryOrder: ['realism'], categories: { realism: { id: 'realism', name: 'Realism' } }, cardOrderByCategory: { realism: Object.keys(cards) }, cards };
+  const { runtime } = createRuntimeHarness({ settings: {
+    mode, reasoningLevel: 'medium', minCards: 2, maxCards: 2,
+    preProcessDecks: { activeDeckId: deck.id, customDecks: { [deck.id]: deck } }
+  } });
+  const result = await runtime.prepareForGeneration({ userMessage: 'Continue with authored guidance.' });
+  assertEqual(result.ok, true, `${mode} authored-only deck succeeds without a generator family`);
+  assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['first', 'second'], `${mode} authored cards respect deck order and cap`);
+  assert(runtime.view().lastHand.omitted.some((card) => card.cardId === 'third' && card.reason === 'priority-over-max-cards'), `${mode} overflow is explained`);
+}
+
 if (false) {
 {
   const proseHost = createProseMessageHarness();

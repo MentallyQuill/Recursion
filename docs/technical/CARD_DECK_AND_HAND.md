@@ -22,6 +22,10 @@ flowchart LR
 
 Editable cards expose `off`, `active`, and `priority`. Auto cycles `off -> active -> priority -> off`; Manual cycles `off -> active -> off`. `off` excludes a card from scope, `active` makes it a normal candidate, and `priority` moves it ahead of normal active cards in Auto. Priority overflow is resolved by deck category/card order and recorded as an omission rather than backfilled with lower-priority cards.
 
+Authored cards without a built-in generator family enter hand selection directly as `Authored` guidance, with their deck IDs and operator text. They require no provider call and are rebuilt from the active deck rather than stored as generated scene evidence. Disabled and draft cards are excluded. Authored text and ordering participate in the deck revision hash, invalidating prepared swipe reuse after edits.
+
+Auto resolves Priority slots before provider work: authored Priority cards reserve slots, and generated Priority families omitted by the Arbiter are added explicitly. Multiple source cards belonging to one generated family share its generated card slot. Both kinds follow source deck order, ahead of ordinary candidates, within the effective card limit. Remaining generation capacity retains the normal focus and strength policy. The runtime cache contract is version 2 so pre-fix prepared artifacts cannot be reused.
+
 ```mermaid
 stateDiagram-v2
     [*] --> off

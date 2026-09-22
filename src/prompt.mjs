@@ -35,6 +35,7 @@ const VALID_GUIDANCE_DROP_REASONS = new Set(['duplicate', 'lower-priority', 'uns
 const VALID_GUIDANCE_STATUSES = new Set(['used', 'missing', 'fallback-raw-only']);
 const VALID_REASONER_DROP_REASONS = new Set(['duplicate', 'lower-priority', 'budget-exceeded', 'unsupported']);
 const VALID_FAMILIES = new Set([
+  'Authored',
   'Scene Frame',
   'Active Cast',
   'Character Motivation',

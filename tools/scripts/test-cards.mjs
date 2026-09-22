@@ -1441,6 +1441,16 @@ assert(priorityOverflowHand.metadata.diagnostics.includes('priority-card-cap'), 
 assert(priorityOverflowHand.omitted.some((entry) => entry.cardId === 'risk' && entry.reason === 'priority-over-max-cards'), 'priority overflow uses priority omission reason');
 assert(priorityOverflowHand.omitted.some((entry) => entry.cardId === 'emph' && entry.reason === 'priority-over-max-cards'), 'every overflow priority card records priority omission reason');
 
+const mixedPriorityCards = [
+  { ...deckCard('Environment', 'Generated environment.'), id: 'generated', sourceCardIds: ['environment-source'] },
+  { id: 'authored', family: 'Authored', status: 'active', origin: 'authored', promptText: 'Authored direction.' }
+];
+const generatedFirst = selectHand(mixedPriorityCards, { maxCards: 1, forcedCardIds: ['environment-source', 'authored'] });
+assertDeepEqual(generatedFirst.cards.map((card) => card.id), ['generated'], 'generated Priority source respects deck order before authored Priority');
+const authoredFirst = selectHand(mixedPriorityCards, { maxCards: 1, forcedCardIds: ['authored', 'environment-source'] });
+assertDeepEqual(authoredFirst.cards.map((card) => card.id), ['authored'], 'authored Priority respects deck order before generated Priority');
+assert(authoredFirst.omitted.some((card) => card.cardId === 'generated' && card.reason === 'priority-over-max-cards'), 'generated source Priority overflow has the correct omission reason');
+
 const characterFocusHand = selectHand([
   deckCard('Character Motivation', 'Mara seems guarded.', { id: 'motivation-tie', tokenEstimate: 20 }),
   deckCard('Scene Frame', 'The room stays sealed.', { id: 'scene-tie', tokenEstimate: 20 }),

@@ -975,6 +975,25 @@ export function activeCardDeckSourceCards(settings = {}) {
   return grouped;
 }
 
+// Authored cards without a generator family are operator guidance, not model jobs.
+export function activeCardDeckAuthoredCards(settings = {}) {
+  const deck = getActiveCardDeck(settings);
+  return orderedDeckCardsAcrossCategories(deck)
+    .filter((card) => !card.builtinFamily && getDeckCardStatus(card).runnable)
+    .map((card) => ({
+      id: card.id,
+      deckCardId: card.id,
+      family: 'Authored',
+      role: 'authoredCard',
+      name: card.name,
+      status: 'active',
+      origin: 'authored',
+      selectionState: cardSelectionState(card),
+      promptText: card.promptText,
+      evidenceRefs: []
+    }));
+}
+
 function emptyCardScope() {
   return {
     version: CARD_SCOPE_VERSION,

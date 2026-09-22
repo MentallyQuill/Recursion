@@ -22,6 +22,11 @@ assertDeepEqual(segmented.topologicalStageIds, [
   'preprocess.arbiter',
   'preprocess.cards.segmented.character'
 ], 'Segmented preprocess graph includes Arbiter and independent card stage');
+const cardCorrection = segmented.getStage('preprocess.cards.segmented.character').buildCorrectionRequest({
+  request: { prompt: 'Original source' }, error: { message: 'Missing evidence reference' }
+});
+assertEqual(cardCorrection.prompt.includes('Missing evidence reference'), true, 'segmented correction includes validation feedback');
+assertEqual(cardCorrection.prompt.includes('Original source'), true, 'segmented correction keeps source');
 
 const fused = createPreprocessCardGraph({
   pipelineMode: 'fused',

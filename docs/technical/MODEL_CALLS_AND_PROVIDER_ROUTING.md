@@ -77,7 +77,7 @@ Endpoint values, secret references, headers, and complete preset bodies are not 
 
 ## Request Construction
 
-The host adapter builds messages from either a request message array or the request's system/user prompt pair. Production requests default to the provider lane output ceiling. An explicit per-request response allowance is capped at that ceiling; certification probes can request smaller allowances. Utility requests default to minimal reasoning, while explicitly supplied reasoning intent is preserved.
+The host adapter builds messages from either a request message array or the request's system/user prompt pair. Production requests default to the provider lane output ceiling. An explicit per-request response allowance is capped at that ceiling; certification probes can request smaller allowances. Utility requests explicitly disable reasoning, overriding role hints and inherited preset flags. Reasoner preserves its supplied reasoning intent. NanoGPT uses SillyTavern's `min` value, which the host maps to provider effort `none`; OpenRouter and supported OpenAI models receive `none`. Other models retain the host-supported minimum and report `reasoningDowngraded`; all chat calls requesting off also set `include_reasoning: false`. Hiding reasoning output alone is not evidence that reasoning computation stopped. Provider/model support must be verified by qualification and returned usage; a forced-thinking model may still reason. Utility qualification hashes include this policy so prior reasoning-enabled qualifications cannot be reused.
 
 The Connection Manager call is:
 

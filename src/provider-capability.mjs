@@ -109,6 +109,7 @@ export function providerConfigHash(provider = {}) {
   return hashJson({
     lane,
     connectionProfileId: text(provider.connectionProfileId),
+    ...(lane === 'utility' ? { reasoningPolicy: 'none' } : {}),
     generationPolicy: {
       presetMode: text(provider.generationPolicy?.presetMode) || 'isolated',
       instructMode: text(provider.generationPolicy?.instructMode) || 'auto',

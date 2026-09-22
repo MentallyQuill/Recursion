@@ -1,5 +1,5 @@
 const REASONING_LEVELS = new Set(['low', 'medium', 'high', 'ultra']);
-const REASONING_INTENTS = new Set(['minimal', 'medium', 'high']);
+const REASONING_INTENTS = new Set(['none', 'minimal', 'medium', 'high']);
 const REASONING_CATEGORIES = new Set(['final-brief', 'arbiter', 'card', 'enhancement', 'post-process', 'provider-test']);
 
 function settingsReasoningLevel(value) {

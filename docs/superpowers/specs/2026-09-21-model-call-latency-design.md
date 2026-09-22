@@ -83,3 +83,7 @@ Read-only benchmark preflight on September 21 found existing `recursion-soak-a`,
 **Completion evidence**
 
 Deliver the scoped implementation, updated schemas/docs/examples/design contracts, focused checks, required integration-gate results, and an updated performance report mapping every review finding to code and measured outcome or an evidence-backed disposition. Verify actual Fused dispatch and actual speed improvement. Keep the goal active while live performance or any other explicit requirement remains unverified.
+
+**Measured refinement approved during execution (2026-09-21)**
+
+The user proposed disabling reasoning for Utility calls. Utility now overrides role hints with a reasoning-off request, while Reasoner keeps its intent. NanoGPT maps this through the installed host's min-to-none dialect; live usage confirmed zero Utility reasoning tokens. Other providers use a supported off value or their supported minimum with downgrade diagnostics, rather than sending an unsupported none value indiscriminately. Qualification hashes include the Utility policy. The selected final comparison has three successful serial baseline samples and three successful reasoning-off samples in each optimized mode; an additional thinking-enabled parallel cohort retains one failed coverage attempt. See docs/technical/MODEL_CALL_BENCHMARK.md for measured outcomes and confounders. The local-planner/raw-guidance shortcuts remain disabled for the documented semantic reasons.

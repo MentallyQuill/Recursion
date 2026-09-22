@@ -1037,12 +1037,21 @@ async function sendViaConnectionProfile(context, request = {}, readSecretMetadat
   const schema = requestJsonSchema(request);
   const reasoningIntent = normalizeReasoningIntent(request.reasoningIntent);
   // SillyTavern maps NanoGPT's UI scale to none/minimal/low/medium/high.
-  const reasoningEffort = apiMap.source === 'nanogpt'
-    ? { minimal: 'low', medium: 'high', high: 'max' }[reasoningIntent]
-    : { minimal: 'min', medium: 'medium', high: 'high' }[reasoningIntent];
+  const source = apiMap.source;
+  const model = stringValue(profile.model).trim();
+  const openAiSource = ['openai', 'azure_openai'].includes(source);
+  const supportsExplicitOff = source === 'nanogpt' || source === 'openrouter'
+    || (openAiSource && /^gpt-5\.(4|5|6)(?:\D|$)/.test(model));
+  const offEffort = source === 'nanogpt' ? 'min'
+    : supportsExplicitOff ? 'none'
+      : openAiSource ? (/^gpt-5/.test(model) ? 'min' : 'low') : 'min';
+  const reasoningEffort = reasoningIntent === 'none' ? offEffort : apiMap.source === 'nanogpt'
+    ? { none: 'min', minimal: 'low', medium: 'high', high: 'max' }[reasoningIntent]
+    : { none: 'none', minimal: 'min', medium: 'medium', high: 'high' }[reasoningIntent];
   const overridePayload = {
     ...samplerPayload,
     ...(completionMode === 'chat' && reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+    ...(completionMode === 'chat' && reasoningIntent === 'none' ? { include_reasoning: false } : {}),
     ...await profileSecretOverride(profile, apiMap, readSecretMetadata),
     ...(policy.structuredOutputMethod === 'native-schema' && schema
       ? { json_schema: schema }
@@ -1077,6 +1086,10 @@ async function sendViaConnectionProfile(context, request = {}, readSecretMetadat
   }
   return {
     raw,
+    reasoningIntent,
+    reasoningDialect: source,
+    reasoningApplied: completionMode === 'chat' && Boolean(reasoningEffort),
+    reasoningDowngraded: reasoningIntent === 'none' && !supportsExplicitOff,
     timings: {
       hostPreparationMs: transportStartedAt - preparationStartedAt,
       transportMs: performance.now() - transportStartedAt

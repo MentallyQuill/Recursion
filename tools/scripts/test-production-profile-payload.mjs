@@ -24,7 +24,8 @@ const client = createProviderClient({ host, settingsStore });
 for (const roleId of ['utilityArbiter', 'sceneFrameCard', 'knowledgeSecretsCard', 'fusedCardBundle', 'guidanceComposer']) {
   await client.generate(roleId, { lane: 'utility', prompt: 'Return JSON' });
   assertEqual(calls.at(-1).maxTokens, 16000, `${roleId} reaches Connection Manager with configured allowance`);
-  assertEqual(calls.at(-1).reasoning_effort, 'low', `${roleId} reaches NanoGPT adapter with minimal intent`);
+  assertEqual(calls.at(-1).reasoning_effort, 'min', `${roleId} reaches NanoGPT adapter with reasoning off`);
+  assertEqual(calls.at(-1).include_reasoning, false, `${roleId} overrides inherited reasoning inclusion`);
 }
 await client.generate('guidanceComposer', { lane: 'reasoner', prompt: 'Return JSON', reasoningIntent: 'medium' });
 assertEqual(calls.at(-1).reasoning_effort, 'high', 'explicit reasoner effort survives the full transport path');

@@ -2155,7 +2155,7 @@ export function createProviderClient({
       lane,
       responseLength,
       ...((normalizeReasoningIntent(request.reasoningIntent) || lane === 'utility')
-        ? { reasoningIntent: normalizeReasoningIntent(request.reasoningIntent) || 'minimal' }
+        ? { reasoningIntent: lane === 'utility' ? 'none' : normalizeReasoningIntent(request.reasoningIntent) }
         : {}),
       ...(reasoningCategoryName(request.reasoningCategory)
         ? { reasoningCategory: reasoningCategoryName(request.reasoningCategory) }

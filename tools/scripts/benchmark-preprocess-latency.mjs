@@ -6,7 +6,7 @@ import { createSillyTavernHttpSession, validateSoakUserHandle } from './lib/sill
 import { configureSoakDeckFixture, sendAndWait } from './prove-live-pipelines.mjs';
 
 const repo = resolve(fileURLToPath(new URL('../..', import.meta.url)));
-const output = resolve(repo, 'artifacts/latency-benchmark');
+const output = resolve(repo, 'artifacts', process.argv.includes('--reasoning-off') ? 'latency-benchmark-reasoning-off' : 'latency-benchmark');
 const user = process.env.RECURSION_SILLYTAVERN_USER;
 const baseUrl = process.env.SILLYTAVERN_BASE_URL;
 if (!process.argv.includes('--live') || !validateSoakUserHandle(user).ok || !baseUrl) {
@@ -35,6 +35,11 @@ try {
   });
   const page = await context.newPage();
   const errors = [];
+  page.on('response', async (response) => {
+    if (response.url().includes('/api/backends/chat-completions/generate') && response.status() >= 400) {
+      errors.push(`Primary/provider HTTP ${response.status()}`);
+    }
+  });
   page.on('pageerror', (error) => errors.push(String(error.message).slice(0, 240)));
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => Boolean(globalThis.__recursionLiveHarnessRuntime), null, { timeout: 30000 });
@@ -121,13 +126,25 @@ try {
           reasoningLevel: 'medium', preProcessDecks: decks, postProcess: { enabled: false } });
         const context = SillyTavern.getContext();
         await context.selectCharacterById(0);
+        await context.executeSlashCommandsWithOptions('/profile <None>');
         await context.executeSlashCommandsWithOptions(`/profile await=true timeout=10000 ${profileName}`);
       }, { decks, profileName });
-      const report = { profile: { model: profile.model, name: profile.name }, families, qualification: [], samples: [],
-        order: 'Three identical-source samples per arm; arms grouped to avoid repeated qualification calls.' };
+      await page.locator('#model_nanogpt_select').selectOption(profile.model, { force: true });
+      const primarySetup = await page.evaluate(async () => {
+        const { oai_settings } = await import('/scripts/openai.js');
+        return { source: oai_settings.chat_completion_source, model: oai_settings.nanogpt_model, streaming: oai_settings.stream_openai };
+      });
+      console.log(JSON.stringify({ primarySetup }));
+      const report = process.argv.includes('--resume')
+        ? JSON.parse(await readFile(resolve(output, 'results.json'), 'utf8'))
+        : { profile: { model: profile.model, name: profile.name }, families, qualification: [], samples: [],
+          order: 'Three identical-source samples per arm; arms grouped to avoid repeated qualification calls.' };
       const persist = () => writeFile(resolve(output, 'results.json'), JSON.stringify(report, null, 2));
-      for (const arm of [{ mode: 'segmented', concurrency: 1 }, { mode: 'segmented', concurrency: 2 }, { mode: 'fused', concurrency: 2 }]) {
-        if (arm.mode === 'segmented') {
+      const arms = [{ mode: 'segmented', concurrency: 1 }, { mode: 'segmented', concurrency: 2 }, { mode: 'fused', concurrency: 2 }];
+      for (const arm of arms.filter((arm) => !process.argv.includes('--reasoning-off') || arm.concurrency === 2)) {
+        const completed = report.samples.filter((sample) => sample.mode === arm.mode && sample.concurrency === arm.concurrency).length;
+        if (completed >= 3) continue;
+        if (arm.mode === 'segmented' || process.argv.includes('--resume')) {
           const qualification = await qualify(arm.concurrency);
           report.qualification.push({ ...arm, ...qualification });
           await persist();
@@ -136,7 +153,7 @@ try {
             throw new Error('Live qualification failed; failed qualification is recorded, and no benchmark arm was silently substituted.');
           }
         }
-        for (let sample = 1; sample <= 3; sample += 1) {
+        for (let sample = completed + 1; sample <= 3; sample += 1) {
           console.log(`Running ${arm.mode}, concurrency ${arm.concurrency}, sample ${sample}/3`);
           const chatName = `Recursion-Latency-${Date.now()}-${arm.mode}-${sample}`;
           await page.evaluate(async ({ mode, chatName }) => {
@@ -167,7 +184,7 @@ try {
           report.samples.push(sampleResult);
           await persist();
           console.log(JSON.stringify({ mode: arm.mode, sample, accepted: sampleResult.accepted, timing: result.timing, failure }));
-          if (!sampleResult.accepted) throw new Error('A live sample failed; all collected results are retained.');
+          if (!sampleResult.accepted) console.warn('Sample failed acceptance; retained in the comparison, not counted as a quality-preserving speedup.');
         }
       }
     }

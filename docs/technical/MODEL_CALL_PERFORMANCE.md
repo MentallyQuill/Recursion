@@ -22,6 +22,8 @@ The alpha integration gate passed 78 offline scripts, documentation contracts, a
 
 A catalog-based scope fixture shrank from 15,355 to 163 UTF-8 bytes after removing two duplicate catalog arrays; the catalog remains supplied once separately. This is a prompt-fragment measurement, not an end-to-end latency result.
 
-Live qualification on the dedicated `recursion-soak-ui` account failed with provider `Unauthorized`. No successful comparative samples exist, so no measured speedup is claimed. The benchmark retains qualification failures and requires real qualified modes for each arm. Provisioning a working test credential remains necessary before comparing segmented concurrency one/two and qualified Fused, then reporting preparation, first-visible-token, total reply, usage, and quality results.
+The initial dedicated-account qualification failed with provider `Unauthorized`. After explicit user authorization to provision its credential, the live comparison completed. See [measured results and limitations](MODEL_CALL_BENCHMARK.md): Utility reasoning off with qualified concurrency two reduced median preparation from 105.5 to 26.2 seconds on the six-family workload. All six reasoning-off samples passed coverage and reported zero Utility reasoning tokens.
 
 Preprocessing alone owns the new operation budget/deadline; postprocessing behavior is unchanged. Optional paid recovery waits for required card work before reserving its allowance. Reload settles active time at the last persisted checkpoint and excludes offline time. Explicit Retry starts a fresh recovery window by design; Resume preserves spending.
+
+Utility explicitly requests reasoning off; Reasoner preserves its role intent. Provider-aware minimum fallback is diagnostic when a model cannot disable reasoning. Both Segmented and Fused corrections include validation feedback. See [provider routing](MODEL_CALLS_AND_PROVIDER_ROUTING.md).

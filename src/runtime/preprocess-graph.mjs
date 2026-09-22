@@ -84,6 +84,9 @@ export function createSegmentedCardStages({
           selectedCard
         });
       },
+      buildCorrectionRequest({ request, error }) {
+        return { ...request, prompt: `${request.prompt || ''}\n\nCorrect the previous invalid ${selectedCardKey(selectedCard)} card. Preserve the requested JSON schema and supplied source evidence.\nValidation: ${String(error?.message || 'Card validation failed.').slice(0, 600)}\nReturn only the corrected card; do not include private reasoning or analysis.` };
+      },
       async validate(artifact, validationContext) {
         return validationResult(
           await validate(artifact, {

@@ -415,7 +415,7 @@ function aggregateFailureCode(children = []) {
 
 function metaForState(state, source = '', reason = '', retryCount = 0) {
   const normalizedSource = normalizeChildSource(source);
-  if (state === 'done' && normalizedSource === 'included') return 'included';
+  if (['done', 'cached'].includes(state) && normalizedSource === 'included') return 'included';
   if (state === 'done' && normalizedSource === 'generated') return 'generated';
   if (state === 'done') return 'done';
   if (state === 'cached') return 'cached';
@@ -970,7 +970,9 @@ function normalizeChildStep(input, index = 0) {
   const step = {
     id,
     label,
-    providerLane: normalizeProviderLane(source.providerLane, roleId === 'reasonerComposer' ? 'reasoner' : 'utility'),
+    providerLane: childSource === 'included' && source.providerLane === null
+      ? null
+      : normalizeProviderLane(source.providerLane, roleId === 'reasonerComposer' ? 'reasoner' : 'utility'),
     state,
     meta: metaForState(state, childSource, reason, retryCount),
     source: childSource || null,
@@ -1553,6 +1555,20 @@ function fusedOutcomeSteps(stage, operation) {
   });
 }
 
+function authoredHandSteps(stage, operation) {
+  if (!['completed', 'cached'].includes(cleanText(stage.state).toLowerCase())) return [];
+  const cards = Array.isArray(stage.summary?.authoredCards) ? stage.summary.authoredCards : [];
+  return cards.map((card, index) => ({
+    id: `authored-hand-${idFromText(card?.id, `card-${index + 1}`)}`,
+    label: safeDisplayText(card?.name, `Authored card ${index + 1}`, 80),
+    providerLane: null,
+    state: progressStateForExecutionStage(stage, operation),
+    source: 'included',
+    action: null,
+    order: index
+  }));
+}
+
 export function progressFromExecution(execution, queuedReprocess = null) {
   const source = asObject(execution);
   const stages = executionStages(source);
@@ -1589,7 +1605,12 @@ export function progressFromExecution(execution, queuedReprocess = null) {
       postProcessGroups.get(suffix).push(stage);
       continue;
     }
-    topLevel.push(executionProgressStep(stage, operation, queuedReprocess));
+    const step = executionProgressStep(stage, operation, queuedReprocess);
+    if (stage.id === 'preprocess.hand') {
+      const children = authoredHandSteps(stage, operation);
+      if (children.length) step.children = children;
+    }
+    topLevel.push(step);
   }
   if (segmented.length) {
     const children = segmented.map((stage, index) => executionProgressStep(

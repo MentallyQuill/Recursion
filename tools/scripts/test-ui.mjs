@@ -1723,6 +1723,37 @@ try {
     for (const child of node.children || []) titleAttributes(child, titles);
     return titles;
   }
+  const authoredNames = ['Focus on the peak', 'Disbelief', 'Reduce Verbosity'];
+  let authoredView = {
+    settings: { mode: 'auto', enabled: true, ui: { tooltipsEnabled: true } },
+    execution: { operationId: 'authored-ui', state: 'completed', stages: [
+      { id: 'preprocess.hand', state: 'completed', summary: {
+        authoredCards: authoredNames.map((name, index) => ({ id: `authored-${index}`, name, priority: true }))
+      } }
+    ] }
+  };
+  const authoredUi = mountRecursionUi({
+    runtime: { view: () => authoredView }, mountPoint: fakeDocument.body
+  });
+  const authoredRoot = fakeDocument.getElementById('recursion-root');
+  const authoredRows = [...authoredRoot.querySelectorAll('[data-recursion-progress-row]')]
+    .filter((row) => row.dataset.recursionProgressStepId.startsWith('authored-hand-'));
+  assertDeepEqual(authoredRows.map((row) => row.querySelector('[data-recursion-progress-label]').textContent), authoredNames, 'progress DOM renders each included authored card by name');
+  for (const row of authoredRows) {
+    assertEqual(row.querySelector('[data-recursion-progress-meta]').textContent, 'included', 'authored DOM row reports inclusion');
+    assertEqual(row.querySelector('[data-recursion-progress-provider-mark]').textContent, '', 'authored DOM row has no invented provider mark');
+    assert(!titleAttributes(row).some((title) => /provider/i.test(title)), 'authored DOM tooltips make no provider claim');
+    assertEqual(row.querySelector('[data-recursion-progress-action]'), null, 'authored DOM row owns no executable action');
+  }
+  authoredView = {
+    ...authoredView,
+    execution: { operationId: 'next-authored-ui', state: 'running', stages: [{ id: 'preprocess.hand', state: 'pending' }] },
+    lastHand: { cards: authoredNames.map((name) => ({ name, origin: 'authored', family: 'Authored' })) }
+  };
+  authoredUi.update();
+  assertEqual([...authoredRoot.querySelectorAll('[data-recursion-progress-row]')].filter((row) => row.dataset.recursionProgressStepId.startsWith('authored-hand-')).length, 0, 'new execution removes old authored inclusion rows');
+  authoredUi.destroy();
+
   const pendingSettingsUpdates = [];
   const pendingTooltipUi = mountRecursionUi({
     runtime: {

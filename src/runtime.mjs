@@ -136,7 +136,7 @@ import {
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
 const PROVIDER_TEST_TIMEOUT_MS = 30000;
 const STORAGE_SCHEMA_VERSION = 1;
-const RUNTIME_CACHE_CONTRACT_VERSION = 2;
+const RUNTIME_CACHE_CONTRACT_VERSION = 3;
 const DEFAULT_CHAT_ID = 'chat';
 const DEFAULT_SCENE_KEY = 'scene';
 const INSTALL_FAILURE_LABEL = 'Prompt install failed. Generation will continue without Recursion.';
@@ -1656,9 +1656,6 @@ function prioritySelectionForSettings(settings = {}) {
 
 function reconcileAutoPriorityPlan(plan, settings) {
   const policy = runPolicyForEffectivePlan(settings, plan);
-  const maxCards = limitCardJobsForHandBudget([], {
-    maxCards: budgetOr(plan.budgets?.maxCards, 6), behaviorPolicy: policy
-  }).metadata.maxCards;
   const deck = getActiveCardDeck(settings);
   const priorityIds = deckPriorityCardIds(deck, settings);
   const units = new Map();
@@ -1667,12 +1664,16 @@ function reconcileAutoPriorityPlan(plan, settings) {
     const key = card.builtinFamily ? `family:${card.builtinFamily}` : `card:${id}`;
     if (!units.has(key)) units.set(key, card);
   }
-  const selected = [...units.values()].slice(0, maxCards);
+  const selected = [...units.values()];
   const families = selected.map((card) => card.builtinFamily).filter(Boolean);
   const reserved = selected.filter((card) => !card.builtinFamily).length;
   const jobs = [...(plan.cardJobs || [])];
   for (const family of families) {
-    if (jobs.some((job) => catalogForCard(job)?.family === family)) continue;
+    const existing = jobs.findIndex((job) => catalogForCard(job)?.family === family);
+    if (existing >= 0) {
+      jobs[existing] = { ...jobs[existing], forcedBy: 'priority-selection' };
+      continue;
+    }
     const catalog = resolveCatalogForFamily(family);
     if (catalog) jobs.push({ family, role: catalog.role, forcedBy: 'priority-selection', reason: 'Priority card selected by the user.' });
   }
@@ -1687,7 +1688,6 @@ function reconcileAutoPriorityPlan(plan, settings) {
     diagnostics: mergeDiagnostics(
       plan.diagnostics,
       priorityIds.length ? ['priority-cards-active'] : [],
-      units.size > maxCards ? ['priority-card-cap'] : [],
       limited.omitted.length ? ['card-jobs-budgeted'] : [],
       limited.omitted.map((entry) => `card-job-budgeted:${entry.family}`)
     )
@@ -7062,7 +7062,12 @@ export function createRecursionRuntime({
         return {
           handId: safeIdentifier(artifact?.handId || '', 'hand', 160),
           cardCount: artifact?.cards?.length || 0,
-          omittedCount: artifact?.omitted?.length || 0
+          omittedCount: artifact?.omitted?.length || 0,
+          authoredCards: (artifact?.cards || []).filter((card) => card.origin === 'authored').map((card) => ({
+            id: safeIdentifier(card.id, 'card', 160),
+            name: safeText(getActiveCardDeck(context.settings).cards[card.id]?.name || 'Authored card', 120),
+            priority: (artifact.metadata?.forcedCardIds || []).includes(card.id)
+          }))
         };
       }
     };

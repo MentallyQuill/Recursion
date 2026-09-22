@@ -1426,4 +1426,35 @@ assert(runtimeFallbackStep, 'unknown logical stage creates runtime fallback step
 assertEqual(runtimeFallbackStep.label, 'Preparing Recursion response', 'runtime fallback has readable label');
 assertEqual(runtimeFallbackStep.state, 'failed', 'runtime fallback step is failed');
 
+
+
+const authoredHandCards = [
+  { id: 'peak', name: 'Focus on the peak', priority: true },
+  { id: 'disbelief', name: 'Disbelief', priority: true },
+  { id: 'verbosity', name: 'Reduce Verbosity', priority: true }
+];
+function authoredHandProgress(handState, operationState = 'running') {
+  return createProgressRunModel({
+    execution: {
+      operationId: 'current-hand-run', state: operationState,
+      stages: [{ id: 'preprocess.hand', state: handState,
+        summary: { authoredCards: authoredHandCards }, order: 1 }]
+    },
+    lastHand: { cards: [{ id: 'old', name: 'Previous turn card', family: 'Authored', origin: 'authored' }] }
+  });
+}
+for (const handState of ['completed', 'cached']) {
+  const progress = authoredHandProgress(handState, handState === 'completed' ? 'completed' : 'running');
+  const hand = progress.steps.find((step) => step.id === 'preprocess.hand');
+  assertDeepEqual(hand.children?.map((card) => card.label), authoredHandCards.map((card) => card.name), 'current hand includes each authored card by its saved name');
+  assert(hand.children.every((card) => card.meta === 'included' && card.source === 'included'), 'authored cards report inclusion, not generation');
+  assert(hand.children.every((card) => card.providerLane === null && card.action === null && card.sourceRoleId === null), 'authored card rows invent no provider calls or actions');
+  assertEqual(hand.state, handState === 'cached' ? 'cached' : 'done', 'authored details preserve hand completion or reuse state');
+  assertEqual(createHeroPixelBlocks(progress).length, 1, 'authored details do not add provider-work pixels');
+}
+for (const handState of ['pending', 'running', 'failed']) {
+  const hand = authoredHandProgress(handState).steps.find((step) => step.id === 'preprocess.hand');
+  assertEqual(hand.children?.length || 0, 0, 'unsettled current hand never shows old hand or leftover summary as included');
+}
+
 console.log('[pass] progress');

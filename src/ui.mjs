@@ -1431,7 +1431,7 @@ function createProgressRowShell(step, child = false) {
   }, [
     el('span', {
       className: 'recursion-provider-mark',
-      text: providerMark(step.providerLane),
+      text: step.providerLane === null ? '' : providerMark(step.providerLane),
       dataset: { recursionProgressProviderMark: '' }
     }),
     el('span', { className: 'recursion-step-separator', attrs: { 'aria-hidden': 'true' } }),
@@ -1528,7 +1528,7 @@ function progressStepTooltip(step, child = false) {
   const suggestedAction = cleanText(step.suggestedAction);
   const parts = [
     `${label}: ${state}`,
-    `${provider} provider`,
+    step.providerLane === null ? '' : `${provider} provider`,
     meta && meta.toLowerCase() !== state.toLowerCase() ? meta : '',
     reason ? `Reason: ${reason}` : '',
     suggestedAction ? `Try: ${suggestedAction}` : '',
@@ -1541,7 +1541,7 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
   const label = step.label || 'Step';
   const meta = step.meta || '';
   const state = step.state || 'pending';
-  const providerLane = step.providerLane || 'utility';
+  const providerLane = step.providerLane === null ? null : (step.providerLane || 'utility');
   const reason = step.reason || '';
   const suggestedAction = step.suggestedAction || '';
   const unhealthy = ['warning', 'failed'].includes(state);
@@ -1554,7 +1554,7 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
     || row.dataset.recursionProgressMeta !== meta
     || row.dataset.recursionProgressReason !== reason
     || row.dataset.recursionProgressSuggestion !== suggestedAction
-    || row.dataset.recursionProgressProvider !== providerLane
+    || row.dataset.recursionProgressProvider !== (providerLane || '')
   );
   row.className = progressRowClass(step, child, firstRender ? 'is-entering' : (changed ? 'is-updating' : ''));
   row.dataset.recursionProgressRendered = 'true';
@@ -1564,8 +1564,8 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
   row.dataset.recursionProgressMeta = meta;
   row.dataset.recursionProgressReason = reason;
   row.dataset.recursionProgressSuggestion = suggestedAction;
-  row.dataset.recursionProgressProvider = providerLane;
-  setText(row, '[data-recursion-progress-provider-mark]', providerMark(providerLane));
+  row.dataset.recursionProgressProvider = providerLane || '';
+  setText(row, '[data-recursion-progress-provider-mark]', providerLane === null ? '' : providerMark(providerLane));
   setText(row, '[data-recursion-progress-label]', label);
   setText(row, '[data-recursion-progress-meta]', meta);
   updateProgressActionSlot(row, step.action, tooltipsEnabled);
@@ -1576,7 +1576,7 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
   if (visibleAction) addClassName(row, 'has-action');
   else removeClassName(row, 'has-action');
   setTooltip(row, tooltipsEnabled, progressStepTooltip({ ...step, label, meta, state, providerLane, suggestedAction }, child));
-  setTooltip(row.querySelector?.('[data-recursion-progress-provider-mark]'), tooltipsEnabled, `${laneLabel(providerLane)} provider`);
+  setTooltip(row.querySelector?.('[data-recursion-progress-provider-mark]'), tooltipsEnabled, providerLane === null ? '' : `${laneLabel(providerLane)} provider`);
 }
 
 function syncScrollableChildFade(group) {

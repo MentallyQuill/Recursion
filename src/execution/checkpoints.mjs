@@ -136,8 +136,12 @@ function normalizeStageSummary(value, depth = 0) {
     Object.keys(value)
       .sort()
       .slice(0, 40)
-      .filter((key) => !unsafeSummaryKey(key))
-      .map((key) => [key.slice(0, 80), normalizeStageSummary(value[key], depth + 1)])
+      .filter((key) => key === 'authoredCards' || !unsafeSummaryKey(key))
+      .map((key) => [key.slice(0, 80), key === 'authoredCards'
+        ? (Array.isArray(value[key]) ? value[key] : []).filter((entry) => entry && typeof entry.id === 'string' && typeof entry.name === 'string').map((entry) => ({
+            id: entry.id.slice(0, 160), name: entry.name.slice(0, 120), priority: entry.priority === true
+          }))
+        : normalizeStageSummary(value[key], depth + 1)])
       .filter(([, entry]) => entry !== null)
   );
 }

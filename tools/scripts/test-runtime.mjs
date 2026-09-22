@@ -1425,7 +1425,7 @@ for (const applyMode of ['as-swipe', 'replace']) {
 // Replaced V1 contract: dialogue/prose pass fixtures are retained as historical
 // examples until the dedicated generation-review harness supersedes them.
 // Priority must survive both the authored-card boundary and Arbiter omissions.
-for (const pipelineMode of ['segmented', 'fused']) {
+for (const pipelineMode of ['segmented', 'fused']) for (const turnLimit of [2, 5]) {
   const deck = createDefaultCardDeck();
   deck.id = 'realism-regression';
   deck.readonly = false;
@@ -1446,7 +1446,7 @@ for (const pipelineMode of ['segmented', 'fused']) {
     };
   }
   const settings = {
-    mode: 'auto', pipelineMode, reasoningLevel: 'medium', minCards: 4, maxCards: 4, strength: 'balanced',
+    mode: 'auto', pipelineMode, reasoningLevel: 'medium', minCards: turnLimit, maxCards: turnLimit, strength: 'balanced',
     preProcessDecks: { activeDeckId: deck.id, customDecks: { [deck.id]: deck } }
   };
   const calls = [];
@@ -1460,7 +1460,7 @@ for (const pipelineMode of ['segmented', 'fused']) {
             schema: UTILITY_ARBITER_SCHEMA, snapshotHash: request.snapshotHash,
             action: 'refresh-cards', sceneStatus: 'same-scene',
             cardJobs: [{ family: 'Scene Frame', role: 'sceneFrameCard' }],
-            budgets: { maxCards: 4 }, reasonerDecision: { mode: 'skip', reason: 'fixture' }
+            budgets: { maxCards: turnLimit }, reasonerDecision: { mode: 'skip', reason: 'fixture' }
           }
         };
         if (roleId === 'guidanceComposer') return localFallbackCardRouter().generate(roleId, request);
@@ -1477,7 +1477,13 @@ for (const pipelineMode of ['segmented', 'fused']) {
   assertDeepEqual(view.lastHand.cards.slice(0, 3).map((card) => card.id), ['peak', 'disbelief', 'verbosity'], `${pipelineMode} authored Priority cards lead the hand`);
   assertEqual(view.lastHand.cards[3]?.family, 'Environment', `${pipelineMode} forces Priority family omitted by Arbiter`);
   assert(calls.some((call) => call.roleId === (pipelineMode === 'fused' ? 'fusedCardBundle' : 'environmentAffordancesCard')), `${pipelineMode} executes its expected provider path`);
-  assertDeepEqual(view.lastPlan.cardJobs.map((job) => job.family), ['Environment'], `${pipelineMode} reserves authored slots before provider work`);
+  assertDeepEqual(view.lastPlan.cardJobs.map((job) => job.family).sort(), turnLimit === 2 ? ['Environment'] : ['Environment', 'Scene Frame'], `${pipelineMode} only fills spare slots after reserving every Priority card`);
+  assertEqual(view.lastHand.cards.length, turnLimit === 2 ? 4 : 5, 'Priority expands limit only as needed');
+  assert(view.lastPlan.cardJobs.find((job) => job.family === 'Environment')?.forcedBy, 'Priority generation is mandatory');
+  const requiredStage = view.execution.stages.find((stage) => stage.stageId === 'preprocess.cards.segmented.environment');
+  if (pipelineMode === 'segmented') assertEqual(requiredStage?.failurePolicy, 'blocking', 'failed generated Priority blocks preparation');
+  const handSummary = view.execution.stages.find((stage) => stage.stageId === 'preprocess.hand' || stage.id === 'preprocess.hand')?.summary;
+  assertDeepEqual(handSummary?.authoredCards?.map((card) => card.name), ['peak', 'disbelief', 'verbosity'], 'execution carries included authored card names for progress');
   const evidence = packetToPromptBlocks(installed[0]).find((block) => block.id === 'cardEvidence')?.text || '';
   for (const id of ['peak', 'disbelief', 'verbosity']) {
     assert(evidence.includes(`Authored ${id} guidance.`), `${pipelineMode} installs authored ${id} text`);
@@ -1502,8 +1508,8 @@ for (const mode of ['auto', 'manual']) {
   } });
   const result = await runtime.prepareForGeneration({ userMessage: 'Continue with authored guidance.' });
   assertEqual(result.ok, true, `${mode} authored-only deck succeeds without a generator family`);
-  assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['first', 'second'], `${mode} authored cards respect deck order and cap`);
-  assert(runtime.view().lastHand.omitted.some((card) => card.cardId === 'third' && card.reason === 'priority-over-max-cards'), `${mode} overflow is explained`);
+  assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['first', 'second', 'third'], `${mode} required authored cards all survive in deck order`);
+  assertEqual(runtime.view().lastHand.omitted.length, 0, `${mode} required authored cards have no budget omissions`);
 }
 
 if (false) {

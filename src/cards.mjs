@@ -1360,7 +1360,7 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
   const requestedCardLimit = numberInRange(maxCards, 6, 0, 64);
   const forcedOrder = forcedFamilyOrder(forcedFamilies);
   const forcedCardOrderMap = forcedCardOrder(forcedCardIds);
-  const cardLimit = Math.max(effectiveMaxCardsForPolicy(requestedCardLimit, policy), forcedOrder.size);
+  let cardLimit = Math.max(effectiveMaxCardsForPolicy(requestedCardLimit, policy), forcedOrder.size);
   const tokenLimit = numberInRange(maxTokens, 700, 0, 20000);
   const active = [];
   const omitted = [];
@@ -1382,7 +1382,8 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
   let tokenEstimate = 0;
   const priorityRank = (card) => Math.min(...[card.id, ...(card.sourceCardIds || [])]
     .map((id) => forcedCardOrderMap.get(id) ?? Infinity));
-  const priorityCount = active.filter((card) => Number.isFinite(priorityRank(card))).length;
+  const priorityCount = active.filter((card) => Number.isFinite(priorityRank(card)) || forcedOrder.has(card.family)).length;
+  cardLimit = Math.max(cardLimit, priorityCount);
   const selectedPriorityIds = new Set();
   const sortedCards = active.slice().sort((a, b) => {
     const aForcedCard = Number.isFinite(priorityRank(a));
@@ -1398,11 +1399,10 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
   for (const card of sortedCards) {
     const cardTokens = numberInRange(card.tokenEstimate, estimateTokens(card.promptText), 1, MAX_TOKEN_ESTIMATE);
     if (selected.length >= cardLimit) {
-      const overPriority = Number.isFinite(priorityRank(card)) && priorityCount > cardLimit;
       omitted.push({
         cardId: card.id,
         family: card.family || '',
-        reason: overPriority ? 'priority-over-max-cards' : 'max-cards',
+        reason: 'max-cards',
         tokenEstimate: cardTokens
       });
       continue;
@@ -1455,7 +1455,7 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
       forcedCardIds: [...forcedCardOrderMap.keys()],
       selectedForcedFamilies: selected.map((card) => card.family).filter((family) => forcedOrder.has(family)),
       selectedForcedCardIds: [...forcedCardOrderMap.keys()].filter((id) => selectedPriorityIds.has(id)),
-      diagnostics: priorityCount > cardLimit ? ['priority-card-cap'] : [],
+      diagnostics: [],
       tokenBudgetExceeded: tokenLimit > 0 && tokenEstimate > tokenLimit,
       sourceCardCount: Array.isArray(cards) ? cards.length : 0,
       ...(behaviorPolicyMetadata ? { behaviorPolicy: behaviorPolicyMetadata } : {})

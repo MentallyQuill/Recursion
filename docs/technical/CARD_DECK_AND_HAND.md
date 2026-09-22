@@ -20,11 +20,11 @@ flowchart LR
 
 ## Selection State Contract
 
-Editable cards expose `off`, `active`, and `priority`. Auto cycles `off -> active -> priority -> off`; Manual cycles `off -> active -> off`. `off` excludes a card from scope, `active` makes it a normal candidate, and `priority` moves it ahead of normal active cards in Auto. Priority overflow is resolved by deck category/card order and recorded as an omission rather than backfilled with lower-priority cards.
+Editable cards expose `off`, `active`, and `priority`. Auto cycles `off -> active -> priority -> off`; Manual cycles `off -> active -> off`. `off` excludes a card from scope, `active` makes it a normal candidate, and `priority` moves it ahead of normal active cards in Auto. Every runnable Priority card is required, in deck category/card order, even when Priority cards exceed the turn card limit. Ordinary cards fill only the remaining slots.
 
 Authored cards without a built-in generator family enter hand selection directly as `Authored` guidance, with their deck IDs and operator text. They require no provider call and are rebuilt from the active deck rather than stored as generated scene evidence. Disabled and draft cards are excluded. Authored text and ordering participate in the deck revision hash, invalidating prepared swipe reuse after edits.
 
-Auto resolves Priority slots before provider work: authored Priority cards reserve slots, and generated Priority families omitted by the Arbiter are added explicitly. Multiple source cards belonging to one generated family share its generated card slot. Both kinds follow source deck order, ahead of ordinary candidates, within the effective card limit. Remaining generation capacity retains the normal focus and strength policy. The runtime cache contract is version 2 so pre-fix prepared artifacts cannot be reused.
+Auto resolves Priority slots before provider work: authored Priority cards reserve slots, and generated Priority families omitted by the Arbiter are added explicitly. Multiple source cards belonging to one generated family share its generated card slot. Both kinds follow source deck order ahead of ordinary candidates. Priority coverage expands the effective card limit when necessary; it is never trimmed to fit it. Remaining generation capacity retains the normal focus and strength policy. The runtime cache contract is version 3 so previously capped Priority artifacts cannot be reused.
 
 ```mermaid
 stateDiagram-v2
@@ -170,7 +170,7 @@ Runtime applies these decisions only after schema and safety checks. If an expli
 
 The scene deck is the cached set of cards for one scene. It can contain active, stowed, stale, and discarded cards. Only active cards can enter the turn hand.
 
-The turn hand is a compact selection for one prompt packet. It is rebuilt each generation attempt and sorted by emphasis, catalog priority, and id. It is capped by max-card and token budgets. Runtime also applies the effective max-card budget before provider generation, so fresh provider calls are not made for card jobs that cannot reach the hand.
+The turn hand is rebuilt for each generation attempt. Required Priority cards come first in deck order; ordinary candidates follow the focus, emphasis, and catalog policy within remaining turn slots. Priority coverage can exceed the turn card limit. Runtime reserves required slots before provider generation so ordinary jobs that cannot reach the hand are not dispatched. Token estimates remain diagnostic.
 
 Card Deck selection state adds a user-steering layer above normal Auto sorting:
 
@@ -180,7 +180,7 @@ Card Deck selection state adds a user-steering layer above normal Auto sorting:
 
 The Cards dropdown represents those states with the supplied eye icons: slashed eye for `off`, open eye for `active`, and eye-plus for `priority`. The deck header has two bulk actions for editable decks: open eye sets all runnable cards to normal `active` and clears Priority, while slashed eye sets all runnable cards to `off`. Draft cards are left untouched, and the read-only Default deck requires duplication before either bulk action can run.
 
-If Priority exceeds `Max Cards`, runtime keeps the top ordered Priority cards, does not backfill with lower Active cards, records `priority-card-cap`, and marks over-cap omissions as `priority-over-max-cards`.
+If Priority exceeds the turn card limit, runtime includes every runnable Priority card in deck order and includes no ordinary Active cards. Priority generated families are required stages: a provider failure blocks preparation rather than silently omitting the card.
 
 Card Deck organization is stored directly on the active deck. Category drag handles update `categoryOrder`; card drag handles update `cardOrderByCategory` and, for cross-category drops, the card's `categoryId`. There is no second visible Card Scope selector under Card Decks. Runtime scope derives from the active deck's `off`, `active`, and `priority` states, with category/card order used for Priority ordering and deterministic hand selection.
 

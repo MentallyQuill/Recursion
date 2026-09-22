@@ -20,6 +20,12 @@ import { assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 assertEqual(PIPELINE_RUN_SCHEMA, 'recursion.pipelineRun.v2', 'pipeline manifests use the turn-scoped V2 schema');
 assertEqual(CHECKPOINT_SCHEMA, 'recursion.stageCheckpoint.v2', 'stage checkpoints use the turn-scoped V2 schema');
 
+const authoredRecord = normalizeStageRecord({
+  ...createStageRecord({ stageId: 'preprocess.hand', kind: 'local' }),
+  summary: { authoredCards: [{ id: 'priority-one', name: 'Focus', priority: true, promptText: 'PRIVATE BODY' }] }
+});
+assertDeepEqual(authoredRecord.summary.authoredCards, [{ id: 'priority-one', name: 'Focus', priority: true }], 'authored progress metadata survives checkpoint normalization without card bodies');
+
 const left = await stableHash({ b: 2, a: 1 });
 const right = await stableHash({ a: 1, b: 2 });
 

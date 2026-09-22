@@ -303,7 +303,7 @@ Draft cards are unchanged by both actions. The bundled Default deck is read-only
 
 Card state icons use the supplied eye family: slashed eye for Inactive, open eye for Active, and eye-plus for Priority. Check and X remain confirm/cancel/delete-confirm language and must not be used as card-state icons.
 
-Priority overflow is allowed. If the user marks more Priority cards than the effective `Max Cards` budget, Recursion uses deck category/card order, selects the top cards, records `priority-card-cap`, and omits the rest with `priority-over-max-cards`.
+Every runnable Priority card is mandatory and precedes ordinary cards in deck category/card order. Priority cards may exceed the effective turn card limit; the Arbiter fills only remaining slots with ordinary Active cards. Generated Priority families must succeed before preparation completes.
 
 ## Card Deck Organization
 

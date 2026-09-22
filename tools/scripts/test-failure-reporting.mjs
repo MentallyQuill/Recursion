@@ -17,11 +17,11 @@ import { progressFromExecution } from '../../src/progress.mjs';
 
 // Stale prompt install retains its cause through summary and journal.
 {
-  const stale = { ok: false, installed: false, settled: true, failureClass: 'host-source-stale', continuePrimaryGeneration: true };
+  const stale = { ok: false, installed: false, settled: true, failureClass: 'host-source-stale', continuePrimaryGeneration: false };
   const install = await installPrompt({ prompt: { install: async () => stale } }, {});
   assert.equal(install.failureClass, 'host-source-stale');
   assert.equal(install.installed, false);
-  assert.equal(install.continuePrimaryGeneration, true);
+  assert.equal(install.continuePrimaryGeneration, false);
   assert.match(installSummary(stale), /Chat changed/);
   const repo = createStorageRepository();
   const entry = await repo.appendJournal('failure-test', {

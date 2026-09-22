@@ -1059,7 +1059,9 @@ function createLivePostProcessRuntimeHarness({
     contextFactory: () => context,
     settingsRoot: {}
   });
+  host.providerProfiles = { list: () => [{ id: 'preprocess-test-profile', completionMode: 'chat' }] };
   host.settingsStore.update({
+    providers: { utility: { connectionProfileId: 'preprocess-test-profile' } },
     reasoningLevel: 'medium',
     postProcess: {
       enabled: true,
@@ -1071,6 +1073,14 @@ function createLivePostProcessRuntimeHarness({
   const generationRouter = {
     async generate(roleId, request, options) {
       routerCalls.push({ roleId, request, options });
+      if (roleId === 'utilityArbiter') {
+        return { ok: true, data: {
+          schema: 'recursion.utilityArbiter.v1', snapshotHash: request.snapshotHash,
+          action: 'skip', cardJobs: [],
+          reasonerDecision: { mode: 'skip', reason: 'No guidance needed for this test turn.', signals: [] },
+          budgets: { targetBriefTokens: 500, maxCards: 6 }, diagnostics: []
+        } };
+      }
       return {
         ok: true,
         roleId,
@@ -3625,12 +3635,12 @@ function immediateDurableCardRouter() {
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Install fails.' });
   const view = runtime.view();
-  assertEqual(result.ok, true, 'install exception remains fail-soft');
+  assertEqual(result.ok, false, 'install exception blocks narration');
   assertEqual(result.install.ok, false, 'install exception preserves non-ok install outcome');
   assertEqual(calls.install, 1, 'install attempted once');
   assertEqual(installed.length, 1, 'failed install still received packet');
   assertEqual(view.activity.severity, 'warning', 'install failure settles warning');
-  assertEqual(view.activity.label, 'Prompt install failed. Generation will continue without Recursion.', 'install failure label');
+  assertEqual(view.activity.label, 'Prompt install failed. Narration stopped.', 'install failure label');
   assertEqual(view.lastBrief?.status, 'empty', 'failed prompt install does not report Last Brief as ready');
   assertEqual(view.lastPreparedGeneration, null, 'initial prompt install failure does not commit a prepared generation artifact');
   assertEqual(view.activeRunId, null, 'active run cleared after install failure');
@@ -3659,7 +3669,7 @@ function immediateDurableCardRouter() {
     }
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Returned install failure.' });
-  assertEqual(result.ok, true, 'returned install failure remains fail-soft');
+  assertEqual(result.ok, false, 'returned install failure blocks narration');
   assertEqual(result.install.ok, false, 'returned install failure preserves non-ok install outcome');
   assertEqual(result.install.error.code, 'RETURNED_SECRET', 'returned install failure preserves safe code');
   assertNoSecretText(result, 'returned install result');
@@ -3673,11 +3683,11 @@ function immediateDurableCardRouter() {
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'No installer.' });
   const view = runtime.view();
-  assertEqual(result.ok, true, 'missing host prompt install remains fail-soft');
+  assertEqual(result.ok, false, 'missing host prompt install blocks narration');
   assertEqual(result.install.ok, false, 'missing installer preserves non-ok install outcome');
   assertEqual(calls.install, 0, 'missing installer is not called');
   assertEqual(result.install.error.code, 'RECURSION_PROMPT_INSTALL_UNAVAILABLE', 'missing installer returns explicit error code');
-  assertEqual(view.activity.label, 'Prompt install failed. Generation will continue without Recursion.', 'missing installer warning label');
+  assertEqual(view.activity.label, 'Prompt install failed. Narration stopped.', 'missing installer warning label');
   assertEqual(view.activeRunId, null, 'active run cleared after missing installer');
   const journal = await storage.loadRunJournal(view.lastSnapshot.chatKey);
   assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected', 'prompt.install_failed'], 'missing installer journals hand before failure');
@@ -3719,14 +3729,14 @@ function immediateDurableCardRouter() {
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'First pending turn.' });
   const view = runtime.view();
-  assertEqual(result.ok, true, 'stale prompt install returns nonfatal ok');
+  assertEqual(result.ok, false, 'stale prompt install blocks narration');
   assertEqual(result.install.ok, false, 'stale prompt install records a settled host failure');
   assertEqual(result.install.failureClass, 'host-source-stale', 'stale prompt install reports host source drift');
   assertEqual(calls.snapshot, 2, 'runtime rechecks host snapshot before prompt install');
   assertEqual(calls.install, 0, 'stale snapshot does not call host prompt install');
   assertEqual(installed.length, 0, 'stale snapshot does not write prompt packet');
   assertEqual(view.activity.severity, 'warning', 'stale install skip surfaces warning activity');
-  assertEqual(view.activity.label, 'Prompt install failed. Generation will continue without Recursion.', 'stale install has visible warning status');
+  assertEqual(view.activity.label, 'Prompt install failed. Narration stopped.', 'stale install has visible warning status');
   const journal = await storage.loadRunJournal(firstTurn.chatKey);
   assertDeepEqual(journal.entries.map((entry) => entry.event), ['hand.selected', 'prompt.install_failed'], 'stale install is journaled after hand selection');
 }
@@ -3795,7 +3805,7 @@ function immediateDurableCardRouter() {
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Snapshot recheck should fail closed.' });
   const view = runtime.view();
-  assertEqual(result.ok, true, 'failed snapshot recheck returns nonfatal ok');
+  assertEqual(result.ok, false, 'failed snapshot recheck blocks narration');
   assertEqual(result.install.ok, false, 'failed snapshot recheck settles prompt installation as failed');
   assertEqual(result.install.failureClass, 'host-source-stale', 'failed snapshot recheck reports bounded host-source failure');
   assertEqual(calls.snapshot, 2, 'failed recheck still attempts final host snapshot');

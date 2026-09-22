@@ -979,13 +979,15 @@ function roleCounts(calls = []) {
       { mesid: 3, role: 'assistant', text: 'First native response.', visible: true }
     ]
   });
-  await harness.runtime.prepareForGeneration({
+  const swipePreparation = await harness.runtime.prepareForGeneration({
     userMessage: null,
     hostGeneration: true,
     generationType: 'swipe'
   });
   assertDeepEqual(roleCounts(providerCalls), firstCounts, 'same-turn swipe still reuses all Pre-process model work');
-  assertEqual(harness.runtime.postProcessPending(), true, 'same-turn swipe replaces the pending trigger for the new response');
+  assertEqual(swipePreparation.reason, 'stale-generation-basis', 'changed swipe source fails the final prompt freshness check');
+  assertEqual(swipePreparation.continuePrimaryGeneration, false, 'stale swipe preparation blocks primary generation');
+  assertEqual(harness.runtime.postProcessPending(), false, 'stale swipe preparation disarms Post-process');
 }
 
 {
@@ -1879,8 +1881,8 @@ function roleCounts(calls = []) {
     userMessage: 'I ask what she remembers.',
     hostGeneration: true
   });
-  assertEqual(result.ok, true, 'prompt-install failure settles without failing primary generation');
-  assertEqual(result.continuePrimaryGeneration, true, 'prompt-install failure permits primary generation');
+  assertEqual(result.ok, false, 'prompt-install failure blocks primary generation');
+  assertEqual(result.continuePrimaryGeneration, false, 'prompt-install failure forbids primary generation');
   assertEqual(result.recursionPromptInstalled, false, 'prompt-install failure is explicit');
   assertEqual(calls.clear, 1, 'failed installation clears partial prompt residue once');
   const manifest = await storage.loadPipelineRun('chat-preprocess');

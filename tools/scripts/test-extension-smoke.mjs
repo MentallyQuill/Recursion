@@ -331,6 +331,62 @@ function createFakeClassList() {
   };
 }
 
+// These exercise the real interceptor/runtime boundary. SillyTavern ignores
+// thrown interceptor errors, so only its abort callback prevents narration.
+for (const failure of ['provider', 'install', 'exception', 'success', 'disabled']) {
+  await globalThis.recursionOnDelete();
+  const fake = createFakeSillyTavernContext(`preparation-${failure}`);
+  globalThis.extension_settings = profileBackedSettings({
+    mode: 'auto', reasonerUse: 'off', modelAttemptsPerStep: 1,
+    enabled: failure !== 'disabled'
+  });
+  globalThis.SillyTavern = { getContext: () => fake.context };
+  if (failure === 'provider') {
+    fake.context.generateRaw = async () => { throw new Error('provider unavailable'); };
+  }
+  if (failure === 'install') {
+    fake.context.setExtensionPrompt = (_key, text) => {
+      if (text) throw new Error('prompt rejected');
+    };
+  }
+  if (failure === 'exception') {
+    const activeRuntime = extensionModule.bootstrapRecursion();
+    activeRuntime.prepareForGeneration = async () => { throw new Error('preparation crashed'); };
+  }
+  const aborts = [];
+  await globalThis.recursionGenerationInterceptor(fake.context.chat, 4096, (immediate) => aborts.push(immediate), 'normal');
+  assertDeepEqual(aborts, ['success', 'disabled'].includes(failure) ? [] : [true], `${failure} preparation controls native narration`);
+  if (!['success', 'disabled'].includes(failure)) {
+    assertEqual(extensionModule.bootstrapRecursion().view().hostGenerationActive, false, `${failure} releases host generation state`);
+    assertEqual(extensionModule.bootstrapRecursion().proseEnhancementPending(), false, `${failure} disarms enhancement`);
+  }
+}
+await globalThis.recursionOnDelete();
+
+{
+  const fake = createFakeSillyTavernContext('generation-result-gate');
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
+  globalThis.SillyTavern = { getContext: () => fake.context };
+  const activeRuntime = extensionModule.bootstrapRecursion();
+  for (const [label, result, expectedAbort] of [
+    ['paused stage', { ok: false, paused: true }, true],
+    ['stale reuse', { ok: true, skipped: true, continuePrimaryGeneration: false }, true],
+    ['missing result', undefined, true],
+    ['incomplete result', { ok: true }, true],
+    ['intentional Arbiter skip', { ok: true, skipped: true, reason: 'arbiter-skip', continuePrimaryGeneration: true }, false]
+  ]) {
+    activeRuntime.prepareForGeneration = async () => result;
+    const aborts = [];
+    await globalThis.recursionGenerationInterceptor(fake.context.chat, 4096, (immediate) => aborts.push(immediate));
+    assertDeepEqual(aborts, expectedAbort ? [true] : [], `${label} gates native narration`);
+  }
+  activeRuntime.prepareForGeneration = async () => { throw new Error('quiet must bypass preparation'); };
+  const aborts = [];
+  await globalThis.recursionGenerationInterceptor(fake.context.chat, 4096, (immediate) => aborts.push(immediate), 'quiet');
+  assertDeepEqual(aborts, [], 'internal quiet generation bypasses the narration gate');
+  await globalThis.recursionOnDelete();
+}
+
 async function assertLifecycleClearsInstalledPrompt(hookName) {
   const fake = createFakeSillyTavernContext(hookName);
   globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
@@ -667,11 +723,13 @@ if (lifecycleFailures.length) {
   const truncatedSwipePayload = [
     { mesid: 1, is_user: true, mes: userText }
   ];
+  const swipeAborts = [];
   assertEqual(
-    await globalThis.recursionGenerationInterceptor(truncatedSwipePayload, undefined, undefined, 'swipe'),
+    await globalThis.recursionGenerationInterceptor(truncatedSwipePayload, undefined, (immediate) => swipeAborts.push(immediate), 'swipe'),
     truncatedSwipePayload,
     'latest assistant native swipe sequence keeps the truncated interceptor payload'
   );
+  assertDeepEqual(swipeAborts, [], 'successful native swipe prompt reuse permits narration');
   assertEqual(fake.context.chat.length, 2, 'latest assistant native swipe sequence does not append a second assistant row');
   assertEqual(fake.context.chat[1].swipes.length, 2, 'latest assistant native swipe sequence preserves both response variants');
   assertEqual(fake.context.chat[1].swipe_id, 1, 'latest assistant native swipe sequence keeps the selected response variant');

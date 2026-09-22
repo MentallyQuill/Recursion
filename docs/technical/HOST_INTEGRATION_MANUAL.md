@@ -52,7 +52,7 @@ The entrypoint subscribes to SillyTavern's player Stop signal through `event_typ
 
 ## Generation Interceptor Boundary
 
-The generation interceptor calls `runtime.prepareForGeneration({ hostGeneration: true })` before returning the chat to SillyTavern. It catches and logs sanitized failures so the host generation can continue. While that intercepted turn is active, `runtime.view().hostGenerationActive` allows the UI to expose the active-only Stop generation button.
+The generation interceptor calls `runtime.prepareForGeneration({ hostGeneration: true })` before returning the chat to SillyTavern. Primary narration proceeds only when preparation returns `ok: true` and `continuePrimaryGeneration: true`. Failed, paused, stale, or unavailable preparation and thrown errors call SillyTavern's `abort(true)` callback; throwing alone is insufficient because SillyTavern catches interceptor errors. Prompt installation failure also blocks narration. Accepted checkpoints remain available for explicit recovery. Blocked turns disarm Post-process and prose enhancement and release the host-generation-active state. Intentional Arbiter skips, disabled Recursion, and internal quiet generations remain bypasses. While an intercepted turn is active, `runtime.view().hostGenerationActive` allows the UI to expose the active-only Stop generation button.
 
 A host-owned Resume re-enters SillyTavern before continuing saved Recursion work. Normal and regenerate resumes call the native `Generate` surface. Swipe resumes call SillyTavern's native right-swipe lifecycle, which allocates the new swipe slot, emits `MESSAGE_SWIPED`, displays the generation placeholder, and then enters `Generate('swipe')`; calling `Generate('swipe')` directly would overwrite the selected slot instead of performing a native swipe.
 
@@ -66,8 +66,12 @@ sequenceDiagram
     Entry->>Runtime: prepareForGeneration
     Runtime->>Host: snapshot, provider bridge, prompt install
     Host-->>Runtime: result or sanitized failure
-    Runtime-->>Entry: prompt ready, skipped, observe, or warning
-    Entry-->>ST: original chat continues
+    Runtime-->>Entry: preparation result
+    alt preparation ready or intentional bypass
+        Entry-->>ST: original chat continues
+    else failed, paused, stale, or exception
+        Entry-->>ST: abort(true), retain recovery checkpoints
+    end
 ```
 
 ## Prompt Adapter

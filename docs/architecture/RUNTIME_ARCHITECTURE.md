@@ -72,7 +72,7 @@ Fused sends all requested families through one structured card-bundle call. Each
 
 Provider guidance is helpful but raw validated card evidence remains source of truth. If guidance is unavailable or invalid, packet composition falls back to raw evidence rather than inventing instructions.
 
-Prompt installation rechecks the current host source before and after mutation. A stale operation cannot commit its packet. The prepared artifact becomes active only after the host reports installation success. Install failure is fail-soft for native story generation but is recorded explicitly and never promoted to a reusable success.
+Prompt installation rechecks the current host source before and after mutation. A stale operation cannot commit its packet. The prepared artifact becomes active only after the host reports installation success. Install failure blocks native story generation, is recorded explicitly, and is never promoted to a reusable success. The interceptor calls SillyTavern's abort callback whenever required preparation fails or pauses.
 
 ## Stop, Resume, And Retry
 

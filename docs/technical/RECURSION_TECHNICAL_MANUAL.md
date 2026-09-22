@@ -182,7 +182,7 @@ The Last Brief and Full Viewer are observatories, while the Cards surface is the
 - Invalid card output omits only that card.
 - Reasoner failure falls back to Utility guidance plus raw selected Card Evidence.
 - Prompt composition over budget trims by priority and records omissions.
-- Prompt install failure records a warning and generation continues without Recursion.
+- Prompt install failure records a warning and stops narration. Accepted checkpoints remain available for explicit recovery.
 - Storage failure keeps in-memory work for the current turn when possible and reports a warning.
 - Stale async results cannot mutate the active execution, cache, prompt packet, or host response.
 - Swipe changes are prompt-safe source changes: Recursion clears stale prompts immediately and reuses cached cards only when the active source revision matches.

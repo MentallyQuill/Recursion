@@ -83,7 +83,7 @@ The detailed sequence is:
 7. Runtime selects a bounded hand, composes and validates the prompt packet, and stores accepted outputs as artifacts before advancing the manifest.
 8. Runtime rechecks source and settings revisions under prompt-mutation serialization.
 9. A current packet is installed through Recursion-owned SillyTavern prompt keys and recorded as a prepared-generation receipt.
-10. The interceptor yields to SillyTavern. The primary story request remains host-owned and is never automatically retried by Recursion.
+10. The interceptor yields to SillyTavern only after successful preparation or an intentional bypass. Failed or paused stages, stale source checks, prompt installation failures, and unexpected preparation errors abort primary narration. The primary story request remains host-owned and is never automatically retried by Recursion.
 
 ### Segmented Card Wave
 

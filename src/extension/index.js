@@ -657,20 +657,31 @@ async function teardownRecursion(label) {
   publishLiveHarnessRuntime(null);
 }
 
-export async function recursionGenerationInterceptor(chat, _contextSize, _abort, generationType = '') {
+export async function recursionGenerationInterceptor(chat, _contextSize, abort, generationType = '') {
   if (String(generationType || '').trim().toLowerCase() === 'quiet') return chat;
-  const activeRuntime = bootstrapRecursion();
-  if (!activeRuntime) return chat;
-
+  if (!hasSillyTavernContext()) return chat;
+  let activeRuntime;
+  let ready = false;
   try {
+    activeRuntime = bootstrapRecursion();
+    if (!activeRuntime) return chat;
     await runtimeRestorePromise;
-    await activeRuntime.prepareForGeneration({
+    const result = await activeRuntime.prepareForGeneration({
       userMessage: latestPendingUserMessageFromPayload(chat),
       hostGeneration: true,
       generationType
     });
+    ready = result?.ok === true && result.continuePrimaryGeneration === true;
   } catch (error) {
     warn('Generation preparation failed.', error);
+  } finally {
+    if (!ready) {
+      // SillyTavern catches interceptor exceptions and continues. Its abort
+      // callback is the authoritative gate for the primary generation.
+      abort?.(true);
+      activeRuntime?.cancelPostProcess?.('preprocess-not-ready');
+      activeRuntime?.handleHostGenerationEnded?.();
+    }
   }
   return chat;
 }

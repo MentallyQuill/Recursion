@@ -139,7 +139,7 @@ const STORAGE_SCHEMA_VERSION = 1;
 const RUNTIME_CACHE_CONTRACT_VERSION = 3;
 const DEFAULT_CHAT_ID = 'chat';
 const DEFAULT_SCENE_KEY = 'scene';
-const INSTALL_FAILURE_LABEL = 'Prompt install failed. Generation will continue without Recursion.';
+const INSTALL_FAILURE_LABEL = 'Prompt install failed. Narration stopped.';
 const CLEAR_FAILURE_LABEL = 'Prompt clear failed. Recursion skipped without clearing host prompt.';
 const STALE_INSTALL_LABEL = 'Recursion skipped: host turn changed before prompt install.';
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
@@ -7296,7 +7296,7 @@ export function createRecursionRuntime({
             failureClass: 'host-source-stale',
             reason: freshness.reason,
             comparison: freshness.comparison || null,
-            continuePrimaryGeneration: true
+            continuePrimaryGeneration: false
           };
         }
         const install = await installPrompt(host, packet);
@@ -7307,7 +7307,7 @@ export function createRecursionRuntime({
             installed: false,
             settled: true,
             failureClass: 'host-install-rejected',
-            continuePrimaryGeneration: true,
+            continuePrimaryGeneration: false,
             error: sanitizePromptError(
               install.error,
               'RECURSION_PROMPT_INSTALL_FAILED',
@@ -7707,7 +7707,7 @@ export function createRecursionRuntime({
     });
     clearActiveRun(context.runId);
     return {
-      ok: true,
+      ok: installed,
       packet,
       hand,
       plan,
@@ -7715,7 +7715,7 @@ export function createRecursionRuntime({
         ok: installed,
         ...(installSettlement || {})
       },
-      continuePrimaryGeneration: installSettlement?.continuePrimaryGeneration !== false,
+      continuePrimaryGeneration: installed,
       recursionPromptInstalled: installed,
       execution: manifest
     };
@@ -7914,8 +7914,8 @@ export function createRecursionRuntime({
       ...reuse,
       execution: manifest,
       plan,
-      continuePrimaryGeneration: true,
-      recursionPromptInstalled: reuse.ok !== false
+      continuePrimaryGeneration: reuse.ok === true && reuse.reused === true,
+      recursionPromptInstalled: reuse.ok === true && reuse.reused === true
     };
   }
 
@@ -8374,7 +8374,8 @@ export function createRecursionRuntime({
       );
       if (
         hostGeneration === true
-        && durableResult?.continuePrimaryGeneration !== false
+        && durableResult?.ok === true
+        && durableResult?.continuePrimaryGeneration === true
         && preprocessTurnKeyHash
       ) {
         postProcessRuntime.preparePostProcessTrigger({
@@ -8417,7 +8418,7 @@ export function createRecursionRuntime({
       clearLastBrief({ status: 'empty', reason: 'disabled', runId: clearRunId });
       if (clear?.ok === false) reportClearWarning(clearRunId, clear);
       else safeActivity(activity, 'clear');
-      return { ok: true, skipped: true, reason: 'disabled', clear };
+      return { ok: true, skipped: true, reason: 'disabled', clear, continuePrimaryGeneration: true };
     }
 
   }

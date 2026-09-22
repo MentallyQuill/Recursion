@@ -72,7 +72,8 @@ assertEqual(request.sourceHash, baseInput.sourceHash, 'guidance request binds th
 assertEqual(request.reasoningLevel, 'medium', 'guidance request binds its frozen reasoning level');
 assertEqual(request.reasoningCategory, 'post-process', 'guidance request uses post-process reasoning category');
 assertEqual(request.reasoningIntent, 'medium', 'guidance request uses level-specific reasoning intent');
-assertEqual(request.jsonSchema.properties.schema.const, POST_PROCESS_GUIDANCE_SCHEMA, 'guidance request carries the minimal response schema');
+assertDeepEqual(request.jsonSchema.required, ['guidanceText'], 'model returns only guidance text');
+assert(request.prompt.includes('{"guidanceText":"'), 'Prompt JSON contains an explicit response example');
 assertEqual(request.jsonSchema.properties.guidanceText.maxLength, MAX_POST_PROCESS_GUIDANCE_LENGTH, 'guidance response schema bounds guidance text');
 assert(request.prompt.includes('Analyze where the selected revision cards apply.'), 'guidance prompt asks where and how cards apply');
 assert(request.prompt.includes('Do not rewrite the story response.'), 'guidance prompt forbids story authorship');
@@ -83,9 +84,6 @@ assert(request.prompt.includes(baseInput.draft), 'guidance prompt includes the c
 
 function response(fields = {}) {
   return JSON.stringify({
-    schema: POST_PROCESS_GUIDANCE_SCHEMA,
-    snapshotHash: baseInput.snapshotHash,
-    sourceHash: baseInput.sourceHash,
     guidanceText: 'Apply Cut Echoes to the repeated warning while preserving its consequence.',
     ...fields
   });
@@ -107,7 +105,7 @@ async function routeResult(rawText, overrides = {}) {
 
 for (const [name, rawText, expectedCode] of [
   ['malformed', 'not-json', 'RECURSION_JSON_PARSE_FAILED'],
-  ['wrong schema', response({ schema: 'recursion.storyRewrite.v1' }), 'RECURSION_PROVIDER_SCHEMA_MISMATCH'],
+  ['wrong schema', response({ schema: 'recursion.storyRewrite.v1' }), 'RECURSION_POST_PROCESS_GUIDANCE_INVALID'],
   ['stale snapshot hash', response({ snapshotHash: 'stale-snapshot' }), 'RECURSION_POST_PROCESS_GUIDANCE_INVALID'],
   ['stale source hash', response({ sourceHash: 'stale-source' }), 'RECURSION_POST_PROCESS_GUIDANCE_INVALID'],
   ['empty guidance', response({ guidanceText: '   ' }), 'RECURSION_POST_PROCESS_GUIDANCE_INVALID'],
@@ -137,16 +135,20 @@ for (const [field, values] of Object.entries({
 
 const boundedGuidance = `  ${'g'.repeat(MAX_POST_PROCESS_GUIDANCE_LENGTH + 20)}  `;
 const boundedResult = await routeResult(response({ guidanceText: boundedGuidance }));
-assertEqual(boundedResult.ok, true, 'valid guidance envelope succeeds');
-assertEqual(boundedResult.data.guidanceText.length, MAX_POST_PROCESS_GUIDANCE_LENGTH, 'valid guidance is bounded');
-assertEqual(boundedResult.data.guidanceText, boundedResult.data.guidanceText.trim(), 'valid guidance is trimmed');
+assertEqual(boundedResult.ok, false, 'oversized guidance is rejected without tail loss');
+const validResult = await routeResult(response({ guidanceText: '  Apply the card.  ' }));
+assertEqual(validResult.ok, true, 'minimal model output succeeds');
+assertEqual(validResult.data.snapshotHash, baseInput.snapshotHash, 'snapshot binding is local');
+assertEqual(validResult.data.sourceHash, baseInput.sourceHash, 'source binding is local');
+assertEqual(validResult.data.schema, POST_PROCESS_GUIDANCE_SCHEMA, 'schema binding is local');
+assertEqual(validResult.data.guidanceText, validResult.data.guidanceText.trim(), 'valid guidance is trimmed');
 assertDeepEqual(
-  Object.keys(boundedResult.data).sort(),
+  Object.keys(validResult.data).sort(),
   ['guidanceText', 'schema', 'snapshotHash', 'sourceHash'],
   'normalized guidance remains a minimal envelope'
 );
-assertEqual(boundedResult.text, JSON.stringify(boundedResult.data), 'router response text is the structured envelope');
-assert(boundedResult.text !== boundedResult.data.guidanceText, 'router response text is not treated as rewritten story prose');
+assertEqual(validResult.text, JSON.stringify(validResult.data), 'router response text is the structured envelope');
+assert(validResult.text !== validResult.data.guidanceText, 'router response text is not treated as rewritten story prose');
 
 const retryCalls = [];
 const retryRouter = createGenerationRouter({
@@ -186,4 +188,29 @@ assertDeepEqual(
   'guidance attempt policy never changes role or lane'
 );
 
+const completeDraft = 'D'.repeat(25000) + 'CRITICAL DRAFT END';
+const evidenceRequest = buildPostProcessGuidanceRequest({
+  ...baseInput,
+  draft: completeDraft,
+  supportingContext: {
+    latestUserMessage: 'Keep this complete.',
+    boundedPriorMessages: ['x'.repeat(13000), 'A short complete message.'],
+    characterContext: 'Whole character field.'
+  }
+});
+assert(evidenceRequest.prompt.includes(completeDraft), 'complete draft survives beyond old 24000 character limit');
+const evidenceJson = evidenceRequest.prompt.split('Frozen supporting evidence:\n')[1].split('\n\nOrdered revision')[0];
+const evidence = JSON.parse(evidenceJson);
+assertEqual(evidence.evidence.characterContext, 'Whole character field.', 'later fields survive oversized prior evidence');
+assertDeepEqual(evidence.evidence.boundedPriorMessages, ['A short complete message.'], 'messages are included whole');
+assert(evidence.omissions.some((item) => item.path === 'boundedPriorMessages[0]'), 'omitted messages have explicit metadata');
+
+const maximumResult = await routeResult(response({ guidanceText: 'g'.repeat(MAX_POST_PROCESS_GUIDANCE_LENGTH) }));
+assertEqual(maximumResult.ok, true, 'exact maximum guidance length succeeds');
+for (const field of ['snapshotHash', 'sourceHash']) {
+  for (const value of [7, {}, '', 'h'.repeat(181)]) {
+    const result = await routeResult(response(), { [field]: value });
+    assertEqual(result.ok, false, 'malformed local request binding is rejected');
+  }
+}
 console.log('[pass] post-process guidance');

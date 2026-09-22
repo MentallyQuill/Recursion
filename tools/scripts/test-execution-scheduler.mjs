@@ -197,6 +197,47 @@ function createClock() {
   assertEqual(calls, 3, 'Resume cannot replenish exhausted recovery');
 }
 
+{
+  const repository = createRepository();
+  let calls = 0;
+  const failing = (id) => ({ ...stage(id, [], async () => { calls += 1; return null; }),
+    buildCorrectionRequest: ({ request }) => request });
+  const graph = createExecutionGraph({ stages: [failing('post.a'), failing('post.b')] });
+  const scheduler = createExecutionScheduler({ repository, attemptsPerStep: 5 });
+  const result = await scheduler.start({ manifest: { ...manifest({ operationId: 'post-budget' }), phase: 'postprocess' }, graph });
+  assertEqual(calls, 4, 'postprocess stages share two additional dispatches');
+  assertEqual(result.recoveryBudget.recoveryUsed, 2, 'postprocess recovery is durable');
+  assertEqual(result.recoveryBudget.deadlineMs, 300000, 'postprocess has default operation deadline');
+  await scheduler.resume({ operationId: 'post-budget', graph, provenance });
+  assertEqual(calls, 4, 'postprocess Resume preserves exhausted allowance');
+  const retried = await scheduler.retry({ operationId: 'post-budget', stageId: 'post.a', graph, provenance });
+  assertEqual(calls, 7, 'explicit Retry grants first dispatch and fresh two-call allowance');
+  assertEqual(retried.recoveryBudget.recoveryUsed, 2, 'Retry accounting uses fresh window');
+}
+
+{
+  const repository = createRepository();
+  let dispatchedSignal;
+  const graph = createExecutionGraph({ stages: [stage('post.hung', [], ({ signal }) => {
+    dispatchedSignal = signal;
+    return new Promise(() => {});
+  })] });
+  const scheduler = createExecutionScheduler({ repository });
+  let guard;
+  try {
+    const result = await Promise.race([
+      scheduler.start({ manifest: { ...manifest({ operationId: 'post-deadline' }), phase: 'postprocess',
+        recoveryBudget: { deadlineMs: 60000, elapsedActiveMs: 59970, recoveryLimit: 2 } }, graph }),
+      new Promise((_, reject) => { guard = setTimeout(() => reject(new Error('operation deadline did not stop hung stage')), 500); })
+    ]);
+    assertEqual(result.state, 'paused', 'postprocess deadline pauses hung stage');
+    assertEqual(result.pauseReason, 'operation-deadline', 'postprocess deadline has durable reason');
+    assertEqual(dispatchedSignal.aborted, true, 'postprocess deadline aborts transport signal');
+    const resumed = await scheduler.resume({ operationId: 'post-deadline', graph, provenance });
+    assertEqual(resumed.recoveryBudget.recoveryUsed, 0, 'exhausted deadline cannot spend another call');
+  } finally { clearTimeout(guard); }
+}
+
 function createIds() {
   let id = 0;
   return (prefix = 'id') => `${prefix}-${++id}`;

@@ -348,7 +348,7 @@ Assert:
 
 - `postProcessGuidanceUtility` is a Utility role;
 - `postProcessGuidanceReasoner` is a Reasoner role;
-- both require `recursion.postProcessGuidance.v1`;
+- both request exactly `{guidanceText: string}` and normalize locally into `recursion.postProcessGuidance.v1`;
 - Low/Medium select Utility;
 - High/Ultra select Reasoner;
 - one request never changes role or lane during retry;
@@ -423,7 +423,8 @@ export function buildPostProcessGuidanceRequest(input) {
     snapshotHash: input.snapshotHash,
     sourceHash: input.sourceHash,
     prompt: [
-      "Return only recursion.postProcessGuidance.v1 JSON.",
+      'Return exactly {"guidanceText":"Concise revision guidance."}; no other fields.',
+      "guidanceText must be a nonempty string of at most 6000 characters.",
       "Analyze where the selected revision cards apply.",
       "Do not rewrite the story response.",
       "Preserve unsupported material and user agency.",

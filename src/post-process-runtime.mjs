@@ -137,7 +137,7 @@ function boundedSupportingContext(rawSnapshot, settings, assistantIndex) {
   const latestUser = latestMessageByRole(prior, 'user')?.message;
   return {
     latestUserMessage: latestUser ? messageText(latestUser) : '',
-    boundedPriorMessages: bounded.map((message, index) => ({
+    boundedPriorMessages: bounded.filter((message) => message !== latestUser).map((message, index) => ({
       messageId: messageId(message, index),
       role: messageRole(message),
       text: messageText(message)
@@ -401,11 +401,23 @@ function buildWriterDirective(stage) {
   ].join('\n\n');
 }
 
-function usableRewrite(result, draft) {
+function usableRewrite(result) {
   const text = cleanText(result?.text);
-  return result?.ok === true && Boolean(text) && text !== cleanText(draft)
+  return result?.ok === true && Boolean(text)
     ? text
     : '';
+}
+
+function validateWriterResult(result, { draft }) {
+  if (result?.ok === false) {
+    return { ok: false, error: result.error || {
+      code: 'RECURSION_POST_PROCESS_WRITER_FAILED', kind: 'transport', retryable: false
+    } };
+  }
+  const text = usableRewrite(result);
+  return text
+    ? { ok: true, value: { text, noChange: text === cleanText(draft) } }
+    : { ok: false, error: { code: 'RECURSION_POST_PROCESS_WRITER_EMPTY', retryable: true } };
 }
 
 async function rewriteWithRetry(stage, guidance, operation, host) {
@@ -431,21 +443,7 @@ async function rewriteWithRetry(stage, guidance, operation, host) {
       writerDirective: request.writerDirective,
       signal: operation.signal
     }),
-    validate(result) {
-      const text = usableRewrite(result, stage.draft);
-      if (text) return { ok: true, value: { text } };
-      return {
-        ok: false,
-        error: {
-          code: result?.ok === true
-            ? (cleanText(result?.text)
-                ? 'RECURSION_POST_PROCESS_WRITER_NOOP'
-                : 'RECURSION_POST_PROCESS_WRITER_EMPTY')
-            : structuralFailureCode(result, 'RECURSION_POST_PROCESS_WRITER_FAILED'),
-          retryable: true
-        }
-      };
-    },
+    validate: (result) => validateWriterResult(result, { draft: stage.draft }),
     buildCorrectionRequest: ({ request }) => request
   });
   if (attemptResult.aborted || operation.signal.aborted) {
@@ -738,20 +736,7 @@ export function createPostProcessStages({
           }
         };
   },
-  validateRewrite = (result, { draft }) => {
-    const text = usableRewrite(result, draft);
-    return text
-      ? { ok: true, value: { text } }
-      : {
-          ok: false,
-          error: {
-            code: cleanText(result?.text)
-              ? 'RECURSION_POST_PROCESS_WRITER_NOOP'
-              : 'RECURSION_POST_PROCESS_WRITER_EMPTY',
-            retryable: true
-          }
-        };
-  },
+  validateRewrite = validateWriterResult,
   generateGuidance,
   rewrite,
   commit
@@ -936,9 +921,6 @@ export function createPostProcessStages({
         if (
           validationContext.reuse === true
           && cleanText(result?.text)
-          && cleanText(result.text) !== cleanText(
-            draftFromDependencies(validationContext.dependencies || {})
-          )
         ) {
           return { ok: true, value: result };
         }
@@ -978,6 +960,9 @@ export function createPostProcessStages({
     },
     async run({ dependencies, signal }) {
       const text = String(dependencies[finalRewriteStageId].artifact?.text || '');
+      if (cleanText(text) === cleanText(dependencies[sourceStageId].artifact?.originalDraft)) {
+        return { ok: true, applied: false, reason: 'no-change' };
+      }
       const finalArtifactHash = hashJson(text);
       const commitId = hashJson({ operationId, finalArtifactHash });
       if (typeof commit !== 'function') {
@@ -996,7 +981,7 @@ export function createPostProcessStages({
       });
     },
     validate(artifact) {
-      return artifact?.ok !== false && (artifact?.applied === true || artifact?.reason === 'already-applied')
+      return artifact?.ok !== false && (artifact?.applied === true || ['already-applied', 'no-change'].includes(artifact?.reason))
         ? { ok: true, value: artifact }
         : {
             ok: false,
@@ -1194,34 +1179,49 @@ export function createPostProcessRuntime({
     };
   }
 
-  function durableProvenance(operation, currentSettings) {
+  async function durableProvenance(operation, currentSettings, { frozen = false } = {}) {
+    const currentSnapshot = frozen ? operation.snapshot
+      : await capturePostProcessSnapshot(await snapshotProvider(), currentSettings, host);
+    const currentDeck = frozen ? { id: operation.deckId } : await deckProvider(currentSettings);
+    const categories = frozen ? operation.categories : orderedRunnablePostProcessCategories(currentDeck);
+    const provider = currentSettings.providers?.[postProcessGuidanceRoute(currentSettings.reasoningLevel).lane] || {};
+    const hostInputs = await host?.generation?.postProcessProvenance?.({
+      connectionProfileId: provider.connectionProfileId
+    }) || {};
     return buildRunProvenance({
       chatKey: operation.snapshot.chatKey,
       sourceIdentity: {
-        sourceRevisionHash: operation.sourceHash,
-        latestMessageId: String(operation.snapshot.sourceMessageId ?? ''),
-        selectedSwipeId: String(operation.snapshot.sourceSwipeId ?? ''),
-        characterHash: cleanText(operation.snapshot.activeCharacterHash),
-        groupHash: cleanText(operation.snapshot.activeGroupHash)
+        sourceRevisionHash: hashJson({
+          draft: currentSnapshot.originalDraft,
+          evidence: currentSnapshot.supportingContext,
+          chat: currentSnapshot.chatIdentityHash
+        }),
+        latestMessageId: String(currentSnapshot.sourceMessageId ?? ''),
+        selectedSwipeId: String(currentSnapshot.sourceSwipeId ?? ''),
+        characterHash: cleanText(currentSnapshot.activeCharacterHash),
+        groupHash: cleanText(currentSnapshot.activeGroupHash)
       },
       settingsHash: hashJson({
         reasoningLevel: currentSettings.reasoningLevel,
         modelAttemptsPerStep: currentSettings.modelAttemptsPerStep,
         postProcess: currentSettings.postProcess,
-        postProcessDecks: currentSettings.postProcessDecks
+        postProcessDecks: currentSettings.postProcessDecks,
+        provider,
+        hostInputs,
+        operationDeadlineSeconds: currentSettings.operationDeadlineSeconds || 300
       }),
       provider: {
-        id: cleanText(operation.route?.lane || 'utility'),
-        model: ''
+        id: cleanText(provider.connectionProfileId || operation.route?.lane || 'utility'),
+        model: cleanText(hostInputs.model)
       },
       pipelineMode: 'segmented',
-      promptVersions: { postProcess: 1 },
-      providerContractHash: 'recursion.postprocess.provider.v1',
+      promptVersions: { postProcess: 2 },
+      providerContractHash: 'recursion.postprocess.provider.v2',
       deckRevisionHash: hashJson({
-        deckId: operation.deckId,
-        categories: operation.categories
+        deckId: safeId(currentDeck?.id, 'post-process-deck'),
+        categories
       }),
-      cardConfigurationHash: hashJson(operation.categories),
+      cardConfigurationHash: hashJson(categories),
       promptContractHash: hashJson({
         writerPacketSchema: POST_PROCESS_WRITER_PACKET_SCHEMA,
         boundaries: POST_PROCESS_WRITER_BOUNDARIES
@@ -1251,6 +1251,8 @@ export function createPostProcessRuntime({
         );
       },
       async generateGuidance(request, { signal }) {
+        signal = combinedAbortSignal(signal, operation.signal);
+        if (signal?.aborted) throw Object.assign(new Error('Stopped.'), { name: 'AbortError' });
         if (typeof generationRouter?.generate !== 'function') {
           throw Object.assign(new Error('Post-process guidance is unavailable.'), {
             code: 'RECURSION_POST_PROCESS_GUIDANCE_UNAVAILABLE',
@@ -1310,6 +1312,8 @@ export function createPostProcessRuntime({
         };
       },
       rewrite(request, { signal }) {
+        signal = combinedAbortSignal(signal, operation.signal);
+        if (signal?.aborted) throw Object.assign(new Error('Stopped.'), { name: 'AbortError' });
         if (typeof host?.generation?.rewriteWithPostProcess !== 'function') {
           throw Object.assign(new Error('Post-process rewrite is unavailable.'), {
             code: 'RECURSION_POST_PROCESS_WRITER_UNAVAILABLE',
@@ -1426,8 +1430,8 @@ export function createPostProcessRuntime({
   async function finalizeDurableOperation(record, operation, manifest) {
     if (manifest?.state !== 'completed') {
       lastDiagnostics = diagnosticsFor(operation, {
-        status: 'paused',
-        reason: manifest?.pauseReason || 'paused'
+        status: manifest?.stale ? 'stale' : 'paused',
+        reason: manifest?.stale ? 'provenance-changed' : (manifest?.pauseReason || 'paused')
       });
       return {
         ok: false,
@@ -1446,6 +1450,7 @@ export function createPostProcessRuntime({
       manifest
     });
     const candidate = cleanText(draftArtifact?.text);
+    const noChange = commitArtifact?.reason === 'no-change';
     const outcomes = operation.categories.map((category) => {
       const suffix = operation.rewriteFlow === 'progressive'
         ? safeId(category.id, 'category')
@@ -1463,12 +1468,12 @@ export function createPostProcessRuntime({
     });
     lastDiagnostics = diagnosticsFor(operation, {
       outcomes,
-      status: 'committed',
-      committedApplyMode: operation.applyMode
+      status: noChange ? 'no-change' : 'committed',
+      committedApplyMode: noChange ? null : operation.applyMode
     });
     settleActivity(record, operation, {
       outcome: 'success',
-      label: 'Post-processing complete.',
+      label: noChange ? 'Post-processing complete. No changes needed.' : 'Post-processing complete.',
       detail: {
         partial: false,
         requestedApplyMode: operation.applyMode,
@@ -1479,7 +1484,8 @@ export function createPostProcessRuntime({
     });
     return {
       ok: true,
-      committed: true,
+      committed: !noChange,
+      reason: noChange ? 'no-change' : 'applied',
       candidate,
       partial: false,
       requestedApplyMode: operation.applyMode,
@@ -1493,7 +1499,7 @@ export function createPostProcessRuntime({
   }
 
   async function startDurableOperation(record, operation, currentSettings) {
-    const provenance = durableProvenance(operation, currentSettings);
+    const provenance = await durableProvenance(operation, currentSettings, { frozen: true });
     const graph = durableGraph(operation);
     const queuedIntent = normalizeQueuedReprocess(
       await durableRepository.loadQueuedReprocess?.(operation.snapshot.chatKey, 'postprocess')
@@ -1539,10 +1545,11 @@ export function createPostProcessRuntime({
       provenance,
       record
     });
+    if (record.controller.signal.aborted) return finishWithoutCommit(operation, 'canceled', [], {}, record);
     let settled = await durableScheduler.start({
       manifest,
       graph,
-      context: {}
+      context: { settings: currentSettings }
     });
     if (operation.signal?.aborted || settled?.state === 'paused') {
       settled = await durableScheduler.pause({
@@ -2059,7 +2066,7 @@ export function createPostProcessRuntime({
       );
     }
     const graph = durableGraph(operation);
-    const provenance = durableProvenance(operation, currentSettings);
+    const provenance = await durableProvenance(operation, currentSettings);
     durableOperations.set(operation.operationId, {
       operation,
       graph,
@@ -2079,56 +2086,45 @@ export function createPostProcessRuntime({
     };
   }
 
-  async function resumeOperation({ operationId } = {}) {
+  function continueOperation({ operationId, stageId } = {}) {
     const id = cleanText(operationId);
     const restored = durableOperations.get(id);
     if (!durableEnabled || !restored) {
-      throw new Error('Post-process operation context is unavailable for Resume.');
+      return Promise.reject(new Error('Post-process operation context is unavailable.'));
     }
-    const record = restored.record || {
-      controller: new AbortController(),
-      phase: 'pending',
-      activityStarted: false,
-      activitySettled: false,
-      operationId: id,
-      promise: null
+    if (active) {
+      return active.operationId === id ? active.promise
+        : Promise.reject(new Error('Another post-process operation is running.'));
+    }
+    const record = {
+      controller: new AbortController(), phase: 'pending',
+      activityStarted: false, activitySettled: false, operationId: id, promise: null
     };
-    restored.record = record;
-    startActivity(record, restored.operation);
-    const manifest = await durableScheduler.resume({
-      operationId: id,
-      graph: restored.graph,
-      context: {},
-      provenance: restored.provenance
-    });
-    return finalizeDurableOperation(record, restored.operation, manifest);
+    // New graph closures capture a new operation. Late work retains the old aborted signal.
+    const operation = { ...restored.operation, signal: record.controller.signal };
+    active = record;
+    record.promise = (async () => {
+      const currentSettings = cloneValue(settingsStore?.get?.() || {});
+      const provenance = await durableProvenance(operation, currentSettings);
+      if (record.controller.signal.aborted) return finishWithoutCommit(operation, 'canceled', [], {}, record);
+      const graph = durableGraph(operation);
+      Object.assign(restored, { record, operation, graph, provenance });
+      durableExecution?.onOperation?.({ record, operation, graph, provenance });
+      startActivity(record, operation);
+      let manifest = await durableScheduler[stageId ? 'retry' : 'resume']({
+        operationId: id, ...(stageId ? { stageId } : {}), graph,
+        context: { settings: currentSettings }, provenance
+      });
+      if (record.controller.signal.aborted) {
+        manifest = await durableScheduler.pause({ operationId: id, reason: 'post-process-stopped' }) || manifest;
+      }
+      return finalizeDurableOperation(record, operation, manifest);
+    })().finally(() => { if (active === record) active = null; });
+    return record.promise;
   }
 
-  async function retryStage({ operationId, stageId } = {}) {
-    const id = cleanText(operationId);
-    const restored = durableOperations.get(id);
-    if (!durableEnabled || !restored) {
-      throw new Error('Post-process operation context is unavailable for Retry.');
-    }
-    const record = restored.record || {
-      controller: new AbortController(),
-      phase: 'pending',
-      activityStarted: false,
-      activitySettled: false,
-      operationId: id,
-      promise: null
-    };
-    restored.record = record;
-    startActivity(record, restored.operation);
-    const manifest = await durableScheduler.retry({
-      operationId: id,
-      stageId,
-      graph: restored.graph,
-      context: {},
-      provenance: restored.provenance
-    });
-    return finalizeDurableOperation(record, restored.operation, manifest);
-  }
+  function resumeOperation(input) { return continueOperation(input); }
+  function retryStage(input) { return continueOperation(input); }
 
   return {
     postProcessPending() {

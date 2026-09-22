@@ -571,7 +571,7 @@ test('17. Stale source before final commit makes no commit', async () => {
   assertEqual(harness.commitCalls.length, 0, 'stale source makes no commit call');
 });
 
-test('18. Empty and exact-no-op host outputs consume both retries and fail soft', async () => {
+test('18. Empty output retries once and unchanged output finishes without a mutation', async () => {
   const harness = createHarness({
     hostPlan: ['', 'original']
   });
@@ -579,7 +579,7 @@ test('18. Empty and exact-no-op host outputs consume both retries and fail soft'
   assertEqual(result.committed, false, 'empty and no-op outputs do not commit');
   assertEqual(harness.hostCalls.length, 2, 'empty and no-op outputs consume both host attempts');
   assertEqual(harness.commitCalls.length, 0, 'empty and no-op outputs make no commit call');
-  assertEqual(result.outcomes[0].failureStage, 'host-rewrite', 'unusable output fails at host stage');
+  assertEqual(result.reason, 'no-op-candidate', 'unchanged output is a terminal no-change outcome');
 });
 
 test('19. Settings and deck mutation cannot alter the frozen plan', async () => {
@@ -1272,6 +1272,181 @@ test('27. Queued Post-process stage binds to and is consumed by the eligible ope
   assertEqual(queuedViews.at(-1), null, 'runtime view callback clears the consumed Post-process intent');
 });
 
+test('28. Same-session Stop Resume refreshes cancellation ownership', async () => {
+  const storage = createStorageRepository({
+    storage: createMemoryStorageAdapter()
+  });
+  const firstRewrite = deferred();
+  const secondRewrite = deferred();
+  const guidanceCalls = [];
+  const rewriteCalls = [];
+  const commitCalls = [];
+  const settingsStore = {
+    get: () => settings({
+      postProcess: {
+        enabled: true,
+        rewriteFlow: 'unified',
+        applyMode: 'as-swipe'
+      }
+    })
+  };
+  const generationRouter = {
+    async generate(_roleId, request) {
+      guidanceCalls.push(request);
+      return {
+        ok: true,
+        data: {
+          schema: GUIDANCE_SCHEMA,
+          snapshotHash: request.snapshotHash,
+          sourceHash: request.sourceHash,
+          guidanceText: 'Tighten the response.'
+        }
+      };
+    }
+  };
+  const firstScheduler = createExecutionScheduler({
+    repository: storage,
+    attemptsPerStep: 2
+  });
+  const firstRuntime = createPostProcessRuntime({
+    host: {
+      generation: {
+        async rewriteWithPostProcess(input) {
+          rewriteCalls.push(input);
+          return rewriteCalls.length === 1 ? firstRewrite.promise : secondRewrite.promise;
+        }
+      }
+    },
+    generationRouter,
+    settingsStore,
+    snapshotProvider: async () => snapshot({
+      chatKey: 'post-process-reload-chat'
+    }),
+    deckProvider: async () => deckFrom(['natural-prose']),
+    sourceGuard: async () => true,
+    commitResult: async (input) => {
+      commitCalls.push(input);
+      return { ok: true };
+    },
+    durableExecution: {
+      scheduler: firstScheduler,
+      repository: storage
+    }
+  });
+  const running = firstRuntime.runPostProcessForLatestAssistant();
+  await waitUntil(() => rewriteCalls.length === 1, 'durable Post-process rewrite did not start');
+  firstRuntime.cancelPostProcess('user');
+  firstRewrite.resolve({ ok: true, text: 'Late rewrite must not commit.' });
+  const pausedResult = await running;
+  assertEqual(pausedResult.paused, true, 'Stop pauses rather than discards durable Post-process work');
+  let manifest = await storage.loadPipelineRun('post-process-reload-chat');
+  assertEqual(manifest.stageRecords['postprocess.unified.guidance'].state, 'completed', 'durable guidance survives Stop');
+  assertEqual(manifest.stageRecords['postprocess.unified.rewrite'].state, 'pending', 'interrupted durable rewrite returns to pending');
+
+  const secondRuntime = firstRuntime;
+  assertEqual(guidanceCalls.length, 1, 'reload restoration performs no guidance call');
+  assertEqual(rewriteCalls.length, 1, 'reload restoration performs no rewrite call');
+  const resumed = secondRuntime.resumeOperation({
+    operationId: manifest.operationId
+  });
+  await waitUntil(() => rewriteCalls.length === 2, 'reloaded Post-process Resume did not restart rewrite');
+  secondRewrite.resolve({ ok: true, text: 'Reloaded rewrite commits once.' });
+  const completed = await resumed;
+  assertEqual(completed.committed, true, 'resumed writer can commit');
+  assertEqual(commitCalls.length, 1, 'resumed result commits exactly once');
+  assertEqual(firstRuntime.postProcessRunning(), false, 'resume releases active ownership');
+});
+
+test('29. Unchanged writer result is accepted and provider errors retain their classification', async () => {
+  const graph = createPostProcessStages({ categories: [{id: 'test'}] });
+  const validate = graph.getStage('postprocess.unified.rewrite').validate;
+  const context = {dependencies: {'postprocess.source-snapshot': {artifact: {originalDraft: 'original'}}}};
+  const unchanged = validate({ok: true, text: 'original'}, context);
+  assertEqual(unchanged.ok, true, 'unchanged output is successful');
+  assertEqual(unchanged.value.noChange, true, 'unchanged output has explicit disposition');
+  const error = {code: 'RECURSION_PROVIDER_AUTH_FAILED', retryable: false, category: 'configuration', kind: 'transport'};
+  assertDeepEqual(validate({ok: false, error}, context).error, error, 'original provider error preserved');
+});
+
+test('30. Resume refuses saved artifacts after context or model configuration changes', async () => {
+  for (const mutation of ['context', 'provider', 'writer', 'deck', 'stop-race']) {
+    const storage = createStorageRepository({ storage: createMemoryStorageAdapter() });
+    let currentSettings = settings();
+    let currentSnapshot = snapshot();
+    let writerHash = 'writer-before';
+    let currentDeck = deckFrom();
+    let writes = 0;
+    let commits = 0;
+    const scheduler = createExecutionScheduler({repository: storage, attemptsPerStep: 2});
+    const activation = deferred();
+    const activationEntered = deferred();
+    const schedulerResume = scheduler.resume;
+    if (mutation === 'stop-race') scheduler.resume = async (input) => {
+      activationEntered.resolve();
+      await activation.promise;
+      return schedulerResume(input);
+    };
+    const runtime = createPostProcessRuntime({
+      host: { generation: {
+        postProcessProvenance: () => ({writerHash}),
+        rewriteWithPostProcess() { writes += 1; return writes === 1 ? new Promise(() => {}) : Promise.resolve({ok: true, text: 'Changed draft.'}); }
+      } },
+      generationRouter: {generate: async (_role, request) => ({ok: true, data: {
+        schema: GUIDANCE_SCHEMA, snapshotHash: request.snapshotHash,
+        sourceHash: request.sourceHash, guidanceText: 'Tighten prose.'
+      }})},
+      settingsStore: {get: () => currentSettings}, snapshotProvider: async () => currentSnapshot,
+      deckProvider: async () => currentDeck, sourceGuard: async () => true,
+      commitResult: async () => { commits += 1; return {ok: true}; },
+      durableExecution: {scheduler, repository: storage}
+    });
+    const running = runtime.runPostProcessForLatestAssistant();
+    await waitUntil(() => writes === 1, 'writer started');
+    runtime.cancelPostProcess();
+    await running;
+    const manifest = await storage.loadPipelineRun('post-process-chat');
+    if (mutation === 'context') currentSnapshot = snapshot({supportingContext: {latestUserMessage: 'Changed evidence.'}});
+    if (mutation === 'provider') currentSettings = settings({providers: {utility: {connectionProfileId: 'changed'}}});
+    if (mutation === 'writer') writerHash = 'writer-after';
+    if (mutation === 'deck') currentDeck = deckFrom(['different-card']);
+    const continuing = runtime.resumeOperation({operationId: manifest.operationId});
+    if (mutation === 'stop-race') {
+      await activationEntered.promise;
+      runtime.cancelPostProcess();
+      activation.resolve();
+    }
+    const result = await continuing;
+    if (mutation !== 'stop-race') assertEqual(result.execution?.stale, true, `${mutation} changes invalidate saved work`);
+    assertEqual(writes, 1, `${mutation} changes cannot dispatch another writer`);
+    assertEqual(commits, 0, `${mutation} changes cannot commit`);
+  }
+});
+
+test('31. Durable unchanged output completes once without calling commit', async () => {
+  const storage = createStorageRepository({storage: createMemoryStorageAdapter()});
+  let writes = 0;
+  let commits = 0;
+  const scheduler = createExecutionScheduler({repository: storage});
+  const runtime = createPostProcessRuntime({
+    host: {generation: {rewriteWithPostProcess: async () => { writes += 1; return {ok: true, text: 'original'}; }}},
+    generationRouter: {generate: async (_role, request) => ({ok: true, data: {
+      schema: GUIDANCE_SCHEMA, snapshotHash: request.snapshotHash,
+      sourceHash: request.sourceHash, guidanceText: 'Keep compliant material.'
+    }})},
+    settingsStore: {get: () => settings()}, snapshotProvider: async () => snapshot(),
+    deckProvider: async () => deckFrom(), sourceGuard: async () => true,
+    commitResult: async () => {commits += 1; return {ok: true};},
+    durableExecution: {scheduler, repository: storage}
+  });
+  const result = await runtime.runPostProcessForLatestAssistant();
+  assertEqual(result.ok, true, 'no-change is successful');
+  assertEqual(result.committed, false, 'no-change makes no mutation');
+  assertEqual(result.reason, 'no-change', 'explicit no-change reason');
+  assertEqual(result.execution.state, 'completed', 'durable operation reaches completed');
+  assertEqual(writes, 1, 'no repeated rewrite');
+  assertEqual(commits, 0, 'no duplicate swipe or replacement');
+});
+
 let passed = 0;
 for (const entry of cases) {
   try {
@@ -1283,5 +1458,5 @@ for (const entry of cases) {
   }
 }
 
-assertEqual(passed, 28, 'the complete 28-case state-machine matrix ran');
-console.log('[pass] post-process runtime (28 cases)');
+assertEqual(passed, cases.length, 'the complete state-machine matrix ran');
+console.log(`[pass] post-process runtime (${passed} cases)`);

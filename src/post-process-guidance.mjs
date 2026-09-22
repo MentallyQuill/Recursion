@@ -9,16 +9,13 @@ export const MAX_POST_PROCESS_GUIDANCE_LENGTH = 6000;
 export const POST_PROCESS_GUIDANCE_JSON_SCHEMA = Object.freeze({
   type: 'object',
   properties: Object.freeze({
-    schema: Object.freeze({ const: POST_PROCESS_GUIDANCE_SCHEMA }),
-    snapshotHash: Object.freeze({ type: 'string', minLength: 1, maxLength: 180 }),
-    sourceHash: Object.freeze({ type: 'string', minLength: 1, maxLength: 180 }),
     guidanceText: Object.freeze({
       type: 'string',
       minLength: 1,
       maxLength: MAX_POST_PROCESS_GUIDANCE_LENGTH
     })
   }),
-  required: Object.freeze(['schema', 'snapshotHash', 'sourceHash', 'guidanceText']),
+  required: Object.freeze(['guidanceText']),
   additionalProperties: false
 });
 
@@ -37,21 +34,33 @@ function plainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function safeJson(value, maxLength = 12000) {
-  try {
-    return boundedText(JSON.stringify(value ?? {}, null, 2), maxLength);
-  } catch {
-    return '{}';
-  }
-}
-
+// Budget complete fields and messages, never a sliced JSON document. Omission
+// metadata lets the model distinguish absent evidence from negative evidence.
 function renderFrozenEvidence(input = {}) {
-  const evidence = plainObject(input.supportingContext)
+  const source = plainObject(input.supportingContext)
     ? input.supportingContext
     : plainObject(input.snapshot?.supportingContext)
       ? input.snapshot.supportingContext
       : {};
-  return `Frozen supporting evidence:\n${safeJson(evidence)}`;
+  const evidence = {};
+  const omissions = [];
+  const budget = 12000;
+  const size = (value) => JSON.stringify(value).length;
+  for (const [field, value] of Object.entries(source)) {
+    if (Array.isArray(value)) {
+      evidence[field] = [];
+      for (const [index, message] of value.entries()) {
+        const candidate = { ...evidence, [field]: [...evidence[field], message] };
+        if (size(candidate) <= budget) evidence[field].push(message);
+        else omissions.push({ path: `${field}[${index}]`, reason: 'evidence-budget' });
+      }
+    } else {
+      const candidate = { ...evidence, [field]: value };
+      if (size(candidate) <= budget) evidence[field] = value;
+      else omissions.push({ path: field, reason: 'evidence-budget' });
+    }
+  }
+  return `Frozen supporting evidence:\n${JSON.stringify({ evidence, omissions })}`;
 }
 
 function categoryCards(category = {}) {
@@ -78,7 +87,7 @@ function renderOrderedCards(categories = []) {
 }
 
 function renderWritableDraft(draft) {
-  return `Current writable draft (evidence only; do not rewrite it):\n${boundedText(draft, 24000)}`;
+  return `Current writable draft (evidence only; do not rewrite it):\n${typeof draft === 'string' ? draft : ''}`;
 }
 
 export function postProcessGuidanceRoute(reasoningLevel) {
@@ -92,11 +101,13 @@ export function postProcessGuidanceRoute(reasoningLevel) {
 export function buildPostProcessGuidanceRequest(input = {}) {
   const reasoningLevel = normalizeReasoningLevel(input.reasoningLevel);
   return {
-    snapshotHash: boundedText(input.snapshotHash, 180),
-    sourceHash: boundedText(input.sourceHash, 180),
+    snapshotHash: input.snapshotHash,
+    sourceHash: input.sourceHash,
     reasoningLevel,
     prompt: [
-      `Return only ${POST_PROCESS_GUIDANCE_SCHEMA} JSON.`,
+      'Return exactly one JSON object with only a nonempty string guidanceText field.',
+      'Response example: {"guidanceText":"Apply the selected card to the repeated warning."}',
+      `guidanceText must be at most ${MAX_POST_PROCESS_GUIDANCE_LENGTH} characters. No other fields or prose outside JSON.`,
       'Analyze where the selected revision cards apply.',
       'Do not rewrite the story response.',
       'Preserve unsupported material and user agency.',
@@ -114,46 +125,26 @@ export function normalizePostProcessGuidanceResponse(data, request = {}) {
   if (!plainObject(data)) {
     throw guidanceError('Post-process guidance output must be a JSON object.');
   }
-  const keys = Object.keys(data).sort();
-  const expectedKeys = ['guidanceText', 'schema', 'snapshotHash', 'sourceHash'];
-  if (keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) {
-    throw guidanceError('Post-process guidance output must contain only the minimal guidance envelope.');
+  if (Object.keys(data).length !== 1 || !Object.hasOwn(data, 'guidanceText')) {
+    throw guidanceError('Post-process guidance output must contain only guidanceText.');
   }
-  for (const field of expectedKeys) {
-    if (typeof data[field] !== 'string') {
-      throw guidanceError(`Post-process guidance ${field} must be a string.`);
+  if (typeof data.guidanceText !== 'string') {
+    throw guidanceError('Post-process guidance guidanceText must be a string.');
+  }
+  if (data.guidanceText.length > MAX_POST_PROCESS_GUIDANCE_LENGTH) {
+    throw guidanceError('Post-process guidance exceeds the maximum length.');
+  }
+  const guidanceText = data.guidanceText.trim();
+  if (!guidanceText) throw guidanceError('Post-process guidance text must be nonempty.');
+  for (const field of ['snapshotHash', 'sourceHash']) {
+    if (typeof request[field] !== 'string' || !request[field].trim() || request[field].length > 180) {
+      throw guidanceError(`Post-process guidance request ${field} must be a nonempty bounded string.`);
     }
   }
-
-  const schema = boundedText(data.schema, 180);
-  if (schema !== POST_PROCESS_GUIDANCE_SCHEMA) {
-    throw guidanceError(
-      'Provider output schema did not match the requested role.',
-      'RECURSION_PROVIDER_SCHEMA_MISMATCH'
-    );
-  }
-
-  const expectedSnapshotHash = boundedText(request.snapshotHash, 180);
-  const snapshotHash = boundedText(data.snapshotHash, 180);
-  if (!expectedSnapshotHash || snapshotHash !== expectedSnapshotHash) {
-    throw guidanceError('Post-process guidance snapshot hash did not match the frozen request.');
-  }
-
-  const expectedSourceHash = boundedText(request.sourceHash, 180);
-  const sourceHash = boundedText(data.sourceHash, 180);
-  if (!expectedSourceHash || sourceHash !== expectedSourceHash) {
-    throw guidanceError('Post-process guidance source hash did not match the frozen request.');
-  }
-
-  const guidanceText = boundedText(data.guidanceText, MAX_POST_PROCESS_GUIDANCE_LENGTH);
-  if (!guidanceText) {
-    throw guidanceError('Post-process guidance text must be nonempty.');
-  }
-
   return {
     schema: POST_PROCESS_GUIDANCE_SCHEMA,
-    snapshotHash,
-    sourceHash,
+    snapshotHash: request.snapshotHash,
+    sourceHash: request.sourceHash,
     guidanceText
   };
 }

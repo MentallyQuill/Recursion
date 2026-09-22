@@ -7,6 +7,15 @@ import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert
 
 
 
+const writerTimeout = classifyModelFailure({
+  code: 'RECURSION_POST_PROCESS_WRITER_TIMEOUT',
+  message: 'Post-process writer exceeded its deadline.',
+  kind: 'transport', category: 'provider-timeout', retryable: true
+});
+assertEqual(writerTimeout.code, 'RECURSION_POST_PROCESS_WRITER_TIMEOUT', 'writer deadline survives attempt classification');
+assertEqual(writerTimeout.category, 'provider-timeout', 'writer deadline remains a timeout');
+assertEqual(writerTimeout.retryable, true, 'writer deadline remains retryable');
+
 const schemaRequest = { structuredOutputMethod: 'native-schema', responseLength: 900 };
 assertDeepEqual(resolveModelRetryDirective({
   failure: { code: 'RECURSION_STRUCTURED_OUTPUT_UNSUPPORTED', retryable: false },

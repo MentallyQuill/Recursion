@@ -12,7 +12,12 @@ Recursion V1 keeps its structured contracts close to the source modules that val
 - card-scope family and sub-item payloads in `src/card-scope.mjs`;
 - progress-row and Hero Pixel Array view models in `src/progress.mjs`;
 - prompt packet contracts in `src/prompt.mjs`;
-- provider response parsing and diagnostics in `src/providers.mjs`.
+- provider response parsing and diagnostics in `src/providers.mjs`;
+- Post-process model output in `src/post-process-guidance.mjs`: exactly
+  `{ "guidanceText": "Nonempty revision guidance, at most 6000 characters." }`.
+  The normalized internal `recursion.postProcessGuidance.v1` envelope adds
+  locally bound `schema`, `snapshotHash`, and `sourceHash`; these fields are
+  never requested from the model.
 
 Use this folder only if those contracts are later extracted into shared standalone schemas.
 

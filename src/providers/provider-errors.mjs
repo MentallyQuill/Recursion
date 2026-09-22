@@ -71,6 +71,15 @@ export function normalizeProviderError(error) {
     );
   }
 
+  if (codes.has('RECURSION_POST_PROCESS_WRITER_TIMEOUT')) {
+    return providerFailureRecord(
+      'RECURSION_POST_PROCESS_WRITER_TIMEOUT',
+      'Post-process writer exceeded its deadline.',
+      true,
+      { category: 'provider-timeout' }
+    );
+  }
+
   if ([
     'RECURSION_PROFILE_MISSING',
     'RECURSION_PROFILE_UNAVAILABLE',

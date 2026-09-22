@@ -36,7 +36,15 @@ limits, recreates, or substitutes for the writer's context.
 
 Utility or Reasoner synthesizes concise structured guidance from the frozen
 evidence, current writable draft, and selected cards.  It returns
-`recursion.postProcessGuidance.v1`, never revised prose.  Lane assignment is
+exactly `{ "guidanceText": "..." }`, never revised prose. The request includes
+this complete contract in its prompt so Prompt JSON and native JSON modes use
+the same shape. Guidance must be a nonempty string of at most 6000 characters;
+oversized or wrong-type output is rejected, never silently shortened. The
+normalizer binds `schema: "recursion.postProcessGuidance.v1"`, `snapshotHash`,
+and `sourceHash` locally from the frozen request for the internal runtime envelope.
+Supporting evidence is budgeted as whole fields and whole prior messages with
+explicit omission metadata; the current writable draft is included in full.
+Lane assignment is
 frozen for the operation: Low/Medium use `postProcessGuidanceUtility` on
 Utility; High/Ultra use `postProcessGuidanceReasoner` on Reasoner.
 
@@ -103,22 +111,37 @@ Guidance and native quiet rewrite are model stages. Each receives the configured
 `Attempts per step` total window, from one through five, and preserves its frozen
 role/lane or identical host packet across attempts. There is no cross-lane
 fallback. An accepted guidance checkpoint is reused while its rewrite stage
-retries or resumes; guidance is not synthesized again. Empty, exact-no-op, and
-invalid host results consume attempts. Abort or stale source ends the window
-immediately.
+retries or resumes; guidance is not synthesized again. Empty and invalid host
+results can consume another attempt. Unchanged nonempty output is successful:
+processing continues to the next category, or finishes without a chat mutation
+when the final draft equals the source. Returned provider errors retain their
+classification; authentication failures, refusals, and cancellation do not
+become retryable empty-output errors.
 
 Exhausting Unified leaves the original unchanged and pauses at the blocking
-stage for explicit Retry. A failed Progressive category preserves the prior
-valid draft and may allow later categories under the graph's continue policy.
-If every Progressive category fails, there is no final mutation. Recursion sets
-no default deadline for either guidance or quiet rewrite; the user may Stop a
-stalled call.
+stage for explicit Retry. Durable Progressive processing likewise pauses at its
+blocking failed category and preserves earlier accepted drafts.
+
+Post-processing shares two additional model dispatches across the operation,
+beyond the first dispatch of each stage. Resume preserves the spent allowance;
+explicit Retry starts a new recovery window. The existing operation deadline
+(default 300 seconds of active execution) also covers post-processing. A native
+quiet rewrite has a 180-second deadline and an owned abort signal. A host that
+ignores abort cannot keep the Recursion call pending indefinitely or commit a
+late result. Old writer cleanup cannot clear a newer writer's transient prompt.
 
 The operation is stale, and therefore cannot commit, when chat, source message,
 selected swipe, source hash, active character, or active group changes. The
 unified Stop action aborts the active guidance request or quiet generation,
 checkpoints the paused frontier, and preserves completed guidance and drafts for
-Resume.
+Resume. Resume and Retry acquire fresh cancellation ownership while old work
+retains its aborted signal; Stop also applies during resume activation.
+
+Before Resume or Retry, current source identity, supporting evidence, selected
+provider configuration/profile, native writer settings/preset contents, and
+revision deck are fingerprinted again. Changed inputs mark the operation stale;
+frozen artifacts are not reused against changed input. Only fingerprints of
+host settings are persisted, not their raw contents.
 While quiet generation runs, its internal host events belong to the active
 Post-process operation: they cannot arm or recurse into another operation.
 Host controls stay locked, normal Pre-process cleanup settles safely, and the
@@ -192,3 +215,19 @@ authority.  They are marked superseded from the documentation index until Task
 11 removes or rewrites their affected material.  Broad uses of words such as
 “repair” that describe JSON recovery or generic failure handling remain current
 when they have a non-Enhancement consumer.
+
+## Latency decision (2026-09-21)
+
+Unified processing retains one guidance call and one native rewrite. Progressive
+processing retains two dependent calls per category because each category edits
+the preceding result. Immediate savings come from avoiding no-op retries,
+stopping terminal provider failures promptly, reusing valid guidance on Resume,
+and bounding total recovery work. Existing stage timings and failure codes
+separate guidance, native rewriting, and commit work.
+
+A direct native rewrite from the authored cards would remove one round trip in
+Unified mode, but also remove the explicit guidance analysis boundary. This
+repair keeps the established editing behavior; switching to direct rewrite
+requires a representative quality comparison. No live latency or quality gain
+is claimed from offline verification. Utility reasoning remains disabled by its
+lane policy; the native writer retains the user's primary generation settings.

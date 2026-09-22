@@ -15,6 +15,7 @@ import { projectProfileSamplerPayload } from './profile-samplers.mjs';
 import { profileSecretOverride, readSillyTavernSecretMetadata } from './profile-secrets.mjs';
 import { resolveGenerationPolicy } from '../../providers/generation-policy.mjs';
 import { normalizeReasoningIntent } from '../../reasoning-policy.mjs';
+import { normalizeProviderError } from '../../providers/provider-errors.mjs';
 
 const KNOWN_RECURSION_PROMPT_KEYS = Object.freeze([
   'recursion.guidance',
@@ -768,7 +769,8 @@ function postProcessSwipeInfo(marker = {}) {
 }
 
 function postProcessWriterFailedResult(error) {
-  const code = stringValue(error?.code || error?.name || 'RECURSION_POST_PROCESS_WRITER_FAILED').trim()
+  const normalized = normalizeProviderError(error);
+  const code = stringValue(normalized.kind === 'abort' ? normalized.code : (error?.code || normalized.code)).trim()
     || 'RECURSION_POST_PROCESS_WRITER_FAILED';
   const message = stringValue(error?.message || error || 'SillyTavern native Post-process writer failed.')
     .replace(/\s+/g, ' ')
@@ -778,13 +780,17 @@ function postProcessWriterFailedResult(error) {
     ok: false,
     text: '',
     error: {
+      ...normalized,
       code: code.slice(0, 120),
-      message: message.slice(0, 300)
+      message: message.slice(0, 300),
+      ...(typeof error?.retryable === 'boolean' ? { retryable: error.retryable } : {}),
+      ...(error?.category ? { category: String(error.category) } : {})
     }
   };
 }
 
 function normalizePostProcessRewrite(response) {
+  if (response?.ok === false) return postProcessWriterFailedResult(response.error || response);
   const text = generationResponseText(response).trim();
   if (!text) {
     return {
@@ -1344,39 +1350,86 @@ export function createSillyTavernHost({
     }
   };
 
+  let postProcessPromptOwner = null;
   const generation = {
+    postProcessProvenance({ connectionProfileId } = {}) {
+      const context = currentContext(contextFactory);
+      const profile = connectionProfileId
+        ? context.ConnectionManagerRequestService?.getProfile?.(connectionProfileId)
+        : null;
+      // Persist fingerprints, never profile secrets or raw preset/prompt contents.
+      return {
+        model: stringValue(profile?.model),
+        guidanceProfileHash: hashJson(cloneJsonSafe(profile || null)),
+        writerHash: hashJson(cloneJsonSafe({
+          api: context.mainApi || '',
+          chat: context.chatCompletionSettings || {},
+          text: context.textCompletionSettings || {},
+          instruct: context.powerUserSettings?.instruct || {},
+          context: context.powerUserSettings?.context || {},
+          systemPrompt: context.powerUserSettings?.sysprompt || {}
+        }))
+      };
+    },
     async rewriteWithPostProcess({
       guidancePacket,
       writerDirective,
-      signal
+      signal,
+      timeoutMs = 180000
     } = {}) {
+      const aborted = () => Object.assign(new Error('Post-process writer was stopped.'), {
+        name: 'AbortError', retryable: false
+      });
+      if (signal?.aborted) return postProcessWriterFailedResult(aborted());
       const context = currentContext(contextFactory);
       if (typeof context.generate !== 'function') {
         return postProcessWriterUnavailableResult();
       }
 
+      const owner = Symbol('post-process-writer');
+      const controller = new AbortController();
+      let timer;
+      let onAbort;
       let result;
       try {
-        installTransientSystemPrompt(
-          context,
-          POST_PROCESS_PROMPT_KEY,
-          String(guidancePacket || '')
-        );
-        const response = await context.generate('quiet', {
-          automatic_trigger: true,
-          quiet_prompt: String(writerDirective || ''),
-          quietToLoud: true,
-          skipWIAN: false,
-          signal
+        const interrupted = new Promise((_, reject) => {
+          onAbort = () => { controller.abort(); reject(aborted()); };
+          signal?.addEventListener('abort', onAbort, { once: true });
+          const duration = Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0
+            ? Number(timeoutMs) : 180000;
+          timer = setTimeout(() => {
+            controller.abort();
+            reject(Object.assign(new Error('Post-process writer exceeded its deadline.'), {
+              code: 'RECURSION_POST_PROCESS_WRITER_TIMEOUT', retryable: true, category: 'provider-timeout'
+            }));
+          }, duration);
         });
+        postProcessPromptOwner = owner;
+        installTransientSystemPrompt(context, POST_PROCESS_PROMPT_KEY, String(guidancePacket || ''));
+        const running = Promise.resolve().then(() => {
+          if (signal?.aborted || controller.signal.aborted) throw aborted();
+          return context.generate('quiet', {
+            automatic_trigger: true,
+            quiet_prompt: String(writerDirective || ''),
+            quietToLoud: true,
+            skipWIAN: false,
+            signal: controller.signal
+          });
+        });
+        const response = await Promise.race([running, interrupted]);
         result = normalizePostProcessRewrite(response);
       } catch (error) {
         result = postProcessWriterFailedResult(error);
       } finally {
-        try {
-          clearPromptKey(context, POST_PROCESS_PROMPT_KEY);
-        } catch (error) {
-          result = postProcessWriterFailedResult(error);
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        if (postProcessPromptOwner === owner) {
+          postProcessPromptOwner = null;
+          try {
+            clearPromptKey(context, POST_PROCESS_PROMPT_KEY);
+          } catch (error) {
+            if (result?.ok !== false) result = postProcessWriterFailedResult(error);
+          }
         }
       }
       return result;

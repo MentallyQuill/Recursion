@@ -94,9 +94,6 @@ function responseForRequest(request) {
   }
   if (request.roleId === 'postProcessGuidanceUtility' || request.roleId === 'postProcessGuidanceReasoner') {
     return {
-      schema: 'recursion.postProcessGuidance.v1',
-      snapshotHash: request.snapshotHash,
-      sourceHash: request.sourceHash,
       guidanceText: 'Apply the selected cards while preserving the existing prose.'
     };
   }
@@ -369,7 +366,6 @@ const timedOut = await timeoutRouter.generate('utilityArbiter', { prompt: 'Never
 assertEqual(timedOut.ok, false, 'explicit provider timeout is enforced');
 assertEqual(timedOut.error.code, 'RECURSION_PROVIDER_TIMEOUT', 'timeout has stable code');
 
-console.log('[pass] providers');
 
 store.updateProviderConfig('utility', { outputTokenCeiling: 16000 });
 await client.generate('sceneFrameCard', { prompt: 'Return JSON.' });
@@ -380,3 +376,8 @@ assertEqual(calls.at(-1).responseLength, 700, 'explicit smaller transport limit 
 assertEqual(calls.at(-1).reasoningIntent, 'none', 'Utility disables reasoning even when a role requests high effort');
 await client.generate('reasonerComposer', { prompt: 'Return JSON.', reasoningIntent: 'high' });
 assertEqual(calls.at(-1).reasoningIntent, 'high', 'reasoner intent survives central utility default');
+
+const guidanceSchema = jsonSchemaForRequest({ responseSchema: 'recursion.postProcessGuidance.v1', snapshotHash: 's', sourceHash: 't' });
+assertDeepEqual(Object.keys(guidanceSchema.schema.properties), ['guidanceText'], 'native guidance schema requests only model-owned text');
+
+console.log('[pass] providers');

@@ -120,7 +120,7 @@ function createWriterContext({ generateImpl }) {
       quiet_prompt: WRITER_DIRECTIVE,
       quietToLoud: true,
       skipWIAN: false,
-      signal
+      signal: generateCall[2].signal
     }],
     'native Post-process writer uses the exact non-persisting SillyTavern generation contract'
   );
@@ -195,7 +195,7 @@ for (const scenario of [
       error.name = 'AbortError';
       throw error;
     },
-    expectedCode: 'AbortError'
+    expectedCode: 'RECURSION_PROVIDER_ABORTED'
   }
 ]) {
   const controller = new AbortController();
@@ -213,6 +213,7 @@ for (const scenario of [
     signal: controller.signal
   });
 
+  if (scenario.abort) assertEqual(fixture.calls.length, 0, 'pre-aborted writer dispatches nothing');
   assertEqual(result.ok, false, `${scenario.label} fails safely`);
   assertEqual(result.text, '', `${scenario.label} cannot expose a usable draft`);
   assertEqual(result.error?.code, scenario.expectedCode, `${scenario.label} exposes a stable error code`);
@@ -222,7 +223,7 @@ for (const scenario of [
         && entry[1] === POST_PROCESS_PROMPT_KEY
         && entry[2] === ''
     ).length,
-    1,
+    scenario.abort ? 0 : 1,
     `${scenario.label} clears the transient Post-process prompt in finally`
   );
   assertEqual(
@@ -259,6 +260,65 @@ for (const scenario of [
     'missing native writer API exposes a stable unavailable code'
   );
   assertEqual(promptCalls.length, 0, 'missing native writer API does not install a transient prompt');
+}
+
+{
+  const fixture = createWriterContext({ generateImpl: () => new Promise(() => {}) });
+  const host = createSillyTavernHost({ contextFactory: () => fixture.context, settingsRoot: {} });
+  const result = await host.generation.rewriteWithPostProcess({ guidancePacket: 'Timed packet', timeoutMs: 10 });
+  assertEqual(result.error.code, 'RECURSION_POST_PROCESS_WRITER_TIMEOUT', 'hung writer has finite deadline');
+  assertEqual(result.error.retryable, true, 'deadline failure preserves retryability');
+  assertEqual(fixture.calls.find((entry) => entry[0] === 'generate')[2].signal.aborted, true, 'deadline aborts writer signal');
+  assertEqual(fixture.context.extensionPrompts[POST_PROCESS_PROMPT_KEY].value, '', 'timed writer clears its prompt');
+}
+
+{
+  let finishOld;
+  let finishNew;
+  let calls = 0;
+  const fixture = createWriterContext({ generateImpl: () => new Promise((resolve) => {
+    if (++calls === 1) finishOld = resolve;
+    else finishNew = resolve;
+  }) });
+  const host = createSillyTavernHost({ contextFactory: () => fixture.context, settingsRoot: {} });
+  const oldController = new AbortController();
+  const old = host.generation.rewriteWithPostProcess({ guidancePacket: 'Old packet', signal: oldController.signal });
+  await Promise.resolve();
+  const current = host.generation.rewriteWithPostProcess({ guidancePacket: 'New packet' });
+  await Promise.resolve();
+  oldController.abort();
+  assertEqual((await old).error.code, 'RECURSION_PROVIDER_ABORTED', 'abort returns even when host ignores it');
+  assertEqual(fixture.context.extensionPrompts[POST_PROCESS_PROMPT_KEY].value, 'New packet', 'old abort cleanup preserves newer prompt');
+  finishOld('Late obsolete text');
+  await Promise.resolve();
+  assertEqual(fixture.context.extensionPrompts[POST_PROCESS_PROMPT_KEY].value, 'New packet', 'late host completion preserves newer prompt');
+  finishNew('Current text');
+  assertEqual((await current).text, 'Current text', 'new writer completes normally');
+  assertEqual(fixture.context.extensionPrompts[POST_PROCESS_PROMPT_KEY].value, '', 'new writer clears its own prompt');
+}
+
+{
+  const fixture = createWriterContext({ generateImpl: async () => {
+    throw Object.assign(new Error('Provider unavailable'), { code: 'RECURSION_PROVIDER_RATE_LIMIT', retryable: true, category: 'provider' });
+  } });
+  const host = createSillyTavernHost({ contextFactory: () => fixture.context, settingsRoot: {} });
+  const result = await host.generation.rewriteWithPostProcess();
+  assertEqual(result.error.code, 'RECURSION_PROVIDER_RATE_LIMIT', 'provider code survives host boundary');
+  assertEqual(result.error.retryable, true, 'provider retryability survives host boundary');
+  assertEqual(result.error.category, 'provider', 'provider category survives host boundary');
+}
+
+for (const returned of [false, true]) {
+  const fixture = createWriterContext({ generateImpl: async () => {
+    const error = Object.assign(new Error('HTTP 401'), { status: 401 });
+    if (returned) return { ok: false, error };
+    throw error;
+  } });
+  const host = createSillyTavernHost({ contextFactory: () => fixture.context, settingsRoot: {} });
+  const result = await host.generation.rewriteWithPostProcess();
+  assertEqual(result.error.code, 'RECURSION_PROVIDER_AUTH_FAILED', 'native authentication failure retains provider classification');
+  assertEqual(result.error.retryable, false, 'authentication failure cannot retry');
+  assertEqual(result.error.kind, 'transport', 'writer provider failure is transport rather than validation');
 }
 
 console.log('[pass] post-process host writer');

@@ -33,7 +33,6 @@ import {
 } from './editorial-transform.mjs';
 import { providerFailure } from './failures.mjs';
 import {
-  MAX_POST_PROCESS_GUIDANCE_LENGTH,
   POST_PROCESS_GUIDANCE_JSON_SCHEMA,
   POST_PROCESS_GUIDANCE_SCHEMA,
   normalizePostProcessGuidanceResponse
@@ -559,26 +558,9 @@ export function jsonSchemaForRequest(request = {}) {
     };
   }
   if (schema === POST_PROCESS_GUIDANCE_SCHEMA) {
-    const snapshotHash = String(request?.snapshotHash || '').trim();
-    const sourceHash = String(request?.sourceHash || '').trim();
     return {
       name: schemaSafeName(schema),
-      schema: {
-        ...POST_PROCESS_GUIDANCE_JSON_SCHEMA,
-        properties: {
-          ...POST_PROCESS_GUIDANCE_JSON_SCHEMA.properties,
-          snapshotHash: snapshotHash
-            ? { const: snapshotHash }
-            : POST_PROCESS_GUIDANCE_JSON_SCHEMA.properties.snapshotHash,
-          sourceHash: sourceHash
-            ? { const: sourceHash }
-            : POST_PROCESS_GUIDANCE_JSON_SCHEMA.properties.sourceHash,
-          guidanceText: {
-            ...POST_PROCESS_GUIDANCE_JSON_SCHEMA.properties.guidanceText,
-            maxLength: MAX_POST_PROCESS_GUIDANCE_LENGTH
-          }
-        }
-      }
+      schema: POST_PROCESS_GUIDANCE_JSON_SCHEMA
     };
   }
   if (schema === 'recursion.generationReview.v1') {

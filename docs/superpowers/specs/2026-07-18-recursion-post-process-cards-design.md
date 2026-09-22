@@ -342,18 +342,17 @@ Guidance synthesis receives:
 - the enabled category or categories;
 - ordered enabled card prompts;
 - hard safety boundaries;
-- source and snapshot hashes.
+- locally held source and snapshot bindings.
 
-It returns a small structured envelope:
+The model returns exactly this object (also specified directly in the prompt):
 
 ```js
 {
-  schema: "recursion.postProcessGuidance.v1",
-  snapshotHash: "…",
-  sourceHash: "…",
   guidanceText: "Contextual, actionable revision guidance."
 }
 ```
+
+The normalizer locally adds `schema: "recursion.postProcessGuidance.v1"`, `snapshotHash`, and `sourceHash` from the frozen request. Guidance is a nonempty string of at most 6000 characters; excess length or malformed types are rejected. Evidence budgeting retains whole fields/messages and records omissions; the writable draft remains complete.
 
 The provider must not return the rewritten story. The prompt tells it to identify where and how the selected cards apply, preserve unsupported material, and give the host writer concise revision guidance.
 

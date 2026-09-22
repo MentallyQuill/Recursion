@@ -10,6 +10,8 @@ import {
 import { runModelStageAttempts } from './attempt-policy.mjs';
 import { normalizeOperationBudget, reserveRecoveryCall, remainingExecutionMs, settleOperationClock } from './operation-budget.mjs';
 
+const POST_PROCESS_RECOVERY_LIMIT = 2;
+
 const MODEL_RETRY_ACTIONS = new Set([
   'stop',
   'downgrade-structured-output',
@@ -492,7 +494,7 @@ export function createExecutionScheduler({
           request,
           signal: controller.signal,
           invoke: async (attemptRequest, attemptContext) => {
-            if (runtime.manifest.phase !== 'preprocess') return invokeStage(attemptRequest, attemptContext.attempt);
+            if (!runtime.manifest.recoveryBudget) return invokeStage(attemptRequest, attemptContext.attempt);
             const paidRecovery = runtime.manifest.recoveryBudget?.reservationIds.includes(`initial:${stage.id}`)
               || (stage.id.startsWith('preprocess.cards.segmented.') && Boolean(runtime.manifest.stageRecords['preprocess.cards.fused']));
             if (stage.failurePolicy === 'continue' && paidRecovery) {
@@ -509,7 +511,7 @@ export function createExecutionScheduler({
                 runtime.graph.stages.filter((entry) => entry.id.startsWith('preprocess.cards.segmented.')).length
               );
               const budget = normalizeOperationBudget(draft.recoveryBudget);
-              budget.recoveryLimit = Math.max(budget.recoveryLimit, 1 + selectedCount);
+              budget.recoveryLimit = draft.phase === 'postprocess' ? POST_PROCESS_RECOVERY_LIMIT : Math.max(budget.recoveryLimit, 1 + selectedCount);
               const initialId = `initial:${stage.id}`;
               const isFallback = stage.id.startsWith('preprocess.cards.segmented.') && Boolean(draft.stageRecords['preprocess.cards.fused']);
               const first = !budget.reservationIds.includes(initialId);
@@ -952,7 +954,8 @@ export function createExecutionScheduler({
     if (!normalized) throw new TypeError('Scheduler requires a valid pipeline manifest.');
     const limit = attemptLimit();
     normalized.stageRecords = graphStageRecords(normalized, graph, limit, now());
-    normalized.recoveryBudget = normalized.phase === 'preprocess' ? normalizeOperationBudget(normalized.recoveryBudget, {
+    normalized.recoveryBudget = ['preprocess', 'postprocess'].includes(normalized.phase) ? normalizeOperationBudget(normalized.recoveryBudget, {
+      recoveryLimit: normalized.phase === 'postprocess' ? POST_PROCESS_RECOVERY_LIMIT : 1,
       windowId: normalized.operationId,
       deadlineMs: (context?.settings?.operationDeadlineSeconds || 300) * 1000
     }) : null;
@@ -1082,7 +1085,8 @@ export function createExecutionScheduler({
         draft.pauseReason = '';
         draft.staleChangedFields = [];
         if (draft.queuedStageIds.length && ['reprocess', 'full-fresh'].includes(runtime.manifest.pauseReason)) {
-          draft.recoveryBudget = draft.phase === 'preprocess' ? normalizeOperationBudget(null, {
+          draft.recoveryBudget = ['preprocess', 'postprocess'].includes(draft.phase) ? normalizeOperationBudget(null, {
+            recoveryLimit: draft.phase === 'postprocess' ? POST_PROCESS_RECOVERY_LIMIT : 1,
             windowId: createId('recovery-window'),
             deadlineMs: draft.recoveryBudget?.deadlineMs
           }) : null;
@@ -1145,7 +1149,8 @@ export function createExecutionScheduler({
       runtime.forcedStageIds = new Set([stageId]);
       runtime.queuedStageIds = new Set();
       await queueMutation(runtime, (draft) => {
-        draft.recoveryBudget = draft.phase === 'preprocess' ? normalizeOperationBudget(null, {
+        draft.recoveryBudget = ['preprocess', 'postprocess'].includes(draft.phase) ? normalizeOperationBudget(null, {
+          recoveryLimit: draft.phase === 'postprocess' ? POST_PROCESS_RECOVERY_LIMIT : 1,
           windowId: createId('recovery-window'),
           deadlineMs: draft.recoveryBudget?.deadlineMs
         }) : null;

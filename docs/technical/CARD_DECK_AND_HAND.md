@@ -272,7 +272,7 @@ Generated cards are fallible analysis, not new canon or pacing authority. An una
 
 Card writers use neutral analytical instructions rather than performing the story's voice or tense. Story-form metadata governs the narrator; cards cannot select a viewpoint character. Packet guardrails preserve current physical state and completed actions independently of selected families, and require story output without drafting notes. These are model instructions, not a guarantee of prose quality or a substitute for host reasoning-channel separation.
 
-The composer checks cards against bounded recent source messages. Invalid JSON/schema guidance receives bounded correction before raw fallback. Both guidance and fallback remain subordinate to user instructions and established scene evidence. Prompt packet version 4 and revised preprocessing contracts invalidate older prepared prompts.
+The composer checks cards against bounded recent source messages. Invalid JSON/schema Guidance receives bounded correction. Exhausted composition pauses preparation for Retry; it cannot install a raw-card fallback. Guidance remains subordinate to user instructions and established scene evidence. The revised Guidance stage and prompt contract invalidate older prepared prompts.
 
 ## Protective instructions and validation
 

@@ -498,6 +498,39 @@ function editorialVerificationChecksSchema(validEvidenceIds) {
 export function jsonSchemaForRequest(request = {}) {
   const schema = String(request?.responseSchema || '').trim();
   if (!schema) return null;
+  if (schema === 'recursion.guidanceComposer.v1') {
+    const cardIds = uniqueRequestStrings(request.guidanceCardIds);
+    const cardId = cardIds.length ? { enum: cardIds } : { type: 'string' };
+    const references = { type: 'array', items: cardId, uniqueItems: true };
+    return {
+      name: schemaSafeName(schema),
+      schema: {
+        type: 'object',
+        properties: {
+          schema: { const: schema },
+          snapshotHash: { const: String(request.snapshotHash || '') },
+          guidanceText: { type: 'string', minLength: 1, maxLength: 6000 },
+          sourceCardIds: references,
+          guardrailCardIds: references,
+          omittedCardIds: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: cardId,
+                reason: { enum: ['duplicate', 'lower-priority', 'unsupported', 'unsafe'] }
+              },
+              required: ['id', 'reason'],
+              additionalProperties: false
+            }
+          },
+          diagnostics: { type: 'array', items: { type: 'string' }, maxItems: 16 }
+        },
+        required: ['schema', 'snapshotHash', 'guidanceText', 'sourceCardIds', 'guardrailCardIds', 'omittedCardIds', 'diagnostics'],
+        additionalProperties: false
+      }
+    };
+  }
   if (schema === 'recursion.cardPayload.v1') {
     return {
       name: schemaSafeName(schema),
@@ -1025,6 +1058,19 @@ function normalizeNestedCardEnvelope(roleId, data, request = {}) {
 }
 
 function normalizeRoleResponse(roleId, data, request = {}) {
+  if (roleId === 'guidanceComposer' && plainObject(data)
+    && typeof data.guidanceText === 'string' && data.guidanceText.trim()
+    && typeof request.snapshotHash === 'string' && request.snapshotHash
+    && (!Object.hasOwn(data, 'schema') || data.schema === expectedResponseSchema(roleId))
+    && (!Object.hasOwn(data, 'snapshotHash') || data.snapshotHash === request.snapshotHash)) {
+    // These identifiers belong to the request, not the model's analysis. Only
+    // fill omissions; conflicting identities must still fail validation.
+    const recovered = !Object.hasOwn(data, 'schema') || !Object.hasOwn(data, 'snapshotHash');
+    return {
+      data: { ...data, schema: expectedResponseSchema(roleId), snapshotHash: request.snapshotHash },
+      diagnostics: recovered ? { semanticNormalization: 'guidance-request-envelope' } : {}
+    };
+  }
   if (roleId === 'fusedCardBundle' && plainObject(data) && Array.isArray(data.items)) {
     const requested = new Set((request.requestedCards || []).map((card) => card.family));
     const counts = new Map();

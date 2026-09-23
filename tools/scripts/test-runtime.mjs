@@ -538,6 +538,10 @@ function fusedReadyReasonerSettings(settings = {}) {
 }
 
 function cardProviderResponse(roleId, request = {}) {
+  if (roleId === 'guidanceComposer') return {
+    ok: true,
+    data: { schema: 'recursion.guidanceComposer.v1', snapshotHash: request.snapshotHash, guidanceText: 'Answer the immediate question using the selected cards.' }
+  };
   const catalog = CARD_CATALOG.find((entry) => entry.role === roleId) || CARD_CATALOG[0];
   return {
     ok: true,
@@ -2677,12 +2681,11 @@ function immediateDurableCardRouter() {
     }
   });
 
-  const result = await runtime.prepareForGeneration({ userMessage: 'Persist guidance fallback reason.' });
-  const journal = await storage.loadRunJournal(runtime.view().lastSnapshot.chatKey);
-  const handEntry = journal.entries.find((entry) => entry.event === 'hand.selected' && entry.runId === result.packet.diagnostics.runId);
-  assertEqual(result.packet.diagnostics.guidanceStatus, 'fallback-raw-only', 'runtime packet records guidance fallback');
-  assertEqual(handEntry.details.guidanceStatus, 'fallback-raw-only', 'hand journal records guidance fallback status');
-  assertEqual(handEntry.details.guidanceFallbackReason, 'snapshot-mismatch', 'hand journal records guidance fallback reason');
+  const result = await runtime.prepareForGeneration({ userMessage: 'Reject Guidance for a different snapshot.' });
+  assertEqual(result.ok, false, 'wrong-snapshot Guidance blocks preparation');
+  assertEqual(result.continuePrimaryGeneration, false, 'wrong-snapshot Guidance stops narration');
+  assertEqual(result.execution.stageRecords['preprocess.guidance'].state, 'failed', 'wrong-snapshot Guidance remains a failed stage');
+  assert(!result.packet, 'wrong-snapshot Guidance never becomes a raw-card packet');
 }
 
 
@@ -3834,7 +3837,7 @@ function immediateDurableCardRouter() {
     generationRouter: {
       async generate(roleId, request) {
         routerCalls.push({ roleId, request });
-        if (roleId !== 'utilityArbiter') {
+        if (roleId !== 'utilityArbiter' && roleId !== 'guidanceComposer') {
           return {
             ok: true,
             roleId,
@@ -3918,6 +3921,10 @@ function immediateDurableCardRouter() {
         if (roleId === 'reasonerComposer') {
           throw new Error('low reasoning must not call reasonerComposer');
         }
+        if (roleId === 'guidanceComposer') return {
+          ok: true,
+          data: { schema: 'recursion.guidanceComposer.v1', snapshotHash: request.snapshotHash, guidanceText: 'Answer the immediate question.' }
+        };
         return cardProviderResponse(roleId, request);
       }
     }
@@ -4057,6 +4064,7 @@ for (const scenario of [
     settings: { mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'low' },
     generationRouter: {
       async generate(roleId, request) {
+        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
         assertEqual(roleId, 'utilityArbiter', 'compact footprint override only calls utility arbiter');
         return {
           ok: true,
@@ -4124,6 +4132,7 @@ for (const scenario of [
             }
           };
         }
+        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
         throw new Error(`${scenario.label} should not call reasonerComposer`);
       }
     }
@@ -4145,6 +4154,7 @@ for (const scenario of [
     settings: { mode: 'auto', promptFootprint: 'compact', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
+        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
         assertEqual(roleId, 'utilityArbiter', 'invalid footprint fallback only calls utility arbiter');
         return {
           ok: true,
@@ -4173,6 +4183,7 @@ for (const scenario of [
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
+        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
         assertEqual(roleId, 'utilityArbiter', 'invalid scene status fallback only calls utility arbiter');
         return {
           ok: true,
@@ -4563,6 +4574,7 @@ for (const scenario of [
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
+        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
         return {
           ok: true,
           data: {
@@ -4666,6 +4678,7 @@ for (const scenario of [
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
+        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
         return {
           ok: true,
           data: {
@@ -5272,6 +5285,7 @@ for (const scenario of [
             }
           };
         }
+        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
         throw new Error(`Manual disabled-family test expected batch routing, got generate ${roleId}`);
       },
       async batch(requests) {
@@ -5346,6 +5360,7 @@ for (const scenario of [
           }
           };
         }
+        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
         throw new Error(`unexpected Manual forced role ${roleId}`);
       }
     }
@@ -5436,6 +5451,7 @@ for (const scenario of [
             }
           };
         }
+        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
         throw new Error(`Auto focus test expected batch routing, got generate ${roleId}`);
       },
       async batch(requests) {
@@ -5474,6 +5490,7 @@ for (const scenario of [
             }
           };
         }
+        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
         throw new Error(`Auto non-continuity exception test expected batch routing, got generate ${roleId}`);
       },
       async batch(requests) {
@@ -5592,6 +5609,7 @@ for (const scenario of [
     generationRouter: {
       async generate(roleId, request) {
         providerPrompts.push({ roleId, prompt: request.prompt });
+        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
         return {
           ok: true,
           data: {
@@ -5670,6 +5688,7 @@ for (const scenario of [
     },
     generationRouter: {
       async generate(roleId, request = {}) {
+        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
         assertEqual(roleId, 'utilityArbiter', 'provider cap test only needs Arbiter');
         providerPrompts.push(request.prompt);
         return {
@@ -6279,6 +6298,7 @@ for (const scenario of [
     },
     generationRouter: {
       async generate(roleId, request) {
+        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
         if (snapshotCalls === 1) {
           return {
             ok: true,

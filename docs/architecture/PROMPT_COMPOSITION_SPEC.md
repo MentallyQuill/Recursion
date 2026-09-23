@@ -153,7 +153,7 @@ Responsibilities:
 - produce a stable injection plan;
 - degrade cleanly when a provider is unavailable.
 
-The Utility Composer should produce good-enough direction without requiring a Reasoner. If it is unavailable, runtime still injects selected raw card evidence with minimal fallback guidance instead of inventing a deterministic semantic brief.
+The Utility Composer produces direction without requiring a Reasoner. Guidance must pass validation before installation. If composition remains unavailable after bounded recovery, preparation pauses for Retry and narration stops; runtime cannot substitute raw cards or an invented semantic brief.
 
 ### Reasoner Composer
 
@@ -171,7 +171,7 @@ Reasoner Composer triggers may include:
 
 Reasoner output is not authoritative by itself. Runtime must validate, cap, and merge it into the guidance section. The Reasoner must echo the packet's frozen `snapshotHash`; missing or mismatched hashes are stale output and must be rejected. The Reasoner must not invent lore, future plot, hidden motivations, or private analysis. It should transform selected evidence into concise scene-reasoning guidance, then return structured output that the runtime validator can accept, trim, or reject.
 
-If the Reasoner fails, times out, returns invalid schema, returns the wrong snapshot hash, or exceeds safety limits, Recursion keeps the Utility guidance plus raw card evidence and records the fallback in diagnostics. If `guidanceComposer` itself completes at the provider boundary but fails Recursion validation, packet diagnostics record `guidanceStatus: fallback-raw-only` plus a compact `guidanceFallbackReason` such as `snapshot-mismatch`, `schema-mismatch`, `source-ids-invalid`, `hidden-reasoning`, or `text-missing`.
+An optional Reasoner augmentation failure can retain already validated Utility guidance. Failure of `guidanceComposer` itself is blocking on either lane: schema, snapshot, source-id, hidden-reasoning, and text failures receive bounded correction and remain failed if exhausted. Missing request identifiers may be bound locally only for a nonempty string Guidance object with no conflicting identity. No failed Guidance checkpoint is reusable.
 
 ## Injection Lanes/Depths
 

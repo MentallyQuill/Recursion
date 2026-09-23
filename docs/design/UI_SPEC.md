@@ -1372,9 +1372,9 @@ Examples:
 - Reasoner unhealthy: `Reasoner unhealthy. Utility composed.`
 - Post-process guidance unavailable: `Post-process guidance failed. Original response preserved.`
 
-Provider failures should fail soft. The UI should show the issue, preserve any usable cached scene state, and allow the main generation to continue without Recursion when needed.
+Blocking Pre-process provider failures stop narration. The UI shows the issue, preserves successful preparation checkpoints, and offers Retry. Post-process failures preserve the original response.
 
-The Pre-process `Guidance` row uses a provider-neutral label. Raw-card fallback renders amber with `Guidance unavailable. Using raw card evidence.` and leaves the completed operation in `Needs attention`. If the chat changes before prompt installation, the failure reason is `Chat changed before the Recursion prompt could be installed.`; diagnostics retain its stale-state category.
+The Pre-process `Guidance` row uses a provider-neutral label. Exhausted composition is a failed stage in a paused operation with Retry available; it never completes as raw-card fallback. If the chat changes before prompt installation, the failure reason is `Chat changed before the Recursion prompt could be installed.`; diagnostics retain its stale-state category.
 
 Provider fallback states should appear in the Hero Pixel Array Progress Menu and the Full Viewer Activity tab. Hero Pixel Array block color may indicate attention, but the bar should not become a fallback-message strip. Examples:
 

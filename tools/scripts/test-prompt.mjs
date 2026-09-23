@@ -122,6 +122,9 @@ for (const [reasonerUse, footprint, expectedLane, intent] of [
   });
   assertEqual(request.roleId, 'guidanceComposer', 'durable guidance stage exposes its provider role');
   assert(request.request.prompt.includes('recursion.guidanceComposer.v1'), 'durable guidance request names its schema');
+  assert(request.request.systemPrompt.includes('JSON object'), 'Guidance format has a system-level instruction');
+  assert(request.request.prompt.trim().endsWith('}'), 'Guidance request ends with a concrete output template');
+  assert(request.request.guidanceCardIds.includes('scene-card'), 'native schema receives allowed Guidance source ids');
   const valid = validateGuidanceStageResult({
     ok: true,
     data: {

@@ -247,7 +247,7 @@ When Reasoner smoke is enabled:
 - Verify Reasoner activity appears with a bounded trigger reason.
 - Verify the final prompt packet stays within the prompt packet schema.
 - Simulate or trigger one Reasoner failure path.
-- Verify Guidance or Reasoner fallback is visible, generation continues, and sanitized prompt metadata records `composerLane`, `guidanceStatus`, and `reasonerStatus` without raw provider failure text.
+- Verify invalid Guidance receives bounded correction; exhaustion leaves a failed Guidance stage, pauses preparation, and stops narration without installing a raw-card packet. Retry must reuse accepted planning/cards and install only after valid Guidance. Optional Reasoner augmentation can retain already validated Utility Guidance. Record sanitized stage failure codes and prompt metadata without raw provider failure text.
 
 Reasoner output must not add unsupported lore, hidden story plans, private thoughts, or unbounded detail.
 

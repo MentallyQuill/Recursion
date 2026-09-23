@@ -13,6 +13,7 @@ Recursion V1 keeps its structured contracts close to the source modules that val
 - progress-row and Hero Pixel Array view models in `src/progress.mjs`;
 - prompt packet contracts in `src/prompt.mjs`;
 - provider response parsing and diagnostics in `src/providers.mjs`;
+- Pre-process Guidance in `src/providers.mjs` and `src/prompt.mjs`: the native schema requires `schema`, `snapshotHash`, nonempty string `guidanceText`, `sourceCardIds`, `guardrailCardIds`, `omittedCardIds`, and `diagnostics`. Prompt-based outputs may omit bookkeeping identifiers; these are locally bound only when Guidance text exists and no supplied identity conflicts. Invalid content still fails stage validation, and exhausted Guidance blocks installation.
 - Post-process model output in `src/post-process-guidance.mjs`: exactly
   `{ "guidanceText": "Nonempty revision guidance, at most 6000 characters." }`.
   The normalized internal `recursion.postProcessGuidance.v1` envelope adds

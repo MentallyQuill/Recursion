@@ -386,6 +386,7 @@ Expected behavior:
 - Card failure: omit failed cards and keep valid siblings.
 - Reasoner unconfigured or Issue: compose ordinary Pre-process work with Utility when policy allows; fail High/Ultra Post-process guidance soft without crossing lanes. An Untested profile remains Segmented-routable with caution, while explicit Fused selection requires no Fused certification.
 - Recursion Stop: abort the current call, preserve accepted checkpoints, pause the operation, and expose Resume or Retry Stage.
+- Guidance failure: automatically retry correctable output within the attempt limit; if composition still fails, stop narration and show the failed Guidance stage. Retry reuses successful planning and cards. Raw cards cannot substitute for missing Guidance.
 - SillyTavern host-generation stop: clear owned prompt keys and cancel pending Post-process work without automatically retrying the primary story generation.
 - Storage write failure: continue with memory state when safe and report a warning.
 - Prompt install failure: allow SillyTavern generation to continue without Recursion guidance.

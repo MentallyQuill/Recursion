@@ -487,6 +487,7 @@ export function cacheContractVersions(settings = {}) {
       promptPacketVersion: PROMPT_PACKET_VERSION,
       cardSelectionContract: 5,
       guidanceSchema: PROMPT_GUIDANCE_SCHEMA,
+      guidanceContract: 2,
       storyFormSchema: STORY_FORM_SCHEMA
     }),
     providerContractHash: PROVIDER_CONTRACT_HASH,
@@ -7117,7 +7118,7 @@ export function createRecursionRuntime({
   function durableGuidanceStage(context, plan) {
     return {
       id: 'preprocess.guidance',
-      version: 3,
+      version: 4,
       kind: 'model',
       executable: true,
       dependencies: ['preprocess.snapshot', 'preprocess.arbiter', 'preprocess.hand'],
@@ -7178,7 +7179,7 @@ export function createRecursionRuntime({
         if (
           validationContext.reuse === true
           && result?.schema === PROMPT_GUIDANCE_SCHEMA
-          && ['used', 'fallback-raw-only'].includes(result?.status)
+          && result?.status === 'used'
           && safeText(result?.text || '', 6000)
         ) {
           return { ok: true, value: result };
@@ -7195,28 +7196,6 @@ export function createRecursionRuntime({
           value: { ...validation.value, lane: result.guidanceLane }
         };
         return validation;
-      },
-      settleExhausted({ lastArtifact, failure, dependencies }) {
-        const validation = validateGuidanceStageResult(lastArtifact, {
-          hand: dependencies?.['preprocess.hand']?.artifact,
-          snapshot: context.snapshot
-        });
-        const fallbackReason = safeText(validation.error?.reason || failure?.code || 'guidance-invalid', 180);
-        return {
-          ok: true,
-          value: {
-            schema: PROMPT_GUIDANCE_SCHEMA,
-            lane: lastArtifact?.guidanceLane,
-            status: 'fallback-raw-only',
-            text: 'Guidance unavailable; use supported card analysis subject to the established scene and user instructions.',
-            sourceCardIds: [],
-            guardrailCardIds: [],
-            omittedCardIds: [],
-            diagnostics: [fallbackReason],
-            invalidSourceIdCount: 0,
-            fallbackReason
-          }
-        };
       },
       buildCorrectionRequest({ request, error, attempt }) {
         return {
@@ -7502,6 +7481,7 @@ export function createRecursionRuntime({
   function durableOperationResult(manifest, plan = null) {
     return {
       ok: false,
+      continuePrimaryGeneration: false,
       paused: manifest?.state === 'paused',
       execution: manifest,
       ...(plan ? { plan } : {})

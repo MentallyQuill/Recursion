@@ -485,7 +485,7 @@ export function cacheContractVersions(settings = {}) {
     promptPacketVersion: PROMPT_PACKET_VERSION,
     promptContractHash: hashJson({
       promptPacketVersion: PROMPT_PACKET_VERSION,
-      cardSelectionContract: 4,
+      cardSelectionContract: 5,
       guidanceSchema: PROMPT_GUIDANCE_SCHEMA,
       storyFormSchema: STORY_FORM_SCHEMA
     }),
@@ -6485,7 +6485,7 @@ export function createRecursionRuntime({
       pipelineMode: pipelineDecision?.effectiveMode || (settings.pipelineMode === 'fused' ? 'fused' : 'segmented'),
       promptVersions: {
         promptPacket: PROMPT_PACKET_VERSION,
-        preprocessGraph: 3
+        preprocessGraph: 4
       },
       providerContractHash: PROVIDER_CONTRACT_HASH,
       deckRevisionHash: activeDeckRevisionHash(settings),
@@ -8006,17 +8006,6 @@ export function createRecursionRuntime({
     preprocessContexts.set(operationId, context);
     let graph = durableBaseGraph(context);
     preprocessGraphs.set(operationId, graph);
-    if (context.pipelineDecision.reasonCode) {
-      stageRuntimeActivity({
-        runId,
-        phase: 'pipelineModeAdjusted',
-        severity: 'info',
-        outcome: 'neutral',
-        label: 'Fused was requested, but the Utility Connection Profile is not Fused-certified. This run is using Segmented.',
-        chips: ['Pre-process', 'Segmented'],
-        detail: { code: context.pipelineDecision.reasonCode }
-      });
-    }
     startRuntimeActivity({ runId, label: 'Reading current turn...', chips: ['Pre-process'] });
     if (
       queuedIntent?.mode === 'full-fresh'

@@ -8,9 +8,9 @@ assertDeepEqual(resolveEffectivePipelineMode({
 }), {
   ...unconfigured,
   requestedMode: 'fused',
-  effectiveMode: 'segmented',
-  reasonCode: 'profile-not-fused-certified'
-}, 'uncertified Fused request downgrades safely');
+  effectiveMode: 'fused',
+  reasonCode: ''
+}, 'uncertified Fused request honors explicit selection');
 
 assertDeepEqual(resolveEffectivePipelineMode({
   requestedMode: 'fused',

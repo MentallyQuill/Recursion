@@ -79,7 +79,7 @@ Advanced Execution exposes `Attempts per step`:
 
 Local validation, persistence, packet composition, and host mutations do not consume attempts. Recursion never automatically retries SillyTavern's story generation.
 
-Try Manual mode to restrict runnable cards to your selected family/sub-item scope. Try Fused only after the selected profile reports Fused certification.
+Try Manual mode to restrict runnable cards to your selected family/sub-item scope. Fused can be selected without a profile test; malformed bundles retain automatic repair and fallback.
 
 ## 8. Enable Post-process Carefully
 

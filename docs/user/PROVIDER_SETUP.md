@@ -100,11 +100,11 @@ Profile certification is bound to the selected profile and generation policy. Ch
 
 Segmented makes one narrow card request per unresolved family. Requests are logically independent but physically serialized when they share a Connection Profile.
 
-Fused asks one model call for the requested card bundle. It is dispatched only when the selected lane is Fused-certified.
+Fused asks one model call for the requested card bundle. Explicit Fused selection dispatches it without requiring a profile test.
 
-When Fused is selected but the profile is uncertified or only Segmented-certified, Recursion automatically uses Segmented before sending a model request. It records one sanitized downgrade code; it does not first waste a Fused attempt.
+Certification remains diagnostic. Missing profile configuration produces an actionable configuration error; untested, partial, or failed certification does not silently switch the selected pipeline.
 
-When a certified Fused response contains some valid items:
+When a Fused response contains some valid items:
 
 - valid requested families are retained;
 - only unresolved families receive Segmented repair calls;

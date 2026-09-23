@@ -49,7 +49,7 @@ function capabilityState(state, {
     state: normalized,
     eligible: resolvedEligible,
     segmentedEligible: ['segmented-ready', 'fused-ready', 'uncertified'].includes(normalized),
-    fusedEligible: normalized === 'fused-ready',
+    fusedEligible: normalized !== 'unconfigured',
     reasonCode: `RECURSION_PROVIDER_${normalized.toUpperCase().replaceAll('-', '_')}`,
     message: message || `${normalized} capability`
   };

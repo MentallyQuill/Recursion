@@ -1225,45 +1225,32 @@ function roleCounts(calls = []) {
   assertEqual(manifest.stageRecords['preprocess.cards.fused'].state, 'completed', 'corrected Fused stage completes');
 }
 
-{
-  const providerCalls = [];
-  const requestedCards = [
-    { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Preserve current beat.' },
-    { family: 'Active Cast', role: 'activeCastCard', reason: 'Preserve who is present.' }
-  ];
-  const provider = {
-    async generate(roleId, request = {}) {
-      providerCalls.push({ roleId, request });
-      if (roleId === 'utilityArbiter') return arbiterResponse(request, requestedCards);
-      if (roleId === 'sceneFrameCard') return cardResponse(roleId, request, { family: 'Scene Frame' });
-      if (roleId === 'activeCastCard') return cardResponse(roleId, request, { family: 'Active Cast' });
+for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail', 'low'], ['not-run', 'low'], ['not-run', 'high']]) {
+  const calls = [];
+  const harness = createHarness({
+    utilityCertification,
+    settings: { pipelineMode: 'fused', reasoningLevel, providers: { reasoner: { connectionProfileId: 'reasoner-profile' } } },
+    provider: { async generate(roleId, request) {
+      calls.push({ roleId, request });
+      if (roleId === 'utilityArbiter') return arbiterResponse(request, [{ family: 'Scene Frame' }, { family: 'Active Cast' }]);
       if (roleId === 'guidanceComposer') return guidanceResponse(request);
-      throw new Error(`unexpected provider role ${roleId}`);
-    }
-  };
-  const { runtime, storage } = createHarness({
-    provider,
-    settings: { pipelineMode: 'fused' },
-    utilityCertification: 'partial'
+      if (roleId === 'fusedCardBundle') return { ok: true, data: {
+        schema: 'recursion.cardBundle.v1', snapshotHash: request.snapshotHash,
+        items: request.requestedCards.map(card => ({ family: card.family, role: card.role, promptText: 'Keep the current scene grounded in observed events.', evidenceRefs: ['message:2'] }))
+      } };
+      throw new Error('Unexpected segmented request: ' + roleId);
+    } }
   });
-
-  const result = await runtime.prepareForGeneration({
-    userMessage: 'I ask what she remembers.',
-    hostGeneration: true
-  });
-
-  assertEqual(result.ok, true, 'partially certified profile completes through Segmented mode');
-  assertEqual(providerCalls.some((entry) => entry.roleId === 'fusedCardBundle'), false, 'partially certified profile never issues a Fused request');
-  assertDeepEqual(
-    providerCalls.filter((entry) => entry.roleId.endsWith('Card')).map((entry) => entry.roleId).sort(),
-    ['activeCastCard', 'sceneFrameCard'],
-    'partially certified profile issues the requested Segmented card calls'
-  );
-  const manifest = await storage.loadPipelineRun('chat-preprocess');
-  assertEqual(manifest.pipelineMode, 'segmented', 'durable manifest stores the effective Segmented mode');
-  assertEqual(result.packet.diagnostics.requestedPipelineMode, 'fused', 'packet preserves the requested Fused mode');
-  assertEqual(result.packet.diagnostics.pipelineMode, 'segmented', 'packet records the effective Segmented mode');
-  assert(result.packet.diagnostics.pipelineReasonCodes.includes('profile-not-fused-certified'), 'packet records one safe downgrade reason');
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Please explain.', hostGeneration: true });
+  assertEqual(result.ok, true, 'Fused completes independent of certification: ' + utilityCertification);
+  const bundles = calls.filter(call => call.roleId === 'fusedCardBundle');
+  assertEqual(bundles.length, 1, 'explicit Fused selection dispatches a bundle');
+  assertEqual(bundles[0].request.lane, reasoningLevel === 'high' ? 'reasoner' : 'utility', 'uncertified configured lane follows reasoning policy');
+  assertEqual(calls.some(call => call.roleId.endsWith('Card')), false, 'valid bundle needs no segmented repair');
+  const manifest = await harness.storage.loadPipelineRun('chat-preprocess');
+  assertEqual(manifest.pipelineMode, 'fused', 'durable manifest honors Fused');
+  assertEqual(result.packet.diagnostics.pipelineMode, 'fused', 'packet reports actual Fused mode');
+  assert(!result.packet.diagnostics.pipelineReasonCodes.includes('profile-not-fused-certified'), 'no certification downgrade reason remains');
 }
 
 

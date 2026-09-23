@@ -279,3 +279,5 @@ The composer checks cards against bounded recent source messages. Invalid JSON/s
 Card and packet validators share clause-aware handling for explicit protective instructions, such as “Do not reveal spoilers” and “Keep private thoughts private.” A protective clause does not exempt a later disclosure command or an exception. Unsupported private-state claims and requests to disclose reasoning remain rejected. This is a narrow lexical check, not a semantic classifier. Rejection details name the rule and include only a bounded matched phrase for targeted correction; arbitrary full rejected cards are not exported.
 
 After preparation completes with an optional failed card omitted, the Segmented cards parent shows a warning and names the missing card. The child remains failed with its precise rejection and retry action. During a failure, the parent identifies failed cards rather than substituting an internal-error message.
+
+Ordinary mention of “future plot” is not a validation failure. Explicit hidden-future-content and private-reasoning checks remain active; topic words alone do not establish disclosure.

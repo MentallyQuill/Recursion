@@ -39,7 +39,6 @@ export const CHECKPOINT_DIAGNOSTIC_CODES = Object.freeze([
   'provider-retry',
   'stage-reprocess-consumed',
   'profile-sampler-projection-failed',
-  'profile-not-fused-certified',
   'fused-fallback-segmented',
   'unresolved-fused-families',
   'zero-useful-fused-cards'

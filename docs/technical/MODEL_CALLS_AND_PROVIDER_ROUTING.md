@@ -283,11 +283,12 @@ The scheduler applies one directive per attempt and checkpoints only the allowli
 
 ## Pipeline Selection
 
-`resolveEffectivePipelineMode()` uses requested mode and current Utility capability.
+`resolveEffectivePipelineMode()` honors the requested mode and records selected-lane capability for diagnostics.
 
 - Segmented always stays Segmented.
-- Fused stays Fused only when `fusedEligible` is true.
-- Otherwise effective mode is Segmented with `profile-not-fused-certified`.
+- Explicit Fused stays Fused without a certification requirement.
+- `fusedEligible` indicates complete route configuration; tests remain diagnostic.
+- Runtime bundle validation and repair can still fall back to Segmented.
 
 Runtime stores requested and effective mode separately in safe packet diagnostics.
 

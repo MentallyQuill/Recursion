@@ -49,7 +49,7 @@ flowchart LR
     Install --> Continue["Host generation"]
 ```
 
-Fused changes only the foreground card-generation stage. It keeps the Segmented Arbiter, scope, Manual forced-card reconciliation, deck, hand, guidance, packet, and install stages, but sends all requested card families as one `fusedCardBundle` model call. Runtime accepts valid requested siblings, rejects unrequested or duplicate cards, repairs damaged or missing requested siblings with individual Segmented card calls, and uses full Segmented fallback only when the bundle yields no useful cards. Fused still obeys Reasoning Level: Low/Medium route the bundle to Utility, while High/Ultra may route it to Reasoner. The selected physical lane must be Fused-certified; otherwise runtime chooses Segmented before sending a bundle request.
+Fused changes only the foreground card-generation stage. It keeps the Segmented Arbiter, scope, Manual forced-card reconciliation, deck, hand, guidance, packet, and install stages, but sends all requested card families as one `fusedCardBundle` model call. Runtime accepts valid requested siblings, rejects unrequested or duplicate cards, repairs damaged or missing requested siblings with individual Segmented card calls, and uses full Segmented fallback only when the bundle yields no useful cards. Fused still obeys Reasoning Level: Low/Medium route the bundle to Utility, while High/Ultra may route it to Reasoner. A configured physical lane does not need a Fused test; explicit selection dispatches the bundle before any response-based repair or fallback.
 
 Fused is designed for stronger reasoning models such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar. Segmented is usually the better pipeline for smaller, simpler, or less reliable structured-output models.
 
@@ -100,7 +100,7 @@ Recursion has two provider lanes:
 
 Each lane requires a selected SillyTavern Connection Profile. Recursion stores no endpoint, credential, model-discovery result, or authorization header. The generation policy independently controls Behavioral Preset isolation, text-completion instruct formatting, sampler inheritance, and structured-output method. Same-profile calls run through a FIFO queue with concurrency one.
 
-Reasoning Level is the operator-facing lane-depth control. Low is Utility-only, Medium uses an eligible Reasoner for guidance composition, High adds Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy. Segmented eligibility requires connectivity and single-card certification; Fused eligibility additionally requires the representative Fused check. A requested Fused run automatically becomes Segmented when the selected Utility profile is uncertified or only Segmented-certified. Post-process guidance stays on the selected lane for its operation and fails soft when that lane is unavailable or its routed call fails.
+Reasoning Level is the operator-facing lane-depth control. Low is Utility-only, Medium uses an eligible Reasoner for guidance composition, High adds Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy. Configured untested profiles can run Segmented. Explicit Fused selection depends on route configuration, not certification, and does not automatically downgrade based on test status. Post-process guidance stays on the selected lane for its operation and fails soft when that lane is unavailable or its routed call fails.
 
 ## Card And Hand System
 

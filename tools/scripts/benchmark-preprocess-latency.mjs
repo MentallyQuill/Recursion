@@ -149,7 +149,7 @@ try {
           report.qualification.push({ ...arm, ...qualification });
           await persist();
           if (!qualification.ok || qualification.provider.capability.safeConcurrency !== arm.concurrency
-              || (arm.concurrency === 2 && !qualification.provider.capability.fusedEligible)) {
+              || (arm.concurrency === 2 && qualification.provider.capability.state !== 'fused-ready')) {
             throw new Error('Live qualification failed; failed qualification is recorded, and no benchmark arm was silently substituted.');
           }
         }

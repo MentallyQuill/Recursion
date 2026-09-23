@@ -71,9 +71,8 @@ const DYNAMIC_FORBIDDEN_PATTERNS = Object.freeze([
   /\bchain[-\s]of[-\s]thought\b/i,
   /\b(hidden|private|secret|undisclosed)\s+(internal\s+)?thoughts?\b/i,
   /\b(private|hidden|secret|undisclosed)\s+(character\s+)?motives?\b/i,
-  /\b(secret|hidden|private|undisclosed)\s+future\s+(plans?|plot|story)\b/i,
+  /\b(secret|hidden|private|undisclosed)\s+future[-\s]+(plans?|plot|story)\b/i,
   /\breveal\s+future\s+plans?\b/i,
-  /\bfuture[-\s]plot\b/i,
   /\b(hidden|private|secret|undisclosed)\s+spoilers?\b/i,
   /\breveal\s+spoilers?\b/i
 ]);

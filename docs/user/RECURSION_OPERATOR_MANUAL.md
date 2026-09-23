@@ -252,7 +252,7 @@ flowchart LR
 
 Fused is the large foreground card-call pipeline. It runs the same Arbiter, card-scope filtering, Manual forced-card reconciliation, scene deck, hand selection, guidance composition, prompt packet validation, and install flow as Segmented. The difference is the card-generation stage: all Arbiter-requested or manually forced card families are appended into one `fusedCardBundle` request and returned as one `recursion.cardBundle.v1` response.
 
-Fused accepts valid requested card items, rejects unrequested or duplicate items, records compact omissions, and repairs damaged or missing requested siblings through individual Segmented card stages when at least one item is useful. It runs the full Segmented card path only when no useful bundle item survives. It still obeys Reasoning Level: Low and Medium use Utility, while High and Ultra use Reasoner when the required lane is eligible. A physical Fused request is sent only after that profile passes Fused certification.
+Fused accepts valid requested card items, rejects unrequested or duplicate items, records compact omissions, and repairs damaged or missing requested siblings through individual Segmented card stages when at least one item is useful. It runs the full Segmented card path only when no useful bundle item survives. It still obeys Reasoning Level: Low and Medium use Utility, while High and Ultra use Reasoner when the required lane is eligible. A physical Fused request does not require a profile test.
 
 Fused is designed for stronger reasoning models such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar. Segmented is usually better for smaller or simpler models.
 
@@ -260,7 +260,7 @@ Use Fused when:
 
 - your selected provider can reliably return larger structured JSON;
 - you want one stronger model pass to coordinate multiple scene cards;
-- the selected lane reports Fused certification and Reasoning Level routes the bundle there;
+- the selected lane is configured and Reasoning Level routes the bundle there;
 - you are comfortable with targeted Segmented repair for damaged siblings and full Segmented fallback if the bundle has no useful cards.
 
 ```mermaid
@@ -333,7 +333,7 @@ Recursion does not own endpoint, credential, or model-selection fields. Those re
 
 The recommended local-model policy is Isolated behavioral preset, Auto instruct formatting, Connection Profile samplers, and Auto structured output. This keeps text-completion framing and sampler tuning while excluding behavioral prompt content that can corrupt JSON.
 
-Test Profile performs connectivity, single-card, and Fused checks. A single-card pass enables Segmented. The Fused check must pass before Recursion physically dispatches a Fused bundle. Selecting Fused with an uncertified or Segmented-only profile automatically uses Segmented and records one sanitized downgrade.
+Test Profile reports connectivity, single-card, and Fused checks. These checks help diagnose a profile; they are not a prerequisite for selecting Fused. Actual bundle failures use the normal repair and fallback paths.
 
 Provider edits auto-save, increment the lane configuration revision, and invalidate old certification. Same-profile model requests run through a FIFO queue with concurrency one. Utility and Reasoner may overlap only when they select different profiles.
 
@@ -384,7 +384,7 @@ Expected behavior:
 - Fused bundle with no useful cards: use the full Segmented card path.
 - Full Rebuild: queue one fresh Pre-process pass without starting provider or host work; the next matching swipe consumes it once and bypasses reusable work for that turn.
 - Card failure: omit failed cards and keep valid siblings.
-- Reasoner unconfigured or Issue: compose ordinary Pre-process work with Utility when policy allows; fail High/Ultra Post-process guidance soft without crossing lanes. An Untested profile remains Segmented-routable with caution, while a physical Fused request requires Fused certification.
+- Reasoner unconfigured or Issue: compose ordinary Pre-process work with Utility when policy allows; fail High/Ultra Post-process guidance soft without crossing lanes. An Untested profile remains Segmented-routable with caution, while explicit Fused selection requires no Fused certification.
 - Recursion Stop: abort the current call, preserve accepted checkpoints, pause the operation, and expose Resume or Retry Stage.
 - SillyTavern host-generation stop: clear owned prompt keys and cancel pending Post-process work without automatically retrying the primary story generation.
 - Storage write failure: continue with memory state when safe and report a warning.

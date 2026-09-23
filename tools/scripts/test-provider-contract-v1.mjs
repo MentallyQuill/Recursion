@@ -74,7 +74,7 @@ const capability = resolveProviderCapability({
 });
 assertEqual(capability.state, 'segmented-ready', 'single-card certification enables Segmented');
 assertEqual(capability.segmentedEligible, true, 'Segmented is eligible');
-assertEqual(capability.fusedEligible, false, 'Fused is not eligible after a failed Fused check');
+assertEqual(capability.fusedEligible, true, 'Fused remains eligible after a failed Fused check');
 assertEqual(capability.completionMode, 'text', 'completion mode is exposed');
 assertEqual(capability.structuredOutput, 'prompt-json', 'structured output method is exposed');
 

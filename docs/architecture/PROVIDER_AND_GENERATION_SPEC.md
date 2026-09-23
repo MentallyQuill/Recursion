@@ -229,7 +229,7 @@ Capability states are:
 | `fused-ready` | All three checks passed. |
 | `unhealthy` | Connectivity or single-card compatibility failed. |
 
-An uncertified configured profile can run Segmented with a visible caution. A partial certification is useful and enables Segmented. Fused is physically dispatched only for `fused-ready`.
+Certification reports observed capability. Explicit Fused selection dispatches a bundle for a configured profile regardless of whether testing is absent, partial, or failed. Runtime validation, repair, and fallback handle actual responses.
 
 Certification is single-flight per lane. A certification request does not cancel active production work. When the lane is busy, the test returns a stable busy result.
 
@@ -241,16 +241,16 @@ The user's requested pipeline and the runtime's effective pipeline are distinct.
 type PipelineDecision = {
   requestedMode: "segmented" | "fused";
   effectiveMode: "segmented" | "fused";
-  reasonCode: "" | "profile-not-fused-certified";
+  reasonCode: "";
 };
 ```
 
 Rules:
 
 - A requested Segmented run remains Segmented.
-- A requested Fused run remains Fused only when Utility is Fused-eligible under the current lane policy.
-- Otherwise, it becomes Segmented before a Fused provider request is sent.
-- The downgrade is shown once and stored as a fixed safe code.
+- A requested Fused run remains Fused regardless of certification.
+- Missing configuration fails through normal provider handling; it does not silently select another pipeline.
+- Invalid bundles retain sibling repair and full Segmented fallback.
 
 ## Compact Card Contracts
 
@@ -407,8 +407,8 @@ Safe provider diagnostics may include a non-reversible bounded profile hash, com
 3. Keep Behavioral Preset on Isolated unless the complete profile preset is intentionally trusted.
 4. Keep Instruct Formatting on Auto for text-completion compatibility.
 5. Keep Samplers on Connection Profile to inherit sampler settings without importing prompt fields.
-6. Run Test Profile. Segmented may run after a single-card pass; Fused requires a Fused-card pass.
-7. Uncertified or partially certified Fused requests automatically use Segmented.
+6. Test Profile optionally reports connectivity, single-card, and Fused capability.
+7. Selecting Fused does not require a test pass.
 
 ## Non-Goals
 

@@ -84,7 +84,7 @@ for (const lane of ['utility', 'reasoner']) {
   const uncertified = resolveProviderCapability({ settings: settingsFor(), lane, operation: 'prompt-packet', host });
   assertEqual(uncertified.state, 'uncertified', `${lane} selected profile is uncertified`);
   assertEqual(uncertified.segmentedEligible, true, `${lane} uncertified profile may use conservative Segmented`);
-  assertEqual(uncertified.fusedEligible, false, `${lane} uncertified profile may not use Fused`);
+  assertEqual(uncertified.fusedEligible, true, `${lane} uncertified profile may use Fused`);
 
   const segmented = resolveProviderCapability({
     settings: settingsFor({
@@ -101,7 +101,7 @@ for (const lane of ['utility', 'reasoner']) {
   });
   assertEqual(segmented.state, 'segmented-ready', `${lane} single-card pass is Segmented-ready`);
   assertEqual(segmented.ready, true, `${lane} Segmented-ready is ready`);
-  assertEqual(segmented.fusedEligible, false, `${lane} failed Fused check is not Fused-eligible`);
+  assertEqual(segmented.fusedEligible, true, `${lane} failed Fused check does not gate Fused`);
 
   const fused = resolveProviderCapability({
     settings: settingsFor({ [lane]: provider(lane, { certification: { status: 'pass' } }) }),

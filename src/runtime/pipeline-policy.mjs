@@ -6,7 +6,7 @@ export function pipelineExecutionLabel(value) {
   const name = (mode) => mode === 'fused' ? 'Fused' : 'Segmented';
   const lane = decision.selectedLane === 'reasoner' ? 'Reasoner' : 'Utility';
   return decision.requestedMode !== decision.effectiveMode
-    ? `${name(decision.requestedMode)} → ${name(decision.effectiveMode)} · ${lane} profile needs a Fused test`
+    ? `${name(decision.requestedMode)} → ${name(decision.effectiveMode)} · ${lane}`
     : `${name(decision.effectiveMode)} · ${lane}`;
 }
 
@@ -34,26 +34,10 @@ export function resolveEffectivePipelineMode({
     configHash: selectedCapability.configHash || '',
     certificationState: selectedCapability.state || 'not-run'
   };
-  if (requested === 'segmented') {
-    return Object.freeze({
-      ...details,
-      requestedMode: requested,
-      effectiveMode: 'segmented',
-      reasonCode: ''
-    });
-  }
-  if (selectedCapability?.fusedEligible === true) {
-    return Object.freeze({
-      ...details,
-      requestedMode: requested,
-      effectiveMode: 'fused',
-      reasonCode: ''
-    });
-  }
   return Object.freeze({
     ...details,
     requestedMode: requested,
-    effectiveMode: 'segmented',
-    reasonCode: 'profile-not-fused-certified'
+    effectiveMode: requested,
+    reasonCode: ''
   });
 }

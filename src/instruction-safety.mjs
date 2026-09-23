@@ -1,6 +1,6 @@
 // Only complete, narrowly specified protective clauses are exempt. Do not
 // exempt arbitrary text merely because its prefix is a prohibition.
-const SUBJECT = String.raw`(?:(?:all|any|the|their|his|her)\s+)?(?:(?:hidden|private|secret|undisclosed)\s+)?(?:(?:internal|character)\s+)?(?:thoughts?|motives?|motivations?|intentions?|(?:future\s+)?(?:plans?|plot|story)|spoilers?|chain[-\s]of[-\s]thought)`;
+const SUBJECT = String.raw`(?:(?:all|any|the|their|his|her)\s+)?(?:(?:hidden|private|secret|undisclosed)\s+)?(?:(?:internal|character)\s+)?(?:thoughts?|motives?|motivations?|intentions?|(?:future[-\s]+)?(?:plans?|plot|story)|spoilers?|chain[-\s]of[-\s]thought)`;
 const OBJECTS = SUBJECT + String.raw`(?:\s*(?:,\s*(?:and\s+)?|and\s+)` + SUBJECT + ')*';
 const PROTECTIVE = [
   new RegExp(String.raw`^(?:do not|don't|never)\s+(?:reveal|expose|disclose|invent|assert|confirm|print|show|describe)\s+` + OBJECTS + '$', 'i'),

@@ -165,7 +165,8 @@ export function resolveProviderCapability({
     ? resolvedLane === postProcessLane
     : resolvedLane === 'utility' || reasoningLevel !== 'low';
   const segmentedEligible = configuration.complete && state !== 'unhealthy';
-  const fusedEligible = configuration.complete && state === 'fused-ready';
+  // Certification describes observed capability; it does not gate explicit Fused dispatch.
+  const fusedEligible = configuration.complete;
   const eligible = resolvedOperation === 'provider-test'
     ? configuration.testable
     : selectedByPolicy && segmentedEligible;

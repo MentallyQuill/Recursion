@@ -485,7 +485,7 @@ export function cacheContractVersions(settings = {}) {
     promptPacketVersion: PROMPT_PACKET_VERSION,
     promptContractHash: hashJson({
       promptPacketVersion: PROMPT_PACKET_VERSION,
-      cardSelectionContract: 3,
+      cardSelectionContract: 4,
       guidanceSchema: PROMPT_GUIDANCE_SCHEMA,
       storyFormSchema: STORY_FORM_SCHEMA
     }),
@@ -6870,7 +6870,7 @@ export function createRecursionRuntime({
                 code: 'RECURSION_CARD_INVALID',
                 category: 'validation',
                 retryable: true,
-                message: `${family} card failed semantic validation (${safeText(rejection || 'unknown', 120)}).`,
+                message: `${family} card failed semantic validation (${safeText(rejection || 'unknown', 240)}).`,
                 suggestedAction: `Retry ${family}. If it repeats, inspect the card validation reason.`
               }
             };

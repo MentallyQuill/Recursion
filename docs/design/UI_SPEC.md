@@ -1431,3 +1431,7 @@ Do not ship these in V1:
 The first UI should build trust by showing what Recursion did, not by making users operate it manually.
 
 Export Diagnostics downloads a timestamped `recursion-diagnostics-*.json` file on desktop and mobile. It exports the runtime-sanitized payload without clipboard access or operating-system-specific behavior. The browser controls where the file is saved.
+
+### Partial card preparation
+
+When preparation completes after omitting a failed optional card, the Segmented cards parent is a warning and names the omitted card. Keep the failed child, its specific rejection, and its retry action visible. Before completion, the parent names failed cards rather than describing a known validation rejection as an unexpected internal error.

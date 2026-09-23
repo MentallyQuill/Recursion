@@ -1009,7 +1009,9 @@ function normalizeStep(input, index = 0) {
     ? source.children.map((child, childIndex) => normalizeChildStep(child, childIndex)).sort(compareChildOrder)
     : [];
   const retryCount = Math.max(retryCountFromSource(source), maxRetryCount(children));
-  const state = children.length
+  const state = source.partialResult === true && source.state === 'warning'
+    ? 'warning'
+    : children.length
     ? aggregateParentState(normalizeStateWithRetry(source.state, retryCount), children)
     : normalizeStateWithRetry(source.state, retryCount);
   const reason = reasonFromSource(source, state, retryCount) || aggregateReason(children);
@@ -1018,6 +1020,7 @@ function normalizeStep(input, index = 0) {
   const step = {
     id,
     label: definitionLabel || safeDisplayText(source.label, fallbackLabel, 80),
+    ...(source.partialResult === true ? { partialResult: true } : {}),
     currentLabel: safeDisplayText(source.currentLabel || definition.currentLabel, '', 80) || null,
     providerLane: normalizeProviderLane(source.providerLane, definition.providerLane || 'utility'),
     state,
@@ -1622,13 +1625,20 @@ export function progressFromExecution(execution, queuedReprocess = null) {
       queuedReprocess,
       { order: index }
     ));
-    const state = childAggregateState(children) || 'pending';
+    const failed = children.filter(child => child.state === 'failed');
+    const continued = operation.state === 'completed' && failed.length > 0;
+    const state = continued ? 'warning' : (childAggregateState(children) || 'pending');
+    const failedNames = failed.map(child => child.label).join(', ');
     topLevel.push({
       id: 'preprocess.cards.segmented',
       executionStage: true,
       label: 'Segmented cards',
+      partialResult: continued,
       providerLane: 'utility',
       state,
+      reason: failed.length ? (continued
+        ? 'Continued without failed cards: ' + failedNames + '.'
+        : 'Card generation failed: ' + failedNames + '. See the card rejection below.') : null,
       source: state === 'cached' ? 'cache' : null,
       action: null,
       children,

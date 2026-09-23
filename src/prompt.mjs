@@ -1,3 +1,4 @@
+import { unsafeInstructionMatch } from './instruction-safety.mjs';
 import { SCENE_INTERPRETATION_CONTRACT } from './cards.mjs';
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { normalizeInjectionSettings } from './settings.mjs';
@@ -325,11 +326,8 @@ function cleanStringList(value, limit = MAX_DIAGNOSTIC_TEXT, max = 16) {
 }
 
 function assertTextSafe(label, text) {
-  for (const pattern of DYNAMIC_FORBIDDEN_PATTERNS) {
-    if (pattern.test(String(text ?? ''))) {
-      throw new Error(`${label} contains disallowed hidden reasoning wording.`);
-    }
-  }
+  const match = unsafeInstructionMatch(text, DYNAMIC_FORBIDDEN_PATTERNS);
+  if (match) throw new Error(label + ' contains disallowed hidden reasoning wording [hidden-content]: "' + match + '".');
 }
 
 function hiddenReasoningDetected(text) {

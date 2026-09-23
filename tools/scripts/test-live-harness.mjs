@@ -942,6 +942,7 @@ async function createSillyTavernSmokeFixtureServer({
     'src/post-process-runtime.mjs',
     'src/card-scope.mjs',
     'src/cards.mjs',
+    'src/instruction-safety.mjs',
     'src/context-contract.mjs',
     'src/core.mjs',
     'src/execution/attempt-policy.mjs',

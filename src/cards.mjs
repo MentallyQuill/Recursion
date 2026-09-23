@@ -1,3 +1,4 @@
+import { unsafeInstructionMatch } from './instruction-safety.mjs';
 import { compact, hashJson, makeId, nowIso, redact, safeId, truncate } from './core.mjs';
 import { CARD_SCOPE_CATALOG } from './card-scope.mjs';
 import { UTILITY_ROLE_IDS } from './providers.mjs';
@@ -553,17 +554,11 @@ function assertInstructionShapedCardText(promptText) {
 
 function assertCardPromptTextSafe(catalog, promptText) {
   assertInstructionShapedCardText(promptText);
-  for (const pattern of CARD_FORBIDDEN_PATTERNS) {
-    if (pattern.test(promptText)) {
-      throw new Error('Card promptText contains unsafe hidden-reasoning wording.');
-    }
-  }
+  const hiddenMatch = unsafeInstructionMatch(promptText, CARD_FORBIDDEN_PATTERNS);
+  if (hiddenMatch) throw new Error('Card promptText contains unsafe hidden-reasoning wording [hidden-content]: "' + hiddenMatch + '".');
   if (catalog.family !== 'Character Motivation') return;
-  for (const pattern of CHARACTER_MOTIVATION_FORBIDDEN_PATTERNS) {
-    if (pattern.test(promptText)) {
-      throw new Error('Character Motivation promptText contains unsafe internal-thought wording.');
-    }
-  }
+  const motiveMatch = unsafeInstructionMatch(promptText, CHARACTER_MOTIVATION_FORBIDDEN_PATTERNS);
+  if (motiveMatch) throw new Error('Character Motivation promptText contains unsafe internal-thought wording [private-claim]: "' + motiveMatch + '".');
 }
 
 function providerSnapshotMatches(data, context) {
@@ -697,7 +692,7 @@ export function providerCardRejectReason(result, context = {}) {
       origin: item.origin || 'provider'
     }, context);
   } catch (error) {
-    return safeId(cleanText(error?.message || error || 'normalization-failed', 120), 'normalization-failed');
+    return cleanProviderPromptText(error?.message || error || 'normalization-failed', 240);
   }
   return '';
 }

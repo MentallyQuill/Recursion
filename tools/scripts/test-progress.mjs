@@ -220,9 +220,10 @@ const completedPartialSegmented = progressFromExecution({
   ]
 });
 const completedPartialCards = completedPartialSegmented.steps.find((step) => step.id === 'preprocess.cards.segmented');
+assert(completedPartialCards.reason.includes('Continued without'), 'partial success explains the missing card instead of inventing an internal error');
 const completedPartialFailure = completedPartialCards.children.find((step) => step.id === 'preprocess.cards.segmented.active-cast');
 assertEqual(completedPartialSegmented.title, 'Needs attention', 'completed fail-soft card loss is not presented as Ready');
-assertEqual(completedPartialCards.state, 'failed', 'completed Segmented parent remains failed when a child was omitted');
+assertEqual(completedPartialCards.state, 'warning', 'completed Segmented parent reports partial success when a child was omitted');
 assertEqual(completedPartialFailure.state, 'failed', 'omitted card remains a red failed child');
 assertEqual(completedPartialFailure.reason, 'Active Cast provider output did not match recursion.card.v1. Returned fields: envelope, items.', 'completed partial card shows the exact failure reason');
 assertEqual(completedPartialFailure.failureCode, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'completed partial card exposes its stable failure code');

@@ -1446,7 +1446,7 @@ function roleCounts(calls = []) {
   const activeFailure = manifest.stageRecords['preprocess.cards.segmented.active-cast'].failure;
   assertEqual(manifest.state, 'completed', 'continuing card failure does not block downstream completion');
   assertEqual(activeFailure.code, 'RECURSION_CARD_INVALID', 'semantic card exhaustion persists the stable failure code');
-  assertEqual(activeFailure.message, 'Active Cast card failed semantic validation (Card-promptText-contains-unsafe-hidden-reasoning-wording).', 'semantic card exhaustion persists the compact-payload reject reason');
+  assert(activeFailure.message.includes('[hidden-content]: "hidden chain of thought"'), 'semantic card exhaustion persists rule and matched text');
   assertEqual(activeFailure.suggestedAction, 'Retry Active Cast. If it repeats, inspect the card validation reason.', 'semantic card exhaustion persists a useful action');
   assertEqual(manifest.stageRecords['preprocess.deck'].summary.providerCardCount, 1, 'valid sibling alone reaches the deck');
   assertEqual(manifest.stageRecords['preprocess.install'].state, 'completed', 'partial Segmented packet still installs');

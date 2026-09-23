@@ -273,3 +273,9 @@ Generated cards are fallible analysis, not new canon or pacing authority. An una
 Card writers use neutral analytical instructions rather than performing the story's voice or tense. Story-form metadata governs the narrator; cards cannot select a viewpoint character. Packet guardrails preserve current physical state and completed actions independently of selected families, and require story output without drafting notes. These are model instructions, not a guarantee of prose quality or a substitute for host reasoning-channel separation.
 
 The composer checks cards against bounded recent source messages. Invalid JSON/schema guidance receives bounded correction before raw fallback. Both guidance and fallback remain subordinate to user instructions and established scene evidence. Prompt packet version 4 and revised preprocessing contracts invalidate older prepared prompts.
+
+## Protective instructions and validation
+
+Card and packet validators share clause-aware handling for explicit protective instructions, such as “Do not reveal spoilers” and “Keep private thoughts private.” A protective clause does not exempt a later disclosure command or an exception. Unsupported private-state claims and requests to disclose reasoning remain rejected. This is a narrow lexical check, not a semantic classifier. Rejection details name the rule and include only a bounded matched phrase for targeted correction; arbitrary full rejected cards are not exported.
+
+After preparation completes with an optional failed card omitted, the Segmented cards parent shows a warning and names the missing card. The child remains failed with its precise rejection and retry action. During a failure, the parent identifies failed cards rather than substituting an internal-error message.

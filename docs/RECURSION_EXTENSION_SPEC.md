@@ -156,7 +156,7 @@ Advanced Storage Retention exposes Journal Entries only. Diagnostics exposes `Re
 
 ## Provider And Privacy Contract
 
-Connection Profile requests are serialized per profile, use `extractData: false`, and pass through Recursion's canonical response parser. Staged certification distinguishes Segmented compatibility from Fused compatibility. A Fused selection on an uncertified or Segmented-only profile resolves to Segmented before dispatch. Card models return content and evidence only; Recursion attaches schema and snapshot identity locally.
+Connection Profile requests are serialized per profile, use `extractData: false`, and pass through Recursion's canonical response parser. Staged certification distinguishes Segmented compatibility from Fused compatibility. A Fused selection is honored regardless of Fused test status; failed responses use the existing repair and Segmented fallback paths. Card models return content and evidence only; Recursion attaches schema and snapshot identity locally.
 
 
 Utility is required; Reasoner is optional and policy-selected. Each lane requires a selected, available SillyTavern Connection Profile. Recursion stores only profile selection and independent preset, instruct, sampler, structured-output, and output-ceiling policy. All model jobs normalize and validate visible structured output before runtime trusts it.

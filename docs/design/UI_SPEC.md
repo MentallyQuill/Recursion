@@ -1253,7 +1253,7 @@ The operator rules are explicit:
 4. Keep Instruct Formatting on Auto for text-completion compatibility.
 5. Keep Samplers on Connection Profile to inherit sampler settings without importing prompt fields.
 6. Run Test Profile. A `Ready` provider carries `Segmented` detail after the single-card pass and `Fused` detail after the Fused-card pass.
-7. Uncertified or partially certified Fused requests automatically use Segmented.
+7. Fused requests honor the selected mode regardless of Fused test status. Segmented repair and fallback respond to actual bundle failures.
 
 Profile combobox typing filters the detected list locally. Persisted settings change only when the user selects a listed entry. The Providers tab builds both comboboxes from one profile lookup per render and must not scan character, persona, group, avatar, or Recursion card collections.
 

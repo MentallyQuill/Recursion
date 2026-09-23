@@ -46,6 +46,7 @@ V1 uses the audited fixed catalog below. The Arbiter receives this predetermined
 | Character Motivation | Observable or safely inferred motives, pressures, hesitations, and goals. | Replaces raw internal-thought injection with bounded behavior guidance. |
 | Relationship | Current conversational tension, relationship texture, promises, conflicts, and voice constraints. | Guides reply tone, subtext, and active relationship implications. |
 | Social Subtext | Scene-observable implied social meaning such as humor, veiled pressure, invitation, boundaries, status, and face. | Helps prevent literal reads of deniable, indirect, or socially loaded cues. |
+| Realism | Scene-specific stakes, sense-making, conversational proportion, and interpretation of intent. | Supports plausible reactions without forced belief, friendliness, or private thought injection. |
 | Scene Constraints | Hard limits, contradiction traps, timing, access, visibility, and plausibility constraints. | High-priority safety lane for scene constraints. |
 | Knowledge | Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries. | Guardrail lane for knowledge state and spoiler-safe reveal control. |
 | Consequences | Deadlines, countdowns, delayed consequences, and escalation triggers. | Keeps near-term pressure visible without turning it into durable memory. |
@@ -101,6 +102,10 @@ This is the implemented sub-item catalog for `src/card-scope.mjs`. Facets are no
 | Social Subtext | `veiledPressure` | Keep | Capture polite threats, friendly warnings, coercion, intimidation, or consequences carried through implication instead of open hostility. | Flattening indirect danger into blunt threats or inventing intent. |
 | Social Subtext | `invitationBoundary` | Keep | Capture flirtation, charged compliments, testing interest, permission seeking, discomfort, soft refusal, or cues not to push further. | Claiming private desire as fact or escalating beyond observable consent cues. |
 | Social Subtext | `statusFace` | Keep | Capture dominance, deference, rank assertion, saving face, public embarrassment, or who is being made to yield in the exchange. | Generic power-level summaries or unrelated relationship history. |
+| Realism | `presentStakes` | Add | Keep replies engaged with what matters to each character now. | Incidental atmosphere substituting for a response. |
+| Realism | `surpriseSenseMaking` | Add | Identify answerable uncertainties relative to the setting and character. | Impossible proof demands or forced acceptance. |
+| Realism | `conversationalProportion` | Add | Fit reply length to this exchange, emotion, and voice. | Word quotas, forced curtness, or generic style coaching. |
+| Realism | `interpretingIntent` | Add | Ground interpretations in emotional and relationship evidence; clarify missing details. | Treating omission alone as malice, invented diagnoses, or mandatory friendliness. |
 | Scene Constraints | `hardLimits` | Keep | Treat as hard scene constraints and plausibility traps: injuries, locked routes, missing objects, stated choices, or visible limits. | Collecting facts merely because they are true. |
 | Scene Constraints | `spatialConstraints` | Keep | Preserve movement, reach, visibility, blocked route, distance, and access limits that affect the next beat. | General map summary better handled by Environment. |
 | Scene Constraints | `timelineOrder` | Keep | Track immediate cause/effect, sequence, reveal order, and what has not happened yet. | Long timeline management or durable canon arbitration. |
@@ -377,3 +382,13 @@ V1 should explicitly exclude:
 - broad character database extraction.
 
 The first version should prove the core loop: generate small scene-local cards, let the Utility Arbiter manage utility decisions from a fixed catalog, select a compact turn hand, and feed prompt composition without turning cards into memories.
+
+## Realism analysis
+
+The bundled Default Deck includes four active generated Realism facets: **What matters now**, **Making sense of surprises**, **Conversational proportion**, and **Interpreting intent**. In Auto mode, the Arbiter selects Realism when these considerations materially affect the next exchange. Selected facets produce one scene-specific family card and consume one hand slot, using one segmented analysis call or one item in the fused bundle. These are not Priority cards; omission adds no Realism analysis call or mandatory baseline text.
+
+Realism means plausibility within the story's setting and established characterization, not mundane realism or universal politeness. Ground reactions in each character's emotional state, stress, trust, and relationship history. An incomplete answer alone does not establish deception or malice. Identify the specific missing detail that matters, while preserving supported hostility, prejudice, fear, and urgent action. Do not invent diagnoses, private motives, or the player's feelings.
+
+For example, after someone describes books about a character's life only in broad terms, the useful uncertainty could be which events they contain or how the speaker knows. A skeptical character can ask for a concrete example without demanding proof the speaker cannot supply. This is an analysis principle, not scripted dialogue or a requirement to ask a question every turn. Reply length should fit the character and exchange, rather than enforce brevity or generic prose rules.
+
+Existing custom decks retain their authored content. Select or duplicate the updated Default Deck to use the bundled category.

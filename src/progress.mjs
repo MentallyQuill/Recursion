@@ -34,6 +34,7 @@ const MODEL_CALL_ROLE_IDS = new Set([
   'characterMotivationCard',
   'dialogueRelationshipCard',
   'socialSubtextCard',
+  'realismCard',
   'sceneConstraintsCard',
   'knowledgeSecretsCard',
   'clocksConsequencesCard',
@@ -47,6 +48,7 @@ const CARD_ROLE_LABELS = Object.freeze({
   characterMotivationCard: 'Character Motivation',
   dialogueRelationshipCard: 'Relationship',
   socialSubtextCard: 'Social Subtext',
+  realismCard: 'Realism',
   sceneConstraintsCard: 'Scene Constraints',
   knowledgeSecretsCard: 'Knowledge',
   clocksConsequencesCard: 'Consequences',
@@ -929,6 +931,7 @@ function childIdFromRole(roleId, fallback) {
   if (role === 'activeCastCard') return 'active-cast-card';
   if (role === 'characterMotivationCard') return 'character-motivation-card';
   if (role === 'dialogueRelationshipCard') return 'dialogue-relationship-card';
+  if (role === 'realismCard') return 'realism-card';
   if (role === 'socialSubtextCard') return 'social-subtext-card';
   if (role === 'sceneConstraintsCard') return 'scene-constraints-card';
   if (role === 'knowledgeSecretsCard') return 'knowledge-secrets-card';

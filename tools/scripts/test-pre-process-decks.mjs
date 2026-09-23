@@ -42,6 +42,9 @@ import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert
 
 const now = '2026-07-10T00:00:00.000Z';
 const defaultDeck = createDefaultCardDeck({ now });
+const realismCards = Object.values(defaultDeck.cards).filter(card => card.builtinFamily === 'Realism');
+assertEqual(realismCards.length, 4, 'Default deck bundles four Realism facets');
+assert(realismCards.every(card => card.selectionState === 'active' && card.kind === 'generated'), 'Realism facets are eligible analysis, not mandatory authored instructions');
 assertEqual(defaultDeck.id, DEFAULT_PRE_PROCESS_DECK_ID, 'Default deck id stable');
 assertEqual(defaultDeck.name, 'Default Deck', 'Default deck name stable');
 assertEqual(defaultDeck.readonly, true, 'Default deck read-only');

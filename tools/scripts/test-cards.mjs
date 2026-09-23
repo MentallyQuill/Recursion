@@ -22,6 +22,7 @@ const EXPECTED_CATALOG = Object.freeze([
   { family: 'Character Motivation', role: 'characterMotivationCard', priority: 88 },
   { family: 'Relationship', role: 'dialogueRelationshipCard', priority: 84 },
   { family: 'Social Subtext', role: 'socialSubtextCard', priority: 82 },
+  { family: 'Realism', role: 'realismCard', priority: 83 },
   { family: 'Items', role: 'possessionsItemsCard', priority: 78 },
   { family: 'Environment', role: 'environmentAffordancesCard', priority: 76 },
   { family: 'Open Threads', role: 'openThreadsCard', priority: 72 }
@@ -36,7 +37,7 @@ function deckCard(family, promptText, overrides = {}) {
   }, { sceneId: 'scene-budget', snapshotHash: 'hash-budget' });
 }
 
-assertEqual(CARD_CATALOG.length, 11, 'audited V1 catalog present');
+assertEqual(CARD_CATALOG.length, 12, 'audited V1 catalog present');
 assertDeepEqual(
   CARD_CATALOG.map(({ family, role, priority }) => ({ family, role, priority })),
   EXPECTED_CATALOG,
@@ -69,9 +70,9 @@ assertDeepEqual(
   ['Scene Frame', 'Active Cast', 'Scene Constraints', 'Knowledge', 'Consequences', 'Character Motivation'],
   'card job budget preserves the proposed family order'
 );
-assertEqual(mediumBudgetedJobs.omitted.length, 5, 'over-budget card jobs are omitted before provider calls');
+assertEqual(mediumBudgetedJobs.omitted.length, 6, 'over-budget card jobs are omitted before provider calls');
 assert(mediumBudgetedJobs.omitted.every((entry) => entry.reason === 'max-cards'), 'card-job omissions use max-cards reason');
-assertEqual(mediumBudgetedJobs.metadata.requestedCount, 11, 'budget metadata records requested job count');
+assertEqual(mediumBudgetedJobs.metadata.requestedCount, 12, 'budget metadata records requested job count');
 assertEqual(mediumBudgetedJobs.metadata.keptCount, 6, 'budget metadata records kept job count');
 assertEqual(mediumBudgetedJobs.metadata.maxCards, 6, 'budget metadata records effective max cards');
 

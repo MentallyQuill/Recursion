@@ -47,6 +47,11 @@ const EXPECTED_SCOPE_CATALOG = Object.freeze([
     subItems: ['humorIrony', 'veiledPressure', 'invitationBoundary', 'statusFace']
   },
   {
+    family: 'Realism',
+    role: 'realismCard',
+    subItems: ["presentStakes","surpriseSenseMaking","conversationalProportion","interpretingIntent"]
+  },
+  {
     family: 'Scene Constraints',
     role: 'sceneConstraintsCard',
     subItems: ['hardLimits', 'spatialConstraints', 'timelineOrder']
@@ -78,7 +83,7 @@ const EXPECTED_SCOPE_CATALOG = Object.freeze([
   }
 ]);
 
-assertEqual(CARD_SCOPE_CATALOG.length, 11, 'scope catalog mirrors audited V1 scene-reasoning families');
+assertEqual(CARD_SCOPE_CATALOG.length, 12, 'scope catalog mirrors audited V1 scene-reasoning families');
 assertDeepEqual(
   CARD_SCOPE_CATALOG.map((family) => ({
     family: family.family,
@@ -90,7 +95,7 @@ assertDeepEqual(
 );
 assert(CARD_SCOPE_CATALOG.every((family) => !family.family.includes('/')), 'card scope category labels are single-focus names without slashes');
 assert(CARD_SCOPE_CATALOG.every((family) => family.subItems.length >= 2), 'each family has sub-items');
-assertEqual(CARD_SCOPE_TOTAL_SUB_ITEMS, 34, 'scope catalog exposes audited V1 focus count');
+assertEqual(CARD_SCOPE_TOTAL_SUB_ITEMS, 38, 'scope catalog exposes audited V1 focus count');
 assertEqual(
   CARD_SCOPE_TOTAL_SUB_ITEMS,
   CARD_SCOPE_CATALOG.reduce((sum, family) => sum + family.subItems.length, 0),

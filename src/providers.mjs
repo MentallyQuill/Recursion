@@ -62,6 +62,7 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'characterMotivationCard',
   'dialogueRelationshipCard',
   'socialSubtextCard',
+  'realismCard',
   'sceneConstraintsCard',
   'knowledgeSecretsCard',
   'clocksConsequencesCard',
@@ -80,7 +81,7 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'providerTest'
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer', 'postProcessGuidanceReasoner']);
-export const PROVIDER_CONTRACT_VERSION = 9;
+export const PROVIDER_CONTRACT_VERSION = 10;
 const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   utilityArbiter: 'recursion.utilityArbiter.v1',
   sceneFrameCard: 'recursion.cardPayload.v1',
@@ -88,6 +89,7 @@ const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   characterMotivationCard: 'recursion.cardPayload.v1',
   dialogueRelationshipCard: 'recursion.cardPayload.v1',
   socialSubtextCard: 'recursion.cardPayload.v1',
+  realismCard: 'recursion.cardPayload.v1',
   sceneConstraintsCard: 'recursion.cardPayload.v1',
   knowledgeSecretsCard: 'recursion.cardPayload.v1',
   clocksConsequencesCard: 'recursion.cardPayload.v1',

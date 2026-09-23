@@ -9,6 +9,7 @@ const ENHANCEMENT_CARD_FAMILIES = new Set([
   'Character Motivation',
   'Dialogue Relationship',
   'Social Subtext',
+  'Realism',
   'Scene Constraints',
   'Open Threads'
 ]);

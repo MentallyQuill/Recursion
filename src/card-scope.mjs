@@ -1,4 +1,4 @@
-export const CARD_SCOPE_VERSION = 2;
+export const CARD_SCOPE_VERSION = 3;
 
 export const CARD_SCOPE_CATALOG = Object.freeze([
   Object.freeze({
@@ -113,6 +113,33 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
         key: 'statusFace',
         label: 'status/face',
         description: 'Dominance, deference, rank assertion, saving face, public embarrassment, or who is being made to yield in the exchange.'
+      })
+    ])
+  }),
+  Object.freeze({
+    family: 'Realism',
+    role: 'realismCard',
+    description: 'Scene-specific emotional and conversational plausibility: relevant stakes, surprising claims, proportionate replies, and evidence-grounded interpretations of intent.',
+    subItems: Object.freeze([
+      Object.freeze({
+        key: 'presentStakes',
+        label: 'What matters now',
+        description: 'Identify what matters most to each character in this moment, given their goals and the story context. Keep responses engaged with those stakes rather than substituting incidental gestures or atmosphere for an answer. Allow meaningful hesitation, humor, or avoidance when grounded in character.'
+      }),
+      Object.freeze({
+        key: 'surpriseSenseMaking',
+        label: 'Making sense of surprises',
+        description: 'Judge surprising claims against the setting and each character\'s experience, personality, and relationship to the speaker. Let disbelief lead to making sense of what was said: identify the specific uncertainty and an answerable question that could clarify it. Doubt can coexist with listening, helping, or sensible precautions; do not demand unavailable proof or force acceptance.'
+      }),
+      Object.freeze({
+        key: 'conversationalProportion',
+        label: 'Conversational proportion',
+        description: 'Match the length and directness of each response to the character, emotional pressure, and conversational need. An overwhelmed character may be brief; a requested explanation may need space. Preserve voice and room for the player to respond without turning brevity into automatic curtness or interrogation. Do not impose word quotas.'
+      }),
+      Object.freeze({
+        key: 'interpretingIntent',
+        label: 'Interpreting intent',
+        description: 'Ground each character\'s interpretation in established emotional state, stress, trust, relationship history, and what they can know about the speaker, including the player character. An incomplete or general answer is not by itself evidence of deception, refusal, or malice. When a missing detail matters, identify a specific clarifying question before treating ambiguity as an accusation. Preserve established hostility, prejudice, fear, or distrust when supported; do not force friendliness, invent diagnoses or private motives, dictate the player\'s feelings, or require questions when understanding or urgent action already suffices.'
       })
     ])
   }),

@@ -41,6 +41,7 @@ const VALID_FAMILIES = new Set([
   'Character Motivation',
   'Relationship',
   'Social Subtext',
+  'Realism',
   'Scene Constraints',
   'Knowledge',
   'Consequences',

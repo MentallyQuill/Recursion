@@ -3409,7 +3409,7 @@ try {
     ' Scene Frame 3/3 Active Cards',
     'Pre-process category summary shows active cards over total cards'
   );
-  assert(defaultDeckText.includes('34/34 active'), 'Cards header summarizes active cards in the active deck');
+  assert(defaultDeckText.includes('38/38 active'), 'Cards header summarizes active cards in the active deck');
   assert(!defaultDeckText.includes('Default is read-only'), 'Cards dropdown removes read-only status notice rows');
   const firstPreCategoryId = root.querySelector('[data-recursion-card-category-toggle]').dataset.recursionCardCategoryToggle;
   root.querySelector('[data-recursion-card-category-toggle]').click();
@@ -3509,7 +3509,7 @@ try {
     fakeDocument.textTree(emptyDescriptionCard).includes('No description.'),
     'custom Pre-process cards with an empty description show the shared fallback'
   );
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('33/34 active'), 'Cards header reflects inactive cards in the active deck');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('37/38 active'), 'Cards header reflects inactive cards in the active deck');
   assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').disabled, false, 'Activate-all action enables when any runnable deck card is inactive');
   assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').getAttribute('title'), 'Set all runnable cards to Active.', 'enabled activate-all action explains active deck restoration');
   root.querySelector('[data-recursion-card-deck-activate-all]').click();

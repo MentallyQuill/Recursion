@@ -1973,3 +1973,42 @@ for (const proposed of [
   assertEqual(selectedEvent.details.selection.selected[0].family, 'Knowledge', 'persisted hand journal retains actual selected family');
   assertEqual(selectedEvent.details.selection.proposed[0].family, 'Character Motivation', 'persisted journal retains the omitted original proposal');
 }
+
+// Realism is one optional analysis, never four mandatory cards.
+for (const pipelineMode of ['segmented', 'fused']) for (const selectRealism of [true, false]) {
+  const calls = [];
+  let installed;
+  const harness = createHarness({
+    settings: { pipelineMode, reasoningLevel: 'medium', minCards: 1, maxCards: 1 },
+    installPrompt: async packet => { installed = packet; return { ok: true, installed: true }; },
+    provider: { async generate(roleId, request) {
+      calls.push({ roleId, request });
+      if (roleId === 'utilityArbiter') return arbiterResponse(request, [{ family: selectRealism ? 'Realism' : 'Knowledge', reason: 'Clarify the incomplete answer.' }]);
+      if (roleId === 'guidanceComposer') return guidanceResponse(request);
+      if (roleId === 'fusedCardBundle') return { ok: true, data: {
+        schema: 'recursion.cardBundle.v1', snapshotHash: request.snapshotHash,
+        items: request.requestedCards.map(card => ({
+          schema: 'recursion.card.v1', family: card.family, role: card.role,
+          promptText: 'Keep the current ' + card.family.toLowerCase() + ' evidence grounded in the visible scene.',
+          evidenceRefs: ['message:2'], tokenEstimate: 18
+        }))
+      } };
+      return cardResponse(roleId, request, { family: request.metadata.family });
+    } }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'What do you mean?' });
+  assertEqual(result.ok, true, 'optional realism prepares successfully');
+  const cards = harness.runtime.view().lastHand.cards;
+  assertDeepEqual(cards.map(card => card.family), [selectRealism ? 'Realism' : 'Knowledge'], 'Arbiter alone chooses whether Realism occupies the hand slot');
+  const realismCalls = calls.filter(call => call.roleId === 'realismCard' || (call.roleId === 'fusedCardBundle' && call.request.requestedCards.some(card => card.family === 'Realism')));
+  assertEqual(realismCalls.length, selectRealism ? 1 : 0, 'four Realism facets use at most one analysis call');
+  if (selectRealism) {
+    for (const label of ['What matters now', 'Making sense of surprises', 'Conversational proportion', 'Interpreting intent']) {
+      assert(realismCalls[0].request.prompt.includes(label), 'Realism request carries facet: ' + label);
+    }
+    for (const safeguard of ['do not demand unavailable proof or force acceptance', 'Do not impose word quotas', 'urgent action already suffices']) {
+      assert(realismCalls[0].request.prompt.includes(safeguard), pipelineMode + ' preserves complete Realism guidance: ' + safeguard);
+    }
+    assert(JSON.stringify(installed).includes(cards[0].promptText), 'Realism analysis reaches installed narration packet');
+  }
+}

@@ -104,6 +104,12 @@ export const CARD_CATALOG = Object.freeze([
     description: 'Scene-observable implied social meaning such as humor, veiled pressure, invitation, boundaries, status, and face.'
   }),
   catalogEntry({
+    family: 'Realism',
+    role: 'realismCard',
+    priority: 83,
+    description: 'Scene-specific emotional and conversational plausibility: relevant stakes, surprising claims, proportionate replies, and evidence-grounded interpretations of intent.'
+  }),
+  catalogEntry({
     family: 'Items',
     role: 'possessionsItemsCard',
     priority: 78,
@@ -424,7 +430,7 @@ function selectedScopeFacetRows(family, selectedSubItems = []) {
     .map((item) => ({
       key: cleanProviderPromptText(item.key, 80),
       label: cleanProviderPromptText(item.label, 120),
-      description: cleanProviderPromptText(item.description, 260)
+      description: cleanProviderPromptText(item.description, CARD_TEXT_LIMIT)
     }));
 }
 
@@ -569,6 +575,9 @@ function providerSnapshotMatches(data, context) {
 }
 
 function cardPromptSafetyInstruction(catalog) {
+  if (catalog.family === 'Realism') {
+    return 'Synthesize only the selected facets that materially affect this exchange into scene-specific guidance. Distinguish established emotional and relationship context from uncertain interpretation. Do not produce a generic manners checklist, invent private motives or diagnoses, or require universal friendliness.';
+  }
   if (catalog.family === 'Social Subtext') {
     return 'Do not turn this into generic dialogue style coaching. Keep subtext scene-observable, deniable when uncertain, and separate from private desire or hidden motives as fact.';
   }

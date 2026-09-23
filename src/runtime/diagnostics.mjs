@@ -236,6 +236,7 @@ function mapHandSummary(hand) {
   if (!source.handId && cards.length <= 0) return null;
   return safeDiagnosticValue({
     handId: safeText(source.handId, 160),
+    selection: source.metadata?.selection || null,
     selectedCount: cards.length,
     omittedCount: asArray(source.omitted).length,
     families: [...new Set(cards.map((card) => safeText(card?.family, 80)).filter(Boolean))].slice(0, 24),
@@ -256,6 +257,7 @@ function mapPlanSummary(plan) {
     return null;
   }
   return safeDiagnosticValue({
+    selection: source.selection || null,
     action: safeText(source.action, 40),
     sceneStatus: safeText(source.sceneStatus, 40),
     promptFootprint: safeText(source.promptFootprint, 40),

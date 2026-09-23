@@ -185,7 +185,7 @@ Editable Post-process decks use the same compact `Categories` plus row and the s
 
 ### Scope and caps
 
-Auto lets the Arbiter choose relevant cards from the active deck. Manual lets you select family rows directly and use sub-items as focus facets. `Min Cards` and `Max Cards` constrain the resulting hand; when priority cards exceed the effective maximum, deck order determines which priority cards survive and the omitted remainder is shown in diagnostics. Strict whitelist settings keep unselected families out of planning and reuse.
+Auto lets the Arbiter choose relevant cards from the active deck. Manual lets you select family rows directly and use sub-items as focus facets. `Min Cards` and `Max Cards` constrain the resulting hand; every runnable Priority card survives, in deck order, even when that exceeds the effective maximum. Ordinary cards use the remaining capacity. Strict whitelist settings keep unselected families out of planning and reuse.
 
 ### Inspecting the result
 
@@ -489,3 +489,9 @@ Automated soak evidence uses dedicated `recursion-soak-*` users. An explicitly a
 - [Storage And Diagnostics](../architecture/STORAGE_AND_DIAGNOSTICS.md)
 
 Export Diagnostics downloads a timestamped `recursion-diagnostics-*.json` file on desktop and mobile. It exports the runtime-sanitized payload without clipboard access or operating-system-specific behavior. The browser controls where the file is saved.
+
+### Why these cards were selected
+
+Auto ranks ordinary cards by their distinct value to the current reply. Priority cards are mandatory; the remaining hand follows the Arbiter's order rather than a fixed preference for scene bookkeeping. Diagnostics show proposed families and reasons, mandatory cards, budget omissions, and the actual selected evidence. Repeated swipes can reuse the same prepared hand without a new Arbiter call.
+
+For a surprising claim, the stock cards support character-specific sense-making: clarifying what was meant, reacting to personal stakes, asking answerable questions, and taking proportionate action while still uncertain. They preserve real constraints without requiring a stalled confrontation or impossible proof. Existing custom card wording remains yours; copying the updated Default deck is separate from editing an existing custom deck.

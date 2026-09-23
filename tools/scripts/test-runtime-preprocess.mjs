@@ -1892,3 +1892,84 @@ function roleCounts(calls = []) {
 }
 
 console.log('[pass] runtime preprocess lifecycle');
+// The runtime must retain relevance decisions through generation and hand assembly.
+for (const proposed of [
+  ['Knowledge', 'Character Motivation', 'Relationship', 'Scene Frame', 'Scene Constraints', 'Active Cast'],
+  ['Environment', 'Items', 'Consequences', 'Scene Frame', 'Scene Constraints', 'Active Cast']
+]) {
+  const harness = createHarness({
+    settings: { reasoningLevel: 'medium', minCards: 3, maxCards: 3 },
+    provider: { async generate(roleId, request) {
+      if (roleId === 'utilityArbiter') return arbiterResponse(request, proposed.map(family => ({ family, reason: 'Distinct contribution to the current scene.' })));
+      if (roleId === 'guidanceComposer') return guidanceResponse(request);
+      return cardResponse(roleId, request, { family: request.metadata.family });
+    } }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'What do you mean?' });
+  assertEqual(result.ok, true, 'scene-aware run prepares narration');
+  const view = harness.runtime.view();
+  assertDeepEqual(view.lastHand.cards.map(card => card.family), proposed.slice(0, 3), 'runtime preserves relevance order into the narrator hand');
+  assert(!view.lastPlan.diagnostics.includes('local-fallback-plan'), 'successful Arbiter plans never report local fallback');
+  assertDeepEqual(view.lastPlan.selection.proposed.map(job => job.family), proposed, 'selection diagnostics preserve proposals before budgeting');
+  assertDeepEqual(view.lastPlan.selection.omitted.map(job => job.family), proposed.slice(3), 'selection diagnostics explain omitted proposals');
+}
+{
+  let cachedId = '';
+  const harness = createHarness({
+    settings: { reasoningLevel: 'medium', minCards: 4, maxCards: 4 },
+    provider: { async generate(roleId, request) {
+      if (roleId === 'utilityArbiter') {
+        const response = arbiterResponse(request, [{ family: cachedId ? 'Knowledge' : 'Environment' }]);
+        if (cachedId) response.data.lifecycle = [{ action: 'select', cardId: cachedId, reason: 'The exit remains blocked.' }];
+        return response;
+      }
+      if (roleId === 'guidanceComposer') return guidanceResponse(request);
+      return cardResponse(roleId, request, { family: request.metadata.family });
+    } }
+  });
+  await harness.runtime.prepareForGeneration({ userMessage: 'I ask what she remembers.' });
+  cachedId = harness.runtime.view().lastHand.cards[0].id;
+  const next = snapshot();
+  next.messages.push({ mesid: 3, role: 'assistant', text: 'The exit remains blocked.', visible: true }, { mesid: 4, role: 'user', text: 'What does that mean?', visible: true });
+  next.latestMesId = 4;
+  next.sourceRevisionHash = 'mixed-source';
+  next.turnFingerprint = 'mixed-turn';
+  harness.setSnapshot(next);
+  const result = await harness.runtime.prepareForGeneration({ userMessage: { text: 'What does that mean?', mesid: 4 } });
+  assertEqual(result.ok, true, 'mixed generation and reuse prepares successfully');
+  assertDeepEqual(harness.runtime.view().lastHand.cards.map(card => card.family), ['Knowledge'], 'new turns never silently reuse previous-turn scene cards');
+}
+{
+  const first = createHarness({ provider: immediateProvider([]) });
+  await first.runtime.prepareForGeneration({ userMessage: { text: 'I ask what she remembers.', mesid: 2 } });
+  const manifest = await first.storage.loadPipelineRun('chat-preprocess');
+  manifest.state = 'paused';
+  manifest.provenance.promptVersions.preprocessGraph = 1;
+  await first.storage.savePipelineRun('chat-preprocess', manifest);
+  const restored = createHarness({ storage: first.storage, provider: immediateProvider([]) });
+  const state = await restored.runtime.restoreExecutionState();
+  assertEqual(state.state, 'stale', 'checkpoints created under fixed-ranking selection cannot resume under the new contract');
+}
+{
+  const { createDefaultCardDeck } = await import('../../src/pre-process-decks.mjs');
+  const deck = createDefaultCardDeck();
+  deck.id = 'eligibility-proposals'; deck.readonly = false; deck.bundled = false;
+  for (const card of Object.values(deck.cards)) card.selectionState = card.builtinFamily === 'Knowledge' ? 'active' : 'off';
+  const harness = createHarness({
+    settings: { reasoningLevel: 'medium', minCards: 3, maxCards: 3, preProcessDecks: { activeDeckId: deck.id, customDecks: { [deck.id]: deck } } },
+    provider: { async generate(roleId, request) {
+      if (roleId === 'utilityArbiter') return arbiterResponse(request, [{ family: 'Character Motivation', reason: 'Personal stakes.' }, { family: 'Knowledge', reason: 'Clarify meaning.' }]);
+      if (roleId === 'guidanceComposer') return guidanceResponse(request);
+      return cardResponse(roleId, request, { family: request.metadata.family });
+    } }
+  });
+  await harness.runtime.prepareForGeneration({ userMessage: 'What do you mean?' });
+  const view = harness.runtime.view();
+  assertDeepEqual(view.lastPlan.selection.proposed.map(job => job.family), ['Character Motivation', 'Knowledge'], 'diagnostics preserve proposals even when a family is disabled');
+  assertEqual(view.lastPlan.selection.omitted[0].reason, 'inactive-card-ineligible', 'eligibility omissions are distinct from budget omissions');
+  const exported = await harness.runtime.exportDiagnostics();
+  assertEqual(exported.diagnostics.runtime.plan.selection.omitted[0].reason, 'inactive-card-ineligible', 'runtime export retains eligibility omission reason');
+  const selectedEvent = exported.diagnostics.journal.findLast(entry => entry.event === 'hand.selected');
+  assertEqual(selectedEvent.details.selection.selected[0].family, 'Knowledge', 'persisted hand journal retains actual selected family');
+  assertEqual(selectedEvent.details.selection.proposed[0].family, 'Character Motivation', 'persisted journal retains the omitted original proposal');
+}

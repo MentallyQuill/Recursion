@@ -415,6 +415,7 @@ function normalizeHandSelectedDetails(details) {
     : [];
   return {
     handId: safeJournalText(source.handId, 160),
+    selection: source.selection ? sanitizedJsonValue(source.selection, null, { maxString: 240 }) : null,
     selectedCount: numberValue(source.selectedCount, 0, 100000),
     omittedCount: numberValue(source.omittedCount, 0, 100000),
     guidanceStatus: safeJournalText(source.guidanceStatus, 80),

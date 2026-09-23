@@ -33,3 +33,5 @@ Transport start/end monotonic timestamps support qualification overlap checks;
 they are meaningful only inside the current browser session. The existing
 wall-clock `latencyMs` includes queue wait and must not be summed for overlapping
 requests. No request text or private reasoning is included in these timings.
+
+Auto Arbiter cardJobs order is semantically significant (highest marginal relevance first). Runtime-owned plan.selection records proposed/retained/omitted family decisions, mandatory card IDs/families and discretionary capacity. hand.metadata.selection adds actual selected IDs, origins, mandatory status and hand omissions. These fields are projected into compact diagnostics and the hand.selected journal; they are not model-authored schema authority or prompt evidence. Successful plans carry arbiter-model-plan. Selection prompt contract and preprocess graph version 2 invalidate old durable selections.

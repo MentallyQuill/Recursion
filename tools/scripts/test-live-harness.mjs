@@ -928,6 +928,12 @@ async function createSillyTavernSmokeFixtureServer({
     }
   };
   const moduleFiles = [
+    'src/execution/operation-budget.mjs',
+    'src/execution/sha256.mjs',
+    'src/runtime/preprocess-policy.mjs',
+    'src/runtime/turn-timing.mjs',
+    'src/ui/diagnostics-download.mjs',
+    'src/hosts/sillytavern/profile-secrets.mjs',
     'src/extension/index.js',
     'src/activity.mjs',
     'src/pre-process-decks.mjs',

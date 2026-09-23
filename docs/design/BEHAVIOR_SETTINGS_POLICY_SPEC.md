@@ -286,18 +286,11 @@ This block must stay compact. It is a policy hint, not a hidden prompt chain.
 
 ## Hand Selection Rules
 
-The hand selector should sort and omit through this order:
+Auto selection applies validity and eligibility first, reserves every runnable Priority card in deck order, then fills remaining slots in the Arbiter's scene-specific cardJobs order. Focus informs the Arbiter's relevance judgment; it does not reorder a validated Auto proposal after generation. No structural family has an automatic claim on a discretionary slot.
 
-1. Validity and freshness.
-2. Critical guardrails and hard scene constraints.
-3. Arbiter-selected emphasis.
-4. Manual card-scope whitelist, if Manual.
-5. Effective card-budget and token pressure.
-6. Focus boosted-family tie-breaker.
-7. Strength selection pressure tie-breaker.
-8. Stable catalog priority and id fallback.
+The model receives the effective capacity after authored and generated Priority reservations. Runtime enforces the total card limit before dispatch, except that mandatory coverage may expand the hand. Token estimates remain diagnostic. Manual selections remain forced by scope; generic hand selection without an Auto order retains its existing emphasis/focus tie-breakers.
 
-This order preserves safety and semantic relevance before user preference boosts.
+Diagnostics retain the proposal and short contribution reasons, mandatory coverage, eligibility/budget omissions, and the actual hand. Repeated swipes may reuse the same prepared packet without a new selection call.
 
 ## Composition Rules
 

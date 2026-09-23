@@ -120,7 +120,7 @@ for (const removed of [legacyCraftFamily, 'prose' + 'PacingCard', 'den' + 'sity'
 const scenePayload = scopePayloadForArbiter({ mode: 'auto', cardScope: defaultCardScope() })
   .availableCatalog.find((entry) => entry.family === 'Scene Frame');
 assert(
-  scenePayload.subItems.find((item) => item.key === 'beatConstraint').description.includes('avoid time skip'),
+  scenePayload.subItems.find((item) => item.key === 'beatConstraint').description.includes('Preserve explicitly established response boundaries'),
   'Arbiter catalog payload includes beat constraint description'
 );
 

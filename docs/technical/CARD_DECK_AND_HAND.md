@@ -168,9 +168,9 @@ Runtime applies these decisions only after schema and safety checks. If an expli
 
 ## Scene Deck Vs Turn Hand
 
-The scene deck is the cached set of cards for one scene. It can contain active, stowed, stale, and discarded cards. Only active cards can enter the turn hand.
+The scene deck primitives can represent active, stowed, stale, and discarded cards. The current preprocessor builds its deck for the current turn; it does not load prior-turn scene cards. Only active, validated cards enter the turn hand. Compatible same-turn checkpoints and prepared packets provide reuse.
 
-The turn hand is rebuilt for each generation attempt. Required Priority cards come first in deck order; ordinary candidates follow the focus, emphasis, and catalog policy within remaining turn slots. Priority coverage can exceed the turn card limit. Runtime reserves required slots before provider generation so ordinary jobs that cannot reach the hand are not dispatched. Token estimates remain diagnostic.
+The turn hand is rebuilt for each generation attempt. Required Priority cards come first in deck order; ordinary Auto candidates follow the Arbiter's scene-specific cardJobs order within remaining turn slots. Focus informs the Arbiter; fixed catalog rankings do not override its choices. Priority coverage can exceed the turn card limit. Runtime reserves required slots before provider generation so ordinary jobs that cannot reach the hand are not dispatched. Token estimates remain diagnostic.
 
 Card Deck selection state adds a user-steering layer above normal Auto sorting:
 
@@ -219,7 +219,7 @@ The card runner enforces this twice: Motivation card requests include the safety
 
 The bundled Default Deck is read-only. Duplicating it creates a custom deck with editable categories, authored cards, card order, category order, and `Card Assist`; each edit is committed explicitly. Grip handles are the only drag affordance, and dragging may reorder a category or move a card between categories. Draft cards are not runnable until they have a real name and prompt text.
 
-Deck order is deterministic selection priority, not a second prompt. In Auto, `priority` cards are selected before `active` cards and overflow is reported when `Max Cards` is exceeded. In Manual, selected rows are forced and the priority state does not add another card. Disabled cards are excluded from planning, reuse, hand selection, composition, and injection.
+Deck order is deterministic selection priority, not a second prompt. In Auto, every runnable `priority` card is required before discretionary `active` cards, even when mandatory coverage exceeds `Max Cards`. Diagnostics show the effective hand limit and reserved capacity. In Manual, selected rows are forced and the priority state does not add another card. Disabled cards are excluded from planning, reuse, hand selection, composition, and injection.
 
 The UI can show:
 
@@ -242,3 +242,15 @@ The inspector is read-oriented. V1 actions stay broad: refresh scene, copy promp
 | Constraints and knowledge | Scene Constraints, Knowledge | Prevent contradiction, premature reveals, and impossible actions. |
 | Pressure and affordance | Consequences, Environment, Items | Keep timing, space, hazards, props, and object control active in the next reply. |
 | Continuation | Open Threads | Preserve visible obligations, pending actions, and unresolved near-term hooks. |
+
+## Scene-specific selection and sense-making
+
+The Arbiter receives Settings.selectionBudget: the effective total maxCards, mandatoryCardIds, mandatoryFamilies, authoredSlots, and availableSlots. Built-in Priority facets sharing a generator consume one family slot; every required source card remains covered. Priority may expand the hand beyond its ordinary limit. The model's budgets.maxCards is still a total, so a smaller model-selected budget can reduce availableSlots further.
+
+cardJobs is ordered from greatest to least contribution to this particular reply. Each reason should name a distinct contribution; three copies of a setting restriction should not crowd out an important uncertainty or relationship. The runtime reserves Priority capacity before dispatch, keeps discretionary jobs in proposal order, and carries that order through final hand construction. Generation completion order and static catalog priority cannot reorder those choices. No extra selection model call is added.
+
+Fresh turns have no previous-turn scene-card cache. Same-turn swipes reuse the settled packet; Resume reuses compatible execution checkpoints. Selection provenance is therefore the original proposal, not a claim that a new Arbiter ran for each swipe. Selection contract 2 invalidates old prompt and execution checkpoints.
+
+The normalized Auto plan adds runtime-owned selection diagnostics: source, proposed (family/reason), mandatoryCardIds, mandatoryFamilies, authoredSlots, availableSlots, retained (family/reason/mandatory), and omitted (family/reason). Hand metadata adds selected (id/family/source/mandatory) and handOmissions. The compact diagnostic export and hand.selected journal retain this evidence. Successful model plans report arbiter-model-plan, not local-fallback-plan. Existing turn classification and checkpoint diagnostics identify reuse. These are operator diagnostics, never story text.
+
+Knowledge connects observations and claims to tentative interpretations, answerable questions, and reasonable evidence. Character Motivation connects established personal stakes to different reactions. Relationship distinguishes belief, trust, and willingness to cooperate. Scene Frame and Scene Constraints preserve established limits without inventing a requirement to delay, stay in place, or resist. Doubt can coexist with listening, help, and sensible precautions. None of these cards creates hidden facts, guarantees acceptance, scripts the player's response, or turns characters into uniformly rational investigators.

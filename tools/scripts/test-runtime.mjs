@@ -1483,6 +1483,10 @@ for (const pipelineMode of ['segmented', 'fused']) for (const turnLimit of [2, 5
   });
   const result = await runtime.prepareForGeneration({ userMessage: 'Continue.' });
   assertEqual(result.ok, true, `${pipelineMode} priority run succeeds`);
+  const arbiterSettings = JSON.parse(calls.find(call => call.roleId === 'utilityArbiter').request.prompt.match(/Settings: (.*)/)[1]);
+  assertEqual(arbiterSettings.selectionBudget.availableSlots, turnLimit === 2 ? 0 : 1, 'Arbiter sees remaining capacity after all authored and generated Priority cards');
+  assertEqual(arbiterSettings.selectionBudget.authoredSlots, 3, 'Arbiter capacity includes authored reservations');
+  assertDeepEqual(arbiterSettings.selectionBudget.mandatoryFamilies, ['Environment'], 'Arbiter sees mandatory generated family');
   const view = runtime.view();
   assertDeepEqual(view.lastHand.cards.slice(0, 3).map((card) => card.id), ['peak', 'disbelief', 'verbosity'], `${pipelineMode} authored Priority cards lead the hand`);
   assertEqual(view.lastHand.cards[3]?.family, 'Environment', `${pipelineMode} forces Priority family omitted by Arbiter`);
@@ -4427,8 +4431,8 @@ for (const scenario of [
     'Arbiter prompt explains create/refresh card job requirement'
   );
   assert(
-    arbiterPrompts[0].includes('Lifecycle regenerate marks an old cached card stale; it does not create a replacement without cardJobs.'),
-    'Arbiter prompt explains regenerate without replacement behavior'
+    arbiterPrompts[0].includes('Each new turn plans from the current scene snapshot; do not invent cached card ids or issue lifecycle requests for prior turns.'),
+    'Arbiter prompt excludes unavailable cross-turn cached selections'
   );
   const arbiterPromptSnapshotHash = /^Snapshot hash: (.+)$/m.exec(arbiterPrompts[0])?.[1]?.trim();
   assert(arbiterPromptSnapshotHash, 'Arbiter prompt includes snapshot hash line');
@@ -4601,7 +4605,7 @@ for (const scenario of [
   assertEqual(result.plan.nested, undefined, 'result plan drops arbitrary top-level nested object');
   assertEqual(result.plan.cardJobs[0].extraJobField, undefined, 'result plan drops arbitrary card job fields');
   assertEqual(result.plan.reasonerDecision.extraDecisionField, undefined, 'result plan drops arbitrary reasoner decision fields');
-  assertDeepEqual(Object.keys(result.plan).sort(), ['action', 'budgets', 'cardJobs', 'diagnostics', 'lifecycle', 'promptFootprint', 'reasonerDecision', 'sceneStatus', 'schema', 'snapshotHash', 'source', 'storyForm'].sort(), 'result plan only exposes whitelisted fields');
+  assertDeepEqual(Object.keys(result.plan).sort(), ['action', 'budgets', 'cardJobs', 'diagnostics', 'lifecycle', 'promptFootprint', 'reasonerDecision', 'sceneStatus', 'schema', 'selection', 'snapshotHash', 'source', 'storyForm'].sort(), 'result plan only exposes whitelisted fields');
   assert(result.plan.diagnostics.includes('safe-diagnostic'), 'safe diagnostics survive plan scrub');
   assertNoObjectString(result.plan.diagnostics, 'object-valued arbiter diagnostics do not stringify to object marker');
   assert(result.plan.reasonerDecision.signals.includes('safe-signal'), 'safe reasoner signals survive plan scrub');
@@ -5228,8 +5232,8 @@ for (const scenario of [
   assertEqual(generatedRoles.length, 6, 'runtime does not call providers for card jobs beyond the hand budget');
   assertDeepEqual(
     view.lastHand.cards.map((card) => card.family),
-    ['Scene Frame', 'Scene Constraints', 'Active Cast', 'Knowledge', 'Consequences', 'Character Motivation'],
-    'runtime hand uses the budgeted high-priority generated families'
+    ['Scene Frame', 'Active Cast', 'Scene Constraints', 'Knowledge', 'Consequences', 'Character Motivation'],
+    'runtime hand preserves the budgeted Arbiter family order'
   );
   assertEqual(view.lastHand.omitted.filter((entry) => entry.reason === 'max-cards').length, 0, 'ungenerated over-budget cards are not later omitted from the hand');
   assert(view.lastPlan.diagnostics.includes('card-jobs-budgeted'), 'runtime records card job budgeting diagnostic');

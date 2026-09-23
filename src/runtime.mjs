@@ -485,6 +485,7 @@ export function cacheContractVersions(settings = {}) {
     promptPacketVersion: PROMPT_PACKET_VERSION,
     promptContractHash: hashJson({
       promptPacketVersion: PROMPT_PACKET_VERSION,
+      cardSelectionContract: 2,
       guidanceSchema: PROMPT_GUIDANCE_SCHEMA,
       storyFormSchema: STORY_FORM_SCHEMA
     }),
@@ -1124,11 +1125,16 @@ function mergePlan(fallbackPlan, arbiterData) {
     sceneStatus: normalizeSceneStatus(data.sceneStatus, fallbackPlan.sceneStatus),
     promptFootprint: normalizePromptFootprint(data.promptFootprint, fallbackPlan.promptFootprint || 'normal'),
     cardJobs: normalizePlanCardJobs(data.cardJobs) ?? fallbackPlan.cardJobs,
+    selection: {
+      source: 'arbiter',
+      proposed: (normalizePlanCardJobs(data.cardJobs) || []).map(({ family, reason }) => ({ family, reason: reason || '' })),
+      omitted: []
+    },
     storyForm: normalizeStoryForm(data.storyForm, fallbackPlan.storyForm),
     lifecycle: normalizePlanLifecycle(data.lifecycle ?? data.cardLifecycle ?? data.cardDecisions),
     reasonerDecision: normalizeReasonerDecision(fallbackPlan.reasonerDecision, data.reasonerDecision),
     budgets,
-    diagnostics: mergeDiagnostics(fallbackPlan.diagnostics, data.diagnostics),
+    diagnostics: mergeDiagnostics(fallbackPlan.diagnostics, data.diagnostics, ['arbiter-model-plan']).filter((entry) => entry !== 'local-fallback-plan'),
     source: {
       ...mergeSource(fallbackPlan.source),
       snapshotHash: fallbackPlan.source?.snapshotHash || fallbackPlan.snapshotHash
@@ -1685,6 +1691,16 @@ function reconcileAutoPriorityPlan(plan, settings) {
     ...plan,
     action: families.length ? 'refresh-cards' : reserved && planAction(plan) === 'skip' ? 'compose-brief' : plan.action,
     cardJobs: limited.cardJobs,
+    selection: {
+      source: plan.diagnostics?.includes('arbiter-model-plan') ? 'arbiter' : 'fallback',
+      proposed: plan.selection?.proposed || (plan.cardJobs || []).map(({ family, reason }) => ({ family, reason: reason || '' })),
+      mandatoryCardIds: priorityIds,
+      mandatoryFamilies: families,
+      authoredSlots: reserved,
+      availableSlots: Math.max(0, limited.metadata.maxCards - families.length),
+      retained: limited.cardJobs.map(({ family, reason, forcedBy }) => ({ family, reason: reason || '', mandatory: Boolean(forcedBy) })),
+      omitted: [...(plan.selection?.omitted || []), ...limited.omitted]
+    },
     diagnostics: mergeDiagnostics(
       plan.diagnostics,
       priorityIds.length ? ['priority-cards-active'] : [],
@@ -1745,6 +1761,19 @@ function cardEvidenceTokenBudget(settings, plan, behaviorPolicy = null) {
   return Number.isFinite(budget) && budget > 0 ? Math.round(budget) : 30000;
 }
 
+function autoSelectionBudget(settings) {
+  const deck = getActiveCardDeck(settings);
+  const ids = settings.mode === 'auto' ? deckPriorityCardIds(deck, settings) : [];
+  const families = [...new Set(ids.map((id) => deck.cards[id].builtinFamily).filter(Boolean))];
+  const authoredSlots = ids.filter((id) => !deck.cards[id].builtinFamily).length;
+  const maxCards = localFallbackPlan({}, settings).budgets.maxCards;
+  const limited = limitCardJobsForHandBudget([], {
+    maxCards, behaviorPolicy: influencePolicyForSettings(settings), reservedCardSlots: authoredSlots, forcedFamilies: families
+  });
+  return { maxCards, mandatoryCardIds: ids, mandatoryFamilies: families, authoredSlots,
+    availableSlots: Math.max(0, limited.metadata.maxCards - families.length) };
+}
+
 function arbiterSafeSettings(settings, capabilityResolver = providerCapability) {
   const source = settingsWithRuntimeCardScope(settings);
   return {
@@ -1754,6 +1783,7 @@ function arbiterSafeSettings(settings, capabilityResolver = providerCapability) 
       activeDeckId: safeText(source.preProcessDecks?.activeDeckId || '', 120),
       activeDeckName: safeText(getActiveCardDeck(source).name || '', 120)
     },
+    selectionBudget: autoSelectionBudget(source),
     cardScope: cardScopeSummary(source.cardScope),
     strength: safeText(source.strength || 'balanced', 40),
     minCards: normalizeCardBudgetSettings(source).minCards,
@@ -2180,9 +2210,13 @@ function arbiterCardJobContractLine() {
   return [
     'Card job contract:',
     '- To create or refresh a card, emit a cardJobs entry.',
-    '- For refreshes, include refreshOfCardId when replacing a cached card.',
-    '- Use lifecycle actions only for cached or accepted card ids: select, emphasize, stow, discard, regenerate.',
-    '- Lifecycle regenerate marks an old cached card stale; it does not create a replacement without cardJobs.',
+    '- Order cardJobs by contribution to this specific next reply, most useful first. This order governs discretionary selection; catalog priority does not.',
+    '- Settings.selectionBudget gives mandatory cards and remaining discretionary slots after Priority reservations. Keep budgets.maxCards as the TOTAL hand budget, not remaining slots; choosing a smaller total reduces remaining slots further.',
+    '- Mandatory families are covered regardless of your choices. Fit discretionary cardJobs within availableSlots. Fresh turns do not reuse previous-turn scene cards; same-turn swipes reuse the whole prepared packet without another Arbiter call.',
+    '- Give each selected family a short reason naming its distinct contribution. Avoid multiple cards repeating the same setting, posture, or restriction. No discretionary family is automatically required.',
+    '- Prefer Knowledge, Character Motivation, or Relationship when interpretation, personal stakes, or trust is the unresolved work; prefer physical or consequence families when those are what the scene needs. Do not rotate cards merely for variety.',
+    '- Preserve established constraints without inventing delays, withholding ordinary clarification, or freezing progress merely because the larger uncertainty is unresolved.',
+    '- Each new turn plans from the current scene snapshot; do not invent cached card ids or issue lifecycle requests for prior turns.',
     '- Do not include raw prompt text, hidden reasoning, provider endpoints, or host prompt instructions in plan fields.'
   ].join('\n');
 }
@@ -5731,6 +5765,7 @@ export function createRecursionRuntime({
       sceneKey: snapshot.sceneKey,
       details: {
         handId: safeIdentifier(hand?.handId || '', 'hand', 160),
+        selection: hand?.metadata?.selection || null,
         selectedCount: selectedCards.length,
         omittedCount: omittedCards.length,
         guidanceStatus: safeText(packetDiagnostics.guidanceStatus || '', 80),
@@ -6450,7 +6485,7 @@ export function createRecursionRuntime({
       pipelineMode: pipelineDecision?.effectiveMode || (settings.pipelineMode === 'fused' ? 'fused' : 'segmented'),
       promptVersions: {
         promptPacket: PROMPT_PACKET_VERSION,
-        preprocessGraph: 1
+        preprocessGraph: 2
       },
       providerContractHash: PROVIDER_CONTRACT_HASH,
       deckRevisionHash: activeDeckRevisionHash(settings),
@@ -6615,6 +6650,7 @@ export function createRecursionRuntime({
     plan = {
       ...plan,
       cardJobs: scoped.cardJobs,
+      selection: { ...plan.selection, omitted: scoped.omitted },
       diagnostics: mergeDiagnostics(
         plan.diagnostics,
         scopeOmissionReasons(scoped.omitted),
@@ -7049,7 +7085,12 @@ export function createRecursionRuntime({
             maxTokens: cardEvidenceTokenBudget(context.settings, plan, behaviorPolicy),
             behaviorPolicy,
             forcedFamilies: context.settings.mode === 'manual' ? prioritySelection.forcedFamilies : [],
-            forcedCardIds: prioritySelection.forcedCardIds
+            forcedCardIds: prioritySelection.forcedCardIds,
+            selectionDiagnostics: plan.selection || null,
+            selectionOrder: context.settings.mode === 'auto' ? [
+              ...(plan.cardJobs || []).map((job) => job.family),
+              ...(plan.lifecycle || []).filter((entry) => ['select', 'emphasize'].includes(entry.action)).map((entry) => entry.cardId)
+            ] : null
           }
         );
       },

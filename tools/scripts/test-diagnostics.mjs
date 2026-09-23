@@ -210,3 +210,10 @@ const excerptPayload = buildDiagnosticsPayload({
 assert(JSON.stringify(excerptPayload).includes('visible excerpt'), 'explicit excerpts include last packet data');
 
 console.log('[pass] diagnostics');
+const selectionPayload = buildDiagnosticsPayload({ view: {
+  lastPlan: { action: 'refresh-cards', selection: { source: 'arbiter', proposed: [{ family: 'Knowledge', reason: 'Clarify the claim.' }], retained: [{ family: 'Knowledge' }], omitted: [{ family: 'Scene Frame', reason: 'max-cards' }], mandatoryCardIds: ['required'], availableSlots: 1 } },
+  lastHand: { handId: 'hand-selection', cards: [], metadata: { selection: { source: 'arbiter', selected: [{ id: 'knowledge', family: 'Knowledge', source: 'generated' }] } } }
+} });
+assertEqual(selectionPayload.runtime.plan.selection?.proposed[0].family, 'Knowledge', 'compact export preserves Arbiter proposals');
+assertEqual(selectionPayload.runtime.plan.selection?.omitted[0].reason, 'max-cards', 'compact export preserves budget omissions');
+assertEqual(selectionPayload.runtime.hand.selection?.selected[0].source, 'generated', 'compact export distinguishes generated and reused evidence');

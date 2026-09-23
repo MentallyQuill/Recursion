@@ -66,8 +66,8 @@ const mediumBudgetedJobs = limitCardJobsForHandBudget(allCatalogCardJobs, {
 
 assertDeepEqual(
   mediumBudgetedJobs.cardJobs.map((job) => job.family),
-  ['Scene Frame', 'Scene Constraints', 'Active Cast', 'Knowledge', 'Consequences', 'Character Motivation'],
-  'card job budget keeps the same families the hand selector would keep'
+  ['Scene Frame', 'Active Cast', 'Scene Constraints', 'Knowledge', 'Consequences', 'Character Motivation'],
+  'card job budget preserves the proposed family order'
 );
 assertEqual(mediumBudgetedJobs.omitted.length, 5, 'over-budget card jobs are omitted before provider calls');
 assert(mediumBudgetedJobs.omitted.every((entry) => entry.reason === 'max-cards'), 'card-job omissions use max-cards reason');
@@ -580,7 +580,7 @@ assert(scopedRequests[0].prompt.includes('Selected focus facets for Scene Constr
 assert(scopedRequests[0].prompt.includes('hardLimits (hard limits)'), 'card prompt includes selected hard limits facet');
 assert(scopedRequests[0].prompt.includes('timelineOrder (timeline/order)'), 'card prompt includes selected timeline/order facet');
 assert(scopedRequests[0].prompt.includes('would make the next response implausible'), 'card prompt includes selected facet description');
-assert(scopedRequests[0].prompt.includes('Immediate cause and effect'), 'card prompt includes timeline facet description');
+assert(scopedRequests[0].prompt.includes('Preserve established cause and effect'), 'card prompt includes timeline facet description');
 assert(scopedRequests[0].prompt.includes('Do not create separate cards per facet.'), 'card prompt keeps one-card contract clear');
 const disabledFocusRequest = buildCardRequests({
   cardJobs: [{ family: 'Environment', role: 'environmentAffordancesCard', reason: 'High relevance scene risk.' }]

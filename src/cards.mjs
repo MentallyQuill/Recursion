@@ -59,7 +59,7 @@ export const CARD_CATALOG = Object.freeze([
     family: 'Scene Frame',
     role: 'sceneFrameCard',
     priority: 100,
-    description: 'Current location, situation, immediate direction, and hard beat boundary.'
+    description: 'Current situation, useful next exchange, and established limits without inventing a pause.'
   }),
   catalogEntry({
     family: 'Active Cast',
@@ -77,7 +77,7 @@ export const CARD_CATALOG = Object.freeze([
     family: 'Knowledge',
     role: 'knowledgeSecretsCard',
     priority: 92,
-    description: 'Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries.'
+    description: 'What each character knows, how they interpret claims, what remains uncertain, and what they can reasonably learn.'
   }),
   catalogEntry({
     family: 'Consequences',
@@ -89,13 +89,13 @@ export const CARD_CATALOG = Object.freeze([
     family: 'Character Motivation',
     role: 'characterMotivationCard',
     priority: 88,
-    description: 'Observable or safely inferred motives, pressures, hesitations, and goals.'
+    description: 'Established goals, personal stakes, and pressures that make each character respond differently.'
   }),
   catalogEntry({
     family: 'Relationship',
     role: 'dialogueRelationshipCard',
     priority: 84,
-    description: 'Current social tension, leverage, promises, conflicts, and speech constraints.'
+    description: 'Relationship history, trust, concern, obligations, and willingness to cooperate under uncertainty.'
   }),
   catalogEntry({
     family: 'Social Subtext',
@@ -883,7 +883,7 @@ export function limitCardJobsForHandBudget(cardJobs = [], { maxCards = 6, behavi
     const bForced = forcedOrder.has(b.family);
     if (aForced !== bForced) return aForced ? -1 : 1;
     if (aForced && bForced) return forcedOrder.get(a.family) - forcedOrder.get(b.family);
-    return sortCardsForHand(a, b, policy);
+    return a.index - b.index;
   });
   const keptIndexes = new Set(sorted.slice(0, cardLimit).map((entry) => entry.index));
   const kept = sorted.filter((entry) => keptIndexes.has(entry.index));
@@ -1355,7 +1355,7 @@ export function applyCardPlan(existingCards = [], plan = {}) {
   };
 }
 
-export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behaviorPolicy = null, forcedFamilies = [], forcedCardIds = [] } = {}) {
+export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behaviorPolicy = null, forcedFamilies = [], forcedCardIds = [], selectionOrder = null, selectionDiagnostics = null } = {}) {
   const policy = behaviorPolicyForHand(behaviorPolicy);
   const requestedCardLimit = numberInRange(maxCards, 6, 0, 64);
   const forcedOrder = forcedFamilyOrder(forcedFamilies);
@@ -1385,6 +1385,8 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
   const priorityCount = active.filter((card) => Number.isFinite(priorityRank(card)) || forcedOrder.has(card.family)).length;
   cardLimit = Math.max(cardLimit, priorityCount);
   const selectedPriorityIds = new Set();
+  const selectionRanks = new Map((selectionOrder || []).map((key, index) => [key, index]));
+  const selectionRank = (card) => Math.min(selectionRanks.get(card.id) ?? Infinity, selectionRanks.get(card.family) ?? Infinity);
   const sortedCards = active.slice().sort((a, b) => {
     const aForcedCard = Number.isFinite(priorityRank(a));
     const bForcedCard = Number.isFinite(priorityRank(b));
@@ -1394,6 +1396,12 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
     const bForced = forcedOrder.has(b.family);
     if (aForced !== bForced) return aForced ? -1 : 1;
     if (aForced && bForced) return forcedOrder.get(a.family) - forcedOrder.get(b.family);
+    if (Array.isArray(selectionOrder)) {
+      const aRank = selectionRank(a);
+      const bRank = selectionRank(b);
+      if (aRank !== bRank) return aRank - bRank;
+      return 0;
+    }
     return sortCardsForHand(a, b, policy);
   });
   for (const card of sortedCards) {
@@ -1449,6 +1457,15 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
       maxCards: cardLimit,
       requestedMaxCards: requestedCardLimit,
       maxTokens: tokenLimit,
+      ...(selectionDiagnostics ? { selection: {
+        ...selectionDiagnostics,
+        selected: selected.map((card) => ({
+          id: card.id, family: card.family,
+          source: card.origin || 'cache',
+          mandatory: [card.id, ...(card.sourceCardIds || [])].some((id) => forcedCardOrderMap.has(id)) || forcedOrder.has(card.family)
+        })),
+        handOmissions: omitted.map(({ cardId, family, reason }) => ({ cardId, family, reason }))
+      } } : {}),
       selectedCount: selected.length,
       omittedCount: omitted.length,
       forcedFamilies: [...forcedOrder.keys()],

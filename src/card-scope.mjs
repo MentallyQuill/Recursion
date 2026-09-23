@@ -4,7 +4,7 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
   Object.freeze({
     family: 'Scene Frame',
     role: 'sceneFrameCard',
-    description: 'Current location, situation, immediate direction, and hard beat boundary.',
+    description: 'Current situation, useful next exchange, and established limits without inventing a pause.',
     subItems: Object.freeze([
       Object.freeze({
         key: 'locationSituation',
@@ -14,12 +14,12 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
       Object.freeze({
         key: 'immediateDirection',
         label: 'immediate direction',
-        description: 'The next-beat vector the scene is pointing toward, without deciding future plot or skipping player agency.'
+        description: 'Identify the next useful exchange or action supported by the scene. Clarification and provisional decisions may advance understanding without resolving the larger uncertainty or deciding for the player.'
       }),
       Object.freeze({
         key: 'beatConstraint',
         label: 'beat constraint',
-        description: 'Hard response boundary for this beat, such as answer now, hold before a reveal, avoid time skip, or do not skip a pending payoff.'
+        description: 'Preserve explicitly established response boundaries and pending answers. Do not invent a requirement to stay in place, delay clarification, or withhold an ordinary response merely to prolong tension.'
       })
     ])
   }),
@@ -48,39 +48,39 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
   Object.freeze({
     family: 'Character Motivation',
     role: 'characterMotivationCard',
-    description: 'Observable or safely inferred motives, pressures, hesitations, and goals.',
+    description: 'Established goals, personal stakes, and pressures that make each character respond differently.',
     subItems: Object.freeze([
       Object.freeze({
         key: 'visibleGoals',
         label: 'visible goals',
-        description: 'Established visible goals phrased as behavior-facing pressure for the next response.'
+        description: 'Connect established goals and personal stakes to the next response: what matters to this character, what they need to understand, and what they can reasonably ask or do.'
       }),
       Object.freeze({
         key: 'pressures',
         label: 'pressures',
-        description: 'External, social, tactical, or emotional pressures that plausibly shape behavior in this beat.'
+        description: 'Use established external, social, tactical, and emotional pressures to distinguish reactions. Fear, anger, or disbelief may shape a question without replacing its purpose with generic resistance.'
       }),
       Object.freeze({
         key: 'hesitationPosture',
         label: 'hesitation/posture',
-        description: 'Visible reluctance, guardedness, confidence, uncertainty, or restraint without private mind-reading.'
+        description: 'Ground hesitation and confidence in available evidence. Allow doubt alongside listening, helping, or sensible precautions; do not script acceptance or treat inferred motives as known facts.'
       })
     ])
   }),
   Object.freeze({
     family: 'Relationship',
     role: 'dialogueRelationshipCard',
-    description: 'Current social tension, leverage, promises, conflicts, and speech constraints.',
+    description: 'Relationship history, trust, concern, obligations, and willingness to cooperate under uncertainty.',
     subItems: Object.freeze([
       Object.freeze({
         key: 'tension',
         label: 'tension',
-        description: 'Current friction, trust, leverage, intimacy, threat, or subtext that creates usable social affordances.'
+        description: 'Use established relationship history and concern to shape the exchange. Distinguish belief in a claim, trust in the speaker, and willingness to help; they need not change together.'
       }),
       Object.freeze({
         key: 'promisesConflicts',
         label: 'promises/conflicts',
-        description: 'Active promises, refusals, debts, threats, disagreements, or obligations that shape what can be said or done next.'
+        description: 'Track active promises, refusals, debts, disagreements, and obligations. Let these personal stakes shape relevant questions and proportionate actions without manufacturing hostility.'
       }),
       Object.freeze({
         key: 'voiceConstraints',
@@ -134,14 +134,14 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
       Object.freeze({
         key: 'timelineOrder',
         label: 'timeline/order',
-        description: 'Immediate cause and effect, sequence, reveal order, and what has or has not happened yet.'
+        description: 'Preserve established cause and effect and what has actually happened. Separate a genuine limit on knowledge or action from a convenient pacing restriction; unresolved truth does not forbid useful conversation.'
       })
     ])
   }),
   Object.freeze({
     family: 'Knowledge',
     role: 'knowledgeSecretsCard',
-    description: 'Concealed facts, who knows or suspects them, mistaken beliefs, and reveal boundaries.',
+    description: 'What each character knows, how they interpret claims, what remains uncertain, and what they can reasonably learn.',
     subItems: Object.freeze([
       Object.freeze({
         key: 'concealedFacts',
@@ -151,12 +151,12 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
       Object.freeze({
         key: 'knowsSuspects',
         label: 'knows/suspects',
-        description: 'Who knows, suspects, misunderstands, or should not know a fact.'
+        description: 'Distinguish what each character observed, was told, suspects, or misunderstands. For a surprising claim, identify plausible interpretations and the specific uncertainty a relevant, answerable question could clarify. Do not demand evidence the speaker cannot reasonably provide.'
       }),
       Object.freeze({
         key: 'revealBoundaries',
         label: 'reveal boundaries',
-        description: 'What the next response must not reveal, confirm, or imply too early.'
+        description: 'Protect genuinely concealed facts and uncertain claims. Characters may seek clarification, update a tentative interpretation, or take precautions without confirming the underlying truth.'
       })
     ])
   }),

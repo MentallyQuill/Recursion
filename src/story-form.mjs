@@ -88,9 +88,9 @@ export function storyFormPromptBlock(storyForm = UNKNOWN_STORY_FORM) {
     `- Target tense: ${form.tense}.`,
     `- Target POV: ${form.pov}.`,
     `- Confidence: ${form.confidence}.`,
-    '- Write promptText in this same tense and POV when describing scene actions, narration, response posture, or likely next-beat implications.',
+    '- Write neutral analytical instructions, not narration in the character voice. Story form describes the eventual story output, not the analysis.',
     '- Prefer neutral constraint wording when the family is not narrative prose.',
-    '- Do not switch to first person, second person, or present tense unless storyForm requires it.'
+    '- Do not switch to first person or select a viewpoint character inside a card. Do not repeat or override story-form instructions in promptText.'
   ];
   if (form.pov === 'mixed') {
     lines.push('- Preserve the established mixed POV pattern.');

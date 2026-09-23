@@ -4552,7 +4552,7 @@ for (const scenario of [
   }, 'valid Arbiter story form enters plan');
   assert(cardPrompts[0].includes('Target tense: past.'), 'card prompt receives story tense');
   assert(cardPrompts[0].includes('Target POV: third-person-limited.'), 'card prompt receives story pov');
-  assert(guidancePrompts[0].includes('past tense, third-person-limited POV'), 'guidance composer receives story form');
+  assert(guidancePrompts[0].includes('"pov":"third-person-limited"'), 'guidance composer receives story form');
   assertEqual(view.lastPacket.storyForm.tense, 'past', 'packet stores story tense');
   assertEqual(view.lastPacket.storyForm.pov, 'third-person-limited', 'packet stores story pov');
   assert(view.lastPacket.sections.guidance.includes('past tense, third-person-limited POV'), 'installed guidance names story form');

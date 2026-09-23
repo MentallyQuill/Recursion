@@ -585,12 +585,16 @@ function cardPromptSafetyInstruction(catalog) {
   return 'Do not include first-person internal monologue, secret thoughts as truth, or instructions to reveal inner thoughts. Keep motives behavior-facing and observable or explicitly inferred.';
 }
 
+export const SCENE_INTERPRETATION_CONTRACT = "An unanswered question is not an instruction to keep it unanswered. A warning before an explanation can invite attention, concern, or clarification; do not invent delay, earned-reveal requirements, or resistance. Preserve player control without prescribing the player's next action. Ground emotion and suspicion in established evidence; incomplete answers alone do not establish malice. Check current positions and actions already completed before suggesting another action.";
+
 function cardInstructionContractLine() {
   return [
     'promptText must be instruction-shaped private evidence for the next assistant message.',
     'Use 2-5 short lines. Start each line with an instruction verb such as Keep, Preserve, Respect, Use, Avoid, Do not, Track, Hold, Maintain, Show, Withhold, Reveal only, Ensure, Treat, Anchor, or Continue.',
     'Do not write narrative prose, sensory scene description, dialogue, mini-scenes, or recap paragraphs in promptText.',
-    'Keep each line evidence-backed and immediately useful for the next response.'
+    'Keep each line evidence-backed and immediately useful for the next response.',
+    SCENE_INTERPRETATION_CONTRACT,
+    'Generated analysis is fallible interpretation, not new story authority. Do not set viewpoint, invent restrictions, or convert a possible emotional reaction into a required one.'
   ].join('\n');
 }
 

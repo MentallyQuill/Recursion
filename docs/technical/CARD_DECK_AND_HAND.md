@@ -265,3 +265,11 @@ Realism means plausibility within the story's setting and established characteri
 For example, after someone describes books about a character's life only in broad terms, the useful uncertainty could be which events they contain or how the speaker knows. A skeptical character can ask for a concrete example without demanding proof the speaker cannot supply. This is an analysis principle, not scripted dialogue or a requirement to ask a question every turn. Reply length should fit the character and exchange, rather than enforce brevity or generic prose rules.
 
 Existing custom decks retain their authored content. Select or duplicate the updated Default Deck to use the bundled category.
+
+## Grounded interpretation and narration boundaries
+
+Generated cards are fallible analysis, not new canon or pacing authority. An unanswered question does not require continued withholding. A player preparing to explain may invite attention, concern, or clarification; analysis must not invent an earned-reveal requirement or script the player's answer. Emotional interpretations remain tentative unless established.
+
+Card writers use neutral analytical instructions rather than performing the story's voice or tense. Story-form metadata governs the narrator; cards cannot select a viewpoint character. Packet guardrails preserve current physical state and completed actions independently of selected families, and require story output without drafting notes. These are model instructions, not a guarantee of prose quality or a substitute for host reasoning-channel separation.
+
+The composer checks cards against bounded recent source messages. Invalid JSON/schema guidance receives bounded correction before raw fallback. Both guidance and fallback remain subordinate to user instructions and established scene evidence. Prompt packet version 4 and revised preprocessing contracts invalidate older prepared prompts.

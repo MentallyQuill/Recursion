@@ -189,7 +189,7 @@ const packet = await composePromptPacket({
 });
 
 validatePromptPacket(packet);
-assertEqual(packet.packetVersion, 3, 'packet v3 is used');
+assertEqual(packet.packetVersion, 4, 'packet v4 is used');
 assertEqual(packet.diagnostics.guidanceStatus, 'used', 'valid provider guidance is recorded');
 assertEqual(packet.diagnostics.composerLane, 'guidance', 'guidance composer lane is recorded');
 assert(packet.sections.guidance.includes('GUIDANCE_MARKER'), 'provider guidance is injected');
@@ -202,7 +202,7 @@ assertEqual(packet.diagnostics.storyFormTense, 'past', 'packet diagnostics store
 assertEqual(packet.diagnostics.storyFormPov, 'third-person-limited', 'packet diagnostics store story pov');
 assert(packet.sections.cardEvidence.includes('Private Recursion card evidence for the next assistant message.'), 'card evidence section frames raw cards as private response context');
 assert(packet.sections.cardEvidence.includes('Use these cards silently as evidence.'), 'card evidence section tells the final model to use raw cards silently');
-assert(packet.sections.guardrails.includes('Write only the next assistant message; keep Recursion cards, labels, and guidance invisible.'), 'guardrails keep Recursion internals out of final output');
+assert(packet.sections.guardrails.includes('Output only the story reply, without planning, self-correction, or discussion of prompts. Keep Recursion analysis invisible.'), 'guardrails keep Recursion internals out of final output');
 assert(packet.sections.cardEvidence.includes('SCENE_FRAME_MARKER'), 'raw Scene Frame survives');
 assert(packet.sections.cardEvidence.includes('ACTIVE_CAST_MARKER'), 'raw Active Cast survives');
 assert(packet.sections.cardEvidence.includes('SCENE_CONSTRAINT_MARKER'), 'raw Scene Constraints survives');
@@ -214,7 +214,7 @@ assert(!JSON.stringify(packet.sections).includes('Scene brief:'), 'old scene bri
 assert(!JSON.stringify(packet.sections).includes('Turn brief:'), 'old turn brief header is removed');
 assertEqual(guidanceCalls[0].roleId, 'guidanceComposer', 'guidance composer provider role is called');
 assert(guidanceCalls[0].request.prompt.includes('SOCIAL_SUBTEXT_MARKER'), 'guidance composer sees full raw cards');
-assert(guidanceCalls[0].request.prompt.includes('past tense, third-person-limited POV'), 'guidance composer prompt includes story form');
+assert(guidanceCalls[0].request.prompt.includes('"pov":"third-person-limited"'), 'guidance composer prompt includes story form');
 assert(guidanceCalls[0].request.prompt.includes('recursion.guidanceComposer.v1'), 'guidance composer prompt names schema');
 assertNoPrivateFields(packet, 'packet excludes private hand and card fields');
 assertNoPrivateFields(guidanceCalls[0].request.prompt, 'guidance prompt excludes private card fields');

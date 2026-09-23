@@ -485,7 +485,7 @@ export function cacheContractVersions(settings = {}) {
     promptPacketVersion: PROMPT_PACKET_VERSION,
     promptContractHash: hashJson({
       promptPacketVersion: PROMPT_PACKET_VERSION,
-      cardSelectionContract: 2,
+      cardSelectionContract: 3,
       guidanceSchema: PROMPT_GUIDANCE_SCHEMA,
       storyFormSchema: STORY_FORM_SCHEMA
     }),
@@ -6485,7 +6485,7 @@ export function createRecursionRuntime({
       pipelineMode: pipelineDecision?.effectiveMode || (settings.pipelineMode === 'fused' ? 'fused' : 'segmented'),
       promptVersions: {
         promptPacket: PROMPT_PACKET_VERSION,
-        preprocessGraph: 2
+        preprocessGraph: 3
       },
       providerContractHash: PROVIDER_CONTRACT_HASH,
       deckRevisionHash: activeDeckRevisionHash(settings),
@@ -7117,7 +7117,7 @@ export function createRecursionRuntime({
   function durableGuidanceStage(context, plan) {
     return {
       id: 'preprocess.guidance',
-      version: 2,
+      version: 3,
       kind: 'model',
       executable: true,
       dependencies: ['preprocess.snapshot', 'preprocess.arbiter', 'preprocess.hand'],
@@ -7178,10 +7178,13 @@ export function createRecursionRuntime({
         if (
           validationContext.reuse === true
           && result?.schema === PROMPT_GUIDANCE_SCHEMA
-          && result?.status === 'used'
+          && ['used', 'fallback-raw-only'].includes(result?.status)
           && safeText(result?.text || '', 6000)
         ) {
           return { ok: true, value: result };
+        }
+        if (result?.ok === false && !['RECURSION_JSON_OBJECT_REQUIRED', 'RECURSION_JSON_PARSE_FAILED', 'RECURSION_PROVIDER_SCHEMA_MISMATCH'].includes(result?.error?.code)) {
+          return { ok: false, error: { ...result.error, kind: 'transport' } };
         }
         const validation = validateGuidanceStageResult(result, {
           hand: validationContext.dependencies?.['preprocess.hand']?.artifact,
@@ -7191,14 +7194,21 @@ export function createRecursionRuntime({
           ...validation,
           value: { ...validation.value, lane: result.guidanceLane }
         };
-        const fallbackReason = safeText(validation.error?.reason || 'guidance-invalid', 180);
+        return validation;
+      },
+      settleExhausted({ lastArtifact, failure, dependencies }) {
+        const validation = validateGuidanceStageResult(lastArtifact, {
+          hand: dependencies?.['preprocess.hand']?.artifact,
+          snapshot: context.snapshot
+        });
+        const fallbackReason = safeText(validation.error?.reason || failure?.code || 'guidance-invalid', 180);
         return {
           ok: true,
           value: {
             schema: PROMPT_GUIDANCE_SCHEMA,
-            lane: result?.guidanceLane,
+            lane: lastArtifact?.guidanceLane,
             status: 'fallback-raw-only',
-            text: 'Guidance unavailable; use the raw Recursion card evidence directly.',
+            text: 'Guidance unavailable; use supported card analysis subject to the established scene and user instructions.',
             sourceCardIds: [],
             guardrailCardIds: [],
             omittedCardIds: [],

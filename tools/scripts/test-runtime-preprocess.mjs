@@ -2012,3 +2012,44 @@ for (const pipelineMode of ['segmented', 'fused']) for (const selectRealism of [
     assert(JSON.stringify(installed).includes(cards[0].promptText), 'Realism analysis reaches installed narration packet');
   }
 }
+
+// Invalid composition must use the existing bounded correction loop before fallback.
+for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate']) {
+  const requests = [];
+  const harness = createHarness({ provider: { async generate(roleId, request) {
+    if (roleId === 'utilityArbiter') return arbiterResponse(request);
+    if (roleId !== 'guidanceComposer') return cardResponse(roleId, request);
+    requests.push(request);
+    if (['recover', 'rate'].includes(mode) && requests.length === 2) return guidanceResponse(request);
+    return { ok: false, error: { code: mode === 'rate' ? 'RECURSION_PROVIDER_RATE_LIMIT' : mode === 'profile' ? 'RECURSION_PROFILE_UNAVAILABLE' : mode === 'refusal' ? 'RECURSION_PROVIDER_REFUSAL' : 'RECURSION_JSON_OBJECT_REQUIRED', message: 'Not usable.', retryable: false } };
+  } } });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Please explain.' });
+  assertEqual(result.ok, true, 'composer failure retains supported raw-card fallback');
+  assertEqual(requests.length, ['refusal', 'profile'].includes(mode) ? 1 : 2, 'composer follows bounded retry policy for ' + mode);
+  const manifest = await harness.storage.loadPipelineRun('chat-preprocess');
+  assertEqual(manifest.stageRecords['preprocess.guidance'].state, 'completed', 'guidance has a durable terminal artifact');
+  if (mode === 'recover') assert(requests[1].prompt.includes('Correction'), 'malformed output gets targeted correction');
+  if (mode === 'rate') assert(!requests[1].prompt.includes('Correction required'), 'rate limits retry without inappropriate JSON correction');
+  const exported = await harness.runtime.exportDiagnostics();
+  assertEqual(exported.diagnostics.runtime.packet.diagnostics.guidanceStatus, ['recover', 'rate'].includes(mode) ? 'used' : 'fallback-raw-only', 'only exhausted guidance falls back');
+  await harness.runtime.prepareForGeneration({ userMessage: 'Please explain.', type: 'swipe' });
+  assertEqual(requests.length, ['refusal', 'profile'].includes(mode) ? 1 : 2, 'settled guidance is reused without repeating failure');
+}
+
+{
+  const gate = deferred();
+  let composing = false;
+  const harness = createHarness({ provider: { async generate(roleId, request) {
+    if (roleId === 'utilityArbiter') return arbiterResponse(request);
+    if (roleId !== 'guidanceComposer') return cardResponse(roleId, request);
+    composing = true;
+    return gate.promise;
+  } } });
+  const preparing = harness.runtime.prepareForGeneration({ userMessage: 'Please explain.', hostGeneration: true });
+  await waitUntil(() => composing, 'composer did not start');
+  const stopping = harness.runtime.stopGeneration({ source: 'recursion-progress-row' });
+  gate.resolve({ ok: false, error: { code: 'RECURSION_JSON_OBJECT_REQUIRED', message: 'Canceled malformed response.' } });
+  await stopping;
+  await preparing;
+  assertEqual(harness.calls.install, 0, 'canceling composition never installs a terminal fallback');
+}

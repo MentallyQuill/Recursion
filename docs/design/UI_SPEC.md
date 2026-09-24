@@ -1188,7 +1188,7 @@ Reference CSS contract:
 
 The full viewer is an observatory, not a primary play surface. It should open as a full-window panel or modal that can be dismissed quickly.
 
-Deck details display the complete stored card summary and body without display character caps or added ellipses. Text wraps at natural height within the viewer's scroll surface. Secret redaction remains active, including in text beyond the former preview limits.
+Deck details display the complete stored card summary and body without display character caps or added ellipses. Show the body once; render a separate summary only when it is present and differs from the displayed body after whitespace trimming and secret redaction. Text wraps at natural height within the viewer's scroll surface. Secret redaction remains active, including in text beyond the former preview limits.
 
 Refinement targets display their existing outcome and revision count followed by the final assessment: `Satisfied` or `Not applicable`, one scene-specific summary bounded to 400 characters, 1-3 `message:N` evidence references, and up to three supporting runtime card IDs. Reuse subdued card text and compact labeled reference rows; wrap within the card at narrow widths. Render all content as plain text with secret redaction. An assessment-only metadata update refreshes the visible detail. Raw review findings and intermediate `needs-work` assessments are not displayed. Last Brief retains only its compact outcome chip; this adds no settings or permanent bar indicators.
 

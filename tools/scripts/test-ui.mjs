@@ -4380,6 +4380,23 @@ try {
   ui.update();
 
   const originalViewerHand = view.lastHand;
+  const duplicateViewerText = 'Track the immediate objective and obstruction.';
+  for (const fields of [
+    { promptText: duplicateViewerText },
+    { promptText: duplicateViewerText, summary: duplicateViewerText },
+    { promptText: duplicateViewerText, summary: `  ${duplicateViewerText}  ` },
+    { summary: duplicateViewerText }
+  ]) {
+    view = { ...view, lastHand: { cards: [{
+      id: 'viewer-single-text-card', family: 'Character Motivation', ...fields
+    }] } };
+    ui.update();
+    const singleTextCard = root.querySelector('[data-recursion-viewer-card]');
+    assertEqual(fakeDocument.textTree(singleTextCard).split(duplicateViewerText).length - 1, 1,
+      'Viewer displays card instructions once when the summary is absent or duplicates the body');
+    assertEqual(singleTextCard.querySelector('[data-recursion-viewer-card-text]').textContent,
+      duplicateViewerText, 'Viewer preserves the complete card body when omitting a redundant summary');
+  }
   const fullViewerSummary = `${'Summary detail. '.repeat(30)}Summary final sentence.`;
   const fullViewerBody = `${'Card detail. '.repeat(160)}private-secret Final card sentence.`;
   view = { ...view, lastHand: { cards: [{

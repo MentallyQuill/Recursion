@@ -3715,13 +3715,17 @@ function appendViewerDeckSection(viewer, hand) {
         article.appendChild(detail);
       }
     }
-    article.appendChild(el('p', {
-      className: 'recursion-viewer-card-summary',
-      text: safeText(cardSummary(cardSource), Infinity)
-    }));
+    const summary = safeText(cleanText(cardSource.summary, ''), Infinity);
+    const text = safeText(cardText(cardSource) || cardSummary(cardSource), Infinity);
+    if (summary && summary !== text) {
+      article.appendChild(el('p', {
+        className: 'recursion-viewer-card-summary',
+        text: summary
+      }));
+    }
     article.appendChild(el('p', {
       className: 'recursion-viewer-card-text',
-      text: safeText(cardText(cardSource) || cardSummary(cardSource), Infinity),
+      text,
       dataset: { recursionViewerCardText: '' }
     }));
 

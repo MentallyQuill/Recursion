@@ -1,4 +1,5 @@
 import { hashJson, safeId } from '../../core.mjs';
+import { cardSelectionHistoryForChat, cardSelectionCompletionStatus, normalizeCardSelectionReceipt, setCardSelectionReceipt, setCardSelectionIncomplete, cardSelectionGenerationStartedAt, validCardSelectionReceipt } from './card-selection-history.mjs';
 import { packetToPromptBlocks } from '../../prompt.mjs';
 import { createProviderClient, jsonSchemaForRequest } from '../../providers.mjs';
 import { normalizeRetentionSettings, selectBoundedSourceWindow } from '../../retention-policy.mjs';
@@ -1222,6 +1223,7 @@ export function createSillyTavernHost({
       ...entityIdentity,
       latestMesId,
       messages,
+      ...cardSelectionHistoryForChat(sourceChat, { context }),
       latestAssistantExcluded: latestAssistantIndex >= 0,
       ...bounded.metadata
     };
@@ -1868,7 +1870,87 @@ export function createSillyTavernHost({
     return canceledPostProcessCommit();
   }
 
+  function currentCardSelectionReceipt(context, found) {
+    const { cardSelectionSourcePrefixHash } = cardSelectionHistoryForChat(rawChatMessages(context).slice(0, found.index));
+    return validCardSelectionReceipt(found.raw, cardSelectionSourcePrefixHash);
+  }
+
+  let cardSelectionSaveTail = Promise.resolve();
   const messagesApi = {
+    cardSelectionCompletionStatus() {
+      const context = currentContext(contextFactory);
+      const found = findRawAssistantMessage(context);
+      return found ? cardSelectionCompletionStatus(context, found.index) : { completed: false, reason: 'assistant-missing' };
+    },
+    saveCardSelectionUsage({ expectedSourceIdentity, usage } = {}) {
+      const operation = async () => {
+        const context = currentContext(contextFactory);
+        const validation = await validatePostProcessCommitSource(context, { expectedSourceIdentity });
+        if (!validation.ok) return validation;
+        const current = currentContext(contextFactory);
+        if (rawChatMessages(current) !== rawChatMessages(context)) {
+          return { ok: false, reason: 'card-selection-chat-changed' };
+        }
+        const found = findRawAssistantMessage(context, expectedSourceIdentity.messageId);
+        const completion = cardSelectionCompletionStatus(context, found.index);
+        if (!completion.completed) return { ok: false, reason: completion.reason };
+        const { cardSelectionSourcePrefixHash } = cardSelectionHistoryForChat(rawChatMessages(context).slice(0, found.index));
+        const receipt = normalizeCardSelectionReceipt({ ...usage, textHash: validation.current.originalHash });
+        if (!receipt.turnKeyHash || !receipt.deckId || receipt.sourcePrefixHash !== cardSelectionSourcePrefixHash) {
+          return { ok: false, reason: 'card-selection-source-stale' };
+        }
+        const handoff = validatePostProcessMutationHandoff(current, { expectedSourceIdentity }, validation);
+        if (!handoff.ok) return handoff;
+        const existing = currentCardSelectionReceipt(context, found);
+        if (existing && hashJson(existing) === hashJson(receipt)) return { ok: true, skipped: true, reason: 'already-recorded' };
+        const original = cloneJsonSafe(found.raw);
+        if (Array.isArray(found.raw.swipes)) {
+          ensureSwipeInfoArray(found.raw);
+          const index = finiteNonNegativeInteger(found.raw.swipe_id) ?? 0;
+          const info = found.raw.swipe_info[index] || (found.raw.swipe_info[index] = swipeInfoFromMessage(found.raw));
+          info.extra = setCardSelectionReceipt(cloneJsonSafe(info.extra), receipt);
+          found.raw.extra = cloneJsonSafe(info.extra);
+        } else {
+          found.raw.extra = setCardSelectionReceipt(cloneJsonSafe(found.raw.extra), receipt);
+        }
+        const saved = await persistAssistantMutation(context, found.raw, original);
+        return saved.ok ? { ok: true, messageId: found.normalized.mesid } : saved;
+      };
+      const pending = cardSelectionSaveTail.then(operation, operation);
+      cardSelectionSaveTail = pending.catch(() => {});
+      return pending;
+    },
+    markCardSelectionIncomplete({ expectedSourceIdentity, sourcePrefixHash } = {}) {
+      const operation = async () => {
+        const context = currentContext(contextFactory);
+        const validation = await validatePostProcessCommitSource(context, { expectedSourceIdentity });
+        if (!validation.ok) return validation;
+        const current = currentContext(contextFactory);
+        if (rawChatMessages(current) !== rawChatMessages(context)) return { ok: false, reason: 'card-selection-chat-changed' };
+        const found = findRawAssistantMessage(context, expectedSourceIdentity.messageId);
+        const branch = cardSelectionHistoryForChat(rawChatMessages(context).slice(0, found.index));
+        if (sourcePrefixHash !== branch.cardSelectionSourcePrefixHash) return { ok: false, reason: 'card-selection-source-stale' };
+        const handoff = validatePostProcessMutationHandoff(current, { expectedSourceIdentity }, validation);
+        if (!handoff.ok) return handoff;
+        const marker = { sourcePrefixHash, textHash: validation.current.originalHash, generationStartedAt: cardSelectionGenerationStartedAt(found.raw) };
+        const original = cloneJsonSafe(found.raw);
+        if (Array.isArray(found.raw.swipes)) {
+          ensureSwipeInfoArray(found.raw);
+          const index = finiteNonNegativeInteger(found.raw.swipe_id) ?? 0;
+          const info = found.raw.swipe_info[index] || (found.raw.swipe_info[index] = swipeInfoFromMessage(found.raw));
+          info.extra = setCardSelectionIncomplete(cloneJsonSafe(info.extra), marker);
+          found.raw.extra = cloneJsonSafe(info.extra);
+        } else {
+          found.raw.extra = setCardSelectionIncomplete(cloneJsonSafe(found.raw.extra), marker);
+        }
+        if (hashJson(original) === hashJson(found.raw)) return { ok: true, skipped: true, reason: 'already-recorded' };
+        const saved = await persistAssistantMutation(context, found.raw, original);
+        return saved.ok ? { ok: true, messageId: found.normalized.mesid } : saved;
+      };
+      const pending = cardSelectionSaveTail.then(operation, operation);
+      cardSelectionSaveTail = pending.catch(() => {});
+      return pending;
+    },
     activeAssistantMessageIdentity() {
       const context = currentContext(contextFactory);
       return assistantMessageIdentity(context, {
@@ -1936,6 +2018,7 @@ export function createSillyTavernHost({
         if (!handoff.ok) return handoff;
       }
       const original = cloneJsonSafe(found.raw);
+      const selectionReceipt = currentCardSelectionReceipt(context, found);
       if (Array.isArray(found.raw.swipes)) ensureSwipeInfoArray(found.raw);
       setRawAssistantText(found.raw, text);
       delete found.raw.__recursionHeldText;
@@ -1953,6 +2036,13 @@ export function createSillyTavernHost({
         }
       } else {
         found.raw.__recursionGenerationReview = asObject(options.marker);
+      }
+      if (selectionReceipt) {
+        const receipt = { ...selectionReceipt, textHash: hashJson(stringValue(text)) };
+        found.raw.extra = setCardSelectionReceipt(cloneJsonSafe(found.raw.extra), receipt);
+        if (Array.isArray(found.raw.swipe_info)) {
+          found.raw.swipe_info[finiteNonNegativeInteger(found.raw.swipe_id) ?? 0].extra = cloneJsonSafe(found.raw.extra);
+        }
       }
       const saved = await persistAssistantMutation(context, found.raw, original, options);
       if (!saved.ok) return saved;
@@ -1989,12 +2079,14 @@ export function createSillyTavernHost({
         if (!handoff.ok) return handoff;
       }
       const original = cloneJsonSafe(found.raw);
+      const selectionReceipt = currentCardSelectionReceipt(context, found);
       if (!Array.isArray(found.raw.swipes)) found.raw.swipes = [activeRawAssistantText(found.raw)];
       ensureSwipeInfoArray(found.raw);
       const index = found.raw.swipes.length;
       const swipeInfo = options.markerNamespace === 'postProcess'
         ? postProcessSwipeInfo(marker)
         : enhancedSwipeInfo(marker);
+      if (selectionReceipt) swipeInfo.extra = setCardSelectionReceipt(swipeInfo.extra, { ...selectionReceipt, textHash: hashJson(stringValue(text)) });
       found.raw.swipes.push(stringValue(text));
       found.raw.swipe_info.push(swipeInfo);
       if (options.markerNamespace === 'postProcess') {

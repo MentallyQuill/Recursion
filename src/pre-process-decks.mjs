@@ -441,7 +441,13 @@ export function getAllCardDecks(settings = {}) {
 
 export function getActiveCardDeck(settings = {}) {
   const normalized = normalizeCardDeckSettings(settings.preProcessDecks);
-  return getAllCardDecks(settings)[normalized.activeDeckId] || createDefaultCardDeck();
+  const deck = getAllCardDecks(settings)[normalized.activeDeckId] || createDefaultCardDeck();
+  // Runtime-only eligibility projection. Never persist these exclusions as card states.
+  const excluded = new Set(settings.mode === 'manual' ? [] : settings.cardSelectionExcludedIds || []);
+  if (!excluded.size) return deck;
+  return { ...deck, cards: Object.fromEntries(Object.entries(deck.cards).map(([id, card]) => [
+    id, excluded.has(id) && cardSelectionState(card) !== 'priority' ? { ...card, selectionState: 'off' } : card
+  ])) };
 }
 
 export function upsertCustomCardDeck(settings = {}, deck) {

@@ -395,6 +395,9 @@ function registerHostEvents(nextRuntime, currentHost = host) {
         'Generation end cleanup failed.',
         details
       );
+      const recordSelection = () => finalGenerationEvent
+        ? invokeRuntimeCleanup('completeCardSelectionTurn', 'Card selection history save failed.', details)
+        : Promise.resolve();
       if (typeof nextRuntime.postProcessPending === 'function' && nextRuntime.postProcessPending()) {
         if (!finalGenerationEvent) {
           return { ok: true, skipped: true, reason: 'post-process-awaiting-generation-ended' };
@@ -408,7 +411,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
               reason: 'post-process-disabled'
             }));
         }
-        return Promise.resolve(nextRuntime.postProcessFinalTargetReady?.(details))
+        return recordSelection().then(() => nextRuntime.postProcessFinalTargetReady?.(details))
           .then((target) => {
             if (target?.ready !== true) {
               return generationEnded()

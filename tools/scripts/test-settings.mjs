@@ -39,6 +39,21 @@ function assertThrows(fn, pattern, message) {
   throw new Error(message);
 }
 
+assertDeepEqual(DEFAULT_RECURSION_SETTINGS.cardSelection, { variety: 'low', cooldownTurns: 0 }, 'selection defaults are Low with cooldown off');
+assertDeepEqual(normalizeSettings({}).cardSelection, { variety: 'low', cooldownTurns: 0 }, 'missing selection settings use defaults');
+assertDeepEqual(normalizeSettings({ cardSelection: { variety: 'MEDIUM', cooldownTurns: '2' } }).cardSelection, { variety: 'medium', cooldownTurns: 2 }, 'selection settings normalize strings');
+assertDeepEqual(normalizeSettings({ cardSelection: { variety: 'invalid', cooldownTurns: 99 } }).cardSelection, { variety: 'low', cooldownTurns: 10 }, 'selection values fall back and clamp');
+assertEqual(normalizeSettings({ cardSelection: { cooldownTurns: -2 } }).cardSelection.cooldownTurns, 0, 'cooldown clamps low');
+assertEqual(normalizeSettings({ cardSelection: { cooldownTurns: 2.6 } }).cardSelection.cooldownTurns, 3, 'cooldown rounds to whole turns');
+const selectionRoot = {};
+const selectionStore = createSettingsStore({ root: selectionRoot, save() {} });
+selectionStore.update({ cardSelection: { variety: 'medium', cooldownTurns: 2 } });
+selectionStore.update({ focus: 'scene' });
+assertDeepEqual(createSettingsStore({ root: JSON.parse(JSON.stringify(selectionRoot)), save() {} }).get().cardSelection, { variety: 'medium', cooldownTurns: 2 }, 'selection persists through unrelated edits and reload');
+selectionStore.update({ cardSelection: { variety: 'high' } });
+assertEqual(selectionStore.get().cardSelection.cooldownTurns, 2, 'partial selection edits preserve cooldown');
+assertDeepEqual(resetSettingsMenuValue(selectionStore.get()).cardSelection, { variety: 'low', cooldownTurns: 0 }, 'Reset Defaults restores Low and zero');
+
 const normalized = normalizeSettings({
   enabled: false,
   mode: 'auto',

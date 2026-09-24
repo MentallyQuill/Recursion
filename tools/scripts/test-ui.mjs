@@ -3808,9 +3808,25 @@ try {
   assertEqual(root.querySelector('[data-recursion-setting-scene-caches-total]'), null, 'Storage Retention omits retired total scene cache cap');
   assertEqual(root.querySelector('[data-recursion-setting-source-variants-per-scene]'), null, 'Storage Retention omits retired source variant cap');
   assert(root.querySelector('[data-recursion-setting-run-journal-entries]'), 'Storage Retention renders journal entry cap');
+  assertEqual(root.querySelector('[data-recursion-setting-selection-variety]')?.value, 'low', 'selection variety defaults to Low');
+  assertEqual(root.querySelector('[data-recursion-setting-card-cooldown]')?.value, '0', 'card cooldown defaults to zero');
+  assertEqual(root.querySelector('[data-recursion-setting-card-cooldown]').getAttribute('max'), '10', 'card cooldown caps at ten turns');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-settings-section-play-behavior]')).includes('Auto only; Manual ignores these settings. Priority cards are exempt. 0 turns disables cooldown. Fewer eligible cards means a smaller hand.'), 'selection helper explains Manual, Priority, zero and strict shortages');
+  const selectionVarietyControl = root.querySelector('[data-recursion-setting-selection-variety]');
+  selectionVarietyControl.value = 'medium';
+  for (const listener of root.querySelector('[data-recursion-settings-panel]').eventListeners.change || []) listener({ target: selectionVarietyControl });
+  assertDeepEqual(settingsUpdates.at(-1).cardSelection, { variety: 'medium', cooldownTurns: 0 }, 'variety change autosaves the selection settings');
+  const cardCooldownControl = root.querySelector('[data-recursion-setting-card-cooldown]');
+  cardCooldownControl.value = '2';
+  for (const listener of root.querySelector('[data-recursion-settings-panel]').eventListeners.change || []) listener({ target: cardCooldownControl });
+  assertDeepEqual(settingsUpdates.at(-1).cardSelection, { variety: 'medium', cooldownTurns: 2 }, 'cooldown change preserves variety');
+  ui.update();
+  assertEqual(root.querySelector('[data-recursion-setting-selection-variety]').value, 'medium', 'variety survives settings rerender');
+  assertEqual(root.querySelector('[data-recursion-setting-card-cooldown]').value, '2', 'cooldown survives settings rerender');
   const typedIntegerSettingSelectors = [
     '[data-recursion-setting-min-cards]',
     '[data-recursion-setting-max-cards]',
+    '[data-recursion-setting-card-cooldown]',
     '[data-recursion-setting-model-attempts-per-step]',
     '[data-recursion-setting-progress-child-limit]',
     '[data-recursion-setting-progress-list-limit]',
@@ -4017,6 +4033,8 @@ try {
   root.querySelector('[data-recursion-setting-strength]').value = 'strong';
   root.querySelector('[data-recursion-setting-min-cards]').value = '4';
   root.querySelector('[data-recursion-setting-max-cards]').value = '12';
+  root.querySelector('[data-recursion-setting-selection-variety]').value = 'medium';
+  root.querySelector('[data-recursion-setting-card-cooldown]').value = '2';
   root.querySelector('[data-recursion-setting-footprint]').value = 'rich';
   root.querySelector('[data-recursion-setting-focus]').value = 'character';
   root.querySelector('[data-recursion-setting-model-attempts-per-step]').value = '4';
@@ -4040,6 +4058,7 @@ try {
     strength: 'strong',
     minCards: 4,
     maxCards: 12,
+    cardSelection: { variety: 'medium', cooldownTurns: 2 },
     promptFootprint: 'rich',
     focus: 'character',
     requestDeadlineSeconds: 180,
@@ -4234,6 +4253,14 @@ try {
   assert(!copiedPromptPacket.includes('"packetId"'), 'copy prompt packet omits packet JSON wrapper');
   assert(copiedPromptPacket.includes('Door stays blocked and the brass lock remains warped.'), 'copy prompt packet includes actual injected prompt text');
 
+  view = { ...view, lastBriefHand: { ...(view.lastBriefHand ?? view.lastHand), metadata: { selection: {
+    mandatoryCardIds: ['priority-source'],
+    retained: [{ cardId: 'chosen-source', family: 'Scene Frame', reason: 'anchors the blocked exit' }],
+    omitted: [{ cardId: 'cooled-source', reason: 'cooldown', turnsRemaining: 2 }, { family: 'Open Threads', reason: 'overlapping-coverage' }],
+    variety: { level: 'low', replacement: { from: 'ranked-source', to: 'chosen-source' } },
+    recentHistory: 'PRIVATE_HISTORY_SENTINEL'
+  } } } };
+  ui.update();
   const viewer = root.querySelector('[data-recursion-viewer]');
   let showModalCount = 0;
   viewer.showModal = () => {
@@ -4261,6 +4288,14 @@ try {
   assert(cardDetailText.includes('Inspector-only'), 'viewer card detail labels inspector notes');
   assert(cardDetailText.includes('scene opening required fresh frame'), 'viewer card detail includes lifecycle history');
 
+  const selectionSection = viewer.querySelectorAll('[data-recursion-viewer-section]').findLast((section) => section.dataset.recursionViewerSection === 'Card selection');
+  assert(selectionSection, 'viewer provides a Card selection inspection section');
+  const selectionInspection = fakeDocument.textTree(selectionSection);
+  assert(selectionInspection.includes('cooled-source: 2 turns remaining'), 'selection inspector explains cooldown exclusions');
+  assert(selectionInspection.includes('Overlapping coverage'), 'selection inspector translates duplicate coverage');
+  assert(selectionInspection.includes('ranked-source -> chosen-source'), 'selection inspector shows the variety replacement');
+  assert(selectionInspection.includes('priority-source'), 'selection inspector identifies mandatory sources');
+  assert(!selectionInspection.includes('PRIVATE_HISTORY_SENTINEL'), 'selection inspector never dumps raw history');
   const viewerPreviews = Array.from(viewer.querySelectorAll('pre'));
   assertEqual(viewer.querySelector('h2').textContent, 'Recursion Viewer', 'viewer retains its heading');
   const viewerClose = viewer.querySelector('[data-recursion-viewer-close]');

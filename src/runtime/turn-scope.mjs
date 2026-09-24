@@ -103,8 +103,13 @@ export async function createTurnIdentity({
   const chatKey = textValue(source.chatKey ?? source.chatId);
   const characterHash = identityHash(source, 'characterHash', 'character');
   const groupHash = identityHash(source, 'groupHash', 'group');
+  const lastSource = sourceMessages.at(-1);
+  const pendingAlreadyVisible = pendingUserMessageId && messageRole(lastSource) === 'user' && messageId(lastSource) === pendingUserMessageId;
+  const selectionPrefix = source.cardSelectionPendingUser === true ? source.cardSelectionSourcePrefixHash
+    : pendingAlreadyVisible ? source.cardSelectionPreviousPrefixHash || source.cardSelectionSourcePrefixHash : source.cardSelectionSourcePrefixHash;
   const turnKeyHash = await stableHash({
     chatKey,
+    ...(source.cardSelectionSourcePrefixHash ? { selectionSourcePrefixHash: textValue(selectionPrefix) } : {}),
     sourceBandLimit: caps.sourceWindowMessages,
     sourceBand,
     pendingUserMessageId,

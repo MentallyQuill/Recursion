@@ -664,6 +664,7 @@ if (lifecycleFailures.length) {
     const prompt = String(request.prompt || '');
     prompts.push(prompt);
     const snapshotHash = prompt.match(/Snapshot hash:\s*([^\s]+)/)?.[1] || '';
+    if (prompt.includes('recursion.card.v1')) return {text:JSON.stringify({schema:'recursion.card.v1',snapshotHash,role:'sceneFrameCard',family:'Scene Frame',items:[{promptText:'Preserve the retryable scene.',evidenceRefs:['message:1']}]})};
     if (prompt.includes('recursion.guidanceComposer.v1')) {
       return {
         text: JSON.stringify({
@@ -682,7 +683,7 @@ if (lifecycleFailures.length) {
         schema: 'recursion.utilityArbiter.v1',
         snapshotHash,
         action: 'compose-brief',
-        cardJobs: [],
+        cardJobs: [{family:'Scene Frame',reason:'Preserve the retryable scene.'}],
         reasonerDecision: { mode: 'skip', reason: 'latest assistant swipe retry smoke', signals: [] },
         budgets: { targetBriefTokens: 500, maxCards: 6 },
         diagnostics: ['latest-assistant-swipe-retry-smoke']

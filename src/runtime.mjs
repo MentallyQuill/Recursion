@@ -1,3 +1,4 @@
+import { normalizeCardSelectionSettings, cooldownExclusions, selectCardCandidates } from './card-selection.mjs';
 import { createActivityReporter } from './activity.mjs';
 import { failureFromError } from './failures.mjs';
 import {
@@ -451,6 +452,7 @@ function cacheSettingsSignature(settings = {}) {
     strength: normalized.strength,
     minCards: normalized.minCards,
     maxCards: normalized.maxCards,
+    cardSelection: normalizeCardSelectionSettings(normalized.cardSelection),
     modelAttemptsPerStep: normalized.modelAttemptsPerStep,
     requestDeadlineSeconds: normalized.requestDeadlineSeconds,
     operationDeadlineSeconds: normalized.operationDeadlineSeconds,
@@ -485,7 +487,7 @@ export function cacheContractVersions(settings = {}) {
     promptPacketVersion: PROMPT_PACKET_VERSION,
     promptContractHash: hashJson({
       promptPacketVersion: PROMPT_PACKET_VERSION,
-      cardSelectionContract: 5,
+      cardSelectionContract: 6,
       guidanceSchema: PROMPT_GUIDANCE_SCHEMA,
       guidanceContract: 2,
       storyFormSchema: STORY_FORM_SCHEMA
@@ -566,6 +568,10 @@ function normalizeSnapshot(rawSnapshot = {}) {
   const chatKey = safeIdentifier(source.chatKey ?? source.chatId, chatId);
   const sceneFingerprint = safeIdentifier(source.sceneFingerprint, hashJson(messages));
   const normalized = {
+    ...(Array.isArray(source.cardSelectionHistory) ? { cardSelectionHistory: source.cardSelectionHistory } : {}),
+    ...(source.cardSelectionSourcePrefixHash ? { cardSelectionSourcePrefixHash: source.cardSelectionSourcePrefixHash } : {}),
+    ...(source.cardSelectionPreviousPrefixHash ? { cardSelectionPreviousPrefixHash: source.cardSelectionPreviousPrefixHash } : {}),
+    ...(source.cardSelectionPendingUser === true ? { cardSelectionPendingUser: true } : {}),
     chatId,
     chatKey,
     sceneKey: safeIdentifier(source.sceneKey ?? source.sceneFingerprint, DEFAULT_SCENE_KEY),
@@ -719,6 +725,7 @@ function snapshotWithPendingUserMessage(snapshot, userMessage) {
   ];
   const nextSnapshot = {
     ...snapshot,
+    cardSelectionPendingUser: true,
     latestMesId: pendingMesId,
     messages: nextMessages,
     sourceRevisionHash: sourceWindowFingerprint({ ...snapshot, latestMesId: pendingMesId, messages: nextMessages })
@@ -1058,6 +1065,11 @@ function normalizePlanCardJobs(value) {
     const role = safeText(source.role, 120);
     const roleId = safeText(source.roleId, 120);
     const reason = safeText(source.reason, 240);
+    const cardId = safeText(source.cardId, 160);
+    if (cardId) output.cardId = cardId;
+    if (Array.isArray(source.sourceCardIds)) output.sourceCardIds = safeStringList(source.sourceCardIds, 160);
+    if (source.need) output.need = safeText(source.need, 240);
+    if (source.coverageKey) output.coverageKey = safeText(source.coverageKey, 120);
     const inferredFamily = family || safeText(
       CARD_CATALOG.find((entry) => entry.role === (role || roleId))?.family || '',
       120
@@ -1069,7 +1081,7 @@ function normalizePlanCardJobs(value) {
     const refreshOfCardId = safeIdentifier(source.refreshOfCardId ?? source.replacesCardId ?? '', '', 160);
     if (refreshOfCardId) output.refreshOfCardId = refreshOfCardId;
     return output;
-  }).filter((job) => job.family || job.role || job.roleId);
+  }).filter((job) => job.family || job.role || job.roleId || job.cardId);
 }
 
 function normalizePlanLifecycle(value) {
@@ -1335,7 +1347,16 @@ function pendingUserInstallStillCurrent(expected, current, pendingUserMessage, o
   return activeSourceRevisionHash(currentBaseSnapshot) === expectedBaseSourceRevisionHash;
 }
 
-function snapshotsMatchForPromptInstall(expected, current, pendingUserMessage = null, options = {}) {
+function selectionBranchMatchesForInstall(expected, current, pendingUserMessage, options) {
+  if (!expected?.cardSelectionSourcePrefixHash) return true;
+  if (expected.cardSelectionSourcePrefixHash === current?.cardSelectionSourcePrefixHash) return true;
+  return expected.cardSelectionPendingUser === true && current?.cardSelectionPendingUser !== true
+    && expected.cardSelectionSourcePrefixHash === current?.cardSelectionPreviousPrefixHash
+    && pendingUserInstallStillCurrent(expected, current, pendingUserMessage, options);
+}
+
+export function snapshotsMatchForPromptInstall(expected, current, pendingUserMessage = null, options = {}) {
+  if (!selectionBranchMatchesForInstall(expected, current, pendingUserMessage, options)) return false;
   const expectedSignature = promptInstallFreshnessSignature(expected);
   const currentSignature = promptInstallFreshnessSignature(current);
   const exact = expectedSignature.chatKey === currentSignature.chatKey
@@ -1487,6 +1508,7 @@ export function preparedGenerationSettingsSignature(settings = {}) {
     strength: normalized.strength,
     minCards: normalized.minCards,
     maxCards: normalized.maxCards,
+    cardSelection: normalizeCardSelectionSettings(normalized.cardSelection),
     modelAttemptsPerStep: normalized.modelAttemptsPerStep,
     requestDeadlineSeconds: normalized.requestDeadlineSeconds,
     operationDeadlineSeconds: normalized.operationDeadlineSeconds,
@@ -1661,53 +1683,100 @@ function prioritySelectionForSettings(settings = {}) {
   };
 }
 
-function reconcileAutoPriorityPlan(plan, settings) {
+export function cardSelectionSettingsForTurn(settings, snapshot = {}) {
+  if (settings.mode === 'manual') return settings;
+  const policy = normalizeCardSelectionSettings(settings.cardSelection);
+  const deck = getActiveCardDeck(settings);
+  const priorityIds = new Set(deckPriorityCardIds(deck, settings));
+  const exclusions = cooldownExclusions(snapshot.cardSelectionHistory, deck.id, policy.cooldownTurns)
+    .filter(({ cardId }) => !priorityIds.has(cardId));
+  return { ...settings, cardSelectionExcludedIds: exclusions.map(({ cardId }) => cardId), cardSelectionCooldown: exclusions };
+}
+
+export function cardSelectionSettingsForPlan(settings, plan) {
+  if (settings.mode === 'manual') return settings;
+  const deck = getActiveCardDeck(settings);
+  const sources = activeCardDeckSourceCards(settings);
+  const allowed = new Set(plan.selection?.selectedAuthoredCardIds || []);
+  for (const job of plan.cardJobs || []) {
+    const requested = Array.isArray(job.sourceCardIds) ? new Set(job.sourceCardIds) : null;
+    for (const card of sources[job.family] || []) {
+      if (!requested || requested.has(card.id) || card.selectionState === 'priority') allowed.add(card.id);
+    }
+  }
+  return { ...settings, cardSelectionExcludedIds: [...new Set([
+    ...(settings.cardSelectionExcludedIds || []),
+    ...Object.keys(deck.cards).filter((id) => !allowed.has(id))
+  ])] };
+}
+
+export function reconcileAutoPriorityPlan(plan, settings, { seed = '', history = [] } = {}) {
   const policy = runPolicyForEffectivePlan(settings, plan);
   const deck = getActiveCardDeck(settings);
   const priorityIds = deckPriorityCardIds(deck, settings);
-  const units = new Map();
-  for (const id of priorityIds) {
-    const card = deck.cards[id];
-    const key = card.builtinFamily ? `family:${card.builtinFamily}` : `card:${id}`;
-    if (!units.has(key)) units.set(key, card);
-  }
-  const selected = [...units.values()];
-  const families = selected.map((card) => card.builtinFamily).filter(Boolean);
-  const reserved = selected.filter((card) => !card.builtinFamily).length;
-  const jobs = [...(plan.cardJobs || [])];
-  for (const family of families) {
-    const existing = jobs.findIndex((job) => catalogForCard(job)?.family === family);
-    if (existing >= 0) {
-      jobs[existing] = { ...jobs[existing], forcedBy: 'priority-selection' };
+  const prioritySet = new Set(priorityIds);
+  const families = deckPriorityFamilies(deck, settings);
+  const mandatoryAuthored = priorityIds.filter((id) => !deck.cards[id].builtinFamily);
+  const sources = activeCardDeckSourceCards(settings);
+  const authored = new Map(activeCardDeckAuthoredCards(settings).map((card) => [card.id, card]));
+  const maximum = limitCardJobsForHandBudget([], {
+    maxCards: budgetOr(plan.budgets?.maxCards, 6), behaviorPolicy: policy,
+    reservedCardSlots: mandatoryAuthored.length, forcedFamilies: families
+  }).metadata.maxCards;
+  const candidates = [];
+  const omitted = [...(plan.selection?.omitted || []), ...(settings.cardSelectionCooldown || [])];
+  const mandatoryJobs = new Map();
+  for (const job of plan.cardJobs || []) {
+    if (job.cardId && authored.has(job.cardId)) {
+      if (!prioritySet.has(job.cardId)) candidates.push({ ...job, key: `card:${job.cardId}` });
       continue;
     }
-    const catalog = resolveCatalogForFamily(family);
-    if (catalog) jobs.push({ family, role: catalog.role, forcedBy: 'priority-selection', reason: 'Priority card selected by the user.' });
+    const catalog = catalogForCard(job);
+    const family = catalog?.family;
+    const eligible = sources[family] || [];
+    const ids = Array.isArray(job.sourceCardIds) ? eligible.filter((card) => job.sourceCardIds.includes(card.id) || prioritySet.has(card.id)).map((card) => card.id) : eligible.map((card) => card.id);
+    if (!family || !ids.length) {
+      omitted.push({ family: family || job.family || '', cardId: job.cardId || '', reason: 'ineligible-card' });
+      continue;
+    }
+    const candidate = { ...job, family, role: catalog.role, sourceCardIds: ids, key: `family:${family}` };
+    if (families.includes(family)) { if (!mandatoryJobs.has(family)) mandatoryJobs.set(family, candidate); }
+    else candidates.push(candidate);
   }
-  const limited = limitCardJobsForHandBudget(jobs, {
-    maxCards: budgetOr(plan.budgets?.maxCards, 6), behaviorPolicy: policy,
-    reservedCardSlots: reserved, forcedFamilies: families
+  const selection = selectCardCandidates(candidates, {
+    slots: Math.max(0, maximum - families.length),
+    variety: normalizeCardSelectionSettings(settings.cardSelection).variety, seed
   });
+  const requiredJobs = families.map((family) => ({
+    ...(mandatoryJobs.get(family) || { family, role: resolveCatalogForFamily(family).role,
+      sourceCardIds: (sources[family] || []).filter((card) => prioritySet.has(card.id)).map((card) => card.id),
+      reason: 'Priority card selected by the user.' }), forcedBy: 'priority-selection'
+  }));
+  const jobs = [...requiredJobs, ...selection.selected.filter((job) => !job.cardId)];
+  const selectedAuthoredCardIds = [...mandatoryAuthored, ...selection.selected.filter((job) => job.cardId).map((job) => job.cardId)];
+  const cleanJob = ({ key, ...job }) => job;
+  const missingRefreshJobs = plan.action === 'refresh-cards' && !(plan.cardJobs || []).length
+    && (Object.keys(sources).length > 0 || authored.size > 0);
   return {
     ...plan,
-    action: families.length ? 'refresh-cards' : reserved && planAction(plan) === 'skip' ? 'compose-brief' : plan.action,
-    cardJobs: limited.cardJobs,
+    action: jobs.length || missingRefreshJobs ? 'refresh-cards' : selectedAuthoredCardIds.length || plan.action === 'compose-brief' ? 'compose-brief' : 'skip',
+    cardJobs: jobs.map(cleanJob),
     selection: {
+      ...plan.selection,
       source: plan.diagnostics?.includes('arbiter-model-plan') ? 'arbiter' : 'fallback',
-      proposed: plan.selection?.proposed || (plan.cardJobs || []).map(({ family, reason }) => ({ family, reason: reason || '' })),
-      mandatoryCardIds: priorityIds,
-      mandatoryFamilies: families,
-      authoredSlots: reserved,
-      availableSlots: Math.max(0, limited.metadata.maxCards - families.length),
-      retained: limited.cardJobs.map(({ family, reason, forcedBy }) => ({ family, reason: reason || '', mandatory: Boolean(forcedBy) })),
-      omitted: [...(plan.selection?.omitted || []), ...limited.omitted]
+      proposed: (plan.cardJobs || []).map(({ family, cardId, reason }) => ({ family: family || '', cardId: cardId || '', reason: reason || '' })),
+      mandatoryCardIds: priorityIds, mandatoryFamilies: families,
+      authoredSlots: selectedAuthoredCardIds.length, selectedAuthoredCardIds,
+      availableSlots: Math.max(0, maximum - families.length),
+      selectionOrder: [...requiredJobs.map((job) => job.family), ...selection.selected.map((job) => job.cardId || job.family)],
+      retained: [...jobs, ...selection.selected.filter((job) => job.cardId)].map(({ family, cardId, reason, sourceCardIds, forcedBy }) => ({ family: family || '', cardId: cardId || '', sourceCardIds: sourceCardIds || [], reason: reason || '', mandatory: Boolean(forcedBy) })),
+      omitted: [...omitted, ...selection.omitted.map((entry) => ({ ...entry, family: entry.key.startsWith('family:') ? entry.key.slice(7) : '' }))],
+      variety: { level: normalizeCardSelectionSettings(settings.cardSelection).variety, replacement: selection.replacement },
+      recent: history.slice(-3).map(({ deckId, cards }) => ({ deckId, cards }))
     },
-    diagnostics: mergeDiagnostics(
-      plan.diagnostics,
-      priorityIds.length ? ['priority-cards-active'] : [],
-      limited.omitted.length ? ['card-jobs-budgeted'] : [],
-      limited.omitted.map((entry) => `card-job-budgeted:${entry.family}`)
-    )
+    diagnostics: mergeDiagnostics(plan.diagnostics, priorityIds.length ? ['priority-cards-active'] : [],
+      selection.omitted.length ? ['card-jobs-budgeted'] : [],
+      selection.replacement ? ['card-selection-variety'] : [])
   };
 }
 
@@ -2213,7 +2282,8 @@ function arbiterCardJobContractLine() {
     '- To create or refresh a card, emit a cardJobs entry.',
     '- Order cardJobs by contribution to this specific next reply, most useful first. This order governs discretionary selection; catalog priority does not.',
     '- Settings.selectionBudget gives mandatory cards and remaining discretionary slots after Priority reservations. Keep budgets.maxCards as the TOTAL hand budget, not remaining slots; choosing a smaller total reduces remaining slots further.',
-    '- Mandatory families are covered regardless of your choices. Fit discretionary cardJobs within availableSlots. Fresh turns do not reuse previous-turn scene cards; same-turn swipes reuse the whole prepared packet without another Arbiter call.',
+    '- Mandatory families are covered regardless of your choices. List ranked useful candidates, including up to four worthwhile alternatives beyond availableSlots; runtime fills only available slots. Fresh turns do not reuse previous-turn scene cards; same-turn swipes reuse the whole prepared packet without another Arbiter call.',
+    '- First identify what changed this turn, what the user is asking or attempting, and the remaining needs. For each candidate include need, a short reason naming its distinct contribution, and coverageKey identifying the need it covers. Shared coverageKey means redundant optional candidates. Optional jobs may specify sourceCardIds to narrow a family, or cardId for an authored card from Authored candidates. Omitted sourceCardIds means all currently eligible family sources. Never name excluded sources.',
     '- Give each selected family a short reason naming its distinct contribution. Avoid multiple cards repeating the same setting, posture, or restriction. No discretionary family is automatically required.',
     '- Prefer Knowledge, Character Motivation, or Relationship when interpretation, personal stakes, or trust is the unresolved work; prefer physical or consequence families when those are what the scene needs. Do not rotate cards merely for variety.',
     '- Preserve established constraints without inventing delays, withholding ordinary clarification, or freezing progress merely because the larger uncertainty is unresolved.',
@@ -3755,6 +3825,7 @@ export function createRecursionRuntime({
   }
 
   async function handleHostGenerationStopped(details = {}) {
+    const selectionSettlement = completeCardSelectionTurn({ incomplete: true });
     turnTiming.mark(turnTiming.snapshot()?.attemptId, 'invalidate', { reason: 'generation-stopped' });
     if (hostStopCleanupPromise) return hostStopCleanupPromise;
     hostStopCleanupPromise = (async () => {
@@ -3803,7 +3874,7 @@ export function createRecursionRuntime({
       postProcessRuntime.cancelPostProcess('host-generation-stopped');
       const postProcessSettlement = postProcessRuntime.waitForPostProcessSettlement();
       const cancellation = cancelActiveProseEnhancement('prose-enhancement-canceled');
-      await Promise.all([cancellation, stopJournal, postProcessSettlement]);
+      await Promise.all([cancellation, stopJournal, postProcessSettlement, selectionSettlement]);
       try {
         await host.messages?.removeEmptyAssistantSwipePlaceholders?.(source.messageId);
       } catch {
@@ -3855,11 +3926,47 @@ export function createRecursionRuntime({
     if (turnTiming.mark(turnTiming.snapshot()?.attemptId, 'first-visible-token')) recordTurnTiming('first-visible-token');
   }
 
-  function handleHostGenerationEnded() {
+  let pendingCardSelectionUsage = null;
+  let cardSelectionCompletionPromise = null;
+
+  async function completeCardSelectionTurn({ incomplete = false } = {}) {
+    if (cardSelectionCompletionPromise) return cardSelectionCompletionPromise;
+    const pending = pendingCardSelectionUsage;
+    if (!pending) return { ok: true, skipped: true };
+    pendingCardSelectionUsage = null;
+    const run = (async () => {
+      try {
+        const identity = await host.messages?.postProcessSourceIdentity?.();
+        if (!identity || (pending.chatIdentityHash && identity.chatIdentityHash !== pending.chatIdentityHash)) return { ok: true, skipped: true, reason: 'card-selection-chat-changed' };
+        const completion = host.messages?.cardSelectionCompletionStatus?.();
+        if (!completion) return { ok: true, skipped: true, reason: 'completion-unavailable' };
+        const result = incomplete || !completion.completed
+          ? await host.messages?.markCardSelectionIncomplete?.({ expectedSourceIdentity: identity, sourcePrefixHash: pending.usage.sourcePrefixHash })
+          : await host.messages?.saveCardSelectionUsage?.({ expectedSourceIdentity: identity, usage: pending.usage });
+        if (result?.ok === false) await appendJournalSafe(pending.runId, pending.chatKey, {
+          event: 'card-selection.history-not-saved', severity: 'warn', summary: 'Card selection history could not be saved.',
+          details: { reason: safeText(result.reason || 'save-failed', 120) }
+        });
+        return result || { ok: true, skipped: true };
+      } catch (error) {
+        await appendJournalSafe(pending.runId, pending.chatKey, {
+          event: 'card-selection.history-not-saved', severity: 'warn', summary: 'Card selection history could not be saved.',
+          details: { reason: safeText(error?.message || 'save-failed', 120) }
+        });
+        return { ok: false, reason: 'history-save-failed' };
+      }
+    })();
+    cardSelectionCompletionPromise = run;
+    try { return await run; } finally { if (cardSelectionCompletionPromise === run) cardSelectionCompletionPromise = null; }
+  }
+
+  async function handleHostGenerationEnded(details = {}) {
+    const selectionSettlement = String(details.eventName || '').toLowerCase() === 'generation_ended' ? completeCardSelectionTurn() : null;
     if (turnTiming.mark(turnTiming.snapshot()?.attemptId, 'completed')) recordTurnTiming('completed');
     clearPendingProseEnhancement();
     setHostGenerationActive(false);
     runState.clearAttempt?.();
+    if (selectionSettlement) await selectionSettlement;
     return { ok: true };
   }
 
@@ -5980,6 +6087,7 @@ export function createRecursionRuntime({
       if (!snapshotsMatchForPromptInstall(expectedSnapshot, currentSnapshot, pendingUserMessage, options)) {
         const comparison = promptInstallComparisonDiagnostics(expectedSnapshot, currentSnapshot, pendingUserMessage, options);
         const allowPrefixDrift = options.allowPendingUserPrefixDrift === true
+          && selectionBranchMatchesForInstall(expectedSnapshot, currentSnapshot, pendingUserMessage, options)
           && comparison.pendingTextPresent === true
           && comparison.chatKeyMatch === true
           && comparison.sceneKeyMatch === true
@@ -6557,12 +6665,13 @@ export function createRecursionRuntime({
   function buildDurableArbiterRequest(context) {
     const {
       runId,
-      settings,
+      settings: originalSettings,
       arbiterSnapshot,
       fallbackPlan,
       initialCache,
       pendingUserMessage
     } = context;
+    const settings = context.cardSettings || originalSettings;
     const arbiterLane = arbiterLaneForSettings(settings, runtimeProviderCapability);
     const cacheView = compactSceneCacheForArbiter(initialCache, arbiterSnapshot, settings);
     const cardScope = runtimeScopePayload(settings);
@@ -6593,6 +6702,10 @@ export function createRecursionRuntime({
           arbiterStoryFormContractLine(),
           reasoningPolicyPromptLine(settings),
           `Catalog: ${JSON.stringify(catalog)}`,
+          `Authored candidates: ${JSON.stringify(activeCardDeckAuthoredCards(settings).map(({id,name,promptText}) => ({cardId:id,name,promptText})))}`,
+          `Recent selections: ${JSON.stringify((context.snapshot.cardSelectionHistory || []).slice(-3).map(({deckId,cards}) => ({deckId,cards})))}`,
+          `Cooldown exclusions: ${JSON.stringify(settings.cardSelectionCooldown || [])}`,
+          `Family sources: ${JSON.stringify(Object.fromEntries(Object.entries(activeCardDeckSourceCards(settings)).map(([family,cards]) => [family,cards.map(({id,name,description,selectionState,selectedSubItems}) => ({id,name,description,selectionState,selectedSubItems}))])))}`,
           `Catalog hash: ${hashJson(catalog)}`,
           `Snapshot hash: ${fallbackPlan.snapshotHash}`,
           `User message hash: ${hashJson(pendingUserMessage.text)}`,
@@ -6647,7 +6760,8 @@ export function createRecursionRuntime({
     plan = enforceReasonerAvailability(plan, context.settings, runtimeProviderCapability);
     plan = applyReasoningPolicyToPlan(plan, context.settings);
     plan = applyBehaviorPolicyToPlan(plan, context.settings);
-    const scoped = filterCardJobsForRuntimeScope(plan.cardJobs, context.settings);
+    const candidatePlan = plan;
+    const scoped = filterCardJobsForRuntimeScope(plan.cardJobs.filter((job) => !job.cardId), context.cardSettings || context.settings);
     plan = {
       ...plan,
       cardJobs: scoped.cardJobs,
@@ -6679,7 +6793,10 @@ export function createRecursionRuntime({
         manualCoverage.diagnostics
       )
     };
-    plan = context.settings.mode === 'auto' ? reconcileAutoPriorityPlan(plan, context.settings) : budgetCardJobsForGeneration(
+    plan = context.settings.mode === 'auto' ? reconcileAutoPriorityPlan({ ...plan, cardJobs: candidatePlan.cardJobs }, context.cardSettings || context.settings, {
+      seed: hashJson({ turn: context.turnIdentity?.turnKeyHash, deck: activeDeckRevisionHash(context.settings), selection: context.settings.cardSelection }),
+      history: context.snapshot.cardSelectionHistory || []
+    }) : budgetCardJobsForGeneration(
       plan,
       runPolicyForEffectivePlan(context.settings, plan),
       prioritySelectionForSettings(context.settings).forcedFamilies
@@ -6765,8 +6882,8 @@ export function createRecursionRuntime({
       runId: context.runId,
       snapshotHash: scopedPlan.snapshotHash || hashJson(context.snapshot),
       snapshot: providerSafeSnapshot(context.snapshot, context.settings.retention),
-      cardScope: runtimeScopePayload(context.settings),
-      sourceCardsByFamily: activeCardDeckSourceCards(context.settings),
+      cardScope: runtimeScopePayload(cardSelectionSettingsForPlan(context.cardSettings || context.settings, plan)),
+      sourceCardsByFamily: activeCardDeckSourceCards(cardSelectionSettingsForPlan(context.cardSettings || context.settings, plan)),
       storyForm: scopedPlan.storyForm || UNKNOWN_STORY_FORM
     };
     const requests = buildCardRequests(scopedPlan, requestContext)
@@ -6898,8 +7015,8 @@ export function createRecursionRuntime({
       runId: context.runId,
       snapshotHash: plan.snapshotHash || hashJson(context.snapshot),
       snapshot: providerSafeSnapshot(context.snapshot, context.settings.retention),
-      cardScope: runtimeScopePayload(context.settings),
-      sourceCardsByFamily: activeCardDeckSourceCards(context.settings),
+      cardScope: runtimeScopePayload(cardSelectionSettingsForPlan(context.cardSettings || context.settings, plan)),
+      sourceCardsByFamily: activeCardDeckSourceCards(cardSelectionSettingsForPlan(context.cardSettings || context.settings, plan)),
       storyForm: plan.storyForm || UNKNOWN_STORY_FORM
     };
     const selectedCards = Array.isArray(plan.cardJobs) ? plan.cardJobs : [];
@@ -6971,7 +7088,7 @@ export function createRecursionRuntime({
         };
       },
       run({ dependencies }) {
-        const settings = context.settings;
+        const settings = cardSelectionSettingsForPlan(context.cardSettings || context.settings, plan);
         const snapshot = context.snapshot;
         const action = planAction(plan);
         const scopedDiagnostics = [];
@@ -7079,8 +7196,8 @@ export function createRecursionRuntime({
         const behaviorPolicy = runPolicyForEffectivePlan(context.settings, plan);
         const prioritySelection = prioritySelectionForSettings(context.settings);
         return selectHand(
-          [...filterCardsForRuntimeScope(deckArtifact.deck.cards, context.settings).cards,
-            ...activeCardDeckAuthoredCards(context.settings)],
+          [...filterCardsForRuntimeScope(deckArtifact.deck.cards, cardSelectionSettingsForPlan(context.cardSettings || context.settings, plan)).cards,
+            ...activeCardDeckAuthoredCards(cardSelectionSettingsForPlan(context.cardSettings || context.settings, plan))],
           {
             maxCards: budgetOr(plan.budgets?.maxCards, 6),
             maxTokens: cardEvidenceTokenBudget(context.settings, plan, behaviorPolicy),
@@ -7088,10 +7205,10 @@ export function createRecursionRuntime({
             forcedFamilies: context.settings.mode === 'manual' ? prioritySelection.forcedFamilies : [],
             forcedCardIds: prioritySelection.forcedCardIds,
             selectionDiagnostics: plan.selection || null,
-            selectionOrder: context.settings.mode === 'auto' ? [
+            selectionOrder: context.settings.mode === 'auto' ? (plan.selection?.selectionOrder || [
               ...(plan.cardJobs || []).map((job) => job.family),
               ...(plan.lifecycle || []).filter((entry) => ['select', 'emphasize'].includes(entry.action)).map((entry) => entry.cardId)
-            ] : null
+            ]) : null
           }
         );
       },
@@ -7350,6 +7467,7 @@ export function createRecursionRuntime({
           installed: true,
           settled: true,
           failureClass: '',
+          cardSelectionSourcePrefixHash: freshness.snapshot?.cardSelectionSourcePrefixHash || '',
           continuePrimaryGeneration: true
         };
       },
@@ -7695,7 +7813,8 @@ export function createRecursionRuntime({
     const installed = installSettlement?.installed === true;
     if (candidate && installed) commitPreparedGeneration(candidate);
     lastPlan = plan;
-    lastSnapshot = context.snapshot;
+    lastSnapshot = installSettlement?.cardSelectionSourcePrefixHash
+      ? { ...context.snapshot, cardSelectionSourcePrefixHash: installSettlement.cardSelectionSourcePrefixHash } : context.snapshot;
     if (installed) {
       readyLastBrief({ runId: context.runId, reason: 'packet-installed' });
       try {
@@ -7787,6 +7906,7 @@ export function createRecursionRuntime({
       ),
       pendingUserMessage,
       settings,
+      cardSettings: cardSelectionSettingsForTurn(settings, snapshot),
       pipelineDecision,
       effectivePipelineMode: pipelineDecision.effectiveMode,
       initialCache,
@@ -8312,6 +8432,8 @@ export function createRecursionRuntime({
   }
 
   async function prepareForGeneration({ userMessage = '', refreshReason = '', hostGeneration = false, generationType = '' } = {}) {
+    if (cardSelectionCompletionPromise) await cardSelectionCompletionPromise;
+    pendingCardSelectionUsage = null;
     const timingAttemptId = hostGeneration ? makeId('timing') : '';
     if (timingAttemptId) turnTiming.start(timingAttemptId);
     const settings = settingsStore.get();
@@ -8398,6 +8520,25 @@ export function createRecursionRuntime({
         && durableResult?.continuePrimaryGeneration === true
         && preprocessTurnKeyHash
       ) {
+        const hand = durableResult.hand || preparedHand();
+        const deck = getActiveCardDeck(settings);
+        const selected = new Map();
+        for (const card of hand?.cards || []) {
+          const ids = card.origin === 'authored' ? [card.deckCardId || card.id]
+            : (card.sourceCards?.length ? card.sourceCards.map((source) => source.id) : card.sourceCardIds || []);
+          for (const id of ids) {
+            const source = deck.cards[id];
+            if (!source) continue;
+            const rationale = hand.metadata?.selection?.retained?.find((entry) => entry.cardId === id || entry.sourceCardIds?.includes(id));
+            selected.set(id, { cardId: id, categoryId: source.categoryId || '', reason: safeText(rationale?.reason || (source.selectionState === 'priority' ? 'Priority card.' : 'Selected for this turn.'), 240) });
+          }
+        }
+        if (lastSnapshot?.cardSelectionSourcePrefixHash && typeof host.messages?.saveCardSelectionUsage === 'function') {
+          pendingCardSelectionUsage = { runId, chatKey: lastSnapshot.chatKey,
+            chatIdentityHash: preGenerationSourceIdentity?.chatIdentityHash || '',
+            usage: { turnKeyHash: preprocessTurnKeyHash, sourcePrefixHash: lastSnapshot.cardSelectionSourcePrefixHash,
+              deckId: deck.id, generationType: hostGenerationType || 'normal', cards: [...selected.values()] } };
+        }
         postProcessRuntime.preparePostProcessTrigger({
           preprocessTurnKeyHash,
           preGenerationSourceIdentity,
@@ -9091,6 +9232,7 @@ export function createRecursionRuntime({
     handleLatestAssistantSwipeRetry: markLatestAssistantSwipeRetry,
     handleHostGenerationStopped,
     handleHostGenerationEnded,
+    completeCardSelectionTurn,
     handleHostVisibleToken,
     postProcessPending: postProcessRuntime.postProcessPending,
     postProcessRunning: postProcessRuntime.postProcessRunning,

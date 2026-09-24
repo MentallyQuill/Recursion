@@ -1436,6 +1436,42 @@ for (const applyMode of ['as-swipe', 'replace']) {
   assertEqual(live.assistant().__recursionPostProcess.committedApplyMode, 'replace', 'Replace persists one Post-process replacement marker');
 }
 
+// Usage is committed after native completion, never on preparation, early events or Stop.
+{
+  const deck = createDefaultCardDeck();
+  deck.id = 'usage-deck'; deck.bundled = false; deck.readonly = false;
+  for (const card of Object.values(deck.cards)) card.selectionState = 'off';
+  const priority = Object.values(deck.cards)[0]; priority.selectionState = 'priority';
+  const saves = []; const incomplete = [];
+  let completed = true;
+  const target = { chatIdentityHash: 'usage-chat', messageId: 3, swipeId: 0, originalHash: 'response' };
+  const { runtime } = createRuntimeHarness({
+    settings: { preProcessDecks: { activeDeckId: deck.id, customDecks: { [deck.id]: deck } } },
+    snapshot: {chatId:'usage-chat',sceneKey:'scene',latestMesId:2,messages:[{mesid:2,role:'user',text:'Continue.'}],cardSelectionSourcePrefixHash:'prefix'},
+    hostMessages: {
+      postProcessSourceIdentity: async () => target,
+      cardSelectionCompletionStatus: () => ({completed,reason:completed?'':'stopped'}),
+      saveCardSelectionUsage: async (request) => { saves.push(request); return {ok:true}; },
+      markCardSelectionIncomplete: async (request) => { incomplete.push(request); return {ok:true}; }
+    }
+  });
+  await runtime.prepareForGeneration({hostGeneration:true,userMessage:'Continue.'});
+  assertEqual(saves.length,0,'preparation never records usage');
+  await runtime.handleHostGenerationEnded({eventName:'message_received'});
+  assertEqual(saves.length,0,'early message event never records usage');
+  await runtime.handleHostGenerationEnded({eventName:'generation_ended'});
+  assertEqual(saves.length,1,'final successful event records once');
+  assertEqual(saves[0].usage.sourcePrefixHash,'prefix','receipt binds the source prefix');
+  assertEqual(saves[0].usage.cards.length,1,'receipt uses actual source card IDs');
+  await runtime.handleHostGenerationEnded({eventName:'generation_ended'});
+  assertEqual(saves.length,1,'duplicate completion cannot record another turn');
+  await runtime.prepareForGeneration({hostGeneration:true,userMessage:'Continue.'});
+  completed = false;
+  await runtime.handleHostGenerationEnded({eventName:'generation_ended'});
+  assertEqual(saves.length,1,'failed completion does not record use');
+  assertEqual(incomplete.length,1,'failed partial is marked incomplete across reload');
+}
+
 // Replaced V1 contract: dialogue/prose pass fixtures are retained as historical
 // examples until the dedicated generation-review harness supersedes them.
 // Priority must survive both the authored-card boundary and Arbiter omissions.
@@ -2382,7 +2418,7 @@ for (const pipelineMode of ['segmented', 'fused']) {
               schema: UTILITY_ARBITER_SCHEMA,
               snapshotHash: request.snapshotHash,
               action: 'compose-brief',
-              cardJobs: [],
+              cardJobs: [{family:'Scene Frame',reason:'Preserve the immediate exchange.'}],
               budgets: { targetBriefTokens: 500, maxCards: 6 },
               reasonerDecision: { mode: 'skip', reason: 'generation review outcome contract fixture' },
               diagnostics: []
@@ -2403,6 +2439,8 @@ for (const pipelineMode of ['segmented', 'fused']) {
             }
           };
         }
+        if (roleId === 'sceneFrameCard') return cardProviderResponse(roleId, request);
+        if (roleId === 'fusedCardBundle') return { ok:true, data:{ items:[{family:'Scene Frame',promptText:'Preserve the immediate exchange.',evidenceRefs:['message:2']}] } };
         if (roleId !== 'generationReviewer') throw new Error(`Unexpected reviewer fixture role: ${roleId}`);
         reviewerRequests.push(request);
         const cardIds = request.reviewSnapshot?.installedHand?.map((card) => card.cardId).filter(Boolean) || [];
@@ -3885,7 +3923,7 @@ function immediateDurableCardRouter() {
   const result = await runtime.prepareForGeneration({ userMessage: 'Router budgets.' });
   const view = runtime.view();
   assertEqual(result.ok, true, 'router arbiter success still installs');
-  assertDeepEqual(view.lastPlan.cardJobs, [{ family: 'Open Threads', reason: 'Need one open thread card.' }], 'router card jobs merged');
+  assertDeepEqual(view.lastPlan.cardJobs.map(({family,reason}) => ({family,reason})), [{ family: 'Open Threads', reason: 'Need one open thread card.' }], 'router card jobs merged');
   assertEqual(view.lastPlan.budgets.maxCards, 1, 'router maxCards budget merged');
   assertEqual(view.lastPlan.budgets.targetBriefTokens, 60, 'router token budget merged');
   assertEqual(view.lastPlan.reasonerDecision.mode, 'use', 'arbiter reasoner decision preserved in plan');
@@ -4287,6 +4325,7 @@ for (const scenario of [
   let snapshotReads = 0;
   const pendingText = 'The committed pending turn should still install.';
   const initialSnapshot = {
+    cardSelectionSourcePrefixHash: 'prefix-before-pending',
     chatId: 'pending-install-chat',
     chatKey: 'pending-install-chat',
     sceneKey: 'pending-install-scene',
@@ -4299,6 +4338,8 @@ for (const scenario of [
   };
   const committedSnapshot = {
     ...initialSnapshot,
+    cardSelectionSourcePrefixHash: 'prefix-with-pending',
+    cardSelectionPreviousPrefixHash: 'prefix-before-pending',
     turnFingerprint: 'host-committed-pending-fp',
     latestMesId: 31,
     messages: [
@@ -4306,7 +4347,10 @@ for (const scenario of [
       { mesid: 31, role: 'user', text: pendingText, visible: true }
     ]
   };
+  const guidanceInputs=[];
+  const fallbackRouter=localFallbackCardRouter();
   const { runtime, calls, installed } = createRuntimeHarness({
+    generationRouter:{async generate(role,request){if(role==='guidanceComposer')guidanceInputs.push(request.prompt);return fallbackRouter.generate(role,request);}},
     settings: { mode: 'auto', reasonerUse: 'off' },
     snapshot: () => {
       snapshotReads += 1;
@@ -4318,7 +4362,7 @@ for (const scenario of [
   assertEqual(result.skipped, undefined, 'committed pending user turn is not treated as stale');
   assertEqual(calls.snapshot, 2, 'committed pending install reads the source and final install snapshot');
   assertEqual(installed.length, 1, 'committed pending user turn installs prompt');
-  assert(JSON.stringify(installed[0]).includes(pendingText), 'installed prompt includes committed pending user turn');
+  assert(guidanceInputs.some(prompt=>prompt.includes(pendingText)), 'guidance composer receives committed pending user turn');
 }
 
 
@@ -6020,8 +6064,14 @@ for (const scenario of [
 
 
 {
+  const stopRouter=localFallbackCardRouter();
   const { runtime, calls, storage } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' }
+    settings: { mode: 'auto', reasonerUse: 'off' },
+    generationRouter:{async generate(role,request){
+      const result=await stopRouter.generate(role,request);
+      if(role==='utilityArbiter')result.data.cardJobs=[{family:'Scene Frame',reason:'Track the prepared turn.'}];
+      return result;
+    }}
   });
   const prepared = await runtime.prepareForGeneration({
     userMessage: 'Stop after install.',
@@ -6292,7 +6342,7 @@ for (const scenario of [
         return { ok: true, cleared: true };
       },
       async install(packet) {
-        sideEffects.push(`install:${JSON.stringify(packet).includes('Newer install after clear.') ? 'newer' : 'older'}`);
+        sideEffects.push(`install:${packet.chatId === 'clear-run-2' ? 'newer' : 'older'}`);
         return { ok: true };
       }
     },
@@ -6384,8 +6434,8 @@ for (const scenario of [
   assertEqual(firstResult.ok, true, 'first install completes before queued newer run starts');
   assertEqual(secondResult.ok, true, 'queued newer run completes');
   assertEqual(sideEffects.length, 2, 'both installs complete in serialized order');
-  assert(sideEffects[0].includes('Older install packet.'), 'older install finishes first');
-  assert(sideEffects[1].includes('Newer install packet.'), 'newer install overwrites after older install');
+  assert(JSON.parse(sideEffects[0]).chatId === 'install-run-1', 'older install finishes first');
+  assert(JSON.parse(sideEffects[1]).chatId === 'install-run-2', 'newer install overwrites after older install');
 }
 
 

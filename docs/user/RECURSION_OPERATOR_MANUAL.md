@@ -114,7 +114,7 @@ The ellipsis opens the integrated settings/options menu. It is configuration-fir
 
 Main controls:
 
-- Play: a Behavior section containing Strength, Min Cards, Max Cards, Prompt Footprint, and Focus.
+- Play: a Behavior section containing Strength, Min Cards, Max Cards, Selection variety, Card cooldown (turns), Prompt Footprint, and Focus.
 - Providers: collapsible Utility and Reasoner Connection Profile selection, policy controls, and Test Profile actions.
 - Advanced: collapsible Injection, Execution, UI, Context Windows, Storage Retention, and Diagnostics sections covering final prompt injection placement/role/depth, attempt windows, progress row limits, Recursion-owned evidence and analysis windows, Journal Entries, safe excerpts, Reset Turn Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point. Reset Defaults at the bottom restores Play and Advanced settings after confirmation while preserving Connection Profile selections and policies, custom decks and scope, compact-bar settings, and viewer visibility.
 
@@ -291,6 +291,12 @@ Operator settings should stay broad. Pipeline, Mode, and Reasoning Level live in
 - Advanced / Diagnostics: safe excerpts, Reset Turn Cache, Clear Run Journal, and Export Diagnostics.
 
 Use Reprocess from here on the next swipe when one stage and its dependents need rebuilding. Use Full Rebuild to queue a fresh Pre-process pass for one matching swipe. Reset Turn Cache deletes generated work for the active turn, its queued intent, prepared/in-memory state, and prompt keys without touching SillyTavern chat history.
+
+`Selection variety` defaults to **Low**. It keeps the strongest Auto choices and may replace just the last optional slot with another relevant Arbiter candidate. Off preserves ranking; Low has a 25% chance of a replacement from the next two alternatives, Medium a 50% chance from the next four, and High a 100% chance from all remaining relevant alternatives. With no useful alternative, the hand stays unchanged. This does not change provider temperature or add a model call.
+
+`Card cooldown (turns)` defaults to **0 (off)** and accepts whole numbers from 0 to 10. A value of 2 excludes a used source card during the next two completed response turns. Cooldown is strict: if too few cards remain eligible, Recursion uses a smaller or empty optional hand. Both controls apply only in Auto; Manual ignores them. Priority cards are always included in deck order and are exempt from both variety and cooldown.
+
+Only completed assistant responses advance usage history; preparation, failed or stopped generation, retries and same-response swipes do not add turns. Selection is saved with the active chat branch, and same-turn resumes reuse the chosen hand. These controls auto-save in Play Behavior and Reset Defaults restores Low/0. Open the Full Viewer and inspect Card selection to see selected reasons, cooldown exclusions with turns remaining, and any variety replacement.
 
 Behavior controls have distinct jobs. Prompt Footprint controls the size and detail of the final composed prompt packet. Min Cards controls Low's selected-card pressure, Max Cards controls Manual selected-family count and Ultra's selected-card pressure, and Medium/High use the Min/Max average. Max Cards also helps avoid unnecessary card model calls: if the Arbiter asks for more card jobs than the effective hand can use, Recursion trims those jobs before generation and records a compact diagnostic. Strength controls intervention pressure inside that budget. Focus changes soft card-family priority without becoming a hard whitelist. The backend contract is defined in [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md).
 

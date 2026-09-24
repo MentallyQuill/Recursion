@@ -1216,8 +1216,12 @@ Play is the default tab. It contains one open `Behavior` disclosure for controls
 - Strength: Light, Balanced, Strong.
 - Min Cards: numeric `0..20`, used by Low Reasoning Level.
 - Max Cards: numeric `0..20`, used as the Manual selected-family cap and the Ultra Reasoning Level card target; Medium and High use the floor average of Min and Max.
+- Selection variety: Off, Low, Medium, High; default Low.
+- Card cooldown (turns): integer `0..10`; default `0` (off).
 - Focus: Balanced, Character, Constraints, Scene, Plot.
 - Prompt Footprint: Compact, Normal, Rich.
+
+Selection variety and cooldown use compact rows adjacent to Min/Max Cards, with a subdued helper explaining that both apply only in Auto, Manual ignores them, Priority cards are exempt, and cooldown shortages produce smaller hands. Variety preserves the strongest choices and changes at most one optional slot using relevant Arbiter alternatives: Low has a 25% chance from the next two, Medium 50% from the next four, and High 100% from all remaining alternatives. Off preserves rank order. No eligible alternative means no replacement. Cooldown excludes a used source card for the next N completed response turns; 0 disables it. These controls autosave together without changing provider temperature. The existing Full Viewer includes a Card selection section with Priority source IDs, selected reasons, cooldown turns remaining, plain omission reasons and any variety replacement. It does not dump recent history. Add no permanent bar badge.
 
 The backend meaning of these controls is defined by [Behavior Settings Policy Spec](BEHAVIOR_SETTINGS_POLICY_SPEC.md). In short: Strength controls intervention pressure, Min/Max Cards control Reasoning Level card-count bounds, Max Cards also caps Manual selected families, Focus controls soft family priority, and Prompt Footprint controls final packet size/detail. They should be visible as high-level controls, not exposed as per-card weights or prompt-fragment editors.
 

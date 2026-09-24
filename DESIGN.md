@@ -242,6 +242,8 @@ Selected authored Pre-process cards appear by their saved names as child rows un
 
 **Settings panel:** Three tabs: Play, Providers, Advanced. Keep normal-play controls high level in a Play Behavior disclosure, provider lanes collapsible, and Advanced grouped into Injection, UI, and Diagnostics disclosures. Provider lanes show compact derived capability labels (`Ready`, `Untested`, `Unhealthy`, or `Configure`), never a separate enable switch. Provider field commits autosave only the changed field and preserve the open disclosure. Disable advanced commands that have no V1 runtime handler instead of showing fake working controls.
 
+Play Behavior places `Selection variety` (Off, Low, Medium, High; default Low) and `Card cooldown (turns)` (0..10; default 0) beside the card budgets. Reuse compact control rows and one subdued helper: Auto only, Manual ignores these settings, Priority cards are exempt, zero disables cooldown, and shortages produce smaller hands. Tooltips explain that variety changes at most one optional slot among relevant alternatives. Keep selection details in existing inspection surfaces; add no permanent bar badge.
+
 **Full viewer:** An observatory, not a play surface. Use it for Now, Deck, Activity, Prompt Packet, Settings, and Providers. It can be larger than the bar menus, but it should remain utilitarian and dismissible.
 
 ## Do's and Don'ts

@@ -1,4 +1,5 @@
 import { cloneJson } from './core.mjs';
+import { normalizeCardSelectionSettings } from './card-selection.mjs';
 import { providerConfigHash } from './provider-capability.mjs';
 import { PRE_PROCESS_DECK_SETTINGS_VERSION, DEFAULT_PRE_PROCESS_DECK_ID, normalizeCardDeckSettings } from './pre-process-decks.mjs';
 import {
@@ -57,6 +58,7 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
   strength: 'balanced',
   minCards: 3,
   maxCards: 10,
+  cardSelection: { variety: 'low', cooldownTurns: 0 },
   modelAttemptsPerStep: 2,
   requestDeadlineSeconds: 180,
   operationDeadlineSeconds: 300,
@@ -423,6 +425,7 @@ export function normalizeSettings(value = {}) {
     strength: enumValue(source.strength, STRENGTHS, DEFAULT_RECURSION_SETTINGS.strength),
     minCards: cardBudget.minCards,
     maxCards: cardBudget.maxCards,
+    cardSelection: normalizeCardSelectionSettings(source.cardSelection),
     modelAttemptsPerStep: normalizeModelAttemptsPerStep(source.modelAttemptsPerStep),
     requestDeadlineSeconds: Math.min(600, Math.max(30, Math.round(Number(source.requestDeadlineSeconds) || 180))),
     operationDeadlineSeconds: Math.min(1800, Math.max(60, Math.round(Number(source.operationDeadlineSeconds) || 300))),

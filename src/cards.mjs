@@ -769,6 +769,7 @@ function sanitizeHandCard(card) {
   };
   const origin = optionalEnum(card.origin, ORIGIN);
   if (origin) handCard.origin = origin;
+  if (Array.isArray(card.sourceCardIds) && card.sourceCardIds.length) handCard.sourceCardIds = [...new Set(card.sourceCardIds.map(String).filter(Boolean))];
   return handCard;
 }
 
@@ -921,12 +922,12 @@ function normalizeDeckCard(card, { preserveId = false } = {}) {
     sourceRevisionHash: card?.source?.sourceRevisionHash || card?.freshness?.sourceRevisionHash || card?.sourceRevisionHash
   });
   if (preserveId && typeof card?.id === 'string' && card.id) normalized.id = card.id;
-  if (Array.isArray(card?.sourceCardIds) && card.sourceCardIds.length) normalized.sourceCardIds = card.sourceCardIds.map(String).filter(Boolean).slice(0, 32);
-  if (Array.isArray(card?.sourceCards) && card.sourceCards.length) normalized.sourceCards = card.sourceCards.slice(0, 32);
+  if (Array.isArray(card?.sourceCardIds) && card.sourceCardIds.length) normalized.sourceCardIds = card.sourceCardIds.map(String).filter(Boolean);
+  if (Array.isArray(card?.sourceCards) && card.sourceCards.length) normalized.sourceCards = card.sourceCards.slice();
   if (card?.sourceCoverage) normalized.sourceCoverage = String(card.sourceCoverage);
   if (card?.inclusionEvidence) normalized.inclusionEvidence = String(card.inclusionEvidence);
-  if (Array.isArray(card?.coveredSourceCardIds) && card.coveredSourceCardIds.length) normalized.coveredSourceCardIds = card.coveredSourceCardIds.map(String).filter(Boolean).slice(0, 32);
-  if (Array.isArray(card?.omittedSourceCardIds) && card.omittedSourceCardIds.length) normalized.omittedSourceCardIds = card.omittedSourceCardIds.map(String).filter(Boolean).slice(0, 32);
+  if (Array.isArray(card?.coveredSourceCardIds) && card.coveredSourceCardIds.length) normalized.coveredSourceCardIds = card.coveredSourceCardIds.map(String).filter(Boolean);
+  if (Array.isArray(card?.omittedSourceCardIds) && card.omittedSourceCardIds.length) normalized.omittedSourceCardIds = card.omittedSourceCardIds.map(String).filter(Boolean);
   return normalized;
 }
 
@@ -1095,7 +1096,7 @@ export function buildFusedCardBundleRequest(plan = {}, context = {}) {
       card.forcedBy ? `- Forced by: ${card.forcedBy}` : '- Forced by: none',
       cardScopePromptBlock(catalog, card.selectedSubItems),
       card.sourceCards.length
-        ? `- Source deck cards: ${card.sourceCards.map((source) => `${source.name || source.id} [${source.selectionState || 'active'}]`).join(', ')}`
+        ? `- Source deck cards: ${card.sourceCards.map((source) => `${source.name || source.id} (${source.id}) [${source.selectionState || 'active'}]: ${source.promptText || ''}`).join(', ')}`
         : '',
       cardPromptSafetyInstruction(catalog)
     ].filter(Boolean).join('\n');

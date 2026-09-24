@@ -1,4 +1,5 @@
 import { nowIso, redact, stableStringify } from './core.mjs';
+import { normalizeCardSelectionSettings } from './card-selection.mjs';
 import { pipelineExecutionLabel } from './runtime/pipeline-policy.mjs';
 import { downloadDiagnostics } from './ui/diagnostics-download.mjs';
 import {
@@ -239,6 +240,8 @@ const SETTINGS_AUTOSAVE_DATASETS = Object.freeze([
   'recursionSettingStrength',
   'recursionSettingMinCards',
   'recursionSettingMaxCards',
+  'recursionSettingSelectionVariety',
+  'recursionSettingCardCooldown',
   'recursionSettingFootprint',
   'recursionSettingFocus',
   'recursionSettingPostProcessContextMessages',
@@ -270,6 +273,8 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   strength: 'Bias strength for the composed prompt packet. Light stays subtle, Balanced is the normal default, and Strong gives Recursion more room to steer scene adhesion.',
   minCards: 'Low Reasoning Level card target. Use fewer cards for faster, cheaper turns or more cards when sparse scenes need extra grounding.',
   maxCards: 'Upper Manual card-selection cap and Ultra Reasoning Level card target. Medium and High use the average, so this also sets the upper range for busier scenes.',
+  selectionVariety: 'Auto only. Keeps the strongest choices and may replace one optional slot with another relevant card. Off keeps rank order; Low uses 25% / next two alternatives, Medium 50% / next four, High 100% / all alternatives. Priority cards are exempt. Provider temperature is unchanged.',
+  cardCooldown: 'Auto only. Excludes recently used cards for the next 0 to 10 completed response turns. Zero disables cooldown. Priority cards are exempt; a shortage produces a smaller hand.',
   focus: 'Temporary creative priority for card selection and composition. It nudges Recursion toward character, constraints, scene, or plot without becoming a hard whitelist.',
   footprint: 'Prompt budget for the composed Recursion packet. Compact spends fewer tokens, Rich preserves more scene detail when the moment is complex.',
   contextWindows: 'Bounds the Recursion-owned evidence and analysis windows used before and after generation. These do not replace or limit SillyTavern writer context.',
@@ -2938,11 +2943,15 @@ function settingsNumberRow(label, datasetName, value, { min = 0, max = 20, step 
 
 function renderHighLevelSettings(panel, settings) {
   const group = el('section', { className: 'recursion-settings-group' });
+  const selection = normalizeCardSelectionSettings(settings.cardSelection);
   const tooltipsEnabled = asObject(settings.ui).tooltipsEnabled !== false;
   group.appendChild(settingsDisclosureSection('play-behavior', 'Behavior', [
     settingsSelectRow('Strength', 'recursionSettingStrength', cleanText(settings.strength, 'balanced'), STRENGTH_OPTIONS, SETTINGS_TOOLTIPS.strength, tooltipsEnabled),
     settingsNumberRow('Min Cards', 'recursionSettingMinCards', integerInRange(settings.minCards, DEFAULT_RECURSION_SETTINGS.minCards, 0, 20), { tooltip: SETTINGS_TOOLTIPS.minCards, tooltipsEnabled }),
     settingsNumberRow('Max Cards', 'recursionSettingMaxCards', integerInRange(settings.maxCards, DEFAULT_RECURSION_SETTINGS.maxCards, 0, 20), { tooltip: SETTINGS_TOOLTIPS.maxCards, tooltipsEnabled }),
+    settingsSelectRow('Selection variety', 'recursionSettingSelectionVariety', selection.variety, [['off', 'Off'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], SETTINGS_TOOLTIPS.selectionVariety, tooltipsEnabled),
+    settingsNumberRow('Card cooldown (turns)', 'recursionSettingCardCooldown', selection.cooldownTurns, { min: 0, max: 10, tooltip: SETTINGS_TOOLTIPS.cardCooldown, tooltipsEnabled }),
+    el('p', { className: 'recursion-help', text: 'Auto only; Manual ignores these settings. Priority cards are exempt. 0 turns disables cooldown. Fewer eligible cards means a smaller hand.' }),
     settingsSelectRow('Focus', 'recursionSettingFocus', cleanText(settings.focus, 'balanced'), FOCUS_OPTIONS, SETTINGS_TOOLTIPS.focus, tooltipsEnabled),
     settingsSelectRow('Prompt Footprint', 'recursionSettingFootprint', cleanText(settings.promptFootprint, 'normal'), FOOTPRINT_OPTIONS, SETTINGS_TOOLTIPS.footprint, tooltipsEnabled)
   ], { tooltip: SETTINGS_TOOLTIPS.behavior, tooltipsEnabled }));
@@ -3805,6 +3814,30 @@ function promptPacketMeta(preview) {
   ].filter(Boolean);
 }
 
+function cardSelectionPreview(hand) {
+  const selection = asObject(hand?.metadata?.selection);
+  if (!Object.keys(selection).length) return 'No selection details for this hand.';
+  const identity = (row) => cleanText(row?.cardId || row?.family || row?.key, 'Card');
+  const retained = Array.isArray(selection.retained) ? selection.retained : [];
+  const omitted = Array.isArray(selection.omitted) ? selection.omitted : [];
+  const replacement = selection.variety?.replacement;
+  const labels = {
+    'overlapping-coverage': 'Overlapping coverage',
+    'max-cards': 'Card budget',
+    'variety-alternative': 'Variety alternative'
+  };
+  return {
+    Priority: Array.isArray(selection.mandatoryCardIds) ? selection.mandatoryCardIds : [],
+    Selected: retained.map((row) => `${identity(row)}${cleanText(row.reason) ? `: ${cleanText(row.reason)}` : ''}`),
+    Cooldown: omitted.filter((row) => row.reason === 'cooldown').map((row) => {
+      const turns = integerInRange(row.turnsRemaining, 0, 0, 10);
+      return `${identity(row)}: ${turns} turn${turns === 1 ? '' : 's'} remaining`;
+    }),
+    Omitted: omitted.filter((row) => row.reason !== 'cooldown').map((row) => `${identity(row)}: ${labels[row.reason] || 'Not selected'}`),
+    Variety: `${cleanText(selection.variety?.level, 'off')}: ${replacement ? `${cleanText(replacement.from)} -> ${cleanText(replacement.to)}` : 'No replacement'}`
+  };
+}
+
 function renderViewer(viewer, view, model) {
   const reviewHand = view.lastBriefHand ?? view.lastHand ?? { cards: [] };
   const reviewPacket = view.lastBriefPacket ?? view.lastPacket;
@@ -3818,6 +3851,7 @@ function renderViewer(viewer, view, model) {
     activity: model.activityLabel
   });
   appendViewerDeckSection(viewer, reviewHand);
+  appendViewerSection(viewer, 'Card selection', cardSelectionPreview(reviewHand));
   appendViewerSection(viewer, 'Activity', view.activity ?? null);
   appendViewerSection(viewer, 'Prompt Packet', promptPacketPreview(reviewPacket, reviewHand), {
     dataset: { recursionPromptPacket: '' },
@@ -7166,6 +7200,10 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         0,
         20
       ),
+      cardSelection: normalizeCardSelectionSettings({
+        variety: controlValue(sourceRoot, '[data-recursion-setting-selection-variety]'),
+        cooldownTurns: controlNumber(sourceRoot, '[data-recursion-setting-card-cooldown]', 0)
+      }),
       promptFootprint: controlValue(sourceRoot, '[data-recursion-setting-footprint]'),
       focus: controlValue(sourceRoot, '[data-recursion-setting-focus]'),
       requestDeadlineSeconds: integerInRange(controlNumber(sourceRoot, '[data-recursion-setting-request-deadline-seconds]', 180), 180, 30, 600),

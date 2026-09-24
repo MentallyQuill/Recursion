@@ -155,6 +155,8 @@ The product should never read as a standalone SaaS dashboard, landing page, or d
 
 Manual mode is still broad control, not card editing. It may let users force selected card families up to `Max Cards`, but it should not become a per-card writing, ranking, review, or accept/reject workflow.
 
+Progress explains total hand inclusion with compact authored/generated counts on the hand-selection row. A card-count shortfall is amber with a plain-language reason. Fused family outcomes remain inspectable after reload and stale-run transitions; grouping provider work must never hide delivered card counts.
+
 Use this file together with `docs/design/UI_SPEC.md`, `docs/design/CARD_SYSTEM_SPEC.md`, and `styles/recursion.css`. Update this file whenever the visible design contract changes.
 
 ## Colors

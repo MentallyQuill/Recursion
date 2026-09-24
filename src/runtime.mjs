@@ -489,7 +489,7 @@ export function cacheContractVersions(settings = {}) {
     promptPacketVersion: PROMPT_PACKET_VERSION,
     promptContractHash: hashJson({
       promptPacketVersion: PROMPT_PACKET_VERSION,
-      cardSelectionContract: 5,
+      cardSelectionContract: 6,
       guidanceSchema: PROMPT_GUIDANCE_SCHEMA,
       guidanceContract: 2,
       storyFormSchema: STORY_FORM_SCHEMA
@@ -774,9 +774,7 @@ function localFallbackPlan(snapshot, settings) {
   const cardBudget = asObject(behaviorPolicy.cardBudget);
   const reasoningPolicy = reasoningPolicyForSettings(settings);
   const promptFootprint = normalizePromptFootprint(footprintPolicy.level, normalizePromptFootprint(settings.promptFootprint, 'normal'));
-  const fallbackMaxCards = reasoningPolicy.maxCardsFloor > 0
-    ? reasoningPolicy.maxCardsFloor
-    : (reasoningPolicy.maxCardsCap > 0 ? reasoningPolicy.maxCardsCap : DEFAULT_NORMAL_REASONING_MAX_CARDS);
+  const fallbackMaxCards = configuredCardTarget(reasoningPolicy);
   return {
     schema: UTILITY_ARBITER_SCHEMA,
     snapshotHash,
@@ -899,19 +897,16 @@ function reasoningPolicyPromptLine(settings) {
   return `Reasoning level policy: ${policy.prompt} Runtime-enforced card budgets: lowMinCards=${budget.minCards}; normalCards=${budget.normalCards}; ultraMaxCards=${budget.maxCards}. Runtime-enforced routing: composer=${policy.composer}; arbiterLane=${policy.arbiterLane}; cardLane=${policy.cardLane}.`;
 }
 
-function adjustedMaxCardsForPolicy(value, policy) {
-  const current = normalizeBudget(value, DEFAULT_NORMAL_REASONING_MAX_CARDS);
-  if (current <= 0) return current;
-  let next = current;
-  if (policy.maxCardsCap > 0) next = Math.min(next, policy.maxCardsCap);
-  if (policy.maxCardsFloor > 0) next = Math.max(next, policy.maxCardsFloor);
-  return next;
+function configuredCardTarget(policy) {
+  const budget = policy.cardBudget;
+  return policy.level === 'low' ? budget.minCards
+    : policy.level === 'ultra' ? budget.maxCards : budget.normalCards;
 }
 
 function applyReasoningPolicyToPlan(plan, settings) {
   const policy = reasoningPolicyForSettings(settings);
   const budgets = asObject(plan?.budgets);
-  const nextMaxCards = adjustedMaxCardsForPolicy(budgets.maxCards, policy);
+  const nextMaxCards = configuredCardTarget(policy);
   if (nextMaxCards === budgets.maxCards) return plan;
   return {
     ...plan,
@@ -1678,7 +1673,13 @@ function reconcileAutoPriorityPlan(plan, settings) {
   const selected = [...units.values()];
   const families = selected.map((card) => card.builtinFamily).filter(Boolean);
   const reserved = selected.filter((card) => !card.builtinFamily).length;
-  const jobs = [...(plan.cardJobs || [])];
+  const rankedFamilies = new Set();
+  const jobs = (plan.cardJobs || []).filter((job) => {
+    const family = catalogForCard(job)?.family;
+    if (!family || rankedFamilies.has(family)) return false;
+    rankedFamilies.add(family);
+    return true;
+  });
   for (const family of families) {
     const existing = jobs.findIndex((job) => catalogForCard(job)?.family === family);
     if (existing >= 0) {
@@ -1688,19 +1689,42 @@ function reconcileAutoPriorityPlan(plan, settings) {
     const catalog = resolveCatalogForFamily(family);
     if (catalog) jobs.push({ family, role: catalog.role, forcedBy: 'priority-selection', reason: 'Priority card selected by the user.' });
   }
+  const targetCount = configuredCardTarget(reasoningPolicyForSettings(settings));
+  const eligibleJobs = filterCardJobsForRuntimeScope(CARD_CATALOG.map(({ family, role }) => ({ family, role })), settings).cardJobs;
+  const seen = new Set(jobs.map((job) => catalogForCard(job)?.family));
+  for (const job of eligibleJobs) {
+    if (jobs.length >= Math.max(0, targetCount - reserved, families.length)) break;
+    if (seen.has(job.family)) continue;
+    seen.add(job.family);
+    jobs.push({ ...job, reason: 'Fill the configured hand target from eligible deck families.' });
+  }
   const limited = limitCardJobsForHandBudget(jobs, {
-    maxCards: budgetOr(plan.budgets?.maxCards, 6), behaviorPolicy: policy,
+    maxCards: targetCount, behaviorPolicy: policy,
     reservedCardSlots: reserved, forcedFamilies: families
   });
+  const authored = activeCardDeckAuthoredCards(settings);
+  const authoredCardIds = [
+    ...selected.filter((card) => !card.builtinFamily).map((card) => card.id),
+    ...authored.filter((card) => !priorityIds.includes(card.id))
+      .slice(0, Math.max(0, targetCount - reserved - limited.cardJobs.length)).map((card) => card.id)
+  ];
+  const plannedCount = limited.cardJobs.length + authoredCardIds.length;
   return {
     ...plan,
-    action: families.length ? 'refresh-cards' : reserved && planAction(plan) === 'skip' ? 'compose-brief' : plan.action,
+    action: limited.cardJobs.length ? 'refresh-cards'
+      : !authoredCardIds.length && targetCount === 0 && planAction(plan) === 'skip' ? 'skip' : 'compose-brief',
+    budgets: { ...plan.budgets, maxCards: Math.max(targetCount, reserved + families.length) },
     cardJobs: limited.cardJobs,
     selection: {
       source: plan.diagnostics?.includes('arbiter-model-plan') ? 'arbiter' : 'fallback',
       proposed: plan.selection?.proposed || (plan.cardJobs || []).map(({ family, reason }) => ({ family, reason: reason || '' })),
       mandatoryCardIds: priorityIds,
       mandatoryFamilies: families,
+      targetCount,
+      plannedCount,
+      authoredCardIds,
+      eligibleCount: eligibleJobs.length + authored.length,
+      shortfallReason: plannedCount < targetCount ? 'insufficient-eligible-cards' : '',
       authoredSlots: reserved,
       availableSlots: Math.max(0, limited.metadata.maxCards - families.length),
       retained: limited.cardJobs.map(({ family, reason, forcedBy }) => ({ family, reason: reason || '', mandatory: Boolean(forcedBy) })),
@@ -2219,8 +2243,8 @@ function arbiterCardJobContractLine() {
     'Card job contract:',
     '- To create or refresh a card, emit a cardJobs entry.',
     '- Order cardJobs by contribution to this specific next reply, most useful first. This order governs discretionary selection; catalog priority does not.',
-    '- Settings.selectionBudget gives mandatory cards and remaining discretionary slots after Priority reservations. Keep budgets.maxCards as the TOTAL hand budget, not remaining slots; choosing a smaller total reduces remaining slots further.',
-    '- Mandatory families are covered regardless of your choices. Fit discretionary cardJobs within availableSlots. Fresh turns do not reuse previous-turn scene cards; same-turn swipes reuse the whole prepared packet without another Arbiter call.',
+    '- Settings.selectionBudget gives the runtime-owned TOTAL hand target, mandatory cards, and remaining discretionary slots after Priority reservations. Set budgets.maxCards to that total; a smaller budget or skip action cannot lower the configured target.',
+    '- Mandatory families are covered regardless of your choices. Rank enough distinct eligible discretionary families to fill availableSlots. Runtime fills any remaining slots from eligible deck families in stable order. Never invent card content or evidence. Fresh turns do not reuse previous-turn scene cards; same-turn swipes reuse the whole prepared packet without another Arbiter call.',
     '- Give each selected family a short reason naming its distinct contribution. Avoid multiple cards repeating the same setting, posture, or restriction. No discretionary family is automatically required.',
     '- Prefer Knowledge, Character Motivation, or Relationship when interpretation, personal stakes, or trust is the unresolved work; prefer physical or consequence families when those are what the scene needs. Do not rotate cards merely for variety.',
     '- Preserve established constraints without inventing delays, withholding ordinary clarification, or freezing progress merely because the larger uncertainty is unresolved.',
@@ -6518,7 +6542,7 @@ export function createRecursionRuntime({
       pipelineMode: pipelineDecision?.effectiveMode || (settings.pipelineMode === 'fused' ? 'fused' : 'segmented'),
       promptVersions: {
         promptPacket: PROMPT_PACKET_VERSION,
-        preprocessGraph: 4
+        preprocessGraph: 5
       },
       providerContractHash: PROVIDER_CONTRACT_HASH,
       deckRevisionHash: activeDeckRevisionHash(settings),
@@ -7044,7 +7068,7 @@ export function createRecursionRuntime({
                 .map(sanitizeGeneratedCard),
               'generated'
             ));
-        const generatedCards = !reuseCacheOnly && !cacheCards.length && !providerCards.length
+        const generatedCards = !plan.selection && !reuseCacheOnly && !cacheCards.length && !providerCards.length
           ? filterScopedCards(cardsWithOrigin(
               localCards(snapshot).map(sanitizeGeneratedCard),
               'fallback'
@@ -7116,7 +7140,8 @@ export function createRecursionRuntime({
         const prioritySelection = prioritySelectionForSettings(context.settings);
         return selectHand(
           [...filterCardsForRuntimeScope(deckArtifact.deck.cards, context.settings).cards,
-            ...activeCardDeckAuthoredCards(context.settings)],
+            ...activeCardDeckAuthoredCards(context.settings).filter((card) =>
+              !plan.selection?.authoredCardIds || plan.selection.authoredCardIds.includes(card.id))],
           {
             maxCards: budgetOr(plan.budgets?.maxCards, 6),
             maxTokens: cardEvidenceTokenBudget(context.settings, plan, behaviorPolicy),
@@ -7141,6 +7166,11 @@ export function createRecursionRuntime({
           handId: safeIdentifier(artifact?.handId || '', 'hand', 160),
           cardCount: artifact?.cards?.length || 0,
           omittedCount: artifact?.omitted?.length || 0,
+          authoredCount: (artifact?.cards || []).filter((card) => card.origin === 'authored').length,
+          generatedCount: (artifact?.cards || []).filter((card) => card.origin !== 'authored').length,
+          targetCount: artifact?.metadata?.selection?.targetCount ?? artifact?.metadata?.requestedMaxCards ?? 0,
+          shortfallCount: artifact?.metadata?.selection?.shortfallCount || 0,
+          shortfallReasons: artifact?.metadata?.selection?.shortfallReasons || [],
           authoredCards: (artifact?.cards || []).filter((card) => card.origin === 'authored').map((card) => ({
             id: safeIdentifier(card.id, 'card', 160),
             name: safeText(getActiveCardDeck(context.settings).cards[card.id]?.name || 'Authored card', 120),

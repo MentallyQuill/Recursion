@@ -76,7 +76,7 @@ flowchart LR
 | Mode | Auto versus Manual enforcement. | Provider lane depth, prompt size, or semantic relevance. |
 | Card Scope | Family/sub-item preference in Auto and strict family/sub-item whitelist in Manual. | Final prose style or provider cost. |
 | Reasoning Level | Provider lane policy and Reasoner cost depth. | Prompt size, card family focus, or intervention strength. |
-| Min Cards / Max Cards | Reasoning Level card-count bounds: Low uses Min, Medium/High use the average, Ultra uses Max. Runtime also applies the effective Max Cards ceiling before card provider calls. | Prompt section size, provider lane routing, or semantic relevance. |
+| Min Cards / Max Cards | Total hand target: Low uses Min, Medium/High use the rounded-down average, Ultra uses Max. Runtime fills eligible slots before either workflow; mandatory Priority coverage may exceed the target. | Prompt section size, provider lane routing, or semantic relevance. |
 | Strength | Intervention pressure, refresh pressure, cache reuse posture, and composer assertiveness. | Prompt Footprint size or Reasoning Level lane selection. |
 | Focus | Broad family priority profile. | Hard exclusion, except where Manual card scope already excludes a family. |
 | Prompt Footprint | Packet size, section budgets, and detail level. | Provider lane policy, semantic truth, or card-count bounds. |
@@ -142,7 +142,7 @@ It must not increase `promptFootprint`, section budgets, Reasoning Level, provid
 
 | Strength | Runtime posture | Arbiter pressure | Composer pressure |
 | --- | --- | --- | --- |
-| Light | Prefer valid cache, avoid churn, select fewer support cards inside the active footprint. | Ask for refresh/regeneration only when relevance or drift risk is clear. | Phrase guidance as gentle, sparse writing support. |
+| Light | Prefer valid cache and avoid churn while retaining the configured hand target. | Ask for refresh/regeneration only when relevance or drift risk is clear. | Phrase guidance as gentle, sparse writing support. |
 | Balanced | Default V1 behavior. | Normal refresh, card-job, and lifecycle pressure. | Concise guidance over selected evidence. |
 | Strong | Be more willing to refresh stale or weak cards, preserve high-risk cards, and use the active footprint fully. | Ask for regeneration when scene drift, scene-constraint risk, or weak coverage is plausible. | Phrase selected constraints firmly and prefer explicit guardrails when evidence supports them. |
 
@@ -152,7 +152,7 @@ Mechanical effects:
 - Local fallback plan uses Strength to choose conservative versus full hand pressure.
 - Post-Arbiter plan shaping keeps Strength inside the active card budget instead of enlarging the hand.
 - Post-Arbiter card-job budgeting trims provider work before generation when the Arbiter over-requests the effective hand size.
-- Hand selection applies Strength inside existing max-card and token caps; Light uses lean pressure, Balanced uses normal pressure, and Strong uses the active footprint fully without enlarging it.
+- Strength controls guidance emphasis and refresh pressure. It does not subtract cards from the configured hand target; Light, Balanced, and Strong use the same count contract.
 - Composer gets a Strength line so Utility and Reasoner composition use matching assertiveness.
 - Diagnostics record the resolved Strength policy and any plan shaping labels.
 
@@ -207,12 +207,16 @@ Reasoning Level applies the values mechanically:
 
 | Reasoning Level | Card budget behavior |
 | --- | --- |
-| Low | Cap positive `maxCards` at Min Cards. |
-| Medium | Cap positive `maxCards` at Normal Cards. |
-| High | Cap positive `maxCards` at Normal Cards. |
-| Ultra | Raise and cap positive `maxCards` at Max Cards. |
+| Low | Target Min Cards. |
+| Medium | Target Normal Cards. |
+| High | Target Normal Cards. |
+| Ultra | Target Max Cards. |
 
 Defaults preserve the original V1 pressure: Min Cards `3`, Max Cards `10`, Normal Cards `6`.
+
+These are total-hand targets, including authored cards and generated families. Auto selection includes every runnable Priority card in deck order first; Priority coverage may exceed the target. Ordinary jobs fill remaining capacity in Arbiter relevance order. If the Arbiter supplies too few families, runtime completes the selection from eligible families in stable order before either workflow executes. A smaller model budget or skip action cannot lower a positive target. Zero requests no ordinary cards. Disabled and draft cards remain unavailable.
+
+Both Fused and Segmented execute this finalized selection. Fused keeps valid bundle items and repairs missing siblings individually. The delivered hand records its target, authored/generated counts, and any shortfall caused by insufficient eligible cards or failed generation. It never fabricates fallback cards to hide failed selected work. Same-turn cached hands retain this summary. Changed selection contracts invalidate old checkpoints.
 
 ## Prompt Footprint Contract
 
@@ -361,7 +365,7 @@ Current source-backed behavior:
 - `influencePolicyForSettings(settings)` derives Strength, Focus, Prompt Footprint, card-budget, reasoning-level, and injection policy data from normalized settings.
 - `behaviorPolicyPromptLines(policy)` adds compact Strength, Focus, and Prompt Footprint policy lines to the Utility Arbiter request.
 - `runPolicyForEffectivePlan(settings, plan)` resolves the stored Prompt Footprint plus the Arbiter's current-run footprint request into an effective footprint for hand selection, composition, and diagnostics.
-- Runtime clamps Arbiter card budgets through Reasoning Level plus Min/Max Cards, applies Strength and Focus as mechanical pressure, and records compact plan-shaping diagnostics.
+- Runtime owns the total hand target through Reasoning Level plus Min/Max Cards, preserves Arbiter ranking, and fills missing eligible slots before workflow dispatch. Strength and Focus shape guidance and ordering without lowering the target.
 - Reasoning Level derives provider reasoning intent per work category: guidance composition scales from minimal to medium/high, High and Ultra Reasoner Arbiter work uses medium, Reasoner card work stays minimal except Ultra, and provider tests always use minimal.
 - Prompt composition consumes the effective behavior policy, guidance/card-evidence/guardrail budgets, and composer policy lines without exposing raw provider output or hidden reasoning.
 

@@ -62,6 +62,9 @@ function createHarness({
     pipelineMode: 'segmented',
     modelAttemptsPerStep: 2,
     reasoningLevel: 'low',
+    // Lifecycle fixtures request one card unless the scenario specifies a larger hand.
+    minCards: 1,
+    maxCards: 1,
     reasonerUse: 'off',
     ...settings
   });
@@ -739,7 +742,7 @@ function roleCounts(calls = []) {
       throw new Error(`unexpected provider role ${roleId}`);
     }
   };
-  const { runtime, storage } = createHarness({ provider });
+  const { runtime, storage } = createHarness({ provider, settings: { minCards: 2, maxCards: 2 } });
   const preparing = runtime.prepareForGeneration({
     userMessage: 'I ask what she remembers.',
     hostGeneration: true
@@ -1210,19 +1213,15 @@ function roleCounts(calls = []) {
     hostGeneration: true
   });
 
-  assertEqual(result.ok, true, 'corrected empty refresh plan completes');
-  assertEqual(arbiterAttempts, 2, 'empty refresh plan consumes the Arbiter correction attempt');
-  assert(
-    providerCalls[1].request.prompt.includes('refresh-cards requires at least one executable card job'),
-    'correction request explains the semantic invariant'
-  );
+  assertEqual(result.ok, true, 'empty ranking is filled from eligible families');
+  assertEqual(arbiterAttempts, 1, 'runtime completes the configured target without another Arbiter call');
   assertEqual(
     providerCalls.filter((entry) => entry.roleId === 'fusedCardBundle').length,
     1,
     'corrected plan creates one Fused bundle call'
   );
   const manifest = await storage.loadPipelineRun('chat-preprocess');
-  assertEqual(manifest.stageRecords['preprocess.arbiter'].attempts.total, 2, 'Arbiter records both attempts');
+  assertEqual(manifest.stageRecords['preprocess.arbiter'].attempts.total, 1, 'Arbiter records the accepted ranking');
   assertEqual(manifest.stageRecords['preprocess.cards.fused'].state, 'completed', 'corrected Fused stage completes');
 }
 
@@ -1267,7 +1266,7 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
   };
   const { runtime, storage } = createHarness({
     provider,
-    settings: { pipelineMode: 'fused' }
+    settings: { pipelineMode: 'fused', minCards: 0, maxCards: 0 }
   });
 
   const result = await runtime.prepareForGeneration({
@@ -1298,7 +1297,7 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
   };
   const { runtime, storage } = createHarness({
     provider,
-    settings: { pipelineMode: 'segmented' }
+    settings: { pipelineMode: 'segmented', minCards: 0, maxCards: 0 }
   });
 
   const result = await runtime.prepareForGeneration({
@@ -1366,6 +1365,7 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
     provider,
     settings: {
       pipelineMode: 'segmented',
+      minCards: 3, maxCards: 3,
       modelAttemptsPerStep: 2
     }
   });
@@ -1420,7 +1420,8 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
     provider,
     settings: {
       pipelineMode: 'segmented',
-      modelAttemptsPerStep: 2
+      modelAttemptsPerStep: 2,
+      minCards: 2, maxCards: 2
     }
   });
   const result = await runtime.prepareForGeneration({
@@ -1489,7 +1490,7 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
   };
   const { runtime, storage } = createHarness({
     provider,
-    settings: { pipelineMode: 'fused' }
+    settings: { pipelineMode: 'fused', minCards: 3, maxCards: 3 }
   });
   const result = await runtime.prepareForGeneration({
     userMessage: 'I ask what she remembers.',
@@ -1568,6 +1569,7 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
     provider,
     settings: {
       pipelineMode: 'fused',
+      minCards: 2, maxCards: 2,
       modelAttemptsPerStep: 2
     }
   });
@@ -1934,7 +1936,8 @@ for (const proposed of [
   harness.setSnapshot(next);
   const result = await harness.runtime.prepareForGeneration({ userMessage: { text: 'What does that mean?', mesid: 4 } });
   assertEqual(result.ok, true, 'mixed generation and reuse prepares successfully');
-  assertDeepEqual(harness.runtime.view().lastHand.cards.map(card => card.family), ['Knowledge'], 'new turns never silently reuse previous-turn scene cards');
+  assertDeepEqual(harness.runtime.view().lastHand.cards.map(card => card.family), ['Knowledge', 'Scene Frame', 'Active Cast', 'Scene Constraints'], 'new turn fills the target after the ranked Knowledge card');
+  assert(!harness.runtime.view().lastHand.cards.some(card => card.id === cachedId), 'new turn never silently reuses the previous-turn card');
 }
 {
   const first = createHarness({ provider: immediateProvider([]) });

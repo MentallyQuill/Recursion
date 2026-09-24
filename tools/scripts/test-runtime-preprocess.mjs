@@ -218,6 +218,34 @@ function roleCounts(calls = []) {
   }, {});
 }
 
+// Formatting must survive provider validation, durable checkpoints, hand selection, and injection.
+for (const pipelineMode of ['fused', 'segmented']) {
+  const promptText = 'Scene guidance:\n1. Keep the response grounded in what Mara had already established about the damaged hatch, the completed pressure test, the missing maintenance records, and the crew waiting beside the sealed door.\n2. Preserve the completed inspection.';
+  const calls = [];
+  const harness = createHarness({ settings: { pipelineMode }, provider: {
+    async generate(roleId, request) {
+      calls.push(roleId);
+      if (roleId === 'utilityArbiter') return arbiterResponse(request);
+      if (roleId === 'guidanceComposer') return guidanceResponse(request);
+      const card = { promptText, evidenceRefs: ['message:2'] };
+      if (roleId === 'fusedCardBundle') return { ok: true, data: { items: [{ family: 'Scene Frame', ...card }] } };
+      if (roleId === 'sceneFrameCard') return { ok: true, data: card };
+      throw new Error('Unexpected role: ' + roleId);
+    }
+  } });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Please explain.', hostGeneration: true });
+  assertEqual(result.ok, true, pipelineMode + ' accepts formatted instruction evidence throughout preparation');
+  assertEqual(harness.runtime.view().lastHand.cards[0].promptText, promptText, 'hand retains original instruction lines');
+  assert(result.packet.sections.cardEvidence.includes('\n  2. Preserve the completed inspection.'), 'prompt injection preserves the final instruction line');
+  assertEqual(calls.filter(role => role === 'sceneFrameCard').length, pipelineMode === 'segmented' ? 1 : 0, 'valid Fused instructions never trigger individual repair');
+  const manifest = await harness.storage.loadPipelineRun('chat-preprocess');
+  assertEqual(manifest.recoveryBudget.recoveryUsed, 0, 'formatting causes no retry or recovery charge');
+  const savedHand = await harness.storage.loadPipelineArtifact('chat-preprocess', manifest.operationId,
+    manifest.stageRecords['preprocess.hand'].checkpoint.artifactRef.artifactId);
+  assertEqual(savedHand.cards[0].promptText, promptText, 'durable hand artifact retains instruction boundaries');
+
+}
+
 // Refinement is required analysis of the selected result before Guidance.
 {
   const calls = [];

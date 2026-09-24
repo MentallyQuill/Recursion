@@ -2405,7 +2405,8 @@ function sanitizeGeneratedCard(card) {
   const sanitized = {
     ...card,
     id: safeId || undefined,
-    promptText: safeText(card?.promptText || '', Infinity),
+    // Instruction boundaries must survive checkpointing and deck revalidation.
+    promptText: safeTextSource(card?.promptText || '', Infinity).replace(SECRET_TEXT_PATTERN, '[redacted]'),
     summary: safeText(card?.summary || card?.promptText || '', 400),
     evidenceRefs: Array.isArray(card?.evidenceRefs)
       ? card.evidenceRefs.map((entry) => safeText(entry, 120)).filter(Boolean).slice(0, 12)

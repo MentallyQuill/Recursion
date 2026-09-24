@@ -535,10 +535,20 @@ function repairProviderEvidenceRefs(value, context = {}) {
   return fallback || value;
 }
 
+function cleanCardPromptText(value) {
+  // Keep the structure the model was asked to produce. Flattening here makes
+  // later instruction lines invisible to validation and prompt composition.
+  return String(value ?? '')
+    .split(/\r\n?|\n/)
+    .map((line) => cleanText(line, CARD_TEXT_LIMIT))
+    .filter(Boolean)
+    .join('\n');
+}
+
 function instructionLines(promptText) {
   return String(promptText || '')
     .split(/\n+|;\s+/)
-    .map((line) => cleanText(line.replace(/^[-*]\s*/, ''), TEXT_LIMIT))
+    .map((line) => cleanText(line.replace(/^\s*(?:[-*+\u2022]\s*|\d+[.)]\s+)/, ''), CARD_TEXT_LIMIT))
     .filter(Boolean);
 }
 
@@ -554,10 +564,12 @@ function assertInstructionShapedCardText(promptText) {
 
 function assertCardPromptTextSafe(catalog, promptText) {
   assertInstructionShapedCardText(promptText);
-  const hiddenMatch = unsafeInstructionMatch(promptText, CARD_FORBIDDEN_PATTERNS);
+  // Content rules span lines even though the instruction-shape check uses them.
+  const safetyText = compact(promptText, CARD_TEXT_LIMIT);
+  const hiddenMatch = unsafeInstructionMatch(safetyText, CARD_FORBIDDEN_PATTERNS);
   if (hiddenMatch) throw new Error('Card promptText contains unsafe hidden-reasoning wording [hidden-content]: "' + hiddenMatch + '".');
   if (catalog.family !== 'Character Motivation') return;
-  const motiveMatch = unsafeInstructionMatch(promptText, CHARACTER_MOTIVATION_FORBIDDEN_PATTERNS);
+  const motiveMatch = unsafeInstructionMatch(safetyText, CHARACTER_MOTIVATION_FORBIDDEN_PATTERNS);
   if (motiveMatch) throw new Error('Character Motivation promptText contains unsafe internal-thought wording [private-claim]: "' + motiveMatch + '".');
 }
 
@@ -935,7 +947,7 @@ export function normalizeCard(input = {}, context = {}) {
   const source = asObject(input);
   const ctx = asObject(context);
   const catalog = resolveCatalog(source);
-  const promptText = cleanText(source.promptText ?? source.text ?? source.claim, CARD_TEXT_LIMIT);
+  const promptText = cleanCardPromptText(source.promptText ?? source.text ?? source.claim);
   if (!promptText) throw new Error('Card promptText is required.');
   assertCardPromptTextSafe(catalog, promptText);
 

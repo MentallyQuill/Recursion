@@ -139,7 +139,7 @@ A normalized card contains:
 - `arbiter`
 - optional `inspectorNotes`
 
-`promptText` is the only card text eligible for prompt composition. It is instruction-shaped private evidence, not story prose: short lines such as `Keep Jack at Capodichino immediately after landing`, `Preserve his weak cover and lack of field readiness`, and `Do not skip the sergeant response beat`. It must not contain mini-scenes, dialogue, sensory recap paragraphs, or decorative narration. `summary` supports scanning. `inspectorNotes` are diagnostics and must never be injected.
+`promptText` is the only card text eligible for prompt composition. It is instruction-shaped private evidence, not story prose: short lines such as `Keep Jack at Capodichino immediately after landing`, `Preserve his weak cover and lack of field readiness`, and `Do not skip the sergeant response beat`. It must not contain mini-scenes, dialogue, sensory recap paragraphs, or decorative narration. `summary` supports scanning. `inspectorNotes` are diagnostics and must never be injected. Card normalization and runtime sanitization preserve instruction line boundaries through validation, checkpoints, hand selection, and injection; only within-line whitespace is compacted. CRLF/CR normalize to LF. The shape check recognizes ordinary bullet and numbered-list markers without rewriting the stored instructions. A harmless heading must not hide the instruction lines that follow it. Narrative-prose checks still apply; formatting alone cannot make prose a valid card. Content-safety checks use a whitespace-compacted validation copy so a line break cannot split a forbidden phrase; the stored instructions keep their line breaks.
 
 ## Lifecycle
 

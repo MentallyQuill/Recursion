@@ -6659,7 +6659,7 @@ export function createRecursionRuntime({
       pipelineMode: pipelineDecision?.effectiveMode || (settings.pipelineMode === 'fused' ? 'fused' : 'segmented'),
       promptVersions: {
         promptPacket: PROMPT_PACKET_VERSION,
-        preprocessGraph: 7
+        preprocessGraph: 8
       },
       providerContractHash: PROVIDER_CONTRACT_HASH,
       deckRevisionHash: activeDeckRevisionHash(settings),
@@ -8391,6 +8391,28 @@ export function createRecursionRuntime({
         && storedManifest.turnKeyHash === turnIdentity.turnKeyHash
         && !['stale', 'abandoned'].includes(storedManifest.state)
       ) {
+        // A same-turn identity does not imply that its saved execution contract
+        // is current. Check before restoring artifacts or returning a completed
+        // packet, including host callbacks that run before reload restoration.
+        const reuseStatus = compareRunProvenance({
+          ...provenance,
+          sourceIdentity: storedManifest.provenance?.sourceIdentity || provenance.sourceIdentity
+        }, storedManifest.provenance);
+        if (!reuseStatus.reusable) {
+          await revokePreviousTurn({ chatKey, storedManifest, reason: 'provenance-changed' });
+          updateTurnScope(turnIdentity, {
+            generationClassification: diagnosticClassification,
+            operationId: '',
+            reused: false,
+            invalidated: true
+          });
+          return startFreshDurablePreprocess(context, {
+            queuedIntent: null,
+            hostGeneration,
+            nativeGenerationType,
+            diagnosticClassification
+          });
+        }
         activeContext = await restoreDurablePreprocessContext(
           storedManifest,
           snapshot,

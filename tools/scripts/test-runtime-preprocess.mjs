@@ -2032,16 +2032,32 @@ for (const proposed of [
   assertDeepEqual(harness.runtime.view().lastHand.cards.map(card => card.family), ['Knowledge', 'Scene Frame', 'Active Cast', 'Scene Constraints'], 'new turn fills the target after the ranked Knowledge card');
   assert(!harness.runtime.view().lastHand.cards.some(card => card.id === cachedId), 'new turn never silently reuses the previous-turn card');
 }
-{
+for (const restoreFirst of [true, false]) for (const stateBefore of ['paused', 'completed']) {
   const first = createHarness({ provider: immediateProvider([]) });
   await first.runtime.prepareForGeneration({ userMessage: { text: 'I ask what she remembers.', mesid: 2 } });
   const manifest = await first.storage.loadPipelineRun('chat-preprocess');
-  manifest.state = 'paused';
-  manifest.provenance.promptVersions.preprocessGraph = 1;
+  manifest.state = stateBefore;
+  // Version 7 could checkpoint a rate-limited bundle as completed and spend
+  // every repair reservation on transport failures. Never resume that contract.
+  manifest.provenance.promptVersions.preprocessGraph = 7;
+  manifest.recoveryBudget.recoveryUsed = manifest.recoveryBudget.recoveryLimit;
+  manifest.recoveryBudget.elapsedActiveMs = manifest.recoveryBudget.deadlineMs;
   await first.storage.savePipelineRun('chat-preprocess', manifest);
-  const restored = createHarness({ storage: first.storage, provider: immediateProvider([]) });
-  const state = await restored.runtime.restoreExecutionState();
-  assertEqual(state.state, 'stale', 'checkpoints created under fixed-ranking selection cannot resume under the new contract');
+  const calls = [];
+  const restored = createHarness({ storage: first.storage, provider: immediateProvider(calls) });
+  if (restoreFirst) {
+    const state = await restored.runtime.restoreExecutionState();
+    assertEqual(state.state, 'stale', 'old recovery checkpoints are invalidated on reload');
+    assertEqual(calls.length, 0, 'reload invalidation performs no provider work');
+  }
+  const result = await restored.runtime.prepareForGeneration({
+    userMessage: { text: 'I ask what she remembers.', mesid: 2 }, hostGeneration: true
+  });
+  assertEqual(result.ok, true, 'sending the same turn rebuilds obsolete work without a second manual retry');
+  const fresh = await first.storage.loadPipelineRun('chat-preprocess');
+  assert(fresh.operationId !== manifest.operationId, 'obsolete operation is replaced before replay');
+  assertEqual(fresh.recoveryBudget.recoveryUsed, 0, 'obsolete recovery exhaustion cannot poison fresh work');
+  assertEqual(calls.filter(call => call.roleId === 'utilityArbiter').length, 1, 'obsolete completed artifacts cannot skip fresh planning');
 }
 {
   const { createDefaultCardDeck } = await import('../../src/pre-process-decks.mjs');

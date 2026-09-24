@@ -21,3 +21,11 @@ Validation completed with all 106 offline test scripts, Playwright readiness, an
 ## Scope
 
 Tests use controlled provider results and do not establish upstream service availability or a live model failure rate. The running SillyTavern installation and user data were not changed. Persisted cooldown restoration covers the same operation after a browser restart; unrelated new operations do not inherit its saved failure state. Live profile queues coordinate all calls sharing a connection during the current session.
+
+## Follow-up: saved operation replay
+
+The default-user Story chat continued to replay its original operation after the rate-limit fix was installed. Its Fused fallback was checkpointed as completed under preprocess graph contract 7, while the shared recovery allowance remained exhausted. Installing new retry code alone did not invalidate those saved artifacts.
+
+Preprocess graph contract 8 invalidates those checkpoints. The normal generation entry point also compares execution provenance before restoring saved artifacts or returning a completed packet, so Send can rebuild obsolete work even before startup restoration runs. The same-turn source identity remains bound to the saved source band; current-contract same-turn reuse still passes its existing tests.
+
+Regression coverage exercises paused and completed obsolete operations with an exhausted allowance, both with and without explicit reload restoration. Each rebuilds successfully with fresh planning and a new allowance, without an extra manual retry. All 106 offline scripts passed, and independent review found no actionable issues. Reopening the actual default-user Story branch with the updated runtime persisted `state: stale`, `pauseReason: provenance-changed`, and `staleChangedFields: [promptVersions]` for the old operation. Live provider generation requires separate verification; checkpoint invalidation alone is not evidence of a successful narration.

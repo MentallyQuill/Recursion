@@ -8,7 +8,7 @@ import {
 } from '../../src/cards.mjs';
 import { assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
-assertEqual(PROVIDER_CONTRACT_VERSION, 10, 'provider contract includes configured output budgets');
+assertEqual(PROVIDER_CONTRACT_VERSION, 11, 'provider contract includes bounded card refinement roles');
 const schema = jsonSchemaForRequest({
   roleId: 'sceneFrameCard',
   responseSchema: 'recursion.cardPayload.v1',

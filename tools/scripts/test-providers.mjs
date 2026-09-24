@@ -112,7 +112,7 @@ assertEqual(roleLane('unknownRole'), '', 'unknown roles have no lane');
 assertEqual(roleLane('utilityArbiter'), 'utility', 'Utility Arbiter uses Utility');
 assertEqual(roleLane('reasonerComposer'), 'reasoner', 'Reasoner Composer uses Reasoner');
 assert(UTILITY_ROLE_IDS.includes('providerTest'), 'Utility role catalog contains provider certification');
-assertDeepEqual(REASONER_ROLE_IDS, ['reasonerComposer', 'postProcessGuidanceReasoner'], 'Reasoner role catalog remains bounded');
+assertDeepEqual(REASONER_ROLE_IDS, ['reasonerComposer', 'postProcessGuidanceReasoner', 'cardRefinementDraft', 'cardRefinementReview'], 'Reasoner role catalog remains bounded');
 assert(PROVIDER_CONTRACT_VERSION >= 7, 'provider contract version is current');
 
 assertDeepEqual(

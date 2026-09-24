@@ -552,9 +552,8 @@ function cardSystemIconSvg(kind) {
     attrs: { ...attrs, viewBox: '0 0 24 24' },
     dataset: { recursionCardStateIcon: kind }
   }, [
-    el('path', { attrs: { d: 'M2 10c2-4 5.5-6 9-6s7 2 9 6c-.5 1-1.1 1.9-1.8 2.6M2 10c1.7 3.5 4.7 5.7 8 6', ...stroke, 'stroke-width': '1.8' } }),
-    el('circle', { attrs: { cx: '11', cy: '10', r: '2.8', ...stroke, 'stroke-width': '1.8' } }),
-    el('path', { attrs: { d: 'M21 16a4.4 4.4 0 1 0 .2 4M21 12.8V16h-3.2', ...stroke, 'stroke-width': '1.8' } })
+    el('path', { attrs: { fill: 'currentColor', d: 'M12,7a4,4,0,1,0,4,4A4,4,0,0,0,12,7Zm0,6a2,2,0,1,1,2-2A2,2,0,0,1,12,13Zm9.938-2.345a.987.987,0,0,1,0,.69,13.339,13.339,0,0,1-1.08,2.264,1,1,0,1,1-1.715-1.028A11.3,11.3,0,0,0,19.928,11C18.451,7.343,15.373,5,12,5S5.549,7.343,4.072,11a9.315,9.315,0,0,0,6.167,5.787,1,1,0,1,1-.478,1.942,11.393,11.393,0,0,1-7.7-7.383.99.99,0,0,1,0-.691C3.773,6,7.674,3,12,3S20.227,6,21.938,10.655Z' } }),
+    el('path', { attrs: { fill: 'currentColor', d: 'M18 13l1.3 3.7L23 18l-3.7 1.3L18 23l-1.3-3.7L13 18l3.7-1.3Z' } })
   ]);
   if (CARD_STATE_ICON_PATHS[kind]) return el('svg', {
     attrs: { ...attrs, viewBox: '0 0 24 24' },

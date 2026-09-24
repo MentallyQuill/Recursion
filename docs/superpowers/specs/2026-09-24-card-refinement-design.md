@@ -8,7 +8,7 @@ The user approved a fourth card state, Priority + Refinement, and explicitly aut
 
 The persisted `selectionState` values are `off`, `active`, `priority`, and `refinement`. Auto cycles in that order; Manual cycles off, active, refinement, off (existing priority is equivalent to active in Manual). Refinement always forces inclusion in both modes, preserving authored deck order and the existing mandatory Priority overflow behavior. Draft and disabled cards do not run. Default-deck overrides, custom decks, duplication, export/import, and active-deck fingerprints preserve the state.
 
-The short visible label is Refinement. The existing compact eye button uses a distinct eye with a circular arrow; tooltip: "Always included. Reviews and improves this card's scene analysis before narration." Counts distinguish Priority from Refinement while both remain mandatory. Existing bulk enable resets runnable cards to active; bulk disable turns them off. No new dashboard or provider configuration surface.
+The short visible label is Refinement. The existing compact eye button uses a distinct eye with a small four-point sparkle; tooltip: "Always included. Reviews and improves this card's scene analysis before narration." Counts distinguish Priority from Refinement while both remain mandatory. Existing bulk enable resets runnable cards to active; bulk disable turns them off. No new dashboard or provider configuration surface.
 
 ## Execution contract
 

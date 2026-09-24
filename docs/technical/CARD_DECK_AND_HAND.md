@@ -183,7 +183,7 @@ Card Deck selection state adds a user-steering layer above normal Auto sorting:
 - `refinement` cards are mandatory in both modes and reviewed before Guidance.
 - `priority` cards are Auto-first. Runtime derives ordered Priority card ids and, for current built-in deck cards, ordered Priority families. `selectHand(...)` accepts `forcedCardIds` for exact hand-card forcing and `forcedFamilies` for generated family-card forcing.
 
-The Cards dropdown represents those states with the supplied eye icons: slashed eye for `off`, open eye for `active`, eye-plus for `priority`, and an eye with a circular arrow for `refinement`. The deck header has two bulk actions for all decks: open eye sets all runnable cards to normal `active` and clears Priority and Refinement, while slashed eye sets all runnable cards to `off`. Draft cards are left untouched, and the Default deck persists operator states through its overlay without requiring duplication.
+The Cards dropdown represents those states with the supplied eye icons: slashed eye for `off`, open eye for `active`, eye-plus for `priority`, and an eye with a small four-point sparkle for `refinement`. The deck header has two bulk actions for all decks: open eye sets all runnable cards to normal `active` and clears Priority and Refinement, while slashed eye sets all runnable cards to `off`. Draft cards are left untouched, and the Default deck persists operator states through its overlay without requiring duplication.
 
 If Priority exceeds the turn card limit, runtime includes every runnable Priority card in deck order and includes no ordinary Active cards. Priority generated families are required stages: a provider failure blocks preparation rather than silently omitting the card.
 

@@ -3486,7 +3486,7 @@ try {
   assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], 'refinement', 'second Auto row tap refines a bundled Default card');
   assert(root.querySelector('[data-recursion-card-toggle-row]').getAttribute('aria-label').includes('Refinement card'), 'refinement state has an accessible name');
   assertEqual(root.querySelector('[data-recursion-card-toggle-row]').getAttribute('title'), "Always included. Reviews and improves this card's scene analysis before narration.", 'refinement tooltip explains required inclusion and review');
-  assert(root.querySelectorAll('[data-recursion-card-state-icon]').some(node => node.dataset.recursionCardStateIcon === 'eye-refinement'), 'refinement renders the distinct eye with circular arrow');
+  assert(root.querySelectorAll('[data-recursion-card-state-icon]').some(node => node.dataset.recursionCardStateIcon === 'eye-refinement'), 'refinement renders the distinct eye with a small four-point sparkle');
   root.querySelector('[data-recursion-card-toggle-row]').click();
   assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], 'off', 'third Auto row tap disables a bundled Default card');
   root.querySelector('[data-recursion-card-toggle-row]').click();

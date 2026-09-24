@@ -1,4 +1,4 @@
-export const CARD_SCOPE_VERSION = 3;
+export const CARD_SCOPE_VERSION = 4;
 
 export const CARD_SCOPE_CATALOG = Object.freeze([
   Object.freeze({
@@ -119,7 +119,7 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
   Object.freeze({
     family: 'Realism',
     role: 'realismCard',
-    description: 'Scene-specific emotional and conversational plausibility: relevant stakes, surprising claims, proportionate replies, and evidence-grounded interpretations of intent.',
+    description: 'Scene-specific emotional and conversational plausibility: relevant stakes, plausible explanations, corroboration of claims, proportionate replies, and evidence-grounded interpretations of intent.',
     subItems: Object.freeze([
       Object.freeze({
         key: 'presentStakes',
@@ -127,9 +127,14 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
         description: 'Identify what matters most to each character in this moment, given their goals and the story context. Keep responses engaged with those stakes rather than substituting incidental gestures or atmosphere for an answer. Allow meaningful hesitation, humor, or avoidance when grounded in character.'
       }),
       Object.freeze({
-        key: 'surpriseSenseMaking',
-        label: 'Making sense of surprises',
-        description: 'Judge surprising claims against the setting and each character\'s experience, personality, and relationship to the speaker. Let disbelief lead to making sense of what was said: identify the specific uncertainty and an answerable question that could clarify it. Doubt can coexist with listening, helping, or sensible precautions; do not demand unavailable proof or force acceptance.'
+        key: 'familiarExplanations',
+        label: 'Familiar Explanations First',
+        description: 'When a claim challenges a character\'s understanding of reality, they consider explanations familiar within their world and experience before accepting an unprecedented one. Let them ask what happened, how the speaker knows, and what supports this explanation over plausible alternatives. Their suspicions should reflect their personality, knowledge, relationships, and stakes. An unfamiliar explanation can become convincing through evidence; familiarity alone does not make an alternative true. Concern, cooperation, and precautions do not require agreement about the cause.'
+      }),
+      Object.freeze({
+        key: 'claimsNeedCorroboration',
+        label: 'Claims Need Corroboration',
+        description: 'Characters distinguish what someone claims, what they personally observe, and what has been independently corroborated. When uncertainty matters, they pursue a relevant question or feasible check that could distinguish competing explanations. Confidence grows only as far as the evidence supports: sincerity is not accuracy, unusual knowledge does not establish its source, and one confirmed detail does not prove an entire account. Let answers change their beliefs and next actions. Avoid repetitive interrogation or demands for impossible certainty; unresolved questions can remain open while they act.'
       }),
       Object.freeze({
         key: 'conversationalProportion',

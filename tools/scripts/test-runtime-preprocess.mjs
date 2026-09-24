@@ -1962,7 +1962,7 @@ for (const proposed of [
   assertEqual(selectedEvent.details.selection.proposed[0].family, 'Character Motivation', 'persisted journal retains the omitted original proposal');
 }
 
-// Realism is one optional analysis, never four mandatory cards.
+// Realism is one optional analysis, never five mandatory cards.
 for (const pipelineMode of ['segmented', 'fused']) for (const selectRealism of [true, false]) {
   const calls = [];
   let installed;
@@ -1989,12 +1989,12 @@ for (const pipelineMode of ['segmented', 'fused']) for (const selectRealism of [
   const cards = harness.runtime.view().lastHand.cards;
   assertDeepEqual(cards.map(card => card.family), [selectRealism ? 'Realism' : 'Knowledge'], 'Arbiter alone chooses whether Realism occupies the hand slot');
   const realismCalls = calls.filter(call => call.roleId === 'realismCard' || (call.roleId === 'fusedCardBundle' && call.request.requestedCards.some(card => card.family === 'Realism')));
-  assertEqual(realismCalls.length, selectRealism ? 1 : 0, 'four Realism facets use at most one analysis call');
+  assertEqual(realismCalls.length, selectRealism ? 1 : 0, 'five Realism facets use at most one analysis call');
   if (selectRealism) {
-    for (const label of ['What matters now', 'Making sense of surprises', 'Conversational proportion', 'Interpreting intent']) {
+    for (const label of ['What matters now', 'Familiar Explanations First', 'Claims Need Corroboration', 'Conversational proportion', 'Interpreting intent']) {
       assert(realismCalls[0].request.prompt.includes(label), 'Realism request carries facet: ' + label);
     }
-    for (const safeguard of ['do not demand unavailable proof or force acceptance', 'Do not impose word quotas', 'urgent action already suffices']) {
+    for (const safeguard of ['familiarity alone does not make an alternative true', 'unusual knowledge does not establish its source', 'Avoid repetitive interrogation or demands for impossible certainty', 'Do not impose word quotas', 'urgent action already suffices']) {
       assert(realismCalls[0].request.prompt.includes(safeguard), pipelineMode + ' preserves complete Realism guidance: ' + safeguard);
     }
     assert(JSON.stringify(installed).includes(cards[0].promptText), 'Realism analysis reaches installed narration packet');

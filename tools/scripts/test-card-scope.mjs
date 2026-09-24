@@ -49,7 +49,7 @@ const EXPECTED_SCOPE_CATALOG = Object.freeze([
   {
     family: 'Realism',
     role: 'realismCard',
-    subItems: ["presentStakes","surpriseSenseMaking","conversationalProportion","interpretingIntent"]
+    subItems: ['presentStakes', 'familiarExplanations', 'claimsNeedCorroboration', 'conversationalProportion', 'interpretingIntent']
   },
   {
     family: 'Scene Constraints',
@@ -95,7 +95,7 @@ assertDeepEqual(
 );
 assert(CARD_SCOPE_CATALOG.every((family) => !family.family.includes('/')), 'card scope category labels are single-focus names without slashes');
 assert(CARD_SCOPE_CATALOG.every((family) => family.subItems.length >= 2), 'each family has sub-items');
-assertEqual(CARD_SCOPE_TOTAL_SUB_ITEMS, 38, 'scope catalog exposes audited V1 focus count');
+assertEqual(CARD_SCOPE_TOTAL_SUB_ITEMS, 39, 'scope catalog exposes audited V1 focus count');
 assertEqual(
   CARD_SCOPE_TOTAL_SUB_ITEMS,
   CARD_SCOPE_CATALOG.reduce((sum, family) => sum + family.subItems.length, 0),

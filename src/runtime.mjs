@@ -137,15 +137,13 @@ import {
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
 const PROVIDER_TEST_TIMEOUT_MS = 30000;
 const STORAGE_SCHEMA_VERSION = 1;
-const RUNTIME_CACHE_CONTRACT_VERSION = 3;
+const RUNTIME_CACHE_CONTRACT_VERSION = 4;
 const DEFAULT_CHAT_ID = 'chat';
 const DEFAULT_SCENE_KEY = 'scene';
 const INSTALL_FAILURE_LABEL = 'Prompt install failed. Narration stopped.';
 const CLEAR_FAILURE_LABEL = 'Prompt clear failed. Recursion skipped without clearing host prompt.';
 const STALE_INSTALL_LABEL = 'Recursion skipped: host turn changed before prompt install.';
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
-const SNAPSHOT_MESSAGE_TEXT_LIMIT = 1200;
-const PROVIDER_MESSAGE_TEXT_LIMIT = 900;
 const PLAN_ACTIONS = new Set(['skip', 'reuse-cache', 'refresh-cards', 'compose-brief']);
 const REASONER_DECISION_MODES = new Set(['use', 'skip']);
 const PROMPT_FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
@@ -221,6 +219,11 @@ function safeTextSource(value, limit = 700) {
 
 function safeText(value, limit = 700) {
   return truncate(compact(safeTextSource(value, limit).replace(SECRET_TEXT_PATTERN, '[redacted]'), limit), limit);
+}
+
+// Story evidence must retain its ending. Bound the selected history, not each message.
+function safeMessageText(value) {
+  return safeTextSource(value, Infinity).replace(SECRET_TEXT_PATTERN, '[redacted]');
 }
 
 export function preserveFusedProviderFailure(providerResult = {}) {
@@ -491,7 +494,7 @@ export function cacheContractVersions(settings = {}) {
       promptPacketVersion: PROMPT_PACKET_VERSION,
       cardSelectionContract: 6,
       guidanceSchema: PROMPT_GUIDANCE_SCHEMA,
-      guidanceContract: 2,
+      guidanceContract: 3,
       storyFormSchema: STORY_FORM_SCHEMA
     }),
     providerContractHash: PROVIDER_CONTRACT_HASH,
@@ -550,7 +553,7 @@ function normalizeMessage(message, index) {
     mesid,
     role,
     ...(sender ? { sender } : {}),
-    text: safeText(rawText, SNAPSHOT_MESSAGE_TEXT_LIMIT),
+    text: safeMessageText(rawText),
     textHash: hashJson(String(rawText ?? '')),
     ...(Number.isFinite(swipeId) ? { swipeId: Math.max(0, Math.round(swipeId)) } : {}),
     ...(Number.isFinite(swipeCount) ? { swipeCount: Math.max(0, Math.round(swipeCount)) } : {}),
@@ -600,7 +603,7 @@ function safeProviderRole(value) {
 function providerSafeMessage(message) {
   const source = asObject(message);
   if (source.visible === false) return null;
-  const text = safeText(source.text ?? '', PROVIDER_MESSAGE_TEXT_LIMIT);
+  const text = safeMessageText(source.text ?? '');
   if (!text) return null;
   return {
     mesid: numberOr(source.mesid, 0),
@@ -678,13 +681,13 @@ function normalizePendingUserMessage(userMessage) {
   if (typeof userMessage === 'string') {
     return {
       rawText: userMessage,
-      text: safeText(userMessage, PROVIDER_MESSAGE_TEXT_LIMIT),
+      text: safeMessageText(userMessage),
       textHash: hashJson(userMessage)
     };
   }
   const source = asObject(userMessage);
   const rawText = source.text ?? source.mes ?? '';
-  const text = safeText(rawText, PROVIDER_MESSAGE_TEXT_LIMIT);
+  const text = safeMessageText(rawText);
   const mesid = Number(source.mesid ?? source.id ?? source.messageId);
   return {
     rawText: String(rawText ?? ''),
@@ -707,7 +710,7 @@ function snapshotWithPendingUserMessage(snapshot, userMessage) {
   const alreadyVisible = latest?.role === 'user'
     && (
       (latest?.textHash && pending.textHash && latest.textHash === pending.textHash)
-      || safeText(latest?.text || '', PROVIDER_MESSAGE_TEXT_LIMIT) === pendingText
+      || safeMessageText(latest?.text || '') === pendingText
     )
     && (!Number.isFinite(pending.mesid) || numberOr(latest?.mesid, null) === pending.mesid);
   if (alreadyVisible) return snapshot;
@@ -746,7 +749,7 @@ function snapshotWithoutVisiblePendingUserMessage(snapshot, userMessage) {
   const matchesLatestPending = latest?.role === 'user'
     && (
       (latest?.textHash && pending.textHash && latest.textHash === pending.textHash)
-      || safeText(latest?.text || '', PROVIDER_MESSAGE_TEXT_LIMIT) === pendingText
+      || safeMessageText(latest?.text || '') === pendingText
     )
     && (!Number.isFinite(pending.mesid) || numberOr(latest?.mesid, null) === pending.mesid);
   if (!matchesLatestPending) return snapshot;
@@ -1319,10 +1322,7 @@ function pendingUserInstallStillCurrent(expected, current, pendingUserMessage, o
     && numberOr(message?.mesid, 0) === expectedSignature.latestMesId
     && (
       (message?.textHash && pending.textHash && message.textHash === pending.textHash)
-      || (
-        String(pending.rawText || '').length <= SNAPSHOT_MESSAGE_TEXT_LIMIT
-        && String(message?.text ?? '') === String(pending.rawText || '')
-      )
+      || String(message?.text ?? '') === String(pending.rawText || '')
     );
   if (!latestMatches(expectedLatest) || !latestMatches(currentLatest)) return false;
   if (prefixContentMatches) return true;
@@ -1358,7 +1358,7 @@ function promptInstallComparisonDiagnostics(expected, current, pendingUserMessag
   const expectedLatest = latestVisibleMessage(expected);
   const currentLatest = latestVisibleMessage(current);
   const rawText = String(pending.rawText || '');
-  const rawTextComparable = rawText.length > 0 && rawText.length <= SNAPSHOT_MESSAGE_TEXT_LIMIT;
+  const rawTextComparable = rawText.length > 0;
   const latestDiagnostics = (message) => ({
     role: safeProviderRole(message?.role),
     mesid: numberOr(message?.mesid, -1),
@@ -2120,8 +2120,8 @@ function runtimeError(error) {
 function localCards(snapshot) {
   const latest = latestVisibleMessage(snapshot);
   const latestUser = latestVisibleUserMessage(snapshot);
-  const latestText = safeText(latest?.text || '', 700);
-  const latestUserText = safeText(latestUser?.text || '', 700);
+  const latestText = safeMessageText(latest?.text || '');
+  const latestUserText = safeMessageText(latestUser?.text || '');
   const evidenceMesId = latest?.mesid ?? snapshot.latestMesId ?? 0;
   const userEvidenceMesId = latestUser?.mesid ?? evidenceMesId;
   const context = cardSourceContext(snapshot);
@@ -8112,7 +8112,7 @@ export function createRecursionRuntime({
       const visibleUser = latestVisibleUserMessage(hostSnapshot);
       if (
         visibleUser
-        && safeText(visibleUser.text || '', PROVIDER_MESSAGE_TEXT_LIMIT) === pendingUserMessage.text
+        && safeMessageText(visibleUser.text || '') === pendingUserMessage.text
       ) {
         pendingUserMessage = normalizePendingUserMessage({
           text: pendingUserMessage.rawText,

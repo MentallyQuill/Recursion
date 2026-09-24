@@ -63,7 +63,7 @@ const RISK_FLAGS = new Set(['none', 'continuity-risk', 'voice-risk', 'card-inter
 const CHANGE_KINDS = new Set(['remove', 'rewrite', 'reorder', 'add-supported-detail', 'redirect']);
 const DOMAINS = new Set(['dialogue', 'narrative-execution', 'anti-slop', 'card-fidelity']);
 const SECRET_PATTERN = /(raw[-_\s]*prompt|rawPrompt|provider[-_\s]*response|hidden[-_\s]*reasoning|api[-_\s]*key|authorization\s*[:=]\s*(?:bearer\s+)?[a-z0-9._~+/=-]+|bearer\s+[a-z0-9._~+/=-]+|sk-[a-z0-9_-]+)/ig;
-const MAX_SOURCE = 12000;
+const MAX_SOURCE = Infinity;
 const MAX_EVIDENCE = 120;
 const MAX_EXCERPT = 600;
 const MAX_TOTAL_EVIDENCE = 12000;
@@ -121,7 +121,9 @@ function sourceSentences(source = '') {
 }
 
 function addEvidence(entries, id, kind, authority, excerpt) {
-  const clean = safeText(excerpt, MAX_EXCERPT);
+  const clean = ['user-turn', 'context'].includes(kind)
+    ? preservedText(excerpt)
+    : safeText(excerpt, MAX_EXCERPT);
   if (!clean || entries.some((entry) => entry.id === id)) return;
   entries.push({ id, kind, authority, excerpt: clean });
 }
@@ -137,11 +139,11 @@ export function buildEditorialEvidence(snapshot = {}, sourceText = '') {
   const contextMessages = array(context.messages);
   const latestUserMessage = [...contextMessages].reverse().find((message) => message?.role === 'user');
   const messageText = (message) => message?.text ?? message?.mes ?? message?.content ?? '';
-  const normalizedSource = compact(source).replace(/\s+/g, ' ');
+  const normalizedSource = compact(source, Infinity).replace(/\s+/g, ' ');
   const isActiveAssistantDraft = (message) => (
     message?.role === 'assistant'
     && (() => {
-      const normalizedMessage = compact(messageText(message)).replace(/\s+/g, ' ');
+      const normalizedMessage = compact(messageText(message), Infinity).replace(/\s+/g, ' ');
       if (!normalizedMessage) return false;
       if (normalizedMessage === normalizedSource) return true;
       return normalizedMessage.length >= 200
@@ -186,7 +188,7 @@ export function buildEditorialEvidence(snapshot = {}, sourceText = '') {
   return entries.filter((entry) => {
     if (entry.kind === 'installed-card') return true;
     if (retainedNonCardEvidence >= MAX_EVIDENCE) return false;
-    if (totalNonCardEvidence + entry.excerpt.length > MAX_TOTAL_EVIDENCE) return false;
+    if (retainedNonCardEvidence > 0 && totalNonCardEvidence + entry.excerpt.length > MAX_TOTAL_EVIDENCE) return false;
     retainedNonCardEvidence += 1;
     totalNonCardEvidence += entry.excerpt.length;
     return true;
@@ -615,8 +617,8 @@ export function validateEditorialPass(result = {}, { mode = '', sourceText = '',
   if (FULL_MODES.has(mode)) {
     if (data.patches !== undefined || !object(data.candidate).text) return fail('RECURSION_EDITORIAL_CANDIDATE_INVALID', 'Full editorial mode requires one complete candidate and no patches.');
     const text = String(data.candidate.text);
-    const normalizedSource = compact(sourceText).replace(/\s+/g, ' ');
-    if (compact(text).replace(/\s+/g, ' ') === normalizedSource) return fail('RECURSION_EDITORIAL_NO_EFFECT', 'Editorial candidate did not change the source.');
+    const normalizedSource = compact(sourceText, Infinity).replace(/\s+/g, ' ');
+    if (compact(text, Infinity).replace(/\s+/g, ' ') === normalizedSource) return fail('RECURSION_EDITORIAL_NO_EFFECT', 'Editorial candidate did not change the source.');
     if (text.length > maxCandidateLength(String(sourceText).length, mode)) return fail('RECURSION_EDITORIAL_CANDIDATE_TOO_LARGE', 'Editorial candidate exceeded its bounded output budget.');
     if (!preservesPresentationEnvelope(sourceText, text)) return fail('RECURSION_EDITORIAL_PRESENTATION_INVALID', 'Editorial candidate changed or collapsed the leading presentation envelope.');
     if (!validateClaimList(data.candidate.preservationLedger, known)) return fail('RECURSION_EDITORIAL_EVIDENCE_INVALID', 'Candidate preservation ledger cited invalid evidence.');

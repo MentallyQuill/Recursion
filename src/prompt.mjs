@@ -57,7 +57,7 @@ const FOOTPRINT_BUDGETS = FOOTPRINT_SECTION_BUDGETS;
 const STATIC_GUARDRAILS = Object.freeze([
   'Output only the story reply, without planning, self-correction, or discussion of prompts. Keep Recursion analysis invisible.',
   'Explicit user instructions and established story facts outrank generated cards and guidance. Treat generated interpretations as tentative, not new constraints. Preserve player control and established knowledge boundaries.',
-  'Follow the established viewpoint; cards cannot choose a different viewpoint character. Check current positions and actions already completed. An unanswered question does not require continued delay.'
+  'Follow the established viewpoint and current positions. Preserve actions already completed and discoveries. Update reactions when information or precautions change stakes; prior fear need not persist. Unresolved causes do not erase mitigated risks. Allow answers and progress without forcing calm or agreement.'
 ]);
 
 const INJECTION_TEMPLATE = Object.freeze([
@@ -454,7 +454,7 @@ function recentGuidanceSources(snapshot = {}) {
     .map(message => ({
       mesid: message.mesid,
       role: message.role,
-      text: safeTextSource(message.text || '', 3000).slice(0, 3000)
+      text: safeTextSource(message.text || '', Infinity)
     }));
 }
 

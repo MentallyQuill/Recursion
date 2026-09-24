@@ -927,6 +927,32 @@ function createRuntimeHarness({
   return { runtime, calls, installed, cleared, storage, settingsStore, activity, adapter };
 }
 
+{
+  const ending = 'The test succeeded. The character chose to avoid the suspect drink.';
+  const userEnding = 'The precaution changes the risk even though the sender remains unknown.';
+  const fullReply = `${'Earlier fear. '.repeat(1100)}\n\n${ending}`;
+  const fullUser = `${'Discussion. '.repeat(1100)}\n\n${userEnding}`;
+  const requests = [];
+  const fallback = localFallbackCardRouter();
+  const { runtime, calls } = createRuntimeHarness({
+    snapshot: { chatId: 'intact-context', sceneKey: 'scene', sceneFingerprint: 'scene', latestMesId: 1,
+      messages: [{ mesid: 1, role: 'assistant', text: fullReply, visible: true }] },
+    generationRouter: {
+      async generate(roleId, request) {
+        requests.push({ roleId, request });
+        return fallback.generate(roleId, request);
+      }
+    }
+  });
+  await runtime.prepareForGeneration({ userMessage: fullUser });
+  assertEqual(calls.install, 1, 'long pending user turn can install its guidance');
+  for (const role of ['utilityArbiter', 'guidanceComposer']) {
+    const prompt = requests.find(({ roleId }) => roleId === role)?.request.prompt || '';
+    assert(prompt.includes(ending), `${role} retains assistant ending through runtime normalization`);
+    assert(prompt.includes(userEnding), `${role} retains long pending user ending`);
+  }
+}
+
 for (const hostExcluded of [false, true]) {
   for (const mutateSource of [false, true]) {
     let reads = 0;

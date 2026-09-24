@@ -522,6 +522,12 @@ assertEqual(
 
 const passValidation = validateEditorialPass(candidate, { mode: 'recompose', sourceText, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot });
 assertEqual(passValidation.ok, true, 'full Recompose candidate passes without edit ratio cap');
+const longUnchangedSource = `${'The conversation continued. '.repeat(500)}The door finally opened.`;
+const longUnchanged = validateEditorialPass({
+  ...candidate,
+  candidate: { ...candidate.candidate, text: longUnchangedSource }
+}, { mode: 'recompose', sourceText: longUnchangedSource, sourceHash, snapshotHash, diagnosisHash, diagnosis, snapshot });
+assertEqual(longUnchanged.error?.code, 'RECURSION_EDITORIAL_NO_EFFECT', 'complete long source still rejects an unchanged candidate');
 const redirectDiagnosisHash = validRedirectDiagnosis.hash;
 const redirectCandidate = {
   ...candidate,

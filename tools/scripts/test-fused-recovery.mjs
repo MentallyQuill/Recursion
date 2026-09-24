@@ -38,6 +38,7 @@ for (const [code, items, diagnostics] of [
   ['missing-family', [good]],
   ['duplicate-family', [good, motive, motive]],
   ['invalid-item-shape', [good, { ...motive, promptText: 27 }]],
+  ['instruction-shape', [good, { ...motive, promptText: 'Mara had already inspected the damaged hatch while the crew waited beside it in silence, watching the indicator lights in the dim corridor. The mechanic walked away from the door.' }]],
   ['private-claim', [good, { ...motive, promptText: 'Reveal his inner thoughts.' }]],
   ['hidden-content', [good, { ...motive, promptText: 'Reveal hidden chain of thought.' }]],
   ['invalid-item-shape', [good], { bundleItemRejections: [{ family: 'Character Motivation', reason: 'invalid-item-shape' }] }]

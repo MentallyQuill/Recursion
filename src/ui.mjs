@@ -1,6 +1,7 @@
 import { nowIso, redact, stableStringify } from './core.mjs';
 import { pipelineExecutionLabel } from './runtime/pipeline-policy.mjs';
 import { downloadDiagnostics } from './ui/diagnostics-download.mjs';
+import { createPostProcessReviewDialog, renderPostProcessWritingControls } from './ui/post-process-review.mjs';
 import {
   defaultCardScope,
   enforceManualSelectionCap,
@@ -44,6 +45,8 @@ import {
   deletePostProcessCategory,
   duplicatePostProcessCard,
   duplicatePostProcessDeck,
+  exportPostProcessDeck,
+  importPostProcessDeck,
   getActivePostProcessDeck,
   movePostProcessCard,
   normalizePostProcessDeckSettings,
@@ -273,8 +276,8 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   focus: 'Temporary creative priority for card selection and composition. It nudges Recursion toward character, constraints, scene, or plot without becoming a hard whitelist.',
   footprint: 'Prompt budget for the composed Recursion packet. Compact spends fewer tokens, Rich preserves more scene detail when the moment is complex.',
   contextWindows: 'Bounds the Recursion-owned evidence and analysis windows used before and after generation. These do not replace or limit SillyTavern writer context.',
-  postProcess: 'Bounds only the frozen evidence used to synthesize Post-process guidance. SillyTavern still assembles the writer context.',
-  postProcessContextMessages: 'Recent visible messages available to Post-process guidance synthesis. This does not replace or limit SillyTavern writer context.',
+  postProcess: 'Bounds the frozen Post-process editing evidence. The current-model writer retains native context; a profile writer receives the bounded editing context.',
+  postProcessContextMessages: 'Recent visible messages used for Post-process guidance and profile-writer editing evidence. Current-model rewriting keeps the native SillyTavern context.',
   injection: 'Compatibility controls for where the final composed Recursion packet lands in SillyTavern. These do not create per-card prompt controls.',
   injectionPlacement: 'Choose the SillyTavern prompt lane for the composed Recursion packet. In Prompt is the recommended default; In Chat can help presets that weight recent chat harder.',
   injectionRole: 'Role SillyTavern assigns to Recursion prompt blocks. System is safest for instruction-like scene guidance; User or Assistant exist for preset compatibility.',
@@ -2698,7 +2701,8 @@ function postProcessDeleteConfirmation(deleteState = {}, deck = {}) {
 function renderPostProcessPanel(panel, view, {
   editorState = null,
   deleteState = null,
-  deckDeleteState = null
+  deckDeleteState = null,
+  writingControls = {}
 } = {}) {
   const deckSettings = normalizePostProcessDeckSettings(view.settings?.postProcessDecks);
   const deck = getActivePostProcessDeck(deckSettings);
@@ -2814,6 +2818,7 @@ function renderPostProcessPanel(panel, view, {
     actionsClassName: 'recursion-post-process-deck-actions',
     dataset: { recursionPostProcessDeckBar: '' }
   }));
+  panel.appendChild(renderPostProcessWritingControls({ el, settings: view.settings?.postProcess, deck, ...writingControls }));
   if (!deck.readonly) {
     panel.appendChild(el('div', { className: 'recursion-card-deck-tools' }, [
       cardSystemIconButton('plus', 'Create a new Category', { recursionPostProcessCategoryCreate: '', recursionPostProcessDeckToolAdd: '' }, { className: 'recursion-card-deck-tool-add' }),
@@ -4145,6 +4150,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   let pendingPreProcessDecks = null;
   let cardsPanelRenderKey = '';
   let postProcessPanelRenderKey = '';
+  let postProcessRenderedDeckId = '';
+  const postProcessStyleDrafts = new Map();
   let postProcessEditorState = null;
   let postProcessDeleteState = null;
   let postProcessDeckDeleteState = null;
@@ -4831,6 +4838,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const settings = asObject(view?.settings);
     return stableStringify({
       postProcess: settings.postProcess,
+      connectionProfiles: runtimeConnectionProfiles(view, runtime),
       postProcessDecks: normalizePostProcessDeckSettings(settings.postProcessDecks),
       tooltipsEnabled: settings.ui?.tooltipsEnabled !== false,
       editor: postProcessEditorState,
@@ -4839,17 +4847,92 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     });
   }
 
+  const postProcessReview = createPostProcessReviewDialog({
+    runtime,
+    onError: (message) => showCardSystemStatus(message, 'warning')
+  });
+
+  function exportActivePostProcessDeck() {
+    const payload = exportPostProcessDeck(getActivePostProcessDeck(currentView().settings?.postProcessDecks));
+    const url = URL.createObjectURL(new Blob([payload], { type: 'application/json;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'recursion-post-process-deck.json';
+    anchor.hidden = true;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    const cleanup = setTimeout(() => URL.revokeObjectURL(url), 60000);
+    cleanup?.unref?.();
+  }
+
+  function importPostProcessDeckFile() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.addEventListener('change', () => runAction((async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) throw new Error('Deck file must be at most 2 MB.');
+      const next = importPostProcessDeck(currentView().settings?.postProcessDecks, await file.text());
+      await applyPostProcessDeckSettings(next, 'Post-process Deck imported.');
+    })()));
+    input.click();
+  }
+
   function renderPostProcessPanelForView(view = currentView()) {
     if (cardDragState?.started && cardDragState.panel === postProcessPanel) return;
     const effectiveView = viewWithPendingDeckSettings(view);
     const nextKey = postProcessPanelViewKey(effectiveView);
     if (postProcessPanelRenderKey === nextKey) return;
     postProcessPanelRenderKey = nextKey;
+    const styleFields = ['brief', 'sample'];
+    if (postProcessRenderedDeckId) {
+      const draft = {};
+      for (const field of styleFields) {
+        const input = postProcessPanel.querySelector(`[data-recursion-post-process-style-${field}]`);
+        if (input && !input.readOnly && input.value !== input.defaultValue) draft[field] = input.value;
+      }
+      if (Object.keys(draft).length) postProcessStyleDrafts.set(postProcessRenderedDeckId, draft);
+      else postProcessStyleDrafts.delete(postProcessRenderedDeckId);
+    }
+    postProcessRenderedDeckId = getActivePostProcessDeck(effectiveView.settings?.postProcessDecks).id;
+    const openDetails = [...postProcessPanel.querySelectorAll('details')].filter(node => node.open).map(node => Object.keys(node.dataset)[0]);
+    const focused = document.activeElement;
+    const focusKey = postProcessPanel.contains?.(focused) ? Object.keys(focused.dataset || {})[0] : null;
+    const scrollTop = postProcessPanel.scrollTop;
+    const writingScrollTop = postProcessPanel.querySelector('.recursion-post-process-writing')?.scrollTop || 0;
     renderPostProcessPanel(postProcessPanel, effectiveView, {
       editorState: postProcessEditorState,
       deleteState: postProcessDeleteState,
-      deckDeleteState: postProcessDeckDeleteState
+      deckDeleteState: postProcessDeckDeleteState,
+      writingControls: {
+        profiles: runtimeConnectionProfiles(effectiveView, runtime),
+        onSettings: (patch) => runAction(applyPostProcessSettings(patch), () => { postProcessPanelRenderKey = ''; renderPostProcessPanelForView(); }),
+        onStyle: (style) => mutateActivePostProcessDeck(deck => ({ ...deck, ...style, updatedAt: nowIso() }), 'Deck style saved.'),
+        onCopy: () => {
+          const settings = normalizePostProcessDeckSettings(currentView().settings?.postProcessDecks);
+          runAction(applyPostProcessDeckSettings(duplicatePostProcessDeck(settings, settings.activeDeckId), 'Deck copied. Style is now editable.'));
+        },
+        onReview: () => runAction(postProcessReview.open()),
+        onImport: importPostProcessDeckFile,
+        onExport: exportActivePostProcessDeck,
+        onError: message => showCardSystemStatus(message, 'warning')
+      }
     });
+    const styleDraft = postProcessStyleDrafts.get(postProcessRenderedDeckId);
+    for (const field of styleFields) {
+      const input = postProcessPanel.querySelector(`[data-recursion-post-process-style-${field}]`);
+      if (input && !input.readOnly && styleDraft?.[field] !== undefined) input.value = styleDraft[field];
+    }
+    for (const details of postProcessPanel.querySelectorAll('details')) if (openDetails.includes(Object.keys(details.dataset)[0])) details.open = true;
+    if (focusKey) {
+      const nextFocus = [...postProcessPanel.querySelectorAll('input, select, textarea, button')].find(node => Object.hasOwn(node.dataset, focusKey));
+      nextFocus?.focus?.({ preventScroll: true });
+    }
+    postProcessPanel.scrollTop = scrollTop;
+    const writingSection = postProcessPanel.querySelector('.recursion-post-process-writing');
+    if (writingSection) writingSection.scrollTop = writingScrollTop;
   }
 
   function applyPostProcessSettings(postProcess, status = '') {
@@ -7182,6 +7265,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         )
       },
       postProcess: {
+        ...asObject(currentView().settings?.postProcess),
         enabled: currentView().settings?.postProcess?.enabled === true,
         applyMode: currentView().settings?.postProcess?.applyMode === 'replace' ? 'replace' : 'as-swipe',
         rewriteFlow: currentView().settings?.postProcess?.rewriteFlow === 'progressive' ? 'progressive' : 'unified',
@@ -7371,7 +7455,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   return {
     root,
     update,
+    openPostProcessReview: (options) => postProcessReview.open(options),
     destroy() {
+      postProcessReview.destroy();
       destroyed = true;
       if (timer !== null && typeof clearInterval === 'function') clearInterval(timer);
       clearRibbonRevealTimer();

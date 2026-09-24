@@ -66,7 +66,7 @@ This is the canonical map for Recursion documentation. Undated manuals and specs
 ## Architecture Specs
 
 - [Runtime Architecture](architecture/RUNTIME_ARCHITECTURE.md)
-- [Post-process Cards Runtime Boundary](architecture/POST_PROCESS_CARDS_RUNTIME.md) - Frozen evidence, native SillyTavern writer ownership, Unified/Progressive sequencing, retry/fail-soft, final persistence, and privacy contract.
+- [Post-process Cards Runtime Boundary](architecture/POST_PROCESS_CARDS_RUNTIME.md) - Frozen evidence, native/profile prose writers, scope/style precedence, source-bound review, retry, comparison retention, and privacy contract.
 - [Generation Review and Enhancement Contract](architecture/ENHANCEMENT_REVIEW_AND_PATCH_CONTRACT.md) - **Superseded by Post-process Cards; retained as historical context only.**
 - [Cache Use And Reuse Spec](architecture/CACHE_USE_AND_REUSE_SPEC.md) - Exact-source reuse, durable stage checkpoints, swipe variants, dependency invalidation, queued reprocessing, and one-shot full-fresh bypasses.
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md)

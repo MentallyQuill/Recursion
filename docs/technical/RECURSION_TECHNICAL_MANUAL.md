@@ -128,11 +128,11 @@ Prompt packets include selected-card references, omissions, injection metadata, 
 
 ## Pre-process And Post-process Boundaries
 
-Pre-process Cards are the scene-evidence deck used before the host writes a response. Post-process Cards are an independent ordered deck evaluated only after an assistant response lands. Post-process guidance is structured provider output; SillyTavern's native quiet-generation path is the only prose writer. Unified performs one guidance synthesis and one host rewrite for all enabled categories. Progressive rewrites category-by-category while carrying the latest valid draft forward. As Swipe appends the result as a selected swipe; Replace updates the selected response in place only after a complete successful run.
+Pre-process Cards are the scene-evidence deck used before the host writes a response. Post-process Cards are an independent ordered deck evaluated only after an assistant response lands. Post-process guidance is structured provider output; the separate prose writer uses either native SillyTavern quiet generation or a selected Connection Profile without changing the primary connection. Unified performs one guidance synthesis and one host rewrite for all enabled categories. Progressive rewrites category-by-category while carrying the latest valid draft forward. As Swipe appends the result as a selected swipe; Replace updates the selected response in place only after a complete successful run.
 
 ![Pre-process guidance, SillyTavern generation, and optional Post-process refinement workflow](../../assets/documentation/renders/recursion-pre-and-post-process-flow.png)
 
-Post-process freezes the source response, bounded visible evidence, Pre-process packet, active Post-process deck, and operation settings before provider work. Guidance uses one sticky provider lane. Guidance and native rewrite drafts are checkpointed, and the host-commit stage uses an idempotent receipt so Resume cannot duplicate a swipe or replacement. Failed or stale work never commits a response mutation, and one sanitized Post-process marker records a successful settlement.
+Post-process freezes the source response, bounded visible evidence, Pre-process packet, active Post-process deck, and operation settings before provider work. Guidance uses one sticky provider lane. Guidance and selected-writer drafts are checkpointed, and the host-commit stage uses an idempotent receipt so Resume cannot duplicate a swipe or replacement. Failed or stale work never commits a response mutation, and one sanitized Post-process marker records a successful settlement.
 
 ## Storage And Diagnostics
 
@@ -145,7 +145,7 @@ Settings stay in `extension_settings.recursion`. Larger records use logical JSON
 - `recursion-execution-artifact-{chatKey}-{artifactId}.v1.json`
 - `recursion-execution-intent-{chatKey}.v1.json`
 
-Execution manifests contain stage metadata and artifact references, never artifact bodies. Artifact files may contain the minimum source or model output needed to resume an active operation, remain local to the chat, and are removed when terminal retention no longer requires them. Completed Pre-process runs keep only reusable checkpoint references. Completed Post-process runs keep only the final accepted rewrite and host-commit receipt. Stale runs retain bounded metadata but no artifacts; abandoned runs are fully pruned.
+Execution manifests contain stage metadata and artifact references, never artifact bodies. Artifact files may contain the minimum source or model output needed to resume an active operation, remain local to the chat, and are removed when terminal retention no longer requires them. Completed Pre-process runs keep only reusable checkpoint references. Completed Post-process execution keeps the final accepted rewrite and host-commit receipt. Separate comparison records retain original/final text and source-bound review state for at most ten completed comparisons per chat, protect pending reviews, and release stale retry inputs. These bodies are excluded from normal diagnostics. Stale runs retain bounded metadata but no artifacts; abandoned runs are fully pruned.
 
 Diagnostics are bounded and sanitized. Normal records may include hashes, ids, card families, operation/stage states, attempt numbers, token estimates, provider lane labels, durations, artifact byte counts, lifecycle codes, and compact errors. They must not include API keys, raw provider prompts, raw provider responses, artifact bodies, full transcripts, hidden reasoning, private story plans, or unbounded local paths. Explicit diagnostic excerpts remain opt-in and bounded.
 
@@ -209,7 +209,7 @@ The current runtime preserves these related boundaries:
 
 - Card Deck configuration is persistent operator state; the scene deck and turn hand remain disposable runtime artifacts. `off`, `active`, and `priority` cards become runtime scope only when they are runnable and belong to the active deck.
 - Checkpoint and unchanged-swipe reuse are exact-turn optimizations. An artifact, hand, or prepared packet may be reused only when turn identity, packet contract, pipeline provenance, dependencies, and artifact-integrity checks match. A queued Full Rebuild bypasses those paths once for the next matching swipe; a new user message always runs fresh work.
-- Post-process is a post-generation revision pipeline, not a generic rewrite. Guidance synthesis and native host rewriting bind to one frozen source and one ordered Post-process deck; failure reasons remain visible and host generation remains safe.
+- Post-process is a post-generation revision pipeline, not a generic rewrite. Guidance synthesis and selected-writer rewriting bind to one frozen source and one ordered Post-process deck; failure reasons remain visible and host generation remains safe.
 - Post-process `As Swipe` certification is mutation-strict: live proof requires exactly one new selected Recursion-owned swipe with a source-bound marker, healthy terminal Post-process settlement, current-run progress/provider evidence, and matching before/after text hashes. Progressive partial output may settle only as a swipe; Replace requires a complete successful result.
 
 ## Non-Goals

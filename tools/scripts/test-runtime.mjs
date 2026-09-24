@@ -767,6 +767,7 @@ function createProseMessageHarness(initialText = 'She was angry. "Keep the door 
       async replaceAssistantMessageText(messageId, text, options = {}) {
         calls.push({ type: 'replace', messageId, text, options });
         message.text = text;
+        message.originalHash = hashJson(text);
         message.swipes[message.swipeId] = text;
         message.heldText = null;
         return { ok: true, text };
@@ -775,6 +776,7 @@ function createProseMessageHarness(initialText = 'She was angry. "Keep the door 
         calls.push({ type: 'append', messageId, text, options });
         message.swipes.push(text);
         message.text = text;
+        message.originalHash = hashJson(text);
         message.swipeId = message.swipes.length - 1;
         message.heldText = null;
         return { ok: true, index: 1, text };

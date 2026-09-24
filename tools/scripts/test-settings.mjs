@@ -79,7 +79,10 @@ assertDeepEqual(DEFAULT_RECURSION_SETTINGS.postProcess, {
   enabled: false,
   applyMode: 'as-swipe',
   rewriteFlow: 'unified',
-  contextMessages: 13
+  contextMessages: 13,
+  editingScope: 'polish',
+  reviewBeforeApplying: false,
+  writer: { mode: 'native', connectionProfileId: '', maxOutputTokens: null, samplerMode: 'profile', samplerOverrides: { temperature: 0.7, topP: 1 } }
 }, 'post-process defaults are exact');
 assertDeepEqual(DEFAULT_RECURSION_SETTINGS.postProcessDecks, {
   version: POST_PROCESS_DECK_SETTINGS_VERSION,
@@ -93,7 +96,7 @@ assertEqual(normalizeSettings({}).postProcess.enabled, false, 'post-process feat
 assertEqual(normalizeSettings({ postProcess: { enabled: true } }).postProcess.enabled, true, 'post-process feature can be enabled');
 assertDeepEqual(
   normalizeSettings({ postProcess: { enabled: true, applyMode: 'REPLACE', rewriteFlow: 'PROGRESSIVE', contextMessages: '35' } }).postProcess,
-  { enabled: true, applyMode: 'replace', rewriteFlow: 'progressive', contextMessages: 35 },
+  { ...DEFAULT_RECURSION_SETTINGS.postProcess, enabled: true, applyMode: 'replace', rewriteFlow: 'progressive', contextMessages: 35 },
   'post-process settings normalize the V1 values'
 );
 assertDeepEqual(
@@ -585,7 +588,7 @@ store.update({ postProcess: { rewriteFlow: 'progressive' } });
 store.update({ postProcess: { contextMessages: 21 } });
 assertDeepEqual(
   root.recursion.postProcess,
-  { enabled: true, applyMode: 'replace', rewriteFlow: 'progressive', contextMessages: 21 },
+  { ...DEFAULT_RECURSION_SETTINGS.postProcess, enabled: true, applyMode: 'replace', rewriteFlow: 'progressive', contextMessages: 21 },
   'partial post-process updates preserve the rest of the clean contract'
 );
 
@@ -659,4 +662,14 @@ try {
 assertEqual(DEFAULT_RECURSION_SETTINGS.providers.utility.outputTokenCeiling, 8192, 'utility default output ceiling is frozen at 8192');
 assertEqual(Object.prototype.hasOwnProperty.call(DEFAULT_RECURSION_SETTINGS.providers.utility, 'enabled'), false, 'utility default omits enabled');
 assertEqual(Object.prototype.hasOwnProperty.call(DEFAULT_RECURSION_SETTINGS.providers.reasoner, 'enabled'), false, 'reasoner default omits enabled');
+
+const writerStore = createSettingsStore({ root: {}, save() {} });
+writerStore.update({ postProcess: { writer: { mode: 'profile', connectionProfileId: 'prose', maxOutputTokens: 4096 }, editingScope: 'revise', reviewBeforeApplying: true } });
+writerStore.update({ postProcess: { applyMode: 'replace' } });
+assertEqual(writerStore.get().postProcess.writer.connectionProfileId, 'prose', 'partial edits retain selected writer');
+assertEqual(writerStore.get().postProcess.editingScope, 'revise', 'scope survives settings updates');
+assertEqual(writerStore.get().postProcess.reviewBeforeApplying, true, 'review survives settings updates');
+assertThrows(() => writerStore.update({ postProcess: { writer: { maxOutputTokens: 1 } } }), /256.*65536/, 'invalid output override is rejected before persistence');
+assertEqual(writerStore.get().postProcess.writer.maxOutputTokens, 4096, 'rejected writer edit preserves saved settings');
+
 console.log('[pass] settings');

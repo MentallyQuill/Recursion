@@ -1882,7 +1882,10 @@ function safeSettingsView(settings, capabilityResolver = providerCapability) {
       enabled: normalizedSettings.postProcess.enabled === true,
       applyMode: safeText(normalizedSettings.postProcess.applyMode, 40),
       rewriteFlow: safeText(normalizedSettings.postProcess.rewriteFlow, 40),
-      contextMessages: numberOr(normalizedSettings.postProcess.contextMessages, 13)
+      contextMessages: numberOr(normalizedSettings.postProcess.contextMessages, 13),
+      writer: normalizedSettings.postProcess.writer,
+      editingScope: normalizedSettings.postProcess.editingScope,
+      reviewBeforeApplying: normalizedSettings.postProcess.reviewBeforeApplying
     },
     postProcessDecks: normalizedSettings.postProcessDecks,
     injection: {
@@ -2403,6 +2406,17 @@ export function createRecursionRuntime({
   generationRouter = null
 } = {}) {
   const runState = createRuntimeRunState();
+  const reviewSubscribers = new Set();
+  let reviewActionTail = Promise.resolve();
+  let reviewActionActive = false;
+  let reviewActionEpoch = 0;
+  let reviewMutationIdentity = null;
+  let comparisonChatKey = '';
+  function publishReviewChanged() {
+    for (const subscriber of reviewSubscribers) {
+      try { subscriber(); } catch { /* UI observers never own settlement. */ }
+    }
+  }
   const activeProviderOperations = new Map();
   const activeProviderTests = new Map();
   const baseGenerationRouter = generationRouter;
@@ -2552,7 +2566,8 @@ export function createRecursionRuntime({
       repository: storage,
       onQueuedReprocessChanged(intent) {
         queuedReprocessView = intent || null;
-      }
+      },
+      onReviewChanged: publishReviewChanged
     }
   });
 
@@ -3524,7 +3539,7 @@ export function createRecursionRuntime({
   async function resetTurnCache() {
     const runId = makeId('turn-reset');
     supersedeActiveRun();
-    postProcessRuntime.cancelPostProcess('reset-turn-cache');
+    cancelPostProcess('reset-turn-cache');
     const operationId = safeText(executionView?.operationId || '', 180);
     return trackRuntimeMutation(async () => {
       startRuntimeActivity({
@@ -3543,6 +3558,9 @@ export function createRecursionRuntime({
       }
       lastSnapshot = snapshot;
       const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 160) || DEFAULT_CHAT_ID;
+      const reviewIdentity = await host?.messages?.postProcessSourceIdentity?.();
+      await invalidatePostProcessComparisons({ chatKey, reason: 'reset-turn-cache', clear: true,
+        sourceMessageId: reviewIdentity?.messageId });
       const revoke = operationId
         ? await storage.revokeTurnExecution(chatKey, {
             operationId,
@@ -3693,7 +3711,7 @@ export function createRecursionRuntime({
     preserveLastBrief = false,
     clearSwipeRetry = true
   }) {
-    postProcessRuntime.cancelPostProcess(reason);
+    cancelPostProcess(reason);
     const runId = makeId(idPrefix);
     if (clearSwipeRetry) clearPendingLatestAssistantSwipeRetry();
     clearPendingFreshNextGeneration();
@@ -3732,6 +3750,7 @@ export function createRecursionRuntime({
   }
 
   async function handleChatChanged() {
+    await invalidatePostProcessComparisons({ chatKey: lastSnapshot?.chatKey || activeExecutionChatKey || comparisonChatKey, reason: 'chat-changed' });
     turnTiming.mark(turnTiming.snapshot()?.attemptId, 'invalidate', { reason: 'chat-changed' });
     return clearForHostEvent({
       idPrefix: 'chat-change',
@@ -3743,6 +3762,7 @@ export function createRecursionRuntime({
   }
 
   async function handleSourceChanged() {
+    await invalidatePostProcessComparisons({ reason: 'source-changed' });
     turnTiming.mark(turnTiming.snapshot()?.attemptId, 'invalidate', { reason: 'source-changed' });
     return clearForHostEvent({
       idPrefix: 'source-change',
@@ -3800,7 +3820,7 @@ export function createRecursionRuntime({
             }
           })
         : Promise.resolve(null);
-      postProcessRuntime.cancelPostProcess('host-generation-stopped');
+      cancelPostProcess('host-generation-stopped');
       const postProcessSettlement = postProcessRuntime.waitForPostProcessSettlement();
       const cancellation = cancelActiveProseEnhancement('prose-enhancement-canceled');
       await Promise.all([cancellation, stopJournal, postProcessSettlement]);
@@ -5469,7 +5489,7 @@ export function createRecursionRuntime({
   async function stopGeneration(details = {}) {
     if (stopGenerationPromise) return stopGenerationPromise;
     const task = (async () => {
-      postProcessRuntime.cancelPostProcess('stop-generation');
+      cancelPostProcess('stop-generation');
       cancelPendingProseEnhancement('prose-enhancement-canceled');
       recursionStopRequest = {
         source: safeText(details.source || 'recursion-ui', 80),
@@ -8312,6 +8332,7 @@ export function createRecursionRuntime({
   }
 
   async function prepareForGeneration({ userMessage = '', refreshReason = '', hostGeneration = false, generationType = '' } = {}) {
+    if (hostGeneration) await invalidatePostProcessComparisons({ reason: 'new-host-generation' });
     const timingAttemptId = hostGeneration ? makeId('timing') : '';
     if (timingAttemptId) turnTiming.start(timingAttemptId);
     const settings = settingsStore.get();
@@ -8322,7 +8343,7 @@ export function createRecursionRuntime({
       await cancelActiveProseEnhancement(explicitSwipe ? 'latest-assistant-swipe' : 'new-host-generation');
     }
     if (hostGeneration === true && postProcessRuntime.postProcessRunning()) {
-      postProcessRuntime.cancelPostProcess(explicitSwipe ? 'latest-assistant-swipe' : 'new-host-generation');
+      cancelPostProcess(explicitSwipe ? 'latest-assistant-swipe' : 'new-host-generation');
       await postProcessRuntime.waitForPostProcessSettlement();
     }
     setHostGenerationActive(hostGeneration);
@@ -8361,7 +8382,7 @@ export function createRecursionRuntime({
           pendingProseEnhancement.cautionReported = true;
         }
       } else {
-        postProcessRuntime.cancelPostProcess('not-host-generation');
+        cancelPostProcess('not-host-generation');
         clearPendingProseEnhancement();
       }
       if (explicitSwipe && !runState.current().pendingLatestAssistantSwipeRetry) {
@@ -8404,7 +8425,7 @@ export function createRecursionRuntime({
           generationType: hostGenerationType || 'normal'
         });
       } else if (hostGeneration === true) {
-        postProcessRuntime.cancelPostProcess('preprocess-not-ready');
+        cancelPostProcess('preprocess-not-ready');
       }
       if (timingAttemptId && durableResult?.continuePrimaryGeneration !== false && durableResult?.ok === true) {
         turnTiming.mark(timingAttemptId, 'prepared', {
@@ -8417,7 +8438,7 @@ export function createRecursionRuntime({
       return durableResult;
     }
     if (settings.enabled === false) {
-      postProcessRuntime.cancelPostProcess('recursion-disabled');
+      cancelPostProcess('recursion-disabled');
       clearPendingProseEnhancement();
       clearPendingLatestAssistantSwipeRetry();
       clearPendingFreshNextGeneration();
@@ -9048,7 +9069,74 @@ export function createRecursionRuntime({
     return { ok: true, queuedReprocess: next };
   }
 
+  function cancelPostProcess(reason) {
+    reviewActionEpoch++;
+    return postProcessRuntime.cancelPostProcess(reason);
+  }
+
+  async function postProcessComparisons() {
+    const identity = await host?.messages?.postProcessSourceIdentity?.();
+    comparisonChatKey = safeText(identity?.chatKey || lastSnapshot?.chatKey || comparisonChatKey || DEFAULT_CHAT_ID, 180);
+    return postProcessRuntime.postProcessComparisons();
+  }
+
+  async function invalidatePostProcessComparisons(options = {}) {
+    cancelPostProcess(options.reason || 'source-changed');
+    if (typeof host?.messages?.postProcessSourceIdentity !== 'function') return { ok: true, skipped: true };
+    const identity = options.chatKey ? null : await host.messages.postProcessSourceIdentity();
+    const chatKey = options.chatKey || identity?.chatKey || comparisonChatKey || lastSnapshot?.chatKey || DEFAULT_CHAT_ID;
+    const result = await postProcessRuntime.invalidatePostProcessComparisons({ ...options, chatKey });
+    publishReviewChanged();
+    return result;
+  }
+
+  function reviewPostProcess(input = {}) {
+    const requestedEpoch = reviewActionEpoch;
+    const canceled = () => ({ ok: false, reason: 'Review canceled because the source or generation changed.' });
+    const run = reviewActionTail.catch(() => {}).then(() => trackRuntimeMutation(async () => {
+      if (requestedEpoch !== reviewActionEpoch) return canceled();
+      if (runState.current().hostGenerationActive || postProcessRuntime.postProcessRunning()
+          || activeProseEnhancementPromise || durablePreparePromises.size > 0) {
+        return { ok: false, reason: 'Wait for the current generation to finish before reviewing a revision.' };
+      }
+      if (!['apply', 'keep', 'edit', 'retry'].includes(input.action)) return { ok: false, reason: 'Unknown review action.' };
+      reviewActionActive = true;
+      let attemptedLock = false;
+      try {
+        // Even candidate edits serialize with new host generation and source mutation.
+        if (input.action !== 'edit') {
+          if (typeof host?.generation?.lockControls !== 'function') return { ok: false, reason: 'Host generation controls are unavailable.' };
+          attemptedLock = true;
+          const locked = await host.generation.lockControls();
+          if (locked?.ok === false) return { ok: false, reason: 'Could not lock host generation controls.' };
+        }
+        if (requestedEpoch !== reviewActionEpoch) return canceled();
+        if (input.action === 'apply' || input.action === 'keep') {
+          const record = (await postProcessRuntime.postProcessComparisons()).find(entry => entry.id === input.id);
+          if (record) {
+            const source = record.originalSnapshot;
+            reviewMutationIdentity = input.action === 'keep'
+              ? { chatIdentityHash: source.chatIdentityHash, messageId: source.sourceMessageId, swipeId: source.sourceSwipeId,
+                originalHash: source.sourceHash, activeCharacterHash: source.activeCharacterHash, activeGroupHash: source.activeGroupHash }
+              : { ...record.targetIdentity, originalHash: record.candidateHash,
+                // A new swipe index is host allocated; its candidate hash is still exact.
+                swipeId: record.applyMode === 'as-swipe' ? null : record.targetIdentity.swipeId };
+          }
+        }
+        if (requestedEpoch !== reviewActionEpoch) return canceled();
+        return await postProcessRuntime.reviewPostProcess(input);
+      } finally {
+        try { if (attemptedLock) await host.generation.unlockControls?.(); }
+        finally { reviewActionActive = false; reviewMutationIdentity = null; publishReviewChanged(); }
+      }
+    }));
+    reviewActionTail = run;
+    return run;
+  }
+
   async function runPostProcessForLatestAssistant(details = {}) {
+    const comparisonIdentity = await host?.messages?.postProcessSourceIdentity?.();
+    comparisonChatKey = safeText(comparisonIdentity?.chatKey || lastSnapshot?.chatKey || comparisonChatKey || DEFAULT_CHAT_ID, 180);
     const rawResult = await postProcessRuntime.runPostProcessForLatestAssistant(details);
     const result = rawResult?.canceled === true && !rawResult.reason
       ? { ...rawResult, reason: 'canceled' }
@@ -9078,10 +9166,11 @@ export function createRecursionRuntime({
     async dispose() {
       await pauseOperation({ reason: 'runtime-disposed' });
       supersedeActiveRun();
-      postProcessRuntime.cancelPostProcess('runtime-disposed');
+      cancelPostProcess('runtime-disposed');
       clearPendingFreshNextGeneration();
       await waitForExternalMutations();
       clearPreparedGeneration();
+      reviewSubscribers.clear();
     },
     async refreshScene() {
       return prepareForGeneration({ refreshReason: 'user-refresh' });
@@ -9096,11 +9185,29 @@ export function createRecursionRuntime({
     postProcessRunning: postProcessRuntime.postProcessRunning,
     preparePostProcessTrigger: postProcessRuntime.preparePostProcessTrigger,
     runPostProcessForLatestAssistant,
-    cancelPostProcess: postProcessRuntime.cancelPostProcess,
+    cancelPostProcess,
     waitForPostProcessSettlement: postProcessRuntime.waitForPostProcessSettlement,
     postProcessFinalTargetReady: postProcessRuntime.postProcessFinalTargetReady,
     postProcessHostRunReady: postProcessRuntime.postProcessHostRunReady,
     postProcessDiagnostics: postProcessRuntime.postProcessDiagnostics,
+    postProcessComparisons,
+    reviewPostProcess,
+    invalidatePostProcessComparisons,
+    postProcessReviewRunning: () => reviewActionActive,
+    async postProcessReviewOwnsSourceMutation(details = {}) {
+      const expected = reviewMutationIdentity;
+      if (!expected || details.deleted) return false;
+      if (details.messageId != null && String(details.messageId) !== String(expected.messageId)) return false;
+      const actual = await host?.messages?.postProcessSourceIdentity?.();
+      return Boolean(actual && ['chatIdentityHash', 'messageId', 'originalHash', 'activeCharacterHash', 'activeGroupHash']
+        .every(key => String(actual[key] ?? '') === String(expected[key] ?? ''))
+        && (expected.swipeId == null || Number(actual.swipeId) === Number(expected.swipeId)));
+    },
+    subscribe(listener) {
+      if (typeof listener !== 'function') return () => {};
+      reviewSubscribers.add(listener);
+      return () => reviewSubscribers.delete(listener);
+    },
     enhanceLatestAssistantMessage,
     proseEnhancementPending,
     proseEnhancementRunning,

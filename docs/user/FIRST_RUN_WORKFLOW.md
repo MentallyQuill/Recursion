@@ -83,7 +83,7 @@ Try Manual mode to restrict runnable cards to your selected family/sub-item scop
 
 ## 8. Enable Post-process Carefully
 
-Post-process freezes the landed assistant response identity and bounded evidence before work begins. Unified produces one guarded rewrite; Progressive applies categories in order.
+Post-process freezes the landed assistant response identity and bounded evidence before work begins. Start with Unified, Polish, and As Swipe. Writer defaults to the current SillyTavern model; choose Connection Profile for a separate prose model. Turn on Review before applying to inspect the candidate first. Progressive applies categories in order.
 
 - Stop leaves the original response intact.
 - Resume continues through native host re-entry and reuses valid checkpoints.

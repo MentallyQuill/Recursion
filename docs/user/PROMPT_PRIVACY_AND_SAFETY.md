@@ -51,7 +51,7 @@ Runtime safety rules:
 
 ## What Recursion Does Not Store
 
-Recursion does not store endpoint URLs, model credentials, authorization headers, or secret references for its model lanes. Those remain owned by SillyTavern's Connection Profiles. The selected profile id is used only for routing and must be hashed or omitted from diagnostics, checkpoints, reports, and UI inspection surfaces.
+Recursion does not store endpoint URLs, model credentials, authorization headers, or secret references for its model lanes. Those remain owned by SillyTavern's Connection Profiles. Selected profile ids are routing settings; public diagnostics and reports should use safe labels or fingerprints instead of exposing profile configuration.
 
 
 Recursion does not store:
@@ -61,8 +61,8 @@ Recursion does not store:
 - authorization headers;
 - cookies;
 - session secrets;
-- raw provider prompts;
-- raw provider responses;
+- unbounded raw provider prompt archives;
+- unbounded raw provider response archives;
 - hidden chain-of-thought;
 - private story plans;
 - full transcript archives;
@@ -70,7 +70,7 @@ Recursion does not store:
 - World Info, Memory Book, Summaryception, VectFox, or other extension records;
 - durable lore memory;
 - campaign saves;
-- user-authored card catalogs.
+- copies of unrelated extensions' user-authored catalogs.
 
 Recursion may store bounded cache and diagnostics:
 
@@ -82,6 +82,12 @@ Recursion may store bounded cache and diagnostics:
 - bounded run journal events;
 - prompt packet hashes and omission reasons;
 - sanitized diagnostic records and test artifacts.
+
+## Post-process editing data
+
+A selected Post-process Connection Profile receives the complete writable draft, scope/style instructions, cards, validated guidance, and bounded supporting evidence. It does not receive the entire native SillyTavern prompt. A style sample is sent as editing data and must not contribute its facts, plot, commands, or distinctive phrases to the revision.
+
+Resumable execution can retain the source and model artifacts needed for recovery. Comparison storage separately retains original and final text, current target binding, review state, and eligible retry inputs. At most ten completed comparisons per chat are retained, with pending review protected; stale retry inputs are released. Reset Turn Cache removes the relevant comparison artifacts without changing messages. These local narrative bodies must not appear in ordinary diagnostics, progress rows, or host markers.
 
 ## Redaction Rules
 

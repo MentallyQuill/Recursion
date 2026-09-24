@@ -1,9 +1,12 @@
-export const POST_PROCESS_DECK_SETTINGS_VERSION = 3;
+import { normalizePostProcessStyle } from './post-process-editing.mjs';
+export { normalizePostProcessStyle } from './post-process-editing.mjs';
+
+export const POST_PROCESS_DECK_SETTINGS_VERSION = 4;
 export const STARTER_POST_PROCESS_DECK_ID = 'starter-post-process';
 
 const STARTER_CATEGORIES = [
   ['natural-prose', 'Natural Prose', ''],
-  ['follow-through', 'Follow Through', ''],
+  ['follow-through', 'Follow Through', 'Tighten actions already performed in the draft without introducing a new event.'],
   ['concrete-meaning', 'Concrete Meaning', 'Replace manufactured significance with concrete meaning, behavior, or consequence.'],
   ['character-specific-relationships', 'Character-Specific Relationships', 'Repair stock attraction and defensive scripts through established character and relationship evidence.']
 ];
@@ -12,9 +15,9 @@ const STARTER_CARDS = [
   ['cut-echoes', 'natural-prose', 'Cut Echoes', 'Remove parroting, redundant restatement, and repeated dialogue beats.', 'Review the draft for echoed information. Remove narration that merely restates dialogue, dialogue that paraphrases the immediately preceding line, repeated emotional labels, and repeated beats that do not change the scene. Preserve deliberate repetition used for rhythm, characterization, escalation, or clarity. Keep the strongest expression of each idea and preserve all consequential information.'],
   ['natural-diction', 'natural-prose', 'Natural Diction', 'Replace unnecessary clinical, tactical, statistical, or optimization-heavy language with direct character-appropriate wording. Preserve that register only for literal robots or androids whose canonical voice uses it.', 'Review dialogue and character-facing narration for over-technical or pseudo-analytical diction such as “assessing variables,” “recalibrating,” “data point,” “optimal,” “inefficient,” “statistically,” “physiologically,” “strategically,” “tactically,” and “clinical precision.”\n\nFor non-robotic characters, rewrite those expressions into direct, idiomatic phrasing that matches each character\'s established voice. Do not use technical language as shorthand for intelligence, emotional distance, dominance, or competence.\n\nPreserve this register only when the speaker is a literal robot or android whose canonical voice genuinely uses it. Preserve the intended meaning and do not flatten distinct character voices.'],
   ['land-the-ending', 'natural-prose', 'Land the Ending', 'End on consequential movement instead of canned questions or fake choices.', 'Review the ending. Remove canned questions, fake either-or choices, summary conclusions, and endings that hand responsibility back to the user without meaningful movement. End on the strongest concrete beat already supported by the scene: an action, consequence, revelation, sensory change, or decisive line. Do not invent a new plot turn solely to avoid a question.'],
-  ['act-on-the-threat', 'follow-through', 'Act on the Threat', 'Convert repeated immediate threats into supported action or consequence.', 'Do not invent intent, override consent, force unsupported escalation, or take control of the user\'s character. Act only on intent, reciprocity, capability, and immediacy already established by the draft and frozen context.\n\nWhen a character\'s immediate violent intent is already established and the draft repeats warnings, threats, preparations, or chances to back down, replace the repetition with the supported action or its immediate consequence. Preserve hesitation when it is itself meaningful characterization or when action is not yet supported.'],
-  ['close-the-distance', 'follow-through', 'Close the Distance', 'Complete supported reciprocal physical or romantic contact.', 'Do not invent intent, override consent, force unsupported escalation, or take control of the user\'s character. Act only on intent, reciprocity, capability, and immediacy already established by the draft and frozen context.\n\nWhen reciprocal physical or romantic intent is already established, replace repeated hovering, near-touching, almost-kissing, interrupted-contact, or “giving one last chance” loops with the appropriate supported contact. Preserve boundaries, consent, character voice, and the scene\'s established intensity.'],
-  ['complete-the-move', 'follow-through', 'Complete the Move', 'Carry repeated preparation or implication into the concrete next step.', 'Do not invent intent, override consent, force unsupported escalation, or take control of the user\'s character. Act only on intent, reciprocity, capability, and immediacy already established by the draft and frozen context.\n\nWhen a character repeatedly prepares, hints, reaches, starts, or almost acts, carry the established intention into the concrete next step. Do not manufacture a new intention or skip a necessary decision. Prefer an observable action or consequence over another statement of intent.'],
+  ['act-on-the-threat', 'follow-through', 'Act on the Threat', 'Clarify an action or consequence already present without turning a threat into a new event.', 'Review threats, preparations, warnings, and repeated chances to back down. Tighten redundant narration around an action or immediate consequence already performed in the draft. Preserve threats and hesitation when the action remains unperformed. Follow Through cannot complete an action the draft leaves unperformed. Do not invent intent, override consent, force escalation, change outcomes, or take control of the user character. Obey the selected editing scope; Polish preserves spoken dialogue wording.'],
+  ['close-the-distance', 'follow-through', 'Close the Distance', 'Clarify reciprocal contact already present without completing an unperformed gesture.', 'Review hovering, near-touching, almost-kissing, and interrupted-contact loops. Tighten repetition only around contact already performed in the draft. Preserve unfinished gestures, boundaries, consent, established intensity, and character voice. Follow Through cannot complete an action the draft leaves unperformed. Do not invent intent, override consent, force escalation, change outcomes, or take control of the user character. Obey the selected editing scope; Polish preserves spoken dialogue wording.'],
+  ['complete-the-move', 'follow-through', 'Complete the Move', 'Make an already performed action clear without adding its next step.', 'Review repeated preparation, reaching, and statements of intent. Clarify the observable action or consequence already present in the draft. Preserve a preparation as preparation when the next step or necessary decision has not occurred. Follow Through cannot complete an action the draft leaves unperformed. Do not invent intent, override consent, force escalation, change outcomes, or take control of the user character. Obey the selected editing scope; Polish preserves spoken dialogue wording.'],
   ['strip-false-weight', 'concrete-meaning', 'Strip False Weight', 'Replace manufactured profundity with concrete meaning, behavior, or consequence.', 'Review the draft for sentence structures that manufacture significance without adding specific meaning. This includes stacked negation or contrast, fragment ladders, vague almost-statements, generic lock-and-key revelations, unnamed truths, and the weight of what remains unspoken.\n\nDo not substitute one ornamental phrase for another. When a construction carries no scene-specific information, remove it or rebuild the beat around a concrete observation, choice, action, consequence, or explicit realization already supported by the draft and frozen context. Preserve genuinely apt figurative language, deliberate rhythm, character-specific phrasing, and motifs that earn their effect through the scene.', false],
   ['earn-the-attraction', 'character-specific-relationships', 'Earn the Attraction', 'Replace prefabricated hunger, possession, and dominance scripts with character-specific attraction.', 'Review romantic or sexual dialogue and narration for prefabricated attraction scripts: generic hunger or predation, ownership and claiming language, automatic dominance, ritual warnings, and stock declarations of overwhelming desire.\n\nDo not merely replace stock words with softer synonyms. Rewrite only where the formula substitutes for characterization. Ground attraction in established voice, history, specific observed qualities, reciprocal behavior, present stakes, and the scene\'s supported level of intimacy. Preserve intensity, consensual possessiveness, or genre-specific language when it is genuinely established for these characters. Do not invent attraction, consent, submission, dominance, or escalation, and do not take control of the user\'s character.', false],
   ['ground-the-deflection', 'character-specific-relationships', 'Ground the Deflection', 'Replace stock defensive banter with the character\'s actual motive, boundary, or conflict.', 'Review guarded or defensive dialogue for stock deflection: automatic denial of care, canned irritation, tactical or research excuses, generic insults, and reflexive refusal to admit that another character is right.\n\nDo not replace one stock deflection with another. Identify the supported reason for the defense, such as pride, embarrassment, fear, distrust, status, unresolved conflict, a genuine boundary, deliberate humor, or difficulty conceding. Rewrite the beat so that motive emerges through character-specific wording, action, silence, or subtext. Preserve established recurring speech, sincere hostility, explicit refusal, and real boundaries. Never convert resistance into hidden attraction or soften a boundary without evidence.', false]
@@ -97,7 +100,7 @@ export function createStarterPostProcessDeck({ now = nowIso() } = {}) {
   const categories = Object.fromEntries(STARTER_CATEGORIES.map(([id, name, description]) => [id, { id, name, description, createdAt: now, updatedAt: now }]));
   const cards = Object.fromEntries(STARTER_CARDS.map(([id, categoryId, name, description, promptText, enabled = true]) => [id, { id, categoryId, name, description, promptText, enabled, createdAt: now, updatedAt: now }]));
   const cardOrderByCategory = Object.fromEntries(categoryOrder.map((categoryId) => [categoryId, STARTER_CARDS.filter(([, cardCategoryId]) => cardCategoryId === categoryId).map(([id]) => id)]));
-  return { id: STARTER_POST_PROCESS_DECK_ID, name: 'Starter Post-process Deck', description: 'Bundled Recursion Post-process Deck.', bundled: true, readonly: true, categoryOrder, categories, cardOrderByCategory, cards, createdAt: now, updatedAt: now };
+  return { id: STARTER_POST_PROCESS_DECK_ID, name: 'Starter Post-process Deck', description: 'Bundled Recursion Post-process Deck.', styleBrief: '', styleSample: '', bundled: true, readonly: true, categoryOrder, categories, cardOrderByCategory, cards, createdAt: now, updatedAt: now };
 }
 
 export function normalizePostProcessDeck(raw, fallbackId = '', { now = nowIso(), existingIds = new Set() } = {}) {
@@ -107,7 +110,7 @@ export function normalizePostProcessDeck(raw, fallbackId = '', { now = nowIso(),
   const categories = normalizeCategories(raw.categories, now);
   const categoryOrder = idOrder(raw.categoryOrder, Object.keys(categories));
   const cards = normalizeCards(raw.cards, categories, now);
-  return { id, name: normalizePostProcessName(raw.name) || 'Custom Deck', description: String(raw.description || '').trim(), bundled: false, readonly: false, categoryOrder, categories, cardOrderByCategory: normalizeCardOrder(raw.cardOrderByCategory, cards, categoryOrder), cards, createdAt: String(raw.createdAt || now), updatedAt: String(raw.updatedAt || now) };
+  return { id, name: normalizePostProcessName(raw.name) || 'Custom Deck', description: String(raw.description || '').trim(), ...normalizePostProcessStyle(raw), bundled: false, readonly: false, categoryOrder, categories, cardOrderByCategory: normalizeCardOrder(raw.cardOrderByCategory, cards, categoryOrder), cards, createdAt: String(raw.createdAt || now), updatedAt: String(raw.updatedAt || now) };
 }
 
 function normalizeStarterStates(value, knownIds) {
@@ -233,10 +236,10 @@ export function setAllPostProcessCardsEnabled(settings = {}, enabled = true, { n
   return updateActivePostProcessDeckState(source, next, { now });
 }
 
-export function createCustomPostProcessDeck(settings = {}, { name = 'Custom Deck', description = '', now = nowIso() } = {}) {
+export function createCustomPostProcessDeck(settings = {}, { name = 'Custom Deck', description = '', styleBrief = '', styleSample = '', now = nowIso() } = {}) {
   const normalized = normalizePostProcessDeckSettings(settings, { now });
   const id = generatedId('post-process', normalized.customDecks);
-  const deck = normalizePostProcessDeck({ id, name: uniqueName(name, Object.values(normalized.customDecks).map((entry) => entry.name), 'Custom Deck'), description, categories: { general: { id: 'general', name: 'General' } }, categoryOrder: ['general'], cardOrderByCategory: { general: [] }, cards: {}, createdAt: now, updatedAt: now }, id, { now });
+  const deck = normalizePostProcessDeck({ id, name: uniqueName(name, Object.values(normalized.customDecks).map((entry) => entry.name), 'Custom Deck'), description, styleBrief, styleSample, categories: { general: { id: 'general', name: 'General' } }, categoryOrder: ['general'], cardOrderByCategory: { general: [] }, cards: {}, createdAt: now, updatedAt: now }, id, { now });
   return { ...normalized, activeDeckId: id, customDecks: { ...normalized.customDecks, [id]: deck } };
 }
 
@@ -311,3 +314,40 @@ export function orderedPostProcessCategories(deck) { const categories = isObject
 export function orderedPostProcessCards(deck, categoryId) { const category = normalizePostProcessId(categoryId); const cards = isObject(deck?.cards) ? deck.cards : {}; const ordered = []; const seen = new Set(); for (const raw of Array.isArray(deck?.cardOrderByCategory?.[category]) ? deck.cardOrderByCategory[category] : []) { const id = normalizePostProcessId(raw); if (cards[id]?.categoryId === category && !seen.has(id)) { ordered.push(cards[id]); seen.add(id); } } for (const card of Object.values(cards)) if (card.categoryId === category && !seen.has(card.id)) ordered.push(card); return ordered; }
 export function isRunnablePostProcessCard(card) { return card?.enabled !== false && normalizePostProcessName(card?.name) !== '' && String(card?.promptText || '').trim() !== ''; }
 export function orderedRunnablePostProcessCategories(deck) { return orderedPostProcessCategories(deck).map((category) => ({ ...clone(category), cards: orderedPostProcessCards(deck, category.id).filter((card) => isRunnablePostProcessCard(card)).map(clone) })).filter((category) => category.cards.length > 0); }
+
+export function updatePostProcessDeckStyle(deck, patch = {}, { now = nowIso() } = {}) {
+  if (deck?.id === STARTER_POST_PROCESS_DECK_ID || deck?.readonly) {
+    throw new Error('Copy the bundled Post-process deck before editing its style.');
+  }
+  const style = normalizePostProcessStyle({ ...deck, ...patch });
+  return editDeck(deck, (next) => ({ ...next, ...style }), now);
+}
+
+export function exportPostProcessDeck(deck) {
+  if (!isObject(deck) || !isObject(deck.categories) || !isObject(deck.cards)) {
+    throw new Error('Select a valid Post-process deck to export.');
+  }
+  const style = normalizePostProcessStyle(deck);
+  return JSON.stringify({ ...clone(deck), ...style }, null, 2);
+}
+
+export function importPostProcessDeck(settings = {}, payload, { now = nowIso() } = {}) {
+  let source;
+  try { source = typeof payload === 'string' ? JSON.parse(payload) : clone(payload); }
+  catch { throw new Error('Post-process deck import must contain valid JSON.'); }
+  if (!isObject(source) || !normalizePostProcessName(source.name) || !isObject(source.categories) || !isObject(source.cards)) {
+    throw new Error('Post-process deck import requires a name, categories, and cards.');
+  }
+  const style = normalizePostProcessStyle(source);
+  const normalized = normalizePostProcessDeckSettings(settings, { now });
+  const id = generatedId('post-process', normalized.customDecks);
+  const deck = normalizePostProcessDeck({
+    ...source,
+    ...style,
+    id,
+    name: uniqueName(source.name, Object.values(normalized.customDecks).map((entry) => entry.name), 'Imported Deck'),
+    createdAt: now,
+    updatedAt: now
+  }, id, { now });
+  return normalizePostProcessDeckSettings({ ...normalized, activeDeckId: id, customDecks: { ...normalized.customDecks, [id]: deck } }, { now });
+}

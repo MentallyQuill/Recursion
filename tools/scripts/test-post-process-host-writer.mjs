@@ -321,4 +321,13 @@ for (const returned of [false, true]) {
   assertEqual(result.error.kind, 'transport', 'writer provider failure is transport rather than validation');
 }
 
+{
+  const fixture = createWriterContext({ generateImpl: async () => ({ choices: [{ message: { content: 'Partial prose' }, finish_reason: 'length' }] }) });
+  const host = createSillyTavernHost({ contextFactory: () => fixture.context, settingsRoot: {} });
+  const result = await host.generation.rewriteWithPostProcess({ writer: { mode: 'native' } });
+  assertEqual(result.ok, false, 'native known truncation is not accepted');
+  assertEqual(result.error.code, 'provider_token_limit', 'native truncation keeps provider classification');
+  assertEqual(result.text, '', 'partial native prose cannot be committed');
+}
+
 console.log('[pass] post-process host writer');

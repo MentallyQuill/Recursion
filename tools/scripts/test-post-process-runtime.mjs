@@ -218,6 +218,7 @@ function createHarness({
 
   const host = {
     generation: {
+      async resolvePostProcessWriter(writer) { return {...writer,model:'prose-model',label:'Prose model',profileFingerprint:'profile-v1'}; },
       async rewriteWithPostProcess(input) {
         const callIndex = hostCalls.length;
         hostCalls.push(input);
@@ -977,6 +978,11 @@ test('25. Durable Post-process reload restores paused work without executing and
   const pausedResult = await running;
   assertEqual(pausedResult.paused, true, 'Stop pauses rather than discards durable Post-process work');
   let manifest = await storage.loadPipelineRun('post-process-reload-chat');
+  const sourceCheckpoint = manifest.stageRecords['postprocess.source-snapshot'].checkpoint;
+  const frozenSource = await storage.loadPipelineArtifact(manifest.chatKey, manifest.operationId, sourceCheckpoint.artifactRef.artifactId);
+  assertEqual(frozenSource.operationOptions.writer.mode, 'native', 'durable source freezes effective writer');
+  assertEqual(frozenSource.operationOptions.editingScope, 'polish', 'durable source freezes editing scope');
+
   assertEqual(manifest.stageRecords['postprocess.unified.guidance'].state, 'completed', 'durable guidance survives Stop');
   assertEqual(manifest.stageRecords['postprocess.unified.rewrite'].state, 'pending', 'interrupted durable rewrite returns to pending');
 
@@ -1369,11 +1375,12 @@ test('29. Unchanged writer result is accepted and provider errors retain their c
 });
 
 test('30. Resume refuses saved artifacts after context or model configuration changes', async () => {
-  for (const mutation of ['context', 'provider', 'writer', 'deck', 'stop-race']) {
+  for (const mutation of ['context', 'provider', 'writer', 'selected-writer', 'deck', 'stop-race']) {
     const storage = createStorageRepository({ storage: createMemoryStorageAdapter() });
     let currentSettings = settings();
     let currentSnapshot = snapshot();
     let writerHash = 'writer-before';
+    let selectedWriterHash = 'selected-before';
     let currentDeck = deckFrom();
     let writes = 0;
     let commits = 0;
@@ -1389,6 +1396,7 @@ test('30. Resume refuses saved artifacts after context or model configuration ch
     const runtime = createPostProcessRuntime({
       host: { generation: {
         postProcessProvenance: () => ({writerHash}),
+        resolvePostProcessWriter: async writer => ({...writer,profileFingerprint:selectedWriterHash}),
         rewriteWithPostProcess() { writes += 1; return writes === 1 ? new Promise(() => {}) : Promise.resolve({ok: true, text: 'Changed draft.'}); }
       } },
       generationRouter: {generate: async (_role, request) => ({ok: true, data: {
@@ -1408,6 +1416,7 @@ test('30. Resume refuses saved artifacts after context or model configuration ch
     if (mutation === 'context') currentSnapshot = snapshot({supportingContext: {latestUserMessage: 'Changed evidence.'}});
     if (mutation === 'provider') currentSettings = settings({providers: {utility: {connectionProfileId: 'changed'}}});
     if (mutation === 'writer') writerHash = 'writer-after';
+    if (mutation === 'selected-writer') selectedWriterHash = 'selected-after';
     if (mutation === 'deck') currentDeck = deckFrom(['different-card']);
     const continuing = runtime.resumeOperation({operationId: manifest.operationId});
     if (mutation === 'stop-race') {
@@ -1460,3 +1469,33 @@ for (const entry of cases) {
 
 assertEqual(passed, cases.length, 'the complete state-machine matrix ran');
 console.log(`[pass] post-process runtime (${passed} cases)`);
+
+{
+  const styledDeck = {...deckFrom(),styleBrief:'Use short sentences.',styleSample:'Rain fell. She waited.'};
+  const harness = createHarness({initialDeck:styledDeck,
+    initialSettings:settings({postProcess:{writer:{mode:'profile',connectionProfileId:'prose'},editingScope:'revise'}})});
+  const result = await harness.runtime.runPostProcessForLatestAssistant();
+  assertEqual(result.committed,true,'profile revision commits');
+  assertEqual(harness.hostCalls[0].writer?.connectionProfileId,'prose','selected writer reaches rewrite');
+  const packet=JSON.parse(harness.hostCalls[0].guidancePacket);
+  assertEqual(packet.editingScope,'revise','editing scope reaches writer');
+  assertEqual(packet.styleBrief,'Use short sentences.','style brief reaches writer');
+  assertEqual(packet.supportingContext.latestUserMessage,'Continue.','profile writer receives frozen evidence');
+  assert(harness.hostCalls[0].writerDirective.includes('original'),'complete draft is preserved');
+  assert(harness.guidanceInputs[0].prompt.includes('Use short sentences.'),'guidance receives style');
+  console.log('[pass] selected prose writer receives frozen scope, style and evidence');
+}
+
+{
+  const draft='Complete source '.repeat(2500);
+  const harness=createHarness({initialSnapshot:snapshot({originalDraft:draft,
+    supportingContext:{latestUserMessage:'Continue.',boundedPriorMessages:[{text:'oversized '.repeat(1600)},{text:'Whole short message.'}],
+      characterContext:'character '.repeat(2000),storyForm:{tense:'past'}}})});
+  await harness.runtime.runPostProcessForLatestAssistant();
+  const packet=JSON.parse(harness.hostCalls[0].guidancePacket);
+  assertEqual(packet.supportingContext.boundedPriorMessages.length,1,'writer evidence omits oversized messages whole');
+  assertEqual(packet.supportingContext.boundedPriorMessages[0].text,'Whole short message.','writer evidence retains complete fitting messages');
+  assertEqual(packet.supportingContext.characterContext,undefined,'oversized evidence field is omitted whole');
+  assert(packet.supportingContext.omissions.length>=2,'writer receives evidence omission metadata');
+  assert(harness.hostCalls[0].writerDirective.endsWith(draft),'mandatory original draft is never shortened');
+}

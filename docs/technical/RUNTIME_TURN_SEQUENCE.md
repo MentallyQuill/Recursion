@@ -141,7 +141,7 @@ sequenceDiagram
     Runtime->>Model: Request structured guidance
     Model-->>Runtime: Validated guidance
     Runtime->>Store: Checkpoint guidance artifact
-    Runtime->>Host: Native quiet rewrite
+    Runtime->>Host: Selected native/profile prose rewrite
     Host-->>Runtime: Candidate draft
     Runtime->>Store: Checkpoint draft artifact
     Runtime->>Runtime: Validate current source and final draft

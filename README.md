@@ -16,7 +16,7 @@ Recursion builds a turn-bound deck, selects a compact hand, and injects only the
 
 ![Dynamic card selection from the turn deck to the injected guidance packet](assets/documentation/renders/recursion-dynamic-card-selection.png)
 
-Before SillyTavern generates, Recursion's Pre-process Cards prepare the focused guidance packet. After the host response lands, optional Post-process Cards can revise it through the host's native quiet-generation path.
+Before SillyTavern generates, Recursion's Pre-process Cards prepare the focused guidance packet. After the host response lands, optional Post-process Cards can revise it with the current SillyTavern model or a dedicated Connection Profile writer.
 
 ![Recursion Post-process Cards Unified controls after the host response lands](assets/documentation/renders/recursion-post-process-panel-unified.png)
 
@@ -133,7 +133,7 @@ This is the total automatic model-attempt window for each model stage. Local sta
 
 ### Cost Shape
 
-Recursion adds provider work around the host model's normal generation: Pre-process planning and card guidance before the host writes, followed by optional Post-process guidance and native quiet rewriting after the response lands. Utility or Reasoner supplies structured guidance; SillyTavern remains the prose writer. Prompt Footprint affects the final Pre-process packet, while Post-process Evidence Messages bounds only Recursion's frozen evidence window.
+Recursion adds provider work around the host model's normal generation: Pre-process planning and card guidance before the host writes, followed by optional Post-process guidance and rewriting after the response lands. Utility or Reasoner supplies structured guidance; the selected Post-process writer returns revised prose. Prompt Footprint affects the final Pre-process packet. Post-process Evidence Messages bounds the frozen evidence supplied to guidance and profile writing; the current-model writer retains native host context.
 
 Cost depends most on pipeline, Reasoning Level, card count, footprint, cache reuse, provider hidden reasoning, and any external model multiplier. For the detailed call breakdown and planning estimates, see [Recursion Cost Research](docs/technical/RECURSION_COST_RESEARCH.md).
 
@@ -141,20 +141,25 @@ Under the medium-reasoning Segmented example in that research, Recursion adds ro
 
 ## Post-process Cards
 
-Post-process Cards run after the assistant reply lands. Recursion freezes the source response, bounded visible evidence, the Pre-process Prompt Packet, the active Post-process Deck, and the selected operation settings. Utility or Reasoner synthesizes contextual guidance; SillyTavern's native quiet-generation path writes the revised response using the active host preset and context.
+Post-process Cards run after the assistant reply lands. Recursion freezes the source response, bounded visible evidence, the Pre-process Prompt Packet, the active Post-process Deck, and the selected operation settings. Utility or Reasoner synthesizes contextual guidance. Writer defaults to the current SillyTavern model and its native quiet-generation context; choose Connection Profile to use a separate prose model without changing the main connection. The profile receives the complete draft and bounded editing evidence, not the full native host prompt.
 
-Choose `Unified` to synthesize all enabled categories together and perform one host rewrite. Choose `Progressive` to rewrite one enabled category at a time in deck order, carrying each valid draft forward. The Post-process feature is off by default, and each card is independently On or Off.
+Choose `Unified` to synthesize all enabled categories together and perform one rewrite with the selected writer. Choose `Progressive` to rewrite one enabled category at a time in deck order, carrying each valid draft forward. The Post-process feature is off by default, and each card is independently On or Off.
 
 Every operation checks source identity, stale-state boundaries, guidance shape, host output, exact no-op results, cancellation, and final application safety. A failed Unified operation leaves the original unchanged. A failed Progressive category leaves the last valid draft in place and later categories may continue; partial Progressive output commits only as a new swipe so the original remains available.
 
 | Post-process feature | Function | Use it when |
 | --- | --- | --- |
 | `Off` | Leaves the host response unchanged. | You do not want a post-generation rewrite. |
-| `Unified` | Synthesizes all enabled categories together, then performs one native host rewrite. | Categories reinforce one another and one combined revision is preferable. |
+| `Unified` | Synthesizes all enabled categories together, then performs one rewrite with the selected writer. | Categories reinforce one another and one combined revision is preferable. |
 | `Progressive` | Runs enabled categories in order, carrying each valid draft into the next category. | You want visible category ordering and independent fail-soft boundaries. |
 | `As Swipe` | Keeps the original and appends/selects one final rewritten swipe. | You want to compare or return to the original. |
 | `Replace` | Replaces the selected response only after complete success. | You want the rewritten result to become the active response directly. |
+| `Polish` / `Revise` | Polish preserves spoken dialogue wording; Revise permits restructuring and dialogue rephrasing while preserving intent and events. | Choose how much editing is allowed. |
+| `Review before applying` | Holds a candidate for review before As Swipe or Replace. | You want to inspect or edit the revision before changing the response. |
+| Deck Style | A brief of up to 2000 characters and an optional example of up to 6000. Copy the bundled deck to edit its style. | You want consistent rhythm and texture without importing sample facts or phrases. |
 | Post-process card `On` / `Off` | Enables or skips one ordered revision instruction; category activity derives from child cards. | You want to tune the deck without changing Pre-process selection. |
+
+Open the revision comparison to inspect original/revised text, keep the original, edit the candidate, or try another revision from the original. Actions require the source and turn to remain eligible. Follow Through clarifies actions already present; it cannot introduce an action the draft leaves unperformed.
 
 ![Post-process Cards progress showing frozen evidence, guidance, native host rewrite, and swipe settlement](assets/documentation/renders/recursion-first-run-post-process-result.png)
 
@@ -192,13 +197,13 @@ For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_
 - [Recursion Cost Research](docs/technical/RECURSION_COST_RESEARCH.md) - Provider call counts, token-budget ranges, example estimates, and cost-tuning levers.
 - [Testing Strategy](docs/testing/TESTING_STRATEGY.md) - Deterministic gates, Playwright readiness, guarded live smoke, artifacts, and documentation render checks.
 - [Cache Use And Reuse Spec](docs/architecture/CACHE_USE_AND_REUSE_SPEC.md) - Exact-turn checkpoints, unchanged-swipe reuse, invalidation, and unconditional fresh work for new user turns.
-- [Post-process Cards Design](docs/superpowers/specs/2026-07-18-recursion-post-process-cards-design.md) - Current product and data contract for Post-process decks and host rewriting.
+- [Post-process Writer and Revision Review Design](docs/superpowers/specs/2026-09-23-post-process-writer-review-design.md) - Current writer, editing scope, style, comparison, and retention contract.
 
 ## Security And Privacy
 
 Recursion treats provider secrets and raw model I/O as sensitive. Provider credentials and endpoints remain owned by SillyTavern Connection Profiles; Recursion stores only profile selection and policy state.
 
-Normal diagnostics use hashes, compact statuses, bounded metadata, and sanitized activity instead of raw prompts, raw provider responses, hidden reasoning, or full transcript text. Resume-only prompts, cards, guidance, packets, and drafts live in isolated artifact records; manifests contain only checkpoint metadata. Successful Post-process settlement removes intermediate guidance and drafts, stale or abandoned work loses unusable artifacts, and Reset Turn Cache clears Recursion-generated work for the active turn without changing SillyTavern messages.
+Normal diagnostics use hashes, compact statuses, bounded metadata, and sanitized activity instead of raw prompts, raw provider responses, hidden reasoning, or full transcript text. Resume-only prompts, cards, guidance, packets, and drafts live in isolated artifact records; manifests contain only checkpoint metadata. Post-process comparisons retain original/final text separately from diagnostics: up to ten completed comparisons per chat, with pending review protected. Retry evidence is released when stale; intermediate progressive drafts are disposable. Stale or abandoned work loses unusable execution artifacts, and Reset Turn Cache clears Recursion-generated work for the active turn without changing SillyTavern messages.
 
 ## License
 

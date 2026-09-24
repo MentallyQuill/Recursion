@@ -29,13 +29,13 @@ function deckSettings({ authored = false, refinement = true } = {}) {
     categories: { general: { id: 'general', name: 'General' } }, categoryOrder: ['general'], cards,
     cardOrderByCategory: { general: Object.keys(cards) } } } };
 }
-function createHarness({ pipelineMode = 'segmented', authored = false, refinement = true, rejectTwice = false, providerFailure = false, draftGate = null } = {}) {
+function createHarness({ pipelineMode = 'segmented', authored = false, refinement = true, rejectTwice = false, providerFailure = false, draftGate = null, mode = 'auto', maxCards = 4 } = {}) {
   const calls = [];
   const installed = [];
   let currentSnapshot = initialSnapshot();
   let draftBlocked = false;
   const settingsStore = createSettingsStore({ root: {} });
-  settingsStore.update({ pipelineMode, modelAttemptsPerStep: 2, reasoningLevel: 'low', reasonerUse: 'off', minCards: 1, maxCards: 4,
+  settingsStore.update({ pipelineMode, mode, modelAttemptsPerStep: 2, reasoningLevel: 'low', reasonerUse: 'off', minCards: 1, maxCards,
     preProcessDecks: deckSettings({ authored, refinement }) });
   for (const lane of ['utility', 'reasoner']) settingsStore.updateProviderConfig(lane, { connectionProfileId: `${lane}-profile` });
   const storage = createStorageRepository({ storage: createMemoryStorageAdapter() });
@@ -43,8 +43,8 @@ function createHarness({ pipelineMode = 'segmented', authored = false, refinemen
     calls.push({ roleId, request });
     if (roleId === 'utilityArbiter') return { ok: true, data: {
       schema: 'recursion.utilityArbiter.v1', snapshotHash: request.snapshotHash, action: 'compose-brief', sceneStatus: 'same-scene',
-      promptFootprint: 'normal', cardJobs: [{ family: 'Realism', role: 'realismCard', reason: 'Check the archive claim.' }],
-      budgets: { targetBriefTokens: 500, maxCards: 4 }, reasonerDecision: { mode: 'skip', reason: 'Unit test', signals: [] }, diagnostics: []
+      promptFootprint: 'normal', cardJobs: mode === 'manual' ? [] : [{ family: 'Realism', role: 'realismCard', reason: 'Check the archive claim.' }],
+      budgets: { targetBriefTokens: 500, maxCards }, reasonerDecision: { mode: 'skip', reason: 'Unit test', signals: [] }, diagnostics: []
     } };
     if (roleId === 'fusedCardBundle') return { ok: true, data: { items: request.requestedCards.map(card => ({
       family: card.family, promptText: ORIGINAL, evidenceRefs: ['message:1'], coveredSourceCardIds: card.sourceCardIds
@@ -78,7 +78,7 @@ function createHarness({ pipelineMode = 'segmented', authored = false, refinemen
     messages: {}, generation: { start: async () => ({ ok: true, started: true }), stop: async () => ({ ok: true, stopped: true, eventEmitted: false }) }
   };
   const runtime = createRecursionRuntime({ host, settingsStore, storage, generationRouter: provider, activity: createActivityReporter() });
-  return { runtime, calls, installed, storage, settingsStore, setSnapshot: value => { currentSnapshot = value; } };
+  return { runtime, calls, installed, storage, settingsStore, setSnapshot: value => { currentSnapshot = value; }, setRejectTwice: value => { rejectTwice = value; } };
 }
 const prepare = harness => harness.runtime.prepareForGeneration({ userMessage: { mesid: 2, text: 'What do you remember?' }, hostGeneration: true, generationType: 'normal' });
 const phaseCalls = harness => harness.calls.filter(call => call.roleId.startsWith('cardRefinement'));
@@ -130,7 +130,16 @@ for (const failureMode of ['unresolved', 'provider']) {
   assert.equal(failed.state, 'failed');
   assert.equal(failed.failure.code, failureMode === 'unresolved' ? 'RECURSION_REFINEMENT_UNRESOLVED' : 'RECURSION_PROVIDER_REFUSAL', 'failure classification is preserved');
   assert.equal(phaseCalls(harness).filter(call => call.request.phase === 'review').length, 1, 'semantic failure never repeats first review');
-  if (failureMode === 'unresolved') assert.equal(phaseCalls(harness).filter(call => call.request.phase === 'verify').length, 1, 'second semantic rejection is terminal');
+  if (failureMode === 'unresolved') {
+    assert.equal(phaseCalls(harness).filter(call => call.request.phase === 'verify').length, 1, 'second semantic rejection is terminal');
+    harness.setRejectTwice(false);
+    const initialCardCalls = harness.calls.filter(call => call.roleId === 'realismCard').length;
+    const retried = await harness.runtime.retryStage({ operationId: manifest.operationId, stageId: 'preprocess.refinement.hand' });
+    assert.equal((retried.execution || retried).state, 'completed', 'explicit Retry reruns semantic review and recovers');
+    assert.equal(phaseCalls(harness).filter(call => call.request.phase === 'review').length, 2, 'semantic Retry starts a new first review');
+    assert.equal(harness.calls.filter(call => call.roleId === 'realismCard').length, initialCardCalls, 'semantic Retry preserves accepted initial generation');
+    assert.equal(harness.installed.length, 1);
+  }
 }
 
 {
@@ -160,12 +169,25 @@ for (const failureMode of ['unresolved', 'provider']) {
   assert.equal(changed.ok, true, 'changed authored deck text is prepared afresh');
   assert.equal(phaseCalls(harness).filter(call => call.request.phase === 'review').length, 2, 'deck instruction edit invalidates accepted review');
   assert.ok(phaseCalls(harness).findLast(call => call.request.phase === 'review').request.prompt.includes(decks.customDecks.test.cards['facet-a'].promptText));
+  const activeDecks = structuredClone(decks);
+  for (const id of ['facet-a', 'facet-b']) activeDecks.customDecks.test.cards[id].selectionState = 'active';
+  await harness.runtime.updateSettings({ preProcessDecks: activeDecks });
+  await harness.runtime.handleLatestAssistantSwipeRetry({ messageId: 3 });
+  const unmarked = await harness.runtime.prepareForGeneration({ userMessage: null, hostGeneration: true, generationType: 'swipe' });
+  assert.equal(unmarked.ok, true, 'turning Refinement off still prepares the active cards');
+  assert.equal(phaseCalls(harness).filter(call => call.request.phase === 'review').length, 2, 'unmarked state has no refinement call');
+  assert.equal(harness.runtime.view().lastHand.metadata.refinement, undefined, 'state toggle invalidates old accepted metadata');
+  await harness.runtime.updateSettings({ preProcessDecks: decks });
+  await harness.runtime.handleLatestAssistantSwipeRetry({ messageId: 3 });
+  const remarked = await harness.runtime.prepareForGeneration({ userMessage: null, hostGeneration: true, generationType: 'swipe' });
+  assert.equal(remarked.ok, true);
+  assert.equal(phaseCalls(harness).filter(call => call.request.phase === 'review').length, 3, 'turning Refinement on requires a fresh review');
   const nextSnapshot = { ...assistantSnapshot, latestMesId: 4, sourceRevisionHash: 'archive-next-source', turnFingerprint: 'archive-next-turn',
     messages: [...assistantSnapshot.messages, { mesid: 4, role: 'user', text: 'What do you remember?', visible: true }] };
   harness.setSnapshot(nextSnapshot);
   const nextTurn = await harness.runtime.prepareForGeneration({ userMessage: { mesid: 4, text: 'What do you remember?' }, hostGeneration: true, generationType: 'normal' });
   assert.equal(nextTurn.ok, true);
-  assert.equal(phaseCalls(harness).filter(call => call.request.phase === 'review').length, 3, 'fresh user turn requires fresh semantic review');
+  assert.equal(phaseCalls(harness).filter(call => call.request.phase === 'review').length, 4, 'fresh user turn requires fresh semantic review');
 }
 
 {
@@ -193,6 +215,17 @@ for (const failureMode of ['unresolved', 'provider']) {
   assert.equal(phaseCalls(harness).filter(call => call.request.phase === 'revise').length, 2, 'only interrupted revision gets a new call');
   assert.equal(phaseCalls(harness).filter(call => call.request.phase === 'verify').length, 1);
   assert.equal(harness.installed.length, 1);
+}
+
+for (const pipelineMode of ['segmented', 'fused']) {
+  const harness = createHarness({ pipelineMode, mode: 'manual', maxCards: 1, authored: true });
+  assert.equal((await prepare(harness)).ok, true, 'Manual Refinement succeeds despite requested one-card limit');
+  assert.ok(harness.calls.some(call => ['realismCard', 'fusedCardBundle'].includes(call.roleId)), 'Manual generates marked cards despite empty Arbiter selection');
+  const hand = harness.runtime.view().lastHand;
+  assert.equal(hand.cards[0].family, 'Realism', 'first marked generated family preserves deck order');
+  assert.equal(hand.cards[1].id, 'authored', 'authored Refinement follows generated family in deck order');
+  assert.ok(hand.cards.length >= 2, 'mandatory Refinement exceeds requested capacity');
+  assert.deepEqual(hand.metadata.refinement.targets.map(target => target.targetId), ['facet-a', 'facet-b', 'authored']);
 }
 
 console.log('[pass] runtime refinement integration');

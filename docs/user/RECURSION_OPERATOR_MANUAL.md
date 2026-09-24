@@ -525,3 +525,7 @@ Export Diagnostics downloads a timestamped `recursion-diagnostics-*.json` file o
 Auto ranks ordinary cards by their distinct value to the current reply. Priority and Refinement cards are mandatory; the remaining hand follows the Arbiter's order rather than a fixed preference for scene bookkeeping. Diagnostics show proposed families and reasons, mandatory cards, budget omissions, and the actual selected evidence. Repeated swipes can reuse the same prepared hand without a new Arbiter call.
 
 For a surprising claim, the stock cards support character-specific sense-making: clarifying what was meant, reacting to personal stakes, asking answerable questions, and taking proportionate action while still uncertain. They preserve real constraints without requiring a stalled confrontation or impossible proof. Existing custom card wording remains yours; copying the updated Default deck is separate from editing an existing custom deck.
+
+### Missing selected cards
+
+All selected cards must finish before narration. If a selected card still fails after automatic correction or Fused repair, preparation pauses at that card. Retry it to reuse the successful sibling cards. If Selecting turn hand reports missing planned cards without a failed provider stage, use Reset Turn Cache and try again; export Diagnostics if it repeats. A hand below the configured target can still proceed when there are not enough eligible cards and every planned card is present.

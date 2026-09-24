@@ -1,3 +1,4 @@
+import { missingPlannedCards } from './card-selection.mjs';
 import { unsafeInstructionMatch } from './instruction-safety.mjs';
 import { normalizeFusedRejections } from './fused-recovery.mjs';
 import { compact, hashJson, makeId, nowIso, redact, safeId, truncate } from './core.mjs';
@@ -1475,6 +1476,7 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
     }
   }
 
+  const missing = missingPlannedCards(selected, selectionDiagnostics?.retained || []);
   const behaviorPolicyMetadata = policy
     ? {
         ...summarizeBehaviorPolicyForDiagnostics(policy, {
@@ -1504,10 +1506,10 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
         authoredCount: selected.filter((card) => card.origin === 'authored').length,
         generatedCount: selected.filter((card) => card.origin !== 'authored').length,
         shortfallCount: Math.max(0, Number(selectionDiagnostics.targetCount || 0) - selected.length),
+        missingPlannedCards: missing,
         shortfallReasons: [
           ...(selectionDiagnostics.shortfallReason ? [selectionDiagnostics.shortfallReason] : []),
-          ...((selectionDiagnostics.retained || []).some((job) => !selected.some((card) => job.cardId ? card.id === job.cardId : card.family === job.family))
-            ? ['card-generation-failed'] : [])
+          ...(missing.length ? ['planned-card-missing'] : [])
         ],
         selected: selected.map((card) => ({
           id: card.id, family: card.family,

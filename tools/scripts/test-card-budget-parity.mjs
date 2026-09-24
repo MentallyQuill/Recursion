@@ -57,13 +57,34 @@ for (const pipelineMode of ['fused', 'segmented']) {
   assertEqual(empty.view.lastHand.cards.length, 0, 'zero target retains no cards');
   assert(!empty.calls.some(call => call.roleId === 'fusedCardBundle' || call.request.metadata?.family), 'zero target creates no card provider calls');
   const failed = await runCardBudgetFixture({ pipelineMode, failedFamily: 'Knowledge' });
-  assertEqual(failed.result.ok, true, 'ordinary failure preserves useful sibling work');
-  assertEqual(failed.view.lastHand.cards.length, 9, 'failed selected family is not replaced with invented fallback content');
-  assert(failed.view.lastHand.metadata.selection.shortfallReasons.includes('card-generation-failed'), 'failed generation is distinguished from eligibility');
-  assert(handStep(failed).reason.includes('selected cards failed generation'), 'progress explains provider shortfall');
+  assertEqual(failed.result.ok, false, 'missing planned output blocks narration after recovery is exhausted');
+  assertEqual(failed.installed, null, 'partial planned hand is never installed');
+  assert(!failed.calls.some(call => call.roleId === 'guidanceComposer'), 'Guidance never consumes the incomplete hand');
   const saved = await failed.storage.loadPipelineRun('budget');
-  assertDeepEqual(progressFromExecution(saved).steps.find(step => step.id === 'preprocess.hand').reason,
-    handStep(failed).reason, 'saved manifest restores the same hand summary');
+  const failedCard = saved.stageRecords['preprocess.cards.segmented.knowledge'];
+  assertEqual(failedCard.state, 'failed', 'selected card failure is durable');
+  assertEqual(failedCard.failure.code, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'original provider failure is preserved');
+  assertEqual(failed.result.continuePrimaryGeneration, false, 'host generation remains blocked');
+  failed.recoverProvider();
+  const beforeRetry = failed.calls.length;
+  const retried = await failed.runtime.retryStage({ operationId: saved.operationId, stageId: 'preprocess.cards.segmented.knowledge' });
+  assertEqual(retried.ok, true, 'retrying the failed family completes the hand');
+  assertEqual(failed.installed.selectedCardRefs.length, 10, 'recovered complete hand reaches installation');
+  assertDeepEqual(failed.calls.slice(beforeRetry).map(call => call.roleId), ['knowledgeSecretsCard', 'guidanceComposer'], 'Retry preserves accepted siblings and rebuilds only dependent composition');
+
 }
 
 console.log('[pass] card budget parity');
+
+// A valid provider result can still be lost downstream; the final hand must detect it.
+for (const pipelineMode of ['fused', 'segmented']) {
+  const selectedKnowledge = segmented.view.lastHand.cards.find(card => card.family === 'Knowledge');
+  const lost = await runCardBudgetFixture({ pipelineMode, lifecycle: [{ action: 'stow', cardId: selectedKnowledge.id }] });
+  assertEqual(lost.result.ok, false, 'downstream loss of planned output blocks preparation');
+  assertEqual(lost.result.continuePrimaryGeneration, false, 'coverage guard stops the host');
+  assertEqual(lost.installed, null, 'missing planned output is never installed');
+  assert(!lost.calls.some(call => call.roleId === 'guidanceComposer'), 'Guidance never sees an incomplete hand');
+  const manifest = await lost.storage.loadPipelineRun('budget');
+  assertEqual(manifest.stageRecords['preprocess.hand'].failure.code, 'RECURSION_HAND_INCOMPLETE', 'the coverage guard identifies missing output without blaming provider generation');
+}
+console.log('[pass] final hand coverage guard');

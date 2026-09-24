@@ -5254,6 +5254,7 @@ for (const scenario of [
       reasonerUse: 'off',
       strength: 'strong',
       promptFootprint: 'rich',
+      cardSelection: { variety: 'off' },
       minCards: 5,
       maxCards: 12
     },

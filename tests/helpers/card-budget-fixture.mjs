@@ -6,7 +6,7 @@ import { createMemoryStorageAdapter, createStorageRepository } from '../../src/s
 export async function runCardBudgetFixture({ pipelineMode = 'segmented', reasoningLevel = 'medium',
   minCards = 8, maxCards = 12, strength = 'balanced', authoredCount = 3,
   allowedFamilies = null, partial = false, failedFamily = '', priorityFamily = '',
-  proposed = ['Knowledge'], storage = null } = {}) {
+  proposed = ['Knowledge'], lifecycle = [], storage = null } = {}) {
   const deck = createDefaultCardDeck();
   deck.id = 'budget-fixture'; deck.readonly = false; deck.bundled = false;
   for (const card of Object.values(deck.cards)) {
@@ -42,8 +42,8 @@ export async function runCardBudgetFixture({ pipelineMode = 'segmented', reasoni
       calls.push({ roleId, request });
       if (roleId === 'utilityArbiter') return { ok: true, data: {
         schema: 'recursion.utilityArbiter.v1', snapshotHash: request.snapshotHash,
-        action: 'refresh-cards', sceneStatus: 'same-scene', promptFootprint: 'normal',
-        cardJobs: proposed.map(family => ({ family, reason: 'Ground the next question in visible evidence.' })),
+        action: 'refresh-cards', sceneStatus: 'same-scene', promptFootprint: 'normal', lifecycle,
+        cardJobs: proposed.map(job => typeof job === 'string' ? { family: job, reason: 'Ground the next question in visible evidence.' } : job),
         budgets: { targetBriefTokens: 500, maxCards: 1 },
         reasonerDecision: { mode: 'skip', reason: 'Fixture', signals: [] }, diagnostics: []
       } };
@@ -63,5 +63,5 @@ export async function runCardBudgetFixture({ pipelineMode = 'segmented', reasoni
     } }
   });
   const result = await runtime.prepareForGeneration({ userMessage: { text: 'I ask what she remembers.', mesid: 2 } });
-  return { result, runtime, view: runtime.view(), calls, installed, storage: repository };
+  return { result, runtime, view: runtime.view(), calls, get installed() { return installed; }, recoverProvider() { failedFamily = ''; }, storage: repository };
 }

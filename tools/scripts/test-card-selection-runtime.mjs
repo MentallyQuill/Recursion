@@ -81,7 +81,7 @@ for (const pipelineMode of ['segmented','fused']) {
     if(turn<2)assert.deepEqual(prepared.hand.cards[0].sourceCardIds,[normalizedSources[turn].id]);
     else {
       assert.equal(prepared.hand.cards[0].id,'authored');
-      assert(!prepared.hand.metadata.selection.shortfallReasons.includes('card-generation-failed'),'authored eligibility shortage is not a generation failure');
+      assert(!prepared.hand.metadata.selection.shortfallReasons.includes('planned-card-missing'),'authored eligibility shortage is not missing planned work');
     }
     const current=requests.filter(r=>r.turn===turn);
     if(turn===1){

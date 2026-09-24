@@ -70,3 +70,13 @@ export function selectCardCandidates(candidates = [], { slots = 0, variety = 'lo
   }
   return { selected, omitted, replacement };
 }
+
+// Match execution requirements, not a numeric target: an eligible deck may legitimately be small.
+export function missingPlannedCards(cards = [], requirements = []) {
+  return requirements.filter((job) => !cards.some((card) => {
+    if (card?.status !== 'active' || !String(card.promptText || '').trim()) return false;
+    if (job.cardId) return card.origin === 'authored' && card.id === job.cardId;
+    return card.origin !== 'authored' && card.family === job.family
+      && (job.sourceCardIds || []).every((id) => (card.sourceCardIds || []).includes(id));
+  })).map(({ family = '', cardId = '', sourceCardIds = [] }) => ({ family, cardId, sourceCardIds }));
+}

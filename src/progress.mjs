@@ -1674,7 +1674,7 @@ export function progressFromExecution(execution, queuedReprocess = null) {
           const reasons = new Set(summary.shortfallReasons || []);
           const explanation = [
             reasons.has('insufficient-eligible-cards') ? 'not enough eligible cards' : '',
-            reasons.has('card-generation-failed') ? 'selected cards failed generation' : ''
+            reasons.has('planned-card-missing') ? 'planned cards are missing' : ''
           ].filter(Boolean).join('; ') || 'selected cards unavailable';
           step.reason += `. ${summary.shortfallCount} below target: ${explanation}.`;
           step.state = 'warning';

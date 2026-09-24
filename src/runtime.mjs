@@ -1,4 +1,4 @@
-import { normalizeCardSelectionSettings, cooldownExclusions, selectCardCandidates } from './card-selection.mjs';
+import { normalizeCardSelectionSettings, cooldownExclusions, selectCardCandidates, missingPlannedCards } from './card-selection.mjs';
 import { createActivityReporter } from './activity.mjs';
 import { summarizeRefinementMetadata } from './card-refinement.mjs';
 import { createCardRefinementStages, hasCardRefinement, REFINED_HAND_STAGE_ID } from './runtime/card-refinement-stages.mjs';
@@ -140,7 +140,7 @@ import {
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
 const PROVIDER_TEST_TIMEOUT_MS = 30000;
 const STORAGE_SCHEMA_VERSION = 1;
-const RUNTIME_CACHE_CONTRACT_VERSION = 5;
+const RUNTIME_CACHE_CONTRACT_VERSION = 6;
 const DEFAULT_CHAT_ID = 'chat';
 const DEFAULT_SCENE_KEY = 'scene';
 const INSTALL_FAILURE_LABEL = 'Prompt install failed. Narration stopped.';
@@ -1737,16 +1737,28 @@ export function reconcileAutoPriorityPlan(plan, settings, { seed = '', history =
       if (!prioritySet.has(job.cardId)) candidates.push({ ...job, key: `card:${job.cardId}` });
       continue;
     }
-    const catalog = catalogForCard(job);
+    const sourceCard = job.cardId && Object.hasOwn(deck.cards, job.cardId) ? deck.cards[job.cardId] : null;
+    const catalog = sourceCard?.builtinFamily
+      ? catalogForCard({ family: sourceCard.builtinFamily })
+      : catalogForCard(job);
     const family = catalog?.family;
     const eligible = sources[family] || [];
-    const ids = Array.isArray(job.sourceCardIds) ? eligible.filter((card) => job.sourceCardIds.includes(card.id) || prioritySet.has(card.id)).map((card) => card.id) : eligible.map((card) => card.id);
+    if (job.cardId && !eligible.some((card) => card.id === job.cardId)) {
+      omitted.push({ family: family || '', cardId: job.cardId, reason: 'ineligible-card' });
+      continue;
+    }
+    const requestedIds = job.cardId ? [job.cardId] : job.sourceCardIds;
+    const ids = Array.isArray(requestedIds) ? eligible.filter((card) => requestedIds.includes(card.id) || prioritySet.has(card.id)).map((card) => card.id) : eligible.map((card) => card.id);
     if (!family || !ids.length) {
       omitted.push({ family: family || job.family || '', cardId: job.cardId || '', reason: 'ineligible-card' });
       continue;
     }
-    const candidate = { ...job, family, role: catalog.role, sourceCardIds: ids, key: `family:${family}` };
-    if (families.includes(family)) { if (!mandatoryJobs.has(family)) mandatoryJobs.set(family, candidate); }
+    const { cardId: _sourceCardId, ...familyJob } = job;
+    const candidate = { ...familyJob, family, role: catalog.role, sourceCardIds: ids, key: `family:${family}` };
+    const previous = mandatoryJobs.get(family) || candidates.find((entry) => entry.key === candidate.key);
+    if (previous) {
+      previous.sourceCardIds = eligible.filter((card) => previous.sourceCardIds.includes(card.id) || ids.includes(card.id)).map((card) => card.id);
+    } else if (families.includes(family)) mandatoryJobs.set(family, candidate);
     else candidates.push(candidate);
   }
   // Complete the configured target from eligible sources without reviving cooldown exclusions.
@@ -1793,7 +1805,7 @@ export function reconcileAutoPriorityPlan(plan, settings, { seed = '', history =
       authoredSlots: selectedAuthoredCardIds.length, selectedAuthoredCardIds,
       availableSlots: Math.max(0, maximum - families.length),
       selectionOrder: [...requiredJobs.map((job) => job.family), ...selection.selected.map((job) => job.cardId || job.family)],
-      retained: [...jobs, ...selection.selected.filter((job) => job.cardId)].map(({ family, cardId, reason, sourceCardIds, forcedBy }) => ({ family: family || '', cardId: cardId || '', sourceCardIds: sourceCardIds || [], reason: reason || '', mandatory: Boolean(forcedBy) })),
+      retained: [...jobs, ...mandatoryAuthored.map((cardId) => ({ cardId, forcedBy: 'priority-selection' })), ...selection.selected.filter((job) => job.cardId)].map(({ family, cardId, reason, sourceCardIds, forcedBy }) => ({ family: family || '', cardId: cardId || '', sourceCardIds: sourceCardIds || [], reason: reason || '', mandatory: Boolean(forcedBy) })),
       omitted: [...omitted, ...selection.omitted.map((entry) => ({ ...entry, family: entry.key.startsWith('family:') ? entry.key.slice(7) : '' }))],
       variety: { level: normalizeCardSelectionSettings(settings.cardSelection).variety, replacement: selection.replacement },
       recent: history.slice(-3).map(({ deckId, cards }) => ({ deckId, cards }))
@@ -6647,7 +6659,7 @@ export function createRecursionRuntime({
       pipelineMode: pipelineDecision?.effectiveMode || (settings.pipelineMode === 'fused' ? 'fused' : 'segmented'),
       promptVersions: {
         promptPacket: PROMPT_PACKET_VERSION,
-        preprocessGraph: 6
+        preprocessGraph: 7
       },
       providerContractHash: PROVIDER_CONTRACT_HASH,
       deckRevisionHash: activeDeckRevisionHash(settings),
@@ -6871,7 +6883,7 @@ export function createRecursionRuntime({
   function durableArbiterStage(context) {
     return {
       id: 'preprocess.arbiter',
-      version: 1,
+      version: 2,
       kind: 'model',
       executable: true,
       dependencies: ['preprocess.snapshot'],
@@ -7052,6 +7064,8 @@ export function createRecursionRuntime({
       }
     }).map((stage) => ({
       ...stage,
+      // Every dispatched family is part of the committed plan. Exhaustion must leave Retry on that family.
+      failurePolicy: 'blocking',
       buildCorrectionRequest({ request, error, attempt }) {
         return {
           ...request,
@@ -7235,7 +7249,7 @@ export function createRecursionRuntime({
   function durableHandStage(context, plan) {
     return {
       id: 'preprocess.hand',
-      version: 1,
+      version: 2,
       kind: 'local',
       executable: true,
       dependencies: ['preprocess.deck'],
@@ -7270,9 +7284,20 @@ export function createRecursionRuntime({
         );
       },
       validate(artifact) {
-        return Array.isArray(artifact?.cards) && Array.isArray(artifact?.omitted)
-          ? { ok: true, value: artifact }
-          : { ok: false, error: { code: 'RECURSION_HAND_INVALID' } };
+        if (!Array.isArray(artifact?.cards) || !Array.isArray(artifact?.omitted)) {
+          return { ok: false, error: { code: 'RECURSION_HAND_INVALID' } };
+        }
+        const requirements = [
+          ...(plan.cardJobs || []),
+          ...(plan.selection?.selectedAuthoredCardIds || []).map((cardId) => ({ cardId }))
+        ];
+        const missing = missingPlannedCards(artifact.cards, requirements);
+        if (missing.length) return { ok: false, error: {
+          code: 'RECURSION_HAND_INCOMPLETE', category: 'validation', retryable: false,
+          message: 'The turn hand is missing ' + missing.length + ' planned card(s). Narration stopped.',
+          suggestedAction: 'Reset Turn Cache and try again. If this repeats, export Diagnostics.'
+        } };
+        return { ok: true, value: artifact };
       },
       summarizeArtifact(artifact) {
         return {

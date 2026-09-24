@@ -1487,17 +1487,20 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
     userMessage: 'I ask what she remembers.',
     hostGeneration: true
   });
-  assertEqual(result.ok, true, 'Segmented semantic card exhaustion remains fail-soft');
+  assertEqual(result.ok, false, 'Segmented semantic exhaustion stops incomplete preparation');
+  assertEqual(result.continuePrimaryGeneration, false, 'incomplete hand blocks narration');
   assertEqual(cardAttempts.get('sceneFrameCard'), 1, 'valid sibling remains checkpointed during another card exhaustion');
   assertEqual(cardAttempts.get('activeCastCard'), 2, 'invalid Active Cast card consumes its bounded attempt window');
   const manifest = await storage.loadPipelineRun('chat-preprocess');
   const activeFailure = manifest.stageRecords['preprocess.cards.segmented.active-cast'].failure;
-  assertEqual(manifest.state, 'completed', 'continuing card failure does not block downstream completion');
+  assertEqual(manifest.state, 'paused', 'missing planned output blocks hand completion');
+  assertEqual(manifest.pauseReason, 'stage-failed:preprocess.cards.segmented.active-cast', 'Retry remains on the failed card stage');
   assertEqual(activeFailure.code, 'RECURSION_CARD_INVALID', 'semantic card exhaustion persists the stable failure code');
   assert(activeFailure.message.includes('[hidden-content]: "hidden chain of thought"'), 'semantic card exhaustion persists rule and matched text');
   assertEqual(activeFailure.suggestedAction, 'Retry Active Cast. If it repeats, inspect the card validation reason.', 'semantic card exhaustion persists a useful action');
-  assertEqual(manifest.stageRecords['preprocess.deck'].summary.providerCardCount, 1, 'valid sibling alone reaches the deck');
-  assertEqual(manifest.stageRecords['preprocess.install'].state, 'completed', 'partial Segmented packet still installs');
+  assert(manifest.stageRecords['preprocess.cards.segmented.scene-frame'].checkpoint, 'valid sibling is preserved for Retry');
+  assert(!manifest.stageRecords['preprocess.deck'], 'incomplete selected work never builds a partial deck');
+  assert(!manifest.stageRecords['preprocess.install'], 'partial Segmented packet is never installed');
 }
 
 {
@@ -1956,7 +1959,7 @@ for (const proposed of [
   ['Environment', 'Items', 'Consequences', 'Scene Frame', 'Scene Constraints', 'Active Cast']
 ]) {
   const harness = createHarness({
-    settings: { reasoningLevel: 'medium', minCards: 3, maxCards: 3 },
+    settings: { reasoningLevel: 'medium', minCards: 3, maxCards: 3, cardSelection: { variety: 'off' } },
     provider: { async generate(roleId, request) {
       if (roleId === 'utilityArbiter') return arbiterResponse(request, proposed.map(family => ({ family, reason: 'Distinct contribution to the current scene.' })));
       if (roleId === 'guidanceComposer') return guidanceResponse(request);

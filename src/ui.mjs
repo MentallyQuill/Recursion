@@ -1545,7 +1545,7 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
   const reason = step.reason || '';
   const suggestedAction = step.suggestedAction || '';
   const unhealthy = ['warning', 'failed'].includes(state);
-  const visibleReason = reason && unhealthy ? reason : '';
+  const visibleReason = reason && (unhealthy || step.recoveryState) ? reason : '';
   const visibleAction = suggestedAction && unhealthy ? `Try: ${suggestedAction}` : '';
   const firstRender = row.dataset.recursionProgressRendered !== 'true';
   const changed = !firstRender && (

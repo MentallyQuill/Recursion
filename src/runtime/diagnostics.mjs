@@ -1,6 +1,7 @@
 import { asArray, compact, hashJson, nowIso, redact, truncate } from '../core.mjs';
 import { summarizePreparedGenerationArtifact } from './prepared-generation.mjs';
 import { normalizeGuidanceOmissions } from '../guidance-omissions.mjs';
+import { summarizeFusedOutcome } from '../fused-recovery.mjs';
 
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 const RESUME_BODY_KEY_PATTERN = /(arbiter|card|reference|packet|hand|guidance|draft|prose|prompt|response|artifact).*(body|text|payload|content)|^(body|text|payload|content)$/i;
@@ -128,6 +129,7 @@ function summarizeExecutionStage(record) {
     elapsedMs: elapsedMilliseconds(source.startedAt, source.updatedAt),
     ...(source.timings ? { timings: safeDiagnosticValue(source.timings) } : {}),
     failureClass: safeText(source.failure?.failureClass, 80),
+    ...(source.stageId === 'preprocess.cards.fused' ? { fused: summarizeFusedOutcome(source.summary) } : {}),
     artifactHash: safeText(checkpoint.outputHash || artifactRef.hash, 180),
     artifactBytes: boundedInteger(
       artifactRef.artifactBytes ?? artifactRef.bytes,

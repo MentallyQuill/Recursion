@@ -1479,6 +1479,8 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
         };
       }
       if (roleId === 'openThreadsCard') {
+        assert(request.prompt.includes('missing-family'), 'first targeted repair explains the original bundle rejection');
+        assert(request.prompt.includes('bundle did not return'), 'repair feedback includes an actionable description');
         return cardResponse(roleId, request, { family: 'Open Threads' });
       }
       if (roleId === 'guidanceComposer') return guidanceResponse(request);
@@ -1526,6 +1528,13 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
     'the unresolved family receives one durable Segmented repair stage'
   );
   assertEqual(result.hand.cards.length, 3, 'accepted Fused cards and repaired sibling are merged');
+  assertDeepEqual(fusedArtifact.rejections, [{ family: 'Open Threads', code: 'missing-family' }], 'durable artifact retains the original rejection');
+  assertDeepEqual(manifest.stageRecords['preprocess.cards.fused'].summary.rejections,
+    [{ family: 'Open Threads', code: 'missing-family' }], 'saved summary retains rejection without provider text');
+  const { summarizeExecutionForDiagnostics } = await import('../../src/runtime/diagnostics.mjs');
+  const exported = summarizeExecutionForDiagnostics(manifest).stages.find((stage) => stage.stageId === 'preprocess.cards.fused');
+  assertDeepEqual(exported.fused.rejections, [{ family: 'Open Threads', code: 'missing-family' }], 'export preserves the per-family rejection');
+  assertDeepEqual(exported.fused.acceptedFamilies, ['Scene Frame', 'Scene Constraints'], 'export explains which bundle siblings were accepted');
 }
 
 {

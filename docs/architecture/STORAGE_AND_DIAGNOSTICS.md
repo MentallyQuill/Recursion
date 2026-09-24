@@ -2,6 +2,8 @@
 
 This is the implementation-facing V1 storage, retention, privacy, and diagnostics contract.
 
+Fused execution summaries and diagnostics retain original per-family rejection codes, accepted/unresolved families, and whether individual repair was scheduled. The `stages[].fused` projection is normalized by `src/fused-recovery.mjs`; only catalog families, fixed codes, and bounded lists are exported. Repair stages remain separate durable checkpoints, so saved/reloaded progress can distinguish original rejection, active repair, recovered completion, and unresolved failure without retaining rejected model prose. Fused stage version 2 invalidates earlier checkpoints that omitted source instructions or rejection metadata.
+
 ## Principles
 
 1. SillyTavern chat is authority for story state.

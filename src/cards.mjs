@@ -1,4 +1,5 @@
 import { unsafeInstructionMatch } from './instruction-safety.mjs';
+import { normalizeFusedRejections } from './fused-recovery.mjs';
 import { compact, hashJson, makeId, nowIso, redact, safeId, truncate } from './core.mjs';
 import { CARD_SCOPE_CATALOG } from './card-scope.mjs';
 import { UTILITY_ROLE_IDS } from './providers.mjs';
@@ -1095,7 +1096,7 @@ export function buildFusedCardBundleRequest(plan = {}, context = {}) {
       card.forcedBy ? `- Forced by: ${card.forcedBy}` : '- Forced by: none',
       cardScopePromptBlock(catalog, card.selectedSubItems),
       card.sourceCards.length
-        ? `- Source deck cards: ${card.sourceCards.map((source) => `${source.name || source.id} [${source.selectionState || 'active'}]`).join(', ')}`
+        ? `Source deck cards included in this request:\n${card.sourceCards.map((source) => `- ${source.name || source.id} (id: ${source.id}; ${source.selectionState || 'active'}): ${source.promptText || 'source deck guidance'}`).join('\n')}`
         : '',
       cardPromptSafetyInstruction(catalog)
     ].filter(Boolean).join('\n');
@@ -1225,6 +1226,9 @@ export function cardsFromFusedProviderResult(result, context = {}) {
     })
     .filter(Boolean));
   const seen = new Set();
+  const rejections = new Map(normalizeFusedRejections(
+    (result?.diagnostics?.bundleItemRejections || []).map((entry) => ({ family: entry.family, code: entry.reason }))
+  ).filter((entry) => requested.has(entry.family)).map((entry) => [entry.family, entry.code]));
 
   for (const rawItem of data.items) {
     const item = asObject(rawItem);
@@ -1233,11 +1237,19 @@ export function cardsFromFusedProviderResult(result, context = {}) {
     const duplicate = catalog && data.items.filter((candidate) =>
       resolveCatalog({ family: candidate?.family }, { strict: false })?.family === catalog.family).length > 1;
     if (!catalog || !requested.has(catalog.family) || seen.has(catalog.family) || duplicate) {
+      if (catalog && requested.has(catalog.family) && duplicate) rejections.set(catalog.family, 'duplicate-family');
       if (catalog?.family) output.rejectedFamilies.push(catalog.family);
       output.diagnostics.push(`fused-item-rejected:${diagnosticName}`);
       continue;
     }
     const request = requested.get(catalog.family);
+    if (typeof item.promptText !== 'string' || !item.promptText.trim()
+      || (item.evidenceRefs !== undefined && (!Array.isArray(item.evidenceRefs) || item.evidenceRefs.some((ref) => typeof ref !== 'string')))) {
+      rejections.set(catalog.family, 'invalid-item-shape');
+      output.invalidFamilies.push(catalog.family);
+      output.diagnostics.push(`fused-item-invalid:${catalog.family}`);
+      continue;
+    }
     const cards = cardsFromProviderResult({
       ok: true,
       lane: result?.lane,
@@ -1255,6 +1267,14 @@ export function cardsFromFusedProviderResult(result, context = {}) {
       sourceCards: request.sourceCards
     });
     if (!cards.length) {
+      const reason = providerCardRejectReason({ ok: true, data: item }, {
+        ...context, expectedRole: request.role, expectedFamily: request.family
+      });
+      const code = reason.includes('[hidden-content]') ? 'hidden-content'
+        : reason.includes('[private-claim]') ? 'private-claim'
+        : reason.includes('instruction-shaped') ? 'instruction-shape'
+        : reason === 'evidence-message-missing' ? reason : 'invalid-card';
+      rejections.set(catalog.family, code);
       output.invalidFamilies.push(catalog.family);
       output.diagnostics.push(`fused-item-invalid:${catalog.family}`);
       continue;
@@ -1285,8 +1305,11 @@ export function cardsFromFusedProviderResult(result, context = {}) {
     if (!seen.has(family)) {
       output.missingFamilies.push(family);
       output.diagnostics.push(`fused-item-missing:${family}`);
+      if (!rejections.has(family)) rejections.set(family, 'missing-family');
     }
   }
+  output.rejections = normalizeFusedRejections([...rejections]
+    .filter(([family]) => !seen.has(family)).map(([family, code]) => ({ family, code })));
   return finalize();
 }
 

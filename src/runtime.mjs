@@ -1,5 +1,6 @@
 import { createActivityReporter } from './activity.mjs';
 import { failureFromError } from './failures.mjs';
+import { normalizeFusedRejections, fusedRejectionReason } from './fused-recovery.mjs';
 import {
   CARD_CATALOG,
   applyCardPlan,
@@ -261,13 +262,14 @@ export function validateFusedProviderResult(providerResult = {}, {
     ])
   );
   const selected = Array.isArray(selectedCards) ? selectedCards : [];
+  const rejections = normalizeFusedRejections(parsed.rejections);
   const outcomes = Object.fromEntries(selected.map((selectedCard) => {
     const family = safeText(selectedCard?.family || selectedCard?.role || '', 120);
     return [
       family,
       cards[family]
         ? { state: 'completed', reason: null }
-        : { state: 'failed', reason: 'invalid-card' }
+        : { state: 'failed', reason: rejections.find((entry) => entry.family === family)?.code || 'missing-family' }
     ];
   }));
   const acceptedFamilies = Object.keys(cards);
@@ -282,6 +284,7 @@ export function validateFusedProviderResult(providerResult = {}, {
         outcomes,
         acceptedFamilies,
         unresolvedFamilies,
+        rejections,
         fallback: unresolvedFamilies.length
           ? {
               mode: 'segmented',
@@ -294,6 +297,7 @@ export function validateFusedProviderResult(providerResult = {}, {
   }
   return {
     ok: false,
+    value: { cards, outcomes, acceptedFamilies, unresolvedFamilies, rejections },
     error: {
       code: 'RECURSION_FUSED_ZERO_USEFUL_CARDS',
       category: 'validation',
@@ -6778,11 +6782,15 @@ export function createRecursionRuntime({
       storyForm: scopedPlan.storyForm || UNKNOWN_STORY_FORM
     };
     const requests = buildCardRequests(scopedPlan, requestContext)
-      .map((request) => applyReasoningLaneToCardRequest(
-        request,
-        context.settings,
-        runtimeProviderCapability
-      ));
+      .map((request) => {
+        const job = selectedCards.find((entry) => entry.family === request.metadata.family);
+        const rejection = normalizeFusedRejections([{ family: request.metadata.family, code: job?.fusedRejectionCode }])[0];
+        const corrected = rejection ? {
+          ...request,
+          prompt: `${request.prompt}\n\nRepair this family from the Fused bundle [${rejection.code}]: ${fusedRejectionReason(rejection.code)}\nReturn only this corrected card; accepted sibling cards are already preserved.`
+        } : request;
+        return applyReasoningLaneToCardRequest(corrected, context.settings, runtimeProviderCapability);
+      });
     const requestByKey = new Map();
     for (const request of requests) {
       for (const key of [request.metadata?.family, request.roleId]) {
@@ -7420,7 +7428,9 @@ export function createRecursionRuntime({
         : []
     );
     return (Array.isArray(plan?.cardJobs) ? plan.cardJobs : [])
-      .filter((job) => unresolved.has(safeText(job?.family || job?.role || '', 120)));
+      .filter((job) => unresolved.has(safeText(job?.family || job?.role || '', 120)))
+      .map((job) => ({ ...job, fusedRejectionCode: normalizeFusedRejections(fusedArtifact?.rejections)
+        .find((entry) => entry.family === job.family)?.code || 'invalid-card' }));
   }
 
   function durableCardStageSet(context, plan, {

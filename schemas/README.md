@@ -6,6 +6,8 @@ Performance execution fields: `pipelineRun.v2` includes nullable `pipelineDecisi
 
 Standalone schema files are not required for the current pre-alpha runtime.
 
+Fused card stage version 2 includes full source instructions in provider-visible prompts and records `rejections: [{family, code}]` in its artifact and summary. `src/fused-recovery.mjs` validates request-owned catalog families and allowlisted codes: `missing-family`, `duplicate-family`, `invalid-item-shape`, `instruction-shape`, `hidden-content`, `private-claim`, `evidence-message-missing`, and `invalid-card`. Records are unique by family and bounded to 40. Diagnostics expose `stages[].fused = {acceptedFamilies, unresolvedFamilies, rejections, fallback}`; `fallback` is `segmented` or null. Rejections describe the original bundle, while repair-stage state determines final recovery. Raw provider prose and arbitrary extra fields are excluded. The stage version invalidates old Fused checkpoints.
+
 Recursion V1 keeps its structured contracts close to the source modules that validate them:
 
 - settings and provider preferences in `src/settings.mjs`;

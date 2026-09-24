@@ -9,6 +9,8 @@ Keep the final assessment on per-target hand metadata for the Viewer and opted-i
 - [x] Root: add failing contract tests, update prompt/schema/validation, persist final assessment, sanitize compact summaries and invalidate old contracts.
 - [x] UI worker: render bounded assessment and references beneath existing Viewer outcomes; update UI/design docs and focused tests, verify isolated browser.
 - [x] Root: update runtime/provider fixtures, test unchanged/revised results in both modes with identical call counts, and ensure assessments do not enter narrator/compact diagnostics.
-- [ ] Independent review, full offline suite, integrate current main, commit and push, verify GitHub SHA.
+- [x] Independent review, full offline suite, integrate current main, commit and push, verify GitHub SHA.
+
+Delivered on main at `b1d49758`, verified through the GitHub API. All 105 offline test scripts passed on the combined result, including current main's instruction-line preservation fix. Isolated browser checks at 1000px and 390px verified assessment display, refresh, bounded content, and inert markup. Independent review findings were corrected and rechecked: accepted targets depending on revised peers join the existing verification call, and draft prompts omit review-only output instructions.
 
 Verification limitation: deterministic tests prove contracts and orchestration, not live-model defect detection. No provider calls will be added or silently run for evaluation.

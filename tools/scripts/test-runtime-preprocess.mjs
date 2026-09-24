@@ -1308,8 +1308,10 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
   assertEqual(calls.some(call => call.roleId.endsWith('Card')), false, 'valid bundle needs no segmented repair');
   const manifest = await harness.storage.loadPipelineRun('chat-preprocess');
   assertEqual(manifest.pipelineMode, 'fused', 'durable manifest honors Fused');
+  assertEqual(result.packet.diagnostics.requestedPipelineMode, 'fused', 'packet preserves the requested Fused mode');
   assertEqual(result.packet.diagnostics.pipelineMode, 'fused', 'packet reports actual Fused mode');
-  assert(!result.packet.diagnostics.pipelineReasonCodes.includes('profile-not-fused-certified'), 'no certification downgrade reason remains');
+  assertDeepEqual(result.packet.diagnostics.pipelineReasonCodes, [], 'no certification downgrade reason remains');
+  assertEqual(manifest.stageRecords['preprocess.cards.fused'].state, 'completed', 'Fused progress stage completes');
 }
 
 

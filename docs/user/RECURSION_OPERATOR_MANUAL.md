@@ -382,7 +382,7 @@ Use this first-run path:
 8. Confirm progress reaches prompt ready or a clear fallback.
 9. Inspect Last Brief and Prompt Packet.
 10. Try Manual with a narrowed Cards scope and confirm selected families are covered while disabled families stay out.
-11. Try Fused only after the selected lane reports Fused, then confirm it reports accepted bundle work, targeted Segmented repair, or full Segmented fallback honestly.
+11. Select Fused, then confirm it reports accepted bundle work, targeted Segmented repair, or full Segmented fallback honestly.
 12. Use the power toggle to verify prompt cleanup.
 
 See [First Run Workflow](FIRST_RUN_WORKFLOW.md) for the shorter checklist.

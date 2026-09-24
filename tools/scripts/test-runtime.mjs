@@ -6940,7 +6940,7 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
   const utility = settingsStore.get().providers.utility;
   assertEqual(utility.certification.status, 'partial', 'runtime persists partial certification');
   assertEqual(utility.certification.checks.singleCard, 'pass', 'partial certification permits Segmented stages');
-  assertEqual(utility.certification.checks.fusedCards, 'fail', 'partial certification blocks Fused stages');
+  assertEqual(utility.certification.checks.fusedCards, 'fail', 'partial certification records the failed Fused diagnostic');
   assertEqual(runtime.view().settings.providers.utility.capability.state, 'segmented-ready', 'runtime view reports Segmented readiness');
   assertNoSecretText(partial, 'partial certification result');
 }

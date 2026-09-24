@@ -140,7 +140,7 @@ A context-limit retry lowers only the stage output budget. It does not change th
 | Samplers appear ignored | Profile preset materialization unavailable or unsupported field name. | Inspect sanitized diagnostics for `profile-sampler-projection-failed`; use Recursion Override if needed. |
 | Context-limit failures | Output ceiling or prompt footprint is too large for the model context. | Reduce the lane ceiling or prompt footprint; stage retries already reduce output allowance within safe floors. |
 | Requests stall behind each other | Same profile selected for multiple active stages. | This is expected serialization. Use different profiles only when the backend can safely serve them concurrently. |
-| Fused selection runs Segmented | Profile is not Fused-certified. | Run Test Profile and inspect whether the Fused check passes. |
+| Fused selection runs Segmented repair or fallback | The bundle response had damaged or missing cards, or no useful cards survived. | Inspect the bundle failure details; profile testing is optional diagnostic help. |
 
 ## Privacy And Security
 
@@ -167,7 +167,7 @@ Before relying on a profile:
 4. Run Test Profile.
 5. Confirm the lane reports Segmented or Fused.
 6. Run a Segmented turn and verify one physical request at a time for the profile.
-7. Try Fused only after the lane reports Fused.
+7. Select Fused to bundle card requests; no passing Fused test is required.
 8. Press Stop during a queued multi-card run and verify queued calls do not start.
 9. Export diagnostics and confirm they contain no prompt, output, profile id, endpoint, credential, or hidden reasoning.
 

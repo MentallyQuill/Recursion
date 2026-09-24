@@ -1,7 +1,7 @@
 # Intelligent card selection and controlled variety
 
 Date: 2026-09-23
-Status: Approved for implementation by the user's end-to-end authorization and explicit all-approvals instruction.
+Status: Implemented, verified and delivered to main. Authorized by the user's end-to-end request and explicit all-approvals instruction.
 
 ## Purpose
 Auto mode should respond to the current turn's actual needs and select complementary guidance. A little default variety should expose useful alternatives without replacing the strongest choices or turning selection into arbitrary rotation. Users may opt into a strict cooldown. Message truncation removal is a separate ongoing change and is outside this feature.

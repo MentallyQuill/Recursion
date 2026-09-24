@@ -61,7 +61,7 @@ Interfaces: nested settings.cardSelection from Task 1; controls `Selection varie
 - [x] Review spec coverage and diff; have a fresh reviewer inspect lifecycle, source filtering, randomness and replay boundaries while the full suite runs.
 - [x] Fix findings with targeted red/green tests. Baseline feature suite and browser settings proof pass; merged final suite is recorded below.
 - [x] Fetch main using network permission; integrate concurrent main changes in this isolated branch, without touching the user's dirty checkout. Re-run affected/full suite after integration.
-- [ ] Stage only feature files; create scoped commits; push HEAD:main using network permission. Verify remote SHA. Mark goal complete only after successful push and report tests and limitations.
+- [x] Stage only feature files; create scoped commits; push HEAD:main using network permission. Verify remote SHA. Mark goal complete only after successful push and report tests and limitations.
 
 ## Execution ledger
 - Spec and plan written before implementation; user explicitly granted all approvals including push to main.
@@ -76,3 +76,4 @@ Interfaces: nested settings.cardSelection from Task 1; controls `Selection varie
 - Desktop (1360px) and narrow (390px) production settings proof passed in isolated Chromium; artifacts/card-selection-settings contains screenshots and report. No running SillyTavern installation was changed.
 - Merged verification: all 105 offline test scripts pass. Settings browser screenshots were visually inspected at 1360px and 390px; controls fit without horizontal overflow and persist Medium/2 correctly.
 - All four Playwright-dependent browser test scripts pass. Their isolated server fixture now serves the four added selection/refinement modules; freshness and stale-module checks remain enforced.
+- Delivery: implementation and merged verification pushed to main as `367a92102f13eb0087683e4e81cf77e32465a706`; remote refs/heads/main matched. This final documentation commit closes the delivery ledger. Live-provider narrative quality was not benchmarked; verification used deterministic providers and isolated browser/host fixtures.

@@ -221,6 +221,11 @@ export function createFusedCardStages({
         'RECURSION_RECOVERY_BUDGET_EXHAUSTED', 'RECURSION_OPERATION_DEADLINE'].includes(failure?.code)) {
         return { ok: false, failure };
       }
+      // Narrower card prompts cannot repair an unavailable provider connection.
+      // Only rejected model output may settle into Segmented card repair.
+      if (failure?.kind === 'transport' || failure?.category !== 'validation') {
+        return { ok: false, failure };
+      }
       const validated = validationResult(
         await validate(lastArtifact, {
           context,

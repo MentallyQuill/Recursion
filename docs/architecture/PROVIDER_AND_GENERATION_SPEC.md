@@ -352,13 +352,20 @@ Each failed attempt receives one action.
 | Native schema unsupported | Downgrade structured output to prompt JSON. |
 | Context limit | Reduce only the stage output budget. |
 | Invalid structured or semantic output | Send one bounded correction prompt when the role allows it. |
-| 429, timeout, or transient transport failure | Retry with bounded delay. |
+| 429 / provider rate limit | Retry the same request with a separate capacity allowance and shared profile cooldown. |
+| Timeout or transient transport failure | Retry with bounded delay within the ordinary attempt allowance. |
 | Missing profile, unsupported host API, or configuration mismatch | Stop without retry. |
 | Abort | Stop immediately and do not start queued work. |
 
 One retry never combines schema downgrade, budget reduction, sampler changes, and prompt changes. The scheduler records only allowlisted action and diagnostic codes.
 
 Automatic attempts apply only to Recursion model stages. They do not retry SillyTavern's primary story generation.
+
+Capacity recovery permits eight automatic retries per stage, separate from model correction attempts and the operation's card-repair allowance. Backoff starts at two seconds and doubles to a sixty-second ceiling; a longer provider `Retry-After` always wins. The profile queue applies the cooldown to all queued calls on that connection and resets backoff after a successful transport. Other connections remain independent. The operation deadline bounds requests and waits, and Stop cancels waiting work immediately.
+
+Stage failures persist a hashed provider identity, retry-not-before timestamp, and capacity failure count. The operation budget also retains profile cooldown timestamps independently of stage failure state, so repeated Stop/Resume and explicit Retry cannot erase an inherited cooldown. Resume after interruption waits the remaining cooldown without charging card repair; pending siblings sharing that profile also wait. Explicit Retry opens a new allowance but preserves the saved cooldown. Completed checkpoints remain reusable. A paused operation's cooldown is restored for that operation; unrelated operations after a browser restart do not inherit its saved failure records.
+
+When capacity recovery exhausts, retain the provider rate-limit code and cooldown in diagnostics and progress. Do not replace it with a card validation error or spend the card-repair budget retrying capacity failures.
 
 ## Partial Fused Recovery
 
@@ -372,7 +379,8 @@ Fused request text includes the ID, name, selection state, and full sanitized in
 - When at least one item is useful, only unresolved families receive Segmented repair stages.
 - Accepted Fused cards are not regenerated.
 - Fused artifacts and stage summaries retain bounded `{ family, code }` rejections. The first individual repair request includes the family's fixed rejection explanation, without the rejected response text. A repaired sibling does not mutate the original bundle's acceptance history.
-- When no useful item survives and attempts are exhausted, the scheduler invokes the stage's explicit exhaustion settlement hook once and starts the full Segmented path.
+- When no useful item survives validation and model correction attempts are exhausted, the scheduler invokes the stage's explicit exhaustion settlement hook once and starts the full Segmented path.
+- Provider/transport failures do not create a successful fallback checkpoint or start Segmented card repair. They remain provider failures after bounded recovery, with preparation blocked until they are resolved.
 
 The exhaustion hook may settle an artifact but may not launch provider calls or mutate the graph directly.
 

@@ -1,3 +1,5 @@
+import { rateLimitDelay } from './rate-limit-policy.mjs';
+
 function abortError(reason = 'Provider request was aborted before it started.') {
   const error = new Error(reason);
   error.name = 'AbortError';
@@ -11,6 +13,7 @@ export function createProfileRequestQueue({ concurrency = 1, now = Date.now, set
   const defaultLimit = normalizeLimit(concurrency);
   const limits = new Map();
   const states = new Map();
+  const rateLimits = new Map();
 
   function stateFor(profileId) {
     const key = String(profileId || '').trim();
@@ -54,6 +57,7 @@ export function createProfileRequestQueue({ concurrency = 1, now = Date.now, set
       state.peak = Math.max(state.peak, state.active);
       entry.started = true;
       entry.detachAbort?.();
+      const capacityFailure = rateLimits.get(key);
       Promise.resolve()
         .then(() => {
           if (entry.signal?.aborted) throw abortError();
@@ -69,7 +73,11 @@ export function createProfileRequestQueue({ concurrency = 1, now = Date.now, set
           } catch { /* Diagnostic observers cannot prevent dispatch. */ }
           return entry.task();
         })
-        .then(entry.resolve, entry.reject)
+        .then((value) => {
+          // A success dispatched before another request's 429 cannot clear it.
+          if (rateLimits.get(key) === capacityFailure) rateLimits.delete(key);
+          entry.resolve(value);
+        }, entry.reject)
         .finally(() => {
           state.active -= 1;
           cleanup(key, state);
@@ -129,12 +137,21 @@ export function createProfileRequestQueue({ concurrency = 1, now = Date.now, set
 
   function cooldown(profileId, milliseconds) {
     const [key, state] = stateFor(profileId);
-    const duration = Math.min(60000, Math.max(0, Number(milliseconds) || 0));
+    const duration = Math.min(2147483647, Math.max(0, Number(milliseconds) || 0));
     state.cooldownUntil = Math.max(state.cooldownUntil, now() + duration);
     if (state.timer !== null) clearTimer(state.timer);
     state.timer = null;
     drain(key);
     cleanup(key, state);
+  }
+
+  function rateLimited(profileId, retryAfterMs) {
+    const key = String(profileId || '').trim();
+    const count = (rateLimits.get(key)?.count || 0) + 1;
+    const delayMs = rateLimitDelay(retryAfterMs, count);
+    rateLimits.set(key, { count });
+    cooldown(key, delayMs);
+    return delayMs;
   }
 
   function clear(profileId, reason = 'Provider queue was cleared.') {
@@ -150,5 +167,5 @@ export function createProfileRequestQueue({ concurrency = 1, now = Date.now, set
     return entries.length;
   }
 
-  return Object.freeze({ run, stats, clear, setConcurrency, cooldown });
+  return Object.freeze({ run, stats, clear, setConcurrency, cooldown, rateLimited });
 }

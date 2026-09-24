@@ -202,6 +202,18 @@ assertEqual(executionSummary.stages[0].artifactBytes, 321, 'execution diagnostic
 assert(serializedExecution.includes('operation-paused-user-stop'), 'execution diagnostics emit stable pause code');
 assert(!serializedExecution.includes('CANARY_'), 'execution diagnostics omit all artifact bodies');
 
+{
+  const exported = summarizeExecutionForDiagnostics({ operationId: 'capacity', stageRecords: {
+    fused: { stageId: 'preprocess.cards.fused', state: 'failed',
+      failure: { code: 'RECURSION_PROVIDER_RATE_LIMIT', failureClass: 'capacity', retryAfterMs: 8000, message: 'CANARY_PRIVATE_RESPONSE' },
+      diagnosticCodes: ['provider-rate-limit-exhausted'] }
+  } });
+  assertEqual(exported.stages[0].failureCode, 'RECURSION_PROVIDER_RATE_LIMIT', 'durable diagnostics preserve the exact provider failure');
+  assertEqual(exported.stages[0].retryAfterMs, 8000, 'durable diagnostics retain the cooldown');
+  assert(exported.diagnosticCodes.includes('provider-rate-limit-exhausted'), 'exhaustion cause remains explicit');
+  assert(!JSON.stringify(exported).includes('CANARY_'), 'failure reporting does not export provider prose');
+}
+
 const excerptPayload = buildDiagnosticsPayload({
   view: { lastPacket: { promptText: 'visible excerpt' } },
   includeExcerpts: true,

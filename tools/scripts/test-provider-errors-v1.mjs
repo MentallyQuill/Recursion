@@ -49,6 +49,8 @@ assertEqual(
 );
 
 const sanitized = normalizeProviderError(new Error('Bearer SECRET_PROVIDER_TOKEN'));
+assertEqual(normalizeProviderError({ status: 429, headers: { 'retry-after': '120' } }).retryAfterMs,
+  120000, 'provider cooldown must not be shortened to one minute');
 assertEqual(JSON.stringify(sanitized).includes('SECRET_PROVIDER_TOKEN'), false, 'provider errors do not expose raw messages');
 
 console.log('[pass] provider errors v1');

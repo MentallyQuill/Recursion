@@ -186,6 +186,28 @@ function createClock() {
 {
   const repository = createRepository();
   let calls = 0;
+  const delays = [];
+  const recovering = { ...stage('preprocess.cards.fused', [], async () => {
+    calls += 1;
+    if (calls <= 3) throw { code: 'RECURSION_PROVIDER_RATE_LIMIT', retryAfterMs: 1000 };
+    return calls === 4 ? null : { cards: ['Realism'] };
+  }), buildCorrectionRequest: ({ request }) => request };
+  const graph = createExecutionGraph({ stages: [recovering] });
+  const scheduler = createExecutionScheduler({ repository, retrySleep: async ms => delays.push(ms) });
+  const result = await scheduler.start({ manifest: manifest({ operationId: 'capacity-recovery' }), graph });
+  assertEqual(result.state, 'completed', 'rate limiting recovers automatically within the same operation');
+  assertEqual(calls, 5, 'three capacity failures preserve the subsequent correction attempt');
+  assertEqual(result.recoveryBudget.recoveryUsed, 1, 'only the model correction spends card recovery allowance');
+  assertDeepEqual(delays, [2000, 4000, 8000], 'scheduler uses bounded capacity backoff');
+  const reloaded = createExecutionScheduler({ repository });
+  const resumed = await reloaded.resume({ operationId: 'capacity-recovery', graph, provenance });
+  assertEqual(resumed.state, 'completed', 'reloaded successful checkpoint remains usable');
+  assertEqual(calls, 5, 'reload does not repeat completed capacity recovery');
+}
+
+{
+  const repository = createRepository();
+  let calls = 0;
   const failing = (id) => ({ ...stage(id, [], async () => { calls += 1; return null; }),
     buildCorrectionRequest: ({ request }) => request });
   const graph = createExecutionGraph({ stages: [failing('a'), failing('b')] });
@@ -241,6 +263,105 @@ function createClock() {
 function createIds() {
   let id = 0;
   return (prefix = 'id') => `${prefix}-${++id}`;
+}
+
+{
+  const repository = createRepository();
+  let time = Date.now();
+  const now = () => new Date(time).toISOString();
+  let calls = 0;
+  let sleeping = false;
+  const graph = createExecutionGraph({ stages: [stage('preprocess.cards.fused', [], async () => {
+    calls += 1;
+    if (calls === 1) throw { code: 'RECURSION_PROVIDER_RATE_LIMIT', retryAfterMs: 120000 };
+    return { cards: ['Realism'] };
+  })] });
+  const scheduler = createExecutionScheduler({ repository, now, retrySleep: (_ms, signal) => new Promise((_, reject) => {
+    sleeping = true;
+    signal.addEventListener('abort', () => reject(Object.assign(new Error('Stopped'), { name: 'AbortError' })), { once: true });
+  }) });
+  const running = scheduler.start({ manifest: manifest({ operationId: 'capacity-stop-resume' }), graph });
+  await waitUntil(() => sleeping, 'capacity cooldown never started');
+  await scheduler.pause({ operationId: 'capacity-stop-resume', reason: 'user-stop' });
+  await running;
+  time += 20000;
+  const waits = [];
+  const releaseCooldown = deferred();
+  let siblingCalls = 0;
+  const resumedGraph = createExecutionGraph({ stages: [
+    stage('preprocess.cards.segmented.knowledge', [], async () => { siblingCalls += 1; return { card: 'Knowledge' }; }),
+    ...graph.stages
+  ] });
+  const reloaded = createExecutionScheduler({ repository, now, retrySleep: async (ms, signal) => {
+    waits.push(ms);
+    await Promise.race([releaseCooldown.promise, new Promise((_, reject) => {
+      signal.addEventListener('abort', () => reject(Object.assign(new Error('Stopped'), { name: 'AbortError' })), { once: true });
+    })]);
+  } });
+  const resuming = reloaded.resume({ operationId: 'capacity-stop-resume', graph: resumedGraph, provenance });
+  await waitUntil(() => waits.length === 2, 'both restored stages must enter the shared cooldown');
+  assertEqual(siblingCalls, 0, 'a sibling on the same profile cannot bypass the restored cooldown');
+  await reloaded.pause({ operationId: 'capacity-stop-resume', reason: 'user-stop' });
+  releaseCooldown.resolve();
+  await resuming;
+  time += 20000;
+  const secondWaits = [];
+  const reloadedAgain = createExecutionScheduler({ repository, now, retrySleep: async ms => secondWaits.push(ms) });
+  const resumed = await reloadedAgain.resume({ operationId: 'capacity-stop-resume', graph: resumedGraph, provenance });
+  assertEqual(resumed.state, 'completed', 'Stop and reload preserve resumable capacity recovery');
+  assertDeepEqual(waits, [100000, 100000], 'all same-profile work waits only the remaining provider cooldown');
+  assertDeepEqual(secondWaits, [80000, 80000], 'a second Stop and reload retains cooldown for original and inherited work');
+  assertEqual(calls, 2, 'only one resumed provider call is dispatched');
+  assertEqual(resumed.recoveryBudget.recoveryUsed, 1, 'only the new Segmented repair spends card recovery budget');
+}
+
+{
+  const repository = createRepository();
+  let calls = 0;
+  const graph = createExecutionGraph({ stages: [stage('preprocess.cards.fused', [], async () => {
+    calls += 1;
+    throw { code: 'RECURSION_PROVIDER_RATE_LIMIT', retryAfterMs: 120000 };
+  })] });
+  const scheduler = createExecutionScheduler({ repository });
+  const result = await scheduler.start({ manifest: {
+    ...manifest({ operationId: 'capacity-deadline' }),
+    recoveryBudget: { deadlineMs: 60000, elapsedActiveMs: 59970 }
+  }, graph });
+  assertEqual(result.state, 'paused', 'operation deadline interrupts provider cooldown');
+  assertEqual(result.pauseReason, 'operation-deadline', 'deadline is explicit');
+  assertEqual(calls, 1, 'deadline prevents another provider dispatch');
+  assertEqual(result.stageRecords['preprocess.cards.fused'].failure.code, 'RECURSION_PROVIDER_RATE_LIMIT', 'deadline retains the last provider cause');
+}
+
+{
+  const repository = createRepository();
+  let calls = 0;
+  let available = false;
+  let time = Date.now();
+  const now = () => new Date(time).toISOString();
+  const graph = createExecutionGraph({ stages: [stage('preprocess.cards.fused', [], async () => {
+    calls += 1;
+    if (available) return { cards: ['Realism'] };
+    throw { code: 'RECURSION_PROVIDER_RATE_LIMIT', retryAfterMs: 120000 };
+  })] });
+  const scheduler = createExecutionScheduler({ repository, now, retrySleep: async () => {} });
+  const result = await scheduler.start({ manifest: manifest({ operationId: 'capacity-exhaustion' }), graph });
+  assertEqual(result.state, 'paused', 'persistent capacity failure pauses instead of running forever');
+  assertEqual(calls, 9, 'capacity requests have a separate finite retry bound');
+  const restored = normalizePipelineRun(await repository.loadPipelineRun('chat-a'));
+  assertEqual(restored.stageRecords['preprocess.cards.fused'].failure.code, 'RECURSION_PROVIDER_RATE_LIMIT', 'reload retains capacity failure');
+  assertEqual(restored.stageRecords['preprocess.cards.fused'].failure.retryAfterMs, 120000, 'reload retains provider cooldown');
+  assertEqual(restored.stageRecords['preprocess.cards.fused'].failure.rateLimitFailures, 9, 'terminal failure retains capacity attempt history');
+  assertEqual(Number.isFinite(restored.stageRecords['preprocess.cards.fused'].failure.retryNotBefore), true, 'terminal failure retains the earliest safe retry time');
+  assertEqual(restored.recoveryBudget.recoveryUsed, 0, 'capacity failure never drains card repair allowance');
+  const retryWaits = [];
+  const reloaded = createExecutionScheduler({ repository, now, retrySleep: async ms => { retryWaits.push(ms); time += ms; } });
+  await reloaded.resume({ operationId: 'capacity-exhaustion', graph, provenance });
+  assertEqual(calls, 9, 'Resume cannot silently replenish exhausted capacity retries');
+  available = true;
+  const retried = await reloaded.retry({ operationId: 'capacity-exhaustion', stageId: 'preprocess.cards.fused', graph, provenance });
+  assertEqual(retried.state, 'completed', 'explicit Retry may open a new capacity recovery window');
+  assertDeepEqual(retryWaits, [120000], 'explicit Retry still honors the saved provider cooldown');
 }
 
 {
@@ -327,7 +448,8 @@ for (const insecureCrypto of [{}, undefined]) {
     async () => {
       const saved = await repository.loadPipelineRun('chat-a');
       return saved?.stageRecords?.['card.a']?.state === 'running'
-        && saved?.stageRecords?.['card.b']?.state === 'running';
+        && saved?.stageRecords?.['card.b']?.state === 'running'
+        && cardACalls === 1 && cardBCalls === 1;
     },
     'scheduler did not start concurrent child frontier'
   );

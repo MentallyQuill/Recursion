@@ -150,4 +150,37 @@ assertEqual(ordinaryStarted, false, 'probe override cannot raise ordinary reques
 probeRelease.resolve();
 await Promise.all([...probeWork, ordinary]);
 
+{
+  let time = 0;
+  const pendingTimers = new Map();
+  let timerId = 0;
+  const limited = createProfileRequestQueue({
+    now: () => time,
+    setTimer: (callback) => { pendingTimers.set(++timerId, callback); return timerId; },
+    clearTimer: (id) => pendingTimers.delete(id)
+  });
+  assertEqual(typeof limited.rateLimited, 'function', 'profile queue coordinates rate-limit backoff');
+  assertEqual(limited.rateLimited('shared', 1000), 2000, 'first capacity failure uses a two-second floor');
+  time = 2000;
+  for (const [id, callback] of [...pendingTimers]) { pendingTimers.delete(id); callback(); }
+  assertEqual(limited.rateLimited('shared', 1000), 4000, 'failure history survives empty-queue cleanup');
+  const order = [];
+  const one = limited.run('shared', async () => { order.push('one'); });
+  const stop = new AbortController();
+  const two = limited.run('shared', async () => { order.push('two'); }, { signal: stop.signal }).catch(e => e);
+  await limited.run('other', async () => { order.push('other'); });
+  stop.abort();
+  assertEqual((await two).code, 'RECURSION_PROVIDER_ABORTED', 'Stop removes queued work during cooldown');
+  assertDeepEqual(order, ['other'], 'shared requests wait without blocking other profiles');
+  time = 6000;
+  for (const [id, callback] of [...pendingTimers]) { pendingTimers.delete(id); callback(); }
+  await one;
+  assertDeepEqual(order, ['other', 'one'], 'only uncancelled work resumes after cooldown');
+  assertEqual(limited.rateLimited('shared', 120000), 120000, 'provider cooldown longer than a minute is honored');
+  time += 120000;
+  for (const [id, callback] of [...pendingTimers]) { pendingTimers.delete(id); callback(); }
+  await limited.run('shared', async () => 'recovered');
+  assertEqual(limited.rateLimited('shared', 0), 2000, 'successful transport resets backoff');
+}
+
 console.log('[pass] profile request queue');

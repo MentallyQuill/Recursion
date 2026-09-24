@@ -1456,3 +1456,5 @@ Export Diagnostics downloads a timestamped `recursion-diagnostics-*.json` file o
 ### Partial card preparation
 
 Selected-card exhaustion pauses preparation at that failed card with its specific rejection and Retry action. Accepted siblings remain checkpointed. A later hand-coverage failure shows that planned cards are missing, stops narration, and directs the user to Reset Turn Cache; it must not claim a provider failure without evidence. An eligibility shortage remains a warning when all actually planned cards are present.
+
+Provider rate limits retain their actual cause in the existing progress rows while automatic cooldown/retry runs. Stop cancels waiting work; Resume after reload observes the remaining provider cooldown. Exhausted provider recovery shows the provider failure, never a fabricated card rejection. A Fused child displays `Bundle rejection` only for a recorded validation code; absent rejection details use neutral missing-output wording.

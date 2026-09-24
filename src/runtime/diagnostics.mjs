@@ -10,6 +10,8 @@ const EXECUTION_DIAGNOSTIC_CODE_SET = new Set([
   'operation-paused:chat-changed',
   'operation-stale:source-changed',
   'stage-attempt-exhausted',
+  'provider-rate-limit-retry',
+  'provider-rate-limit-exhausted',
   'stage-checkpoint-reused',
   'stage-checkpoint-invalidated',
   'stage-reprocess-queued',
@@ -129,6 +131,9 @@ function summarizeExecutionStage(record) {
     elapsedMs: elapsedMilliseconds(source.startedAt, source.updatedAt),
     ...(source.timings ? { timings: safeDiagnosticValue(source.timings) } : {}),
     failureClass: safeText(source.failure?.failureClass, 80),
+    failureCode: safeText(source.failure?.code, 120),
+    ...(Number.isFinite(source.failure?.retryAfterMs)
+      ? { retryAfterMs: boundedInteger(source.failure.retryAfterMs, 2147483647) } : {}),
     ...(source.stageId === 'preprocess.cards.fused' ? { fused: summarizeFusedOutcome(source.summary) } : {}),
     artifactHash: safeText(checkpoint.outputHash || artifactRef.hash, 180),
     artifactBytes: boundedInteger(

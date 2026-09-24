@@ -2,6 +2,21 @@ import assert from 'node:assert/strict';
 import { progressFromExecution, createProgressRunModel } from '../../src/progress.mjs';
 import { summarizeExecutionForDiagnostics } from '../../src/runtime/diagnostics.mjs';
 
+{
+  const failure = { code: 'RECURSION_PROVIDER_RATE_LIMIT', failureClass: 'capacity', retryable: true,
+    message: 'The selected profile is rate limited.' };
+  for (const state of ['running', 'failed']) {
+    const execution = { operationId: 'limited', state: state === 'running' ? 'running' : 'paused', stageRecords: {
+      fused: { stageId: 'preprocess.cards.fused', state, failure,
+        outcomeChildren: [{ id: 'preprocess.cards.fused.realism', family: 'Realism' }] }
+    } };
+    const progress = progressFromExecution(execution);
+    assert.ok(!JSON.stringify(progress).includes('invalid-card'), 'provider failure cannot invent a card rejection');
+    assert.match(progress.steps[0].reason, /rate limited/i, 'bundle displays the provider cause');
+    if (state === 'failed') assert.match(progress.steps[0].children[0].reason, /rate limited/i);
+  }
+}
+
 export function recoveredFusedExecution(repairState = 'completed', { graph = true } = {}) {
   return {
     operationId: 'fused-recovery-test', state: repairState === 'completed' ? 'completed' : 'running',

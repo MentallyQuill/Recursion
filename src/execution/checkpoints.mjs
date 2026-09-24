@@ -35,6 +35,7 @@ export const CHECKPOINT_DIAGNOSTIC_CODES = Object.freeze([
   'output-budget-at-floor',
   'model-output-corrected',
   'provider-rate-limit-retry',
+  'provider-rate-limit-exhausted',
   'provider-transient-retry',
   'provider-retry',
   'stage-reprocess-consumed',
@@ -318,6 +319,13 @@ export function normalizeStageRecord(value) {
           code: cleanText(value.failure.code),
           failureClass: cleanText(value.failure.failureClass),
           retryable: value.failure.retryable === true,
+          ...(Number.isFinite(value.failure.retryAfterMs)
+            ? { retryAfterMs: Math.min(2147483647, Math.max(0, Math.trunc(value.failure.retryAfterMs))) } : {}),
+          ...(Number.isFinite(value.failure.retryNotBefore) ? { retryNotBefore: value.failure.retryNotBefore } : {}),
+          ...(Number.isInteger(value.failure.rateLimitFailures)
+            ? { rateLimitFailures: Math.max(0, value.failure.rateLimitFailures) } : {}),
+          ...(typeof value.failure.providerKey === 'string'
+            ? { providerKey: value.failure.providerKey.slice(0, 180) } : {}),
           ...(cleanText(value.failure.message).trim()
             ? { message: cleanText(value.failure.message).trim().slice(0, 300) }
             : {}),

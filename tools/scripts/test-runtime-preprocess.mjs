@@ -218,6 +218,35 @@ function roleCounts(calls = []) {
   }, {});
 }
 
+{
+  const calls = [];
+  let bundleAttempts = 0;
+  const harness = createHarness({ settings: { pipelineMode: 'fused', minCards: 8, maxCards: 8 }, provider: {
+    async generate(roleId, request) {
+      calls.push(roleId);
+      if (roleId === 'utilityArbiter') return arbiterResponse(request);
+      if (roleId === 'guidanceComposer') return guidanceResponse(request);
+      if (roleId === 'fusedCardBundle') {
+        bundleAttempts += 1;
+        if (bundleAttempts <= 2) return { ok: false, error: {
+          code: 'RECURSION_PROVIDER_RATE_LIMIT', category: 'capacity', retryable: true, retryAfterMs: 0
+        } };
+        return { ok: true, data: { items: request.requestedCards.map(card => ({
+          family: card.family, promptText: 'Keep Mara beside the sealed archive.', evidenceRefs: ['message:2']
+        })) } };
+      }
+      throw new Error('Rate-limited Fused request must not fan out: ' + roleId);
+    }
+  } });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'Please explain.', hostGeneration: true });
+  assertEqual(result.ok, true, 'two Fused rate limits recover through the real preparation pipeline');
+  assertEqual(harness.runtime.view().lastHand.cards.length, 8, 'all eight planned families reach the hand');
+  assertEqual(harness.calls.install, 1, 'recovered preparation installs exactly one complete packet');
+  assertDeepEqual(calls, ['utilityArbiter', 'fusedCardBundle', 'fusedCardBundle', 'fusedCardBundle', 'guidanceComposer'], 'capacity recovery adds no Segmented calls');
+  const manifest = await harness.storage.loadPipelineRun('chat-preprocess');
+  assertEqual(manifest.recoveryBudget.recoveryUsed, 0, 'real Fused capacity recovery preserves the card repair budget');
+}
+
 // Formatting must survive provider validation, durable checkpoints, hand selection, and injection.
 for (const pipelineMode of ['fused', 'segmented']) {
   const promptText = 'Scene guidance:\n1. Keep the response grounded in what Mara had already established about the damaged hatch, the completed pressure test, the missing maintenance records, and the crew waiting beside the sealed door.\n2. Preserve the completed inspection.';

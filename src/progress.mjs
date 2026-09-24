@@ -1581,9 +1581,11 @@ function fusedOutcomeSteps(stage, operation, stages) {
     const awaitingRepair = !repair && stage.summary?.fallback === 'segmented'
       && ['running', 'paused'].includes(operation.state);
     const repairing = !acceptedOutcome && (awaitingRepair || ['pending', 'running'].includes(repair?.state));
-    const code = normalizeFusedRejections(stage.summary?.rejections).find((entry) => entry.family === family)?.code || 'invalid-card';
+    const code = normalizeFusedRejections(stage.summary?.rejections).find((entry) => entry.family === family)?.code;
     const reason = !acceptedOutcome && !recovered && settled
-      ? `${repairing ? 'Repairing this card. Original rejection' : 'Bundle rejection'} [${code}]: ${fusedRejectionReason(code)}`
+      ? stage.failure ? safeReasonText(stage.failure.message || stage.failure.code)
+        : code ? `${repairing ? 'Repairing this card. Original rejection' : 'Bundle rejection'} [${code}]: ${fusedRejectionReason(code)}`
+          : 'The bundle did not produce this card.'
       : null;
     return {
       id,

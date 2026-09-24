@@ -2285,8 +2285,8 @@ export function createProviderClient({
         } catch (error) {
           const failure = normalizeProviderError(error);
           if (failure.code === 'RECURSION_PROVIDER_RATE_LIMIT') {
-            error.retryAfterMs = failure.retryAfterMs;
-            requestQueue.cooldown?.(enriched.connectionProfileId, failure.retryAfterMs);
+            error.code = failure.code;
+            error.retryAfterMs = requestQueue.rateLimited(enriched.connectionProfileId, failure.retryAfterMs);
           }
           error.providerDiagnostics = { ...error.providerDiagnostics, timings: {
             ...dispatchTiming, ...error.providerDiagnostics?.timings, providerMs: Date.now() - startedAt

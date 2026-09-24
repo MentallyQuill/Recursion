@@ -9,6 +9,9 @@ export function normalizeOperationBudget(value = {}, defaults = {}) {
     windowId: String(source.windowId || defaults.windowId || 'initial').slice(0, 160),
     recoveryLimit: bounded(source.recoveryLimit ?? defaults.recoveryLimit, 1, 0, 100),
     recoveryUsed: bounded(source.recoveryUsed, 0, 0, 100),
+    providerCooldowns: Object.fromEntries(Object.entries(source.providerCooldowns || {})
+      .filter(([key, until]) => /^[a-f0-9]{64}$/.test(key) && Number.isFinite(until))
+      .slice(0, 40).map(([key, until]) => [key, Math.max(0, until)])),
     reservationIds: [...new Set((Array.isArray(source.reservationIds) ? source.reservationIds : [])
       .filter((id) => typeof id === 'string').map((id) => id.slice(0, 240)))].slice(0, 300),
     elapsedActiveMs: bounded(source.elapsedActiveMs, 0, 0, Number.MAX_SAFE_INTEGER),

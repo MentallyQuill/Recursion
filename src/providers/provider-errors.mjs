@@ -200,7 +200,7 @@ export function normalizeProviderError(error) {
       'The selected profile is rate limited.',
       true,
       { category: 'capacity' }
-    ), retryAfterMs: Math.min(60000, Math.max(0, retryAfter ?? 1000)) });
+    ), retryAfterMs: Math.min(2147483647, Math.max(0, retryAfter ?? 1000)) });
   }
 
   if (codes.has('RECURSION_PROVIDER_AUTH_FAILED') || status === 401 || status === 403

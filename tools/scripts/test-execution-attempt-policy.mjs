@@ -5,6 +5,28 @@ import {
 } from '../../src/execution/attempt-policy.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
+{
+  const delays = [];
+  const invocations = [];
+  let corrections = 0;
+  const recovered = await runModelStageAttempts({
+    attemptsPerStep: 2,
+    request: { prompt: 'original' },
+    invoke: async (request, context) => {
+      invocations.push({ request, ...context });
+      if (invocations.length <= 3) throw { code: 'RECURSION_PROVIDER_RATE_LIMIT', retryAfterMs: 1000 };
+      return invocations.length === 4 ? { text: 'invalid' } : { text: '{"ok":true}' };
+    },
+    validate: parseJsonResponse,
+    buildCorrectionRequest: ({ request }) => { corrections += 1; return { ...request, prompt: 'corrected' }; },
+    sleep: async (ms) => { delays.push(ms); }
+  });
+  assertEqual(recovered.ok, true, 'repeated rate limits recover automatically without spending model correction attempts');
+  assertDeepEqual(delays, [2000, 4000, 8000], 'rate limits back off progressively');
+  assertEqual(corrections, 1, 'only invalid model output requests correction');
+  assertEqual(invocations[1].retryReason, 'RECURSION_PROVIDER_RATE_LIMIT', 'scheduler can account for provider retries separately');
+  assertEqual(invocations[4].retryReason, 'RECURSION_MODEL_OUTPUT_INVALID', 'model correction retains its own accounting');
+}
 
 
 const writerTimeout = classifyModelFailure({

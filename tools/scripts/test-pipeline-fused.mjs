@@ -170,4 +170,20 @@ function validateBundle(bundle, { selectedCards }) {
   assertEqual(Object.hasOwn(settled, 'stages'), false, 'settlement hook does not mutate or extend the graph');
 }
 
+{
+  const selectedCards = [{ family: 'Realism', role: 'realismCard' }];
+  const request = { requestedCards: selectedCards };
+  const failure = { kind: 'transport', category: 'capacity', code: 'RECURSION_PROVIDER_RATE_LIMIT', retryable: true };
+  const [stage] = createFusedCardStages({
+    selectedCards,
+    createBundleRequest: () => request,
+    generateBundle: async () => ({ ok: false, error: failure }),
+    validateBundle: (result) => validateFusedProviderResult(result, { selectedCards, request })
+  });
+  const settled = await stage.settleExhausted({ lastArtifact: { ok: false, error: failure }, failure });
+  assertEqual(settled.ok, false, 'rate limiting cannot fan out into card repair');
+  assertEqual(settled.failure.code, failure.code, 'exhaustion retains the provider cause');
+  assertEqual(settled.value, undefined, 'provider failure cannot commit a successful fallback checkpoint');
+}
+
 console.log('fused pipeline tests passed');

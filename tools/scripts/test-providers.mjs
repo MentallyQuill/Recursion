@@ -186,6 +186,23 @@ configureProfile(store, 'reasoner', 'profile-reasoner');
 const client = createProviderClient({ host, settingsStore: store });
 const router = createGenerationRouter({ client });
 
+{
+  const cooldowns = [];
+  const limitedClient = createProviderClient({
+    settingsStore: store,
+    host: { ...host, generation: { async generate() { throw { status: 429, headers: { 'retry-after': '120' } }; } } },
+    requestQueue: {
+      run: async (_id, task) => task(),
+      stats: () => ({ concurrency: 1 }),
+      rateLimited: (id, delay) => { cooldowns.push([id, delay]); return delay; }
+    }
+  });
+  const failed = await createGenerationRouter({ client: limitedClient }).generate('utilityArbiter', { prompt: 'test' });
+  assertEqual(failed.error.code, 'RECURSION_PROVIDER_RATE_LIMIT', 'router retains the capacity error');
+  assertDeepEqual(cooldowns, [['profile-utility', 120000]], 'provider boundary coordinates cooldown for the entire connection');
+  assertEqual(failed.error.retryAfterMs, 120000, 'retry policy receives the coordinated cooldown');
+}
+
 const utility = await router.generate('utilityArbiter', { prompt: 'Return JSON.' });
 assertEqual(utility.ok, true, 'profile-backed Utility generation succeeds');
 assertEqual(utility.data.schema, 'recursion.utilityArbiter.v1', 'Utility response is parsed');

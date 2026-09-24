@@ -1,6 +1,7 @@
 import { failureFrom } from '../failures.mjs';
 import { normalizeProviderError } from '../providers/provider-errors.mjs';
 import { minimumOutputBudgetForRole, outputBudgetForRequest } from '../providers/stage-output-budgets.mjs';
+import { RATE_LIMIT_RETRY_LIMIT, rateLimitDelay } from '../providers/rate-limit-policy.mjs';
 
 const ATTEMPT_MIN = 1;
 const ATTEMPT_MAX = 5;
@@ -93,8 +94,17 @@ function stopDirective(diagnosticCode = '') {
   return retryDirective('stop', { diagnosticCode });
 }
 
-export function resolveModelRetryDirective({ failure, request, attempt, limit }) {
-  if (attempt >= limit || failure?.kind === 'abort') return stopDirective();
+export function resolveModelRetryDirective({ failure, request, attempt, limit, rateLimitFailures = 1 }) {
+  if (failure?.kind === 'abort') return stopDirective();
+  if (failure?.code === 'RECURSION_PROVIDER_RATE_LIMIT') {
+    if (rateLimitFailures > RATE_LIMIT_RETRY_LIMIT) return stopDirective('provider-rate-limit-exhausted');
+    return retryDirective('retry-same', {
+      delayMs: rateLimitDelay(failure.retryAfterMs, rateLimitFailures),
+      diagnosticCode: 'provider-rate-limit-retry',
+      nextRequest: request
+    });
+  }
+  if (attempt >= limit) return stopDirective();
   if (['RECURSION_PROVIDER_REFUSAL', 'RECURSION_PROVIDER_CONTENT_FILTER',
     'RECURSION_RECOVERY_BUDGET_EXHAUSTED', 'RECURSION_OPERATION_DEADLINE'].includes(failure?.code)) {
     return stopDirective('provider-declined-request');
@@ -149,13 +159,10 @@ export function resolveModelRetryDirective({ failure, request, attempt, limit })
     });
   }
 
-  if (failure?.code === 'RECURSION_PROVIDER_RATE_LIMIT'
-      || failure?.code === 'RECURSION_PROVIDER_TRANSIENT'
+  if (failure?.code === 'RECURSION_PROVIDER_TRANSIENT'
       || (failure?.kind === 'transport' && failure?.retryable === true)) {
     const delayMs = failure?.retryAfterMs ?? (attempt === 1 ? 250 : 750);
-    const diagnosticCode = failure.code === 'RECURSION_PROVIDER_RATE_LIMIT'
-      ? 'provider-rate-limit-retry'
-      : failure.code === 'RECURSION_PROVIDER_TRANSIENT'
+    const diagnosticCode = failure.code === 'RECURSION_PROVIDER_TRANSIENT'
         ? 'provider-transient-retry'
         : 'provider-retry';
     return retryDirective('retry-same', {
@@ -168,7 +175,7 @@ export function resolveModelRetryDirective({ failure, request, attempt, limit })
   return stopDirective();
 }
 
-function abortableSleep(ms, signal) {
+export function abortableSleep(ms, signal) {
   if (ms <= 0) return Promise.resolve();
   if (signal?.aborted) {
     return Promise.reject(Object.assign(new Error('Provider retry was stopped.'), {
@@ -208,6 +215,7 @@ export async function runModelStageAttempts({
   resolveDirective = resolveModelRetryDirective,
   sleep = abortableSleep,
   signal = null,
+  capacityRecovery = null,
   onAttemptSettled = null
 } = {}) {
   if (typeof invoke !== 'function') throw new TypeError('Model attempt policy requires invoke.');
@@ -216,10 +224,17 @@ export async function runModelStageAttempts({
   const limit = normalizeAttempts(attemptsPerStep);
   const attempts = [];
   let currentRequest = request;
-  let lastFailure = null;
+  let lastFailure = capacityRecovery?.failure ? classifyModelFailure(capacityRecovery.failure) : null;
   let lastResponse;
+  let modelAttempts = 0;
+  let rateLimitFailures = Math.max(0, Math.trunc(capacityRecovery?.failure?.rateLimitFailures || 0));
+  let retryReason = lastFailure?.code || null;
 
-  for (let attempt = 1; attempt <= limit; attempt += 1) {
+  if (lastFailure && rateLimitFailures > RATE_LIMIT_RETRY_LIMIT) {
+    return { ok: false, failure: lastFailure, attempts };
+  }
+
+  for (let attempt = 1; attempt <= limit + RATE_LIMIT_RETRY_LIMIT; attempt += 1) {
     if (signal?.aborted) {
       lastFailure = normalizeProviderError(Object.assign(new Error('Stopped.'), { name: 'AbortError' }));
       return { ok: false, aborted: true, failure: lastFailure, lastResponse, attempts };
@@ -229,7 +244,7 @@ export async function runModelStageAttempts({
     let validationError = null;
     let outcome = 'failed';
     try {
-      response = await invoke(currentRequest, { attempt, signal });
+      response = await invoke(currentRequest, { attempt, signal, retryReason });
       lastResponse = response;
       if (signal?.aborted) {
         throw Object.assign(new Error('Provider request was stopped.'), {
@@ -256,16 +271,20 @@ export async function runModelStageAttempts({
       outcome = lastFailure.kind === 'abort' ? 'aborted' : 'failed';
     }
 
+    if (lastFailure.code === 'RECURSION_PROVIDER_RATE_LIMIT') rateLimitFailures += 1;
+    else modelAttempts += 1;
     const directive = resolveDirective({
       failure: lastFailure,
       request: currentRequest,
-      attempt,
-      limit
+      attempt: modelAttempts,
+      limit,
+      rateLimitFailures
     });
     await notifyAttempt(onAttemptSettled, attempts, {
       attempt,
       outcome,
       failure: lastFailure,
+      rateLimitFailures,
       action: directive.action,
       delayMs: directive.delayMs,
       diagnosticCode: directive.diagnosticCode
@@ -275,6 +294,7 @@ export async function runModelStageAttempts({
       return { ok: false, aborted: true, failure: lastFailure, lastResponse, attempts };
     }
     if (directive.action === 'stop') break;
+    retryReason = lastFailure.code;
 
     if (directive.delayMs > 0) {
       try {

@@ -28,7 +28,7 @@ const rateResult = await runModelStageAttempts({ request, attemptsPerStep: 2,
   buildCorrectionRequest: review.buildCorrectionRequest, sleep: async () => {}
 });
 assert.equal(rateResult.ok, false);
-assert.equal(calls, 2);
+assert.equal(calls, 9, 'capacity retries have their own bounded window');
 assert.equal(rateResult.attempts[0].action, 'retry-same', 'provider failure remains transport, not a semantic correction');
 assert.equal(rateResult.attempts[0].diagnosticCode, 'provider-rate-limit-retry');
 

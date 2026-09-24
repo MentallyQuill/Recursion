@@ -7,7 +7,7 @@ import {
   normalizePipelineRun,
   normalizeStageRecord
 } from './checkpoints.mjs';
-import { runModelStageAttempts } from './attempt-policy.mjs';
+import { abortableSleep, runModelStageAttempts } from './attempt-policy.mjs';
 import { normalizeOperationBudget, reserveRecoveryCall, remainingExecutionMs, settleOperationClock } from './operation-budget.mjs';
 
 const POST_PROCESS_RECOVERY_LIMIT = 2;
@@ -67,6 +67,10 @@ function failureRecord(failure, fallbackCode = 'RECURSION_STAGE_FAILED') {
     code: String(source.code || fallbackCode).slice(0, 120),
     failureClass: String(source.category || source.kind || 'internal').slice(0, 80),
     retryable: source.retryable === true,
+    ...(Number.isFinite(source.retryAfterMs) ? { retryAfterMs: Math.max(0, source.retryAfterMs) } : {}),
+    ...(Number.isFinite(source.retryNotBefore) ? { retryNotBefore: source.retryNotBefore } : {}),
+    ...(Number.isInteger(source.rateLimitFailures) ? { rateLimitFailures: source.rateLimitFailures } : {}),
+    ...(typeof source.providerKey === 'string' ? { providerKey: source.providerKey } : {}),
     ...(message ? { message } : {}),
     ...(suggestedAction ? { suggestedAction } : {})
   };
@@ -132,6 +136,7 @@ export function createExecutionScheduler({
   now = () => new Date().toISOString(),
   createId = makeId,
   attemptsPerStep = 2,
+  retrySleep,
   onViewChanged = null
 } = {}) {
   for (const method of [
@@ -372,7 +377,10 @@ export function createExecutionScheduler({
           ...record,
           state: 'failed',
           checkpoint: null,
-          failure: failureRecord(failure),
+          failure: {
+            ...(failure?.code === 'RECURSION_PROVIDER_RATE_LIMIT' && record.failure?.code === failure.code ? record.failure : {}),
+            ...failureRecord(failure)
+          },
           executionToken: null,
           updatedAt: now()
         };
@@ -413,6 +421,7 @@ export function createExecutionScheduler({
     let dependencyArtifacts = {};
     let inputHash = '';
     let openedAttempts = null;
+    let capacityRecovery = null;
     let validationMs = 0;
 
     try {
@@ -435,6 +444,9 @@ export function createExecutionScheduler({
       await queueMutation(runtime, (draft) => {
         if (draft.state !== 'running') return null;
         const record = draft.stageRecords[stage.id];
+        if (record.failure?.code === 'RECURSION_PROVIDER_RATE_LIMIT') {
+          capacityRecovery = { failure: record.failure };
+        }
         openedAttempts = modelStage
           ? {
               window: Number(record.attempts?.window || 0) + 1,
@@ -448,7 +460,7 @@ export function createExecutionScheduler({
           state: 'running',
           checkpoint: null,
           summary: null,
-          failure: null,
+          failure: capacityRecovery ? record.failure : null,
           diagnosticCodes: queuedIntentConsumed
             ? [...new Set([...(record.diagnosticCodes || []), 'stage-reprocess-consumed'])]
             : record.diagnosticCodes || [],
@@ -475,6 +487,11 @@ export function createExecutionScheduler({
       const request = typeof stage.buildRequest === 'function'
         ? await stage.buildRequest(runtime.context, dependencyArtifacts)
         : { context: runtime.context, dependencies: dependencyArtifacts };
+      const providerRequest = request?.request || request;
+      const lane = providerRequest?.lane || stage.providerLane || 'utility';
+      const profileId = providerRequest?.providerConfig?.connectionProfileId
+        || providerRequest?.connectionProfileId || runtime.context.settings?.providers?.[lane]?.connectionProfileId;
+      const providerKey = await stableHash(profileId ? { profileId } : { lane });
       const invokeStage = (attemptRequest, attempt = 0) => raceAbort(
         () => stage.run({
           request: attemptRequest,
@@ -491,9 +508,15 @@ export function createExecutionScheduler({
       if (modelStage) {
         attemptResult = await runModelStageAttempts({
           attemptsPerStep: openedAttempts.limit,
+          sleep: retrySleep,
+          capacityRecovery,
           request,
           signal: controller.signal,
           invoke: async (attemptRequest, attemptContext) => {
+            if (attemptContext.attempt === 1) {
+              const delayMs = Math.max(0, (runtime.manifest.recoveryBudget?.providerCooldowns?.[providerKey] || 0) - Date.parse(now()));
+              if (delayMs > 0) await (retrySleep || abortableSleep)(delayMs, controller.signal);
+            }
             if (!runtime.manifest.recoveryBudget) return invokeStage(attemptRequest, attemptContext.attempt);
             const paidRecovery = runtime.manifest.recoveryBudget?.reservationIds.includes(`initial:${stage.id}`)
               || (stage.id.startsWith('preprocess.cards.segmented.') && Boolean(runtime.manifest.stageRecords['preprocess.cards.fused']));
@@ -515,7 +538,8 @@ export function createExecutionScheduler({
               const initialId = `initial:${stage.id}`;
               const isFallback = stage.id.startsWith('preprocess.cards.segmented.') && Boolean(draft.stageRecords['preprocess.cards.fused']);
               const first = !budget.reservationIds.includes(initialId);
-              const cost = first && !isFallback ? 0 : 1;
+              const capacityRetry = attemptContext.retryReason === 'RECURSION_PROVIDER_RATE_LIMIT';
+              const cost = capacityRetry || (first && !isFallback) ? 0 : 1;
               const requiredPending = runtime.graph.stages.filter((entry) =>
                 entry.id.startsWith('preprocess.cards.segmented.') && entry.failurePolicy !== 'continue'
                 && !['completed', 'skipped'].includes(draft.stageRecords[entry.id]?.state)).length;
@@ -559,6 +583,14 @@ export function createExecutionScheduler({
             ) {
               return null;
             }
+            // Stop before a resumed capacity dispatch must retain its retry identity.
+            if (summary.failure?.kind === 'abort' && record.failure?.code === 'RECURSION_PROVIDER_RATE_LIMIT') return draft;
+            if (summary.failure?.code === 'RECURSION_PROVIDER_RATE_LIMIT' && draft.recoveryBudget) {
+              const budget = normalizeOperationBudget(draft.recoveryBudget);
+              budget.providerCooldowns[providerKey] = Math.max(budget.providerCooldowns[providerKey] || 0,
+                Date.parse(now()) + Math.max(summary.delayMs, summary.failure.retryAfterMs || 0));
+              draft.recoveryBudget = budget;
+            }
             const diagnosticCodes = summary.diagnosticCode
               ? [...new Set([...(record.diagnosticCodes || []), summary.diagnosticCode])]
               : (record.diagnosticCodes || []);
@@ -574,7 +606,13 @@ export function createExecutionScheduler({
               },
               diagnosticCodes,
               lastAttemptAction,
-              failure: summary.failure ? failureRecord(summary.failure) : null,
+              failure: summary.failure ? failureRecord({ ...summary.failure,
+                ...(summary.failure.code === 'RECURSION_PROVIDER_RATE_LIMIT' ? {
+                  rateLimitFailures: summary.rateLimitFailures,
+                  providerKey,
+                  retryNotBefore: Date.parse(now()) + Math.max(summary.delayMs, summary.failure.retryAfterMs || 0)
+                } : {})
+              }) : null,
               updatedAt: now()
             };
             return draft;
@@ -1150,7 +1188,7 @@ export function createExecutionScheduler({
       runtime.forcedStageIds = new Set([retryFromStageId]);
       runtime.queuedStageIds = new Set();
       await queueMutation(runtime, (draft) => {
-        draft.recoveryBudget = ['preprocess', 'postprocess'].includes(draft.phase) ? normalizeOperationBudget(null, {
+        draft.recoveryBudget = ['preprocess', 'postprocess'].includes(draft.phase) ? normalizeOperationBudget({ providerCooldowns: draft.recoveryBudget?.providerCooldowns }, {
           recoveryLimit: draft.phase === 'postprocess' ? POST_PROCESS_RECOVERY_LIMIT : 1,
           windowId: createId('recovery-window'),
           deadlineMs: draft.recoveryBudget?.deadlineMs

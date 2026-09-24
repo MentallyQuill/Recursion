@@ -580,7 +580,7 @@ function cardPromptSafetyInstruction(catalog) {
   return 'Do not include first-person internal monologue, secret thoughts as truth, or instructions to reveal inner thoughts. Keep motives behavior-facing and observable or explicitly inferred.';
 }
 
-export const SCENE_INTERPRETATION_CONTRACT = "An unanswered question is not an instruction to keep it unanswered. A warning before an explanation can invite attention, concern, or clarification; do not invent delay, earned-reveal requirements, or resistance. Preserve player control without prescribing the player's next action. Ground emotion and suspicion in established evidence; incomplete answers alone do not establish malice. Check current positions and actions already completed before suggesting another action.";
+export const SCENE_INTERPRETATION_CONTRACT = "An unanswered question is not an instruction to keep it unanswered. A warning before an explanation can invite attention, concern, or clarification; do not invent delay, earned-reveal requirements, or resistance. Preserve player control without prescribing the player's next action. Ground emotion and suspicion in established evidence; incomplete answers alone do not establish malice. Preserve completed actions and discoveries, including results at the end of a message; do not reset them to pending. Update character reactions when new information, decisions, or precautions change the stakes. Distinguish a mitigated risk from an unresolved cause: uncertainty about one does not erase progress on the other. Prior fear or resistance is context, not a requirement to sustain or escalate it. Allow supported emotional change without forcing calm, agreement, trust, or reassurance.";
 
 function cardInstructionContractLine() {
   return [
@@ -750,7 +750,7 @@ function optionalEnum(value, allowed) {
 function stringifyForPrompt(value) {
   try {
     const scrubbed = scrubProviderPromptStructured(value ?? {});
-    return scrubProviderPromptSecrets(JSON.stringify(redact(scrubbed, { maxString: TEXT_LIMIT }), null, 2));
+    return scrubProviderPromptSecrets(JSON.stringify(redact(scrubbed, { maxString: Infinity }), null, 2));
   } catch {
     return JSON.stringify({ unavailable: true });
   }

@@ -13,6 +13,18 @@ assert(request.prompt.includes('The next few minutes will be hard'), 'composer r
 assert(!request.prompt.includes('HIDDEN-REPLY'), 'hidden alternatives are not source evidence');
 assert(request.prompt.includes('not an instruction to keep it unanswered'), 'composer distinguishes pending information from imposed delay');
 const plan = { cardJobs: [{ family: 'Knowledge' }] };
+const completedAction = 'He found the marked spell and closed the book. She would avoid the drink; the sender remained unknown.';
+const completeMessage = `${'Earlier uncertainty. '.repeat(800)}\n\n${completedAction}`;
+const completeSnapshot = { ...snapshot, messages: [{ mesid: 93, role: 'assistant', visible: true, text: completeMessage }] };
+for (const r of [
+  buildGuidanceStageRequest({ snapshot: completeSnapshot, hand: { cards: [] } }).request,
+  buildCardRequests(plan, { snapshot: completeSnapshot })[0],
+  buildFusedCardBundleRequest(plan, { snapshot: completeSnapshot })
+]) {
+  assert(r.prompt.includes(completedAction), 'every analysis prompt preserves completed actions beyond former message limits');
+  assert(r.prompt.includes('Update character reactions'), 'analysis requires reactions to respond to changed stakes');
+  assert(r.prompt.includes('precautions'), 'analysis distinguishes practical mitigation from unresolved uncertainty');
+}
 for (const r of [buildCardRequests(plan, { snapshot })[0], buildFusedCardBundleRequest(plan, { snapshot })]) {
   assert(r.prompt.includes('not an instruction to keep it unanswered'), 'both card paths prohibit invented withholding');
 }

@@ -308,6 +308,10 @@ Default injection settings use Recursion's recommended concrete plan: `In Prompt
 
 Context-window caps are local Recursion tuning controls. Lower Source Freshness Messages or Source Freshness Text Budget if a very long chat makes Recursion feel slow. Storage Retention controls only the bounded diagnostic journal. Generated work belongs to one exact turn and prior-turn artifacts are pruned automatically. None of these controls prune SillyTavern chat history.
 
+Selected chat messages retain their full text, including paragraph breaks and endings. Recursion does not apply an additional per-message character cutoff. Window budgets select whole messages; a smaller window includes less history rather than shortening every reply. The newest source message is retained whole even when it exceeds the source-window budget. Complete evidence may use more input tokens than older versions did.
+
+Generated cards and guidance must preserve completed actions and discoveries. Character reactions should respond to new information and practical precautions: an unanswered question about a threat's cause does not erase a reduction in its risk. Earlier fear or resistance does not require repeated escalation, and an update does not force calm, agreement, or trust.
+
 ![Advanced Context Windows and Storage Retention controls for source windows, provider analysis, and the run journal](../../assets/documentation/renders/recursion-operator-retention-settings.png)
 
 ## Provider Controls

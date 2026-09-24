@@ -28,4 +28,10 @@ const bounded = boundEnhancementMessages(
 assertEqual(bounded.messages.length, 2, 'enhancement context enforces total character budget');
 assert(bounded.characters <= 2100, 'enhancement context stays within character budget');
 
+const completeText = `${'A long exchange. '.repeat(220)}The door was unlocked and they left.`;
+const intact = boundEnhancementMessages([{ text: 'Older scene.' }, { text: completeText }], 3, 4000);
+assertEqual(intact.messages.at(-1).text, completeText, 'selected context retains complete messages and their endings');
+const overBudget = boundEnhancementMessages([{ text: 'Older scene.' }, { text: completeText }], 3, 2000);
+assertEqual(overBudget.messages.length, 0, 'a message that does not fit is omitted whole, never clipped');
+
 console.log('[pass] context-contract');

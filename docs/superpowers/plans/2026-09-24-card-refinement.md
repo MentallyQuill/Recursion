@@ -69,7 +69,7 @@
 - [x] Run an isolated browser render of the card-state cycle and progress state; inspect screenshot/accessibility labels without changing the running host.
 - [x] Request fresh spec and code review of all changes, including cross-task contracts and malformed-output/replay boundaries. Fix actionable findings and rerun affected tests plus full suite for final code.
 - [x] Verify `git diff --check`, scoped commit history, clean worktree, and latest origin/main. Integrate remote changes if needed and rerun full tests after integration.
-- [ ] Push `HEAD:main` without force, verify GitHub SHA using network-enabled `gh`, report commit, tests, and live-provider limitation, then mark the goal complete.
+- [x] Push `HEAD:main` without force and verify GitHub SHA using network-enabled `gh`.
 
 ## Execution ledger
 
@@ -83,3 +83,4 @@
 - Isolated browser renders verify the 15px eye-arrow state and desktop/mobile layouts without touching the running host. Progress renders identified the visible outcome correction above.
 - Two independent reviews completed; all findings addressed. Global revision rounds and revised-card counts are distinct, with a two-result regression.
 - Concurrent main changes through `432253b3` were merged at `6d662038`, preserving Post-process writer/review, card-budget behavior, and complete-message context. The one design-text conflict retains both features. Combined runtime/cache/selection contract versions were incremented to prevent stale reuse.
+- Post-merge independent review and isolated desktop/mobile state/progress browser checks passed with no JavaScript errors. Pushed implementation `e8ec3e8b888c9ef59e2ed9d2b692506cfef5ec02` to main and verified that exact GitHub branch SHA; this final ledger update changes documentation only.

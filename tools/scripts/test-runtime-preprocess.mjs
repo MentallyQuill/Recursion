@@ -1479,6 +1479,8 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
         };
       }
       if (roleId === 'openThreadsCard') {
+        assert(request.prompt.includes('missing-family'), 'first targeted repair explains the original bundle rejection');
+        assert(request.prompt.includes('bundle did not return'), 'repair feedback includes an actionable description');
         return cardResponse(roleId, request, { family: 'Open Threads' });
       }
       if (roleId === 'guidanceComposer') return guidanceResponse(request);
@@ -1526,6 +1528,13 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
     'the unresolved family receives one durable Segmented repair stage'
   );
   assertEqual(result.hand.cards.length, 3, 'accepted Fused cards and repaired sibling are merged');
+  assertDeepEqual(fusedArtifact.rejections, [{ family: 'Open Threads', code: 'missing-family' }], 'durable artifact retains the original rejection');
+  assertDeepEqual(manifest.stageRecords['preprocess.cards.fused'].summary.rejections,
+    [{ family: 'Open Threads', code: 'missing-family' }], 'saved summary retains rejection without provider text');
+  const { summarizeExecutionForDiagnostics } = await import('../../src/runtime/diagnostics.mjs');
+  const exported = summarizeExecutionForDiagnostics(manifest).stages.find((stage) => stage.stageId === 'preprocess.cards.fused');
+  assertDeepEqual(exported.fused.rejections, [{ family: 'Open Threads', code: 'missing-family' }], 'export preserves the per-family rejection');
+  assertDeepEqual(exported.fused.acceptedFamilies, ['Scene Frame', 'Scene Constraints'], 'export explains which bundle siblings were accepted');
 }
 
 {
@@ -2004,13 +2013,15 @@ for (const pipelineMode of ['segmented', 'fused']) for (const selectRealism of [
 // Guidance is required: bounded recovery succeeds or stops narration for Retry.
 for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate']) {
   const requests = [];
+  const stageAttempts = [];
   let retryReady = false;
   let upstreamCalls = 0;
-  const harness = createHarness({ provider: { async generate(roleId, request) {
+  const harness = createHarness({ provider: { async generate(roleId, request, options) {
     if (roleId !== 'guidanceComposer') upstreamCalls += 1;
     if (roleId === 'utilityArbiter') return arbiterResponse(request);
     if (roleId !== 'guidanceComposer') return cardResponse(roleId, request);
     requests.push(request);
+    stageAttempts.push(options.stageAttempt);
     if (retryReady || (['recover', 'rate'].includes(mode) && requests.length === 2)) return guidanceResponse(request);
     return { ok: false, error: { code: mode === 'rate' ? 'RECURSION_PROVIDER_RATE_LIMIT' : mode === 'profile' ? 'RECURSION_PROFILE_UNAVAILABLE' : mode === 'refusal' ? 'RECURSION_PROVIDER_REFUSAL' : 'RECURSION_JSON_OBJECT_REQUIRED', message: 'Not usable.', retryable: false } };
   } } });
@@ -2020,6 +2031,7 @@ for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate']) {
   assertEqual(harness.calls.install, recovered ? 1 : 0, 'failed Guidance is never installed for ' + mode);
   assertEqual(result.continuePrimaryGeneration, recovered, 'failed Guidance stops narration for ' + mode);
   assertEqual(requests.length, ['refusal', 'profile'].includes(mode) ? 1 : 2, 'composer follows bounded retry policy for ' + mode);
+  assertDeepEqual(stageAttempts, requests.map((_, index) => index + 1), 'Guidance forwards scheduler attempt identity to provider diagnostics');
   const manifest = await harness.storage.loadPipelineRun('chat-preprocess');
   assertEqual(manifest.stageRecords['preprocess.guidance'].state, recovered ? 'completed' : 'failed', 'Guidance state reflects whether composition succeeded');
   if (mode === 'recover') assert(requests[1].prompt.includes('Correction'), 'malformed output gets targeted correction');

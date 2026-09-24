@@ -1,4 +1,5 @@
 import { nowIso, redact, safeId } from '../core.mjs';
+import { normalizeGuidanceOmissions } from '../guidance-omissions.mjs';
 
 export const LAST_BRIEF_SCHEMA = 'recursion.lastBrief.v1';
 
@@ -198,7 +199,7 @@ function normalizeInspectionPacket(value) {
       text: safeText(guidance.text, 3_000),
       sourceCardIds: safeStringList(guidance.sourceCardIds, 32, 180),
       guardrailCardIds: safeStringList(guidance.guardrailCardIds, 32, 180),
-      omittedCardIds: safeStringList(guidance.omittedCardIds, 32, 180)
+      omittedCardIds: normalizeGuidanceOmissions(guidance.omittedCardIds, { sanitizeId: (id) => safeText(id, 160) })
     },
     cardEvidence: (Array.isArray(source.cardEvidence) ? source.cardEvidence : [])
       .map(normalizePacketCardRef)

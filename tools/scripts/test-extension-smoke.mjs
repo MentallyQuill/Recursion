@@ -151,6 +151,11 @@ assertDeepEqual(
   },
   'provider journal adapter preserves sanitized recovery and token diagnostics'
 );
+await providerJournal.append({ roleId: 'guidanceComposer', status: 'success',
+  semanticNormalization: 'guidance-request-envelope', stageAttempt: 2, text: 'PRIVATE_PROVIDER_PROSE' });
+assertEqual(providerJournalEntries[1].details.semanticNormalization, 'guidance-request-envelope', 'journal preserves local Guidance recovery evidence');
+assertEqual(providerJournalEntries[1].details.stageAttempt, 2, 'journal preserves scheduler attempt separately from router retries');
+assert(!JSON.stringify(providerJournalEntries[1]).includes('PRIVATE_PROVIDER_PROSE'), 'journal still excludes provider prose');
 
 async function waitUntil(predicate, message, { attempts = 50 } = {}) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -305,9 +310,9 @@ function createFakeEventSource() {
     listenerCount(eventName) {
       return (listeners.get(String(eventName)) || []).length;
     },
-    async emit(eventName, payload = {}) {
+    async emit(eventName, payload = {}, ...args) {
       const list = [...(listeners.get(String(eventName)) || [])];
-      await Promise.all(list.map((handler) => handler(payload)));
+      await Promise.all(list.map((handler) => handler(payload, ...args)));
     }
   };
 }
@@ -2474,5 +2479,48 @@ assertEqual(
   previousGlobals.fetch,
   'extension smoke restores the process fetch implementation for later test modules'
 );
+
+{
+  const fake = createFakeSillyTavernContext('primary-timing-events');
+  const eventSource = createFakeEventSource();
+  fake.context.eventSource = eventSource;
+  fake.context.event_types = {
+    GENERATE_AFTER_DATA: 'generate_after_data',
+    CHAT_COMPLETION_SETTINGS_READY: 'chat_completion_settings_ready',
+    STREAM_TOKEN_RECEIVED: 'stream_token_received',
+    GENERATION_ENDED: 'generation_ended'
+  };
+  globalThis.extension_settings = profileBackedSettings({ mode: 'auto', reasonerUse: 'off' });
+  globalThis.SillyTavern = { getContext: () => fake.context };
+  await globalThis.recursionOnDelete();
+  await globalThis.recursionGenerationInterceptor('timing-payload');
+  const activeRuntime = extensionModule.bootstrapRecursion();
+  assertEqual(eventSource.listenerCount('generate_after_data'), 0, 'untyped host data events are not treated as primary milestones');
+  const readTiming = () => activeRuntime.getView().turnTiming;
+  await eventSource.emit('generation_started', 'normal', {}, false);
+  await eventSource.emit('generation_started', 'quiet', {}, false);
+  await eventSource.emit('chat_completion_settings_ready', { type: 'quiet', messages: ['PRIVATE_HOST_PROMPT'] });
+  assertEqual(readTiming().hostRequestReadyAt, null, 'nested quiet generation cannot claim primary timing');
+  await eventSource.emit('generate_after_data', { prompt: 'PRIVATE_HOST_PROMPT' }, true);
+  assertEqual(readTiming().hostRequestReadyAt, null, 'dry-run assembly is not request readiness');
+  await eventSource.emit('chat_completion_settings_ready', { messages: ['PRIVATE_HOST_PROMPT'] });
+  assertEqual(readTiming().hostRequestReadyAt, null, 'untyped settings event is ignored');
+  // Raw calls do not emit generation_started at all.
+  await eventSource.emit('chat_completion_settings_ready', { type: 'quiet', messages: ['PRIVATE_HOST_PROMPT'] });
+  assertEqual(readTiming().hostRequestReadyAt, null, 'intervening raw call cannot claim primary timing');
+  await eventSource.emit('chat_completion_settings_ready', { type: 'normal', messages: ['PRIVATE_HOST_PROMPT'] });
+  assert(Number.isFinite(readTiming().hostRequestReadyAt), 'parent primary resumes after nested quiet work without another start event');
+  await eventSource.emit('stream_token_received', '');
+  assertEqual(readTiming().firstVisibleTokenAt, null, 'empty stream update is not visible output');
+  await eventSource.emit('stream_token_received', 'Visible reply');
+  assert(Number.isFinite(readTiming().requestReadyToFirstVisibleTokenMs), 'real event wiring measures the request-ready wait');
+  assert(!JSON.stringify(readTiming()).includes('PRIVATE_HOST_PROMPT'), 'timing never retains host request bodies');
+  await globalThis.recursionOnDelete();
+  assertEqual(eventSource.listenerCount('chat_completion_settings_ready'), 0, 'request-ready listener removed on teardown');
+  if (previousGlobals.SillyTavern === undefined) delete globalThis.SillyTavern;
+  else globalThis.SillyTavern = previousGlobals.SillyTavern;
+  if (previousGlobals.extensionSettings === undefined) delete globalThis.extension_settings;
+  else globalThis.extension_settings = previousGlobals.extensionSettings;
+}
 
 console.log('[pass] extension smoke');

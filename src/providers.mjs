@@ -2341,6 +2341,9 @@ export function createGenerationRouter({ client, activity = null, journal = null
       : activityStart(activity, startedActivityEvent);
     if (options.lockRunId !== true) runId = activityRunId || runId;
     lastDiagnostics = diagnosticsBase({ roleId, lane, request, runId, startedAt, timeoutMs: effectiveTimeoutMs });
+    if (Number.isInteger(options.stageAttempt) && options.stageAttempt >= 1 && options.stageAttempt <= 5) {
+      lastDiagnostics.stageAttempt = options.stageAttempt;
+    }
     const settleProviderActivity = (event) => {
       if (nestedActivityLifecycle) {
         activityStage(activity, {

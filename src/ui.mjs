@@ -1548,7 +1548,7 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
   const reason = step.reason || '';
   const suggestedAction = step.suggestedAction || '';
   const unhealthy = ['warning', 'failed'].includes(state);
-  const visibleReason = reason && unhealthy ? reason : '';
+  const visibleReason = reason && (unhealthy || step.recoveryState) ? reason : '';
   const visibleAction = suggestedAction && unhealthy ? `Try: ${suggestedAction}` : '';
   const firstRender = row.dataset.recursionProgressRendered !== 'true';
   const changed = !firstRender && (
@@ -3530,12 +3530,22 @@ function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null, pr
 }
 
 function appendViewerSection(viewer, title, data, options = {}) {
-  const section = el('section', { className: 'recursion-viewer-section' });
-  section.appendChild(el('h3', { text: title }));
-  const pre = el('pre', { dataset: asObject(options).dataset || {} });
-  pre.textContent = safeJson(data, { maxString: options.maxString || 900 });
-  section.appendChild(pre);
-  viewer.appendChild(section);
+  let section = viewer.querySelector(`[data-recursion-viewer-section="${title}"]`);
+  if (!section) {
+    section = el('section', { className: 'recursion-viewer-section', dataset: { recursionViewerSection: title } });
+    section.appendChild(el('h3', { text: title }));
+    section.appendChild(el('pre', { dataset: asObject(options).dataset || {} }));
+    viewer.appendChild(section);
+  }
+  const pre = section.querySelector('pre');
+  const text = safeJson(data, { maxString: options.maxString || 900 });
+  if (pre.textContent !== text) {
+    const scrollTop = pre.scrollTop;
+    const scrollLeft = pre.scrollLeft;
+    pre.textContent = text;
+    pre.scrollTop = scrollTop;
+    pre.scrollLeft = scrollLeft;
+  }
 }
 
 function viewerChip(text, className = '') {
@@ -3572,11 +3582,15 @@ function cardLifecycle(card) {
 function appendViewerDeckSection(viewer, hand) {
   const source = asObject(hand);
   const cards = Array.isArray(source.cards) ? source.cards.slice(0, 20) : [];
-  const section = el('section', { className: 'recursion-viewer-section recursion-viewer-deck', dataset: { recursionViewerDeck: '' } });
+  let section = viewer.querySelector('[data-recursion-viewer-deck]');
+  if (!section) {
+    section = el('section', { className: 'recursion-viewer-section recursion-viewer-deck', dataset: { recursionViewerDeck: '' } });
+    viewer.appendChild(section);
+  }
+  section.replaceChildren();
   section.appendChild(el('h3', { text: 'Deck' }));
   if (!cards.length) {
     section.appendChild(el('p', { className: 'recursion-empty', text: 'No cards are active in the current hand.' }));
-    viewer.appendChild(section);
     return;
   }
 
@@ -3659,7 +3673,6 @@ function appendViewerDeckSection(viewer, hand) {
     list.appendChild(article);
   }
   section.appendChild(list);
-  viewer.appendChild(section);
 }
 
 function safeJson(value, options = {}) {
@@ -3800,12 +3813,8 @@ function promptPacketMeta(preview) {
 function renderViewer(viewer, view, model) {
   const reviewHand = view.lastBriefHand ?? view.lastHand ?? { cards: [] };
   const reviewPacket = view.lastBriefPacket ?? view.lastPacket;
-  viewer.replaceChildren();
-  const header = el('div', { className: 'recursion-viewer-header' }, [
-    el('h2', { text: 'Recursion Viewer' }),
-    button('Close', 'recursionViewerClose', 'Close Recursion viewer')
-  ]);
-  viewer.appendChild(header);
+  const scrollTop = viewer.scrollTop;
+  const scrollLeft = viewer.scrollLeft;
   appendViewerSection(viewer, 'Now', {
     status: model.runtimeHealthLabel,
     mode: model.modeLabel,
@@ -3821,6 +3830,8 @@ function renderViewer(viewer, view, model) {
   });
   appendViewerSection(viewer, 'Settings', view.settings ?? null);
   appendViewerSection(viewer, 'Providers', view.settings?.providers ?? null);
+  viewer.scrollTop = scrollTop;
+  viewer.scrollLeft = scrollLeft;
 }
 
 function buildRoot() {
@@ -4026,7 +4037,10 @@ function buildRoot() {
     attrs: { 'aria-label': 'Recursion Viewer' },
     dataset: { recursionViewer: '' }
   }, [
-    button('Close', 'recursionViewerClose', 'Close Recursion viewer')
+    el('div', { className: 'recursion-viewer-header' }, [
+      el('h2', { text: 'Recursion Viewer' }),
+      button('Close', 'recursionViewerClose', 'Close Recursion viewer')
+    ])
   ]);
   viewer.hidden = true;
   const hiddenViewerToggle = button('Open Viewer', 'recursionViewerToggle', 'Open Recursion viewer');

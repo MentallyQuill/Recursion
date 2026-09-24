@@ -364,11 +364,14 @@ Automatic attempts apply only to Recursion model stages. They do not retry Silly
 
 Fused validation is item-scoped.
 
+Fused request text includes the ID, name, selection state, and full sanitized instruction text of every selected source card, as individual-card requests do. Metadata alone does not count as model-visible inclusion. No new provider call is required for this contract.
+
 - Valid requested items are accepted and checkpointed.
 - Duplicate, unrequested, or invalid items are rejected independently.
 - Accepted families and unresolved families are explicit artifact fields.
 - When at least one item is useful, only unresolved families receive Segmented repair stages.
 - Accepted Fused cards are not regenerated.
+- Fused artifacts and stage summaries retain bounded `{ family, code }` rejections. The first individual repair request includes the family's fixed rejection explanation, without the rejected response text. A repaired sibling does not mutate the original bundle's acceptance history.
 - When no useful item survives and attempts are exhausted, the scheduler invokes the stage's explicit exhaustion settlement hook once and starts the full Segmented path.
 
 The exhaustion hook may settle an artifact but may not launch provider calls or mutate the graph directly.

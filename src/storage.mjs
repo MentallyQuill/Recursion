@@ -447,14 +447,19 @@ function normalizeJournalEntry(entry = {}) {
     const structuredDetails = details && typeof details === 'object' && !Array.isArray(details)
       ? details
       : {};
-    const cause = structuredDetails.failure
+    const explicitFailure = structuredDetails.failure
       || structuredDetails.error
       || structuredDetails.compactError
-      || (structuredDetails.code && structuredDetails.message ? structuredDetails : null)
+      || (structuredDetails.code && structuredDetails.message ? structuredDetails : null);
+    const cause = explicitFailure
       || structuredDetails.reason
       || structuredDetails.statusReason
       || structuredDetails.cautionReason;
-    details = {
+    details = event === 'host.generation_stopped' && !explicitFailure ? {
+      ...structuredDetails,
+      reason: structuredDetails.reason || (structuredDetails.recursionRequested === true
+        ? 'recursion-requested-stop' : 'host-stop-cause-unavailable')
+    } : {
       ...structuredDetails,
       failure: failureFrom(cause, {
         code: 'RECURSION_JOURNAL_REASON_MISSING',

@@ -3,6 +3,7 @@ import {
   normalizeCheckpointDiagnosticCodes
 } from './execution/checkpoints.mjs';
 import { activeCardDeckSourceCards } from './pre-process-decks.mjs';
+import { normalizeFusedRejections, fusedRejectionReason } from './fused-recovery.mjs';
 
 const VALID_STATES = new Set(['pending', 'running', 'done', 'cached', 'warning', 'failed', 'skipped', 'info']);
 const VALID_PROVIDER_LANES = new Set(['utility', 'reasoner']);
@@ -415,7 +416,9 @@ function aggregateFailureCode(children = []) {
   return safeDisplayText(child?.failureCode, '', 120);
 }
 
-function metaForState(state, source = '', reason = '', retryCount = 0) {
+function metaForState(state, source = '', reason = '', retryCount = 0, recoveryState = '') {
+  if (recoveryState === 'recovered' && ['done', 'cached'].includes(state)) return 'recovered';
+  if (recoveryState === 'repairing' && ['running', 'pending'].includes(state)) return 'repairing';
   const normalizedSource = normalizeChildSource(source);
   if (['done', 'cached'].includes(state) && normalizedSource === 'included') return 'included';
   if (state === 'done' && normalizedSource === 'generated') return 'generated';
@@ -958,7 +961,9 @@ function normalizeChildStep(input, index = 0) {
         ? childIdFromRole(roleId, `child-${index + 1}`)
         : idFromText(rawId, `child-${index + 1}`));
   const retryCount = retryCountFromSource(source);
-  const state = normalizeStateWithRetry(source.state, retryCount);
+  const state = source.recoveryState === 'recovered'
+    ? normalizeState(source.state)
+    : normalizeStateWithRetry(source.state, retryCount);
   const childSource = normalizeChildSource(source.source || source.sourceType || (state === 'cached' ? 'cache' : ''));
   const reason = usefulReasonText(
     source.reason
@@ -977,7 +982,8 @@ function normalizeChildStep(input, index = 0) {
       ? null
       : normalizeProviderLane(source.providerLane, roleId === 'reasonerComposer' ? 'reasoner' : 'utility'),
     state,
-    meta: metaForState(state, childSource, reason, retryCount),
+    meta: metaForState(state, childSource, reason, retryCount, source.recoveryState),
+    ...(['recovered', 'repairing'].includes(source.recoveryState) ? { recoveryState: source.recoveryState } : {}),
     source: childSource || null,
     sourcePhase: cleanText(source.sourcePhase || source.phase) || null,
     sourceRoleId: roleId || null,
@@ -1009,11 +1015,14 @@ function normalizeStep(input, index = 0) {
     ? source.children.map((child, childIndex) => normalizeChildStep(child, childIndex)).sort(compareChildOrder)
     : [];
   const retryCount = Math.max(retryCountFromSource(source), maxRetryCount(children));
+  const ownState = source.recoveryState === 'recovered'
+    ? normalizeState(source.state)
+    : normalizeStateWithRetry(source.state, retryCount);
   const state = source.partialResult === true && source.state === 'warning'
     ? 'warning'
     : children.length
-    ? aggregateParentState(normalizeStateWithRetry(source.state, retryCount), children)
-    : normalizeStateWithRetry(source.state, retryCount);
+    ? aggregateParentState(ownState, children)
+    : ownState;
   const reason = reasonFromSource(source, state, retryCount) || aggregateReason(children);
   const fallbackLabel = id === 'provider-test' ? 'Provider test' : `Step ${index + 1}`;
   const definitionLabel = id === 'provider-test' ? '' : definition.label;
@@ -1024,7 +1033,8 @@ function normalizeStep(input, index = 0) {
     currentLabel: safeDisplayText(source.currentLabel || definition.currentLabel, '', 80) || null,
     providerLane: normalizeProviderLane(source.providerLane, definition.providerLane || 'utility'),
     state,
-    meta: metaForState(state, source.source || source.sourceType, reason, retryCount),
+    meta: metaForState(state, source.source || source.sourceType, reason, retryCount, source.recoveryState),
+    ...(['recovered', 'repairing'].includes(source.recoveryState) ? { recoveryState: source.recoveryState } : {}),
     sourcePhase: cleanText(source.sourcePhase || source.phase) || null,
     sourceRoleId: safeDisplayText(source.sourceRoleId || source.roleId, '', 80) || null,
     retryCount,
@@ -1534,26 +1544,43 @@ function groupedExecutionStep({
   };
 }
 
-function fusedOutcomeSteps(stage, operation) {
-  const outcomes = Array.isArray(stage.outcomeChildren) ? stage.outcomeChildren : [];
+function fusedOutcomeSteps(stage, operation, stages) {
+  const graphOutcomes = Array.isArray(stage.outcomeChildren) ? stage.outcomeChildren : [];
+  const savedFamilies = [...new Set([
+    ...(stage.summary?.acceptedFamilies || []), ...(stage.summary?.unresolvedFamilies || [])
+  ])];
+  const outcomes = graphOutcomes.length ? graphOutcomes : savedFamilies.map((family) => ({
+    id: `preprocess.cards.fused.${idFromText(family, 'card')}`, family
+  }));
   const accepted = new Set(
     Array.isArray(stage.summary?.acceptedFamilies)
       ? stage.summary.acceptedFamilies.map((value) => cleanText(value).toLowerCase())
       : []
   );
-  const settled = ['completed', 'failed'].includes(cleanText(stage.state).toLowerCase());
+  const settled = ['completed', 'cached', 'failed'].includes(cleanText(stage.state).toLowerCase());
   return outcomes.map((outcome, index) => {
     const id = executionStageId(outcome);
     const family = cleanText(outcome.label || outcome.family || outcome.selectedCard?.family)
       || titleFromId(id.split('.').at(-1), `Card ${index + 1}`);
     const acceptedOutcome = accepted.has(family.toLowerCase())
       || accepted.has(cleanText(outcome.selectedCard?.family).toLowerCase());
+    const repair = stages.find((candidate) => candidate.id === `preprocess.cards.segmented.${idFromText(family, 'card')}`);
+    const recovered = !acceptedOutcome && ['completed', 'cached'].includes(repair?.state);
+    const awaitingRepair = !repair && stage.summary?.fallback === 'segmented'
+      && ['running', 'paused'].includes(operation.state);
+    const repairing = !acceptedOutcome && (awaitingRepair || ['pending', 'running'].includes(repair?.state));
+    const code = normalizeFusedRejections(stage.summary?.rejections).find((entry) => entry.family === family)?.code || 'invalid-card';
+    const reason = !acceptedOutcome && settled
+      ? `${recovered ? 'Recovered with an individual card call. Original rejection' : repairing ? 'Repairing this card. Original rejection' : 'Bundle rejection'} [${code}]: ${fusedRejectionReason(code)}`
+      : null;
     return {
       id,
       executionStage: true,
       label: family,
       providerLane: stage.providerLane || 'utility',
-      state: !settled ? 'pending' : (acceptedOutcome ? 'done' : 'failed'),
+      state: !settled ? 'pending' : (acceptedOutcome || recovered ? 'done' : repairing ? repair?.state || 'pending' : 'failed'),
+      ...(settled && (recovered || repairing) ? { recoveryState: recovered ? 'recovered' : 'repairing' } : {}),
+      reason,
       executable: false,
       action: null,
       order: index
@@ -1599,8 +1626,20 @@ export function progressFromExecution(execution, queuedReprocess = null) {
     if (stage.id.startsWith('preprocess.cards.segmented.')) continue;
     if (stage.id === 'preprocess.cards.fused') {
       const parent = executionProgressStep(stage, operation, queuedReprocess);
-      const children = fusedOutcomeSteps(stage, operation);
+      const children = fusedOutcomeSteps(stage, operation, stages);
       if (children.length) parent.children = children;
+      if (children.some((child) => child.recoveryState === 'recovered') && children.every((child) => child.state === 'done')) {
+        parent.state = 'done';
+        parent.recoveryState = 'recovered';
+        parent.reason = 'Recovered with individual card calls. Accepted bundle cards were preserved.';
+      } else if (children.some((child) => child.state === 'failed')) {
+        parent.state = 'failed';
+        parent.reason = aggregateReason(children);
+      } else if (children.some((child) => child.recoveryState === 'repairing')) {
+        parent.state = childAggregateState(children);
+        parent.recoveryState = 'repairing';
+        parent.reason = 'Repairing unresolved cards. Accepted bundle cards are preserved.';
+      }
       topLevel.push(parent);
       continue;
     }
@@ -1619,12 +1658,14 @@ export function progressFromExecution(execution, queuedReprocess = null) {
     topLevel.push(step);
   }
   if (segmented.length) {
-    const children = segmented.map((stage, index) => executionProgressStep(
-      stage,
-      operation,
-      queuedReprocess,
-      { order: index }
-    ));
+    const fusedRepairs = new Map((topLevel.find((step) => step.id === 'preprocess.cards.fused')?.children || [])
+      .filter((child) => child.recoveryState)
+      .map((child) => [child.id.replace('preprocess.cards.fused.', 'preprocess.cards.segmented.'), child]));
+    const children = segmented.map((stage, index) => {
+      const child = executionProgressStep(stage, operation, queuedReprocess, { order: index });
+      const recovery = fusedRepairs.get(stage.id);
+      return recovery ? { ...child, state: recovery.state, recoveryState: recovery.recoveryState, reason: recovery.reason } : child;
+    });
     const failed = children.filter(child => child.state === 'failed');
     const continued = operation.state === 'completed' && failed.length > 0;
     const state = continued ? 'warning' : (childAggregateState(children) || 'pending');
@@ -1633,6 +1674,9 @@ export function progressFromExecution(execution, queuedReprocess = null) {
       id: 'preprocess.cards.segmented',
       executionStage: true,
       label: 'Segmented cards',
+      ...(children.every((child) => child.recoveryState === 'recovered') ? {
+        recoveryState: 'recovered'
+      } : {}),
       partialResult: continued,
       providerLane: 'utility',
       state,

@@ -252,6 +252,7 @@ Selected authored Pre-process cards appear by their saved names as child rows un
 - Do keep Recursion chrome compact, stable, and readable at toolbar density.
 - Do use cyan only for active system identity, running work, selection, or focus.
 - Do use amber for repairable attention, green for success, purple for cached, and red only for blocked or failed states.
+- Do reconcile Fused family rows with individual repair stages. Pending/running repairs read `repairing`; successful repairs read `recovered` with green completion. Keep the original fixed rejection explanation visible in the child detail. A recovered child must not leave its parent or Hero Pixel Array block red.
 - Do keep progress, packet, and card inspection surfaces privacy-safe and free of raw provider output, secrets, hidden reasoning, stack traces, and unrelated diagnostics.
 - Do make every icon-only control keyboard reachable and ARIA-labeled.
 - Do preserve reduced-motion behavior for all progress and block animations.

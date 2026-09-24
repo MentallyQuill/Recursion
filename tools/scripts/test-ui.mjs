@@ -4302,6 +4302,30 @@ try {
   assert(cardDetailText.includes('Inspector-only'), 'viewer card detail labels inspector notes');
   assert(cardDetailText.includes('scene opening required fresh frame'), 'viewer card detail includes lifecycle history');
 
+  const viewerPreviews = Array.from(viewer.querySelectorAll('pre'));
+  assertEqual(viewer.querySelector('h2').textContent, 'Recursion Viewer', 'viewer retains its heading');
+  const viewerClose = viewer.querySelector('[data-recursion-viewer-close]');
+  viewer.scrollTop = 240;
+  viewerPreviews.forEach((preview, index) => {
+    preview.scrollTop = 40 + index;
+    preview.scrollLeft = 12 + index;
+  });
+  const viewerTick = timers.find((entry) => entry.kind === 'interval' && entry.delay === 500 && entry.active);
+  assert(viewerTick, 'viewer has an active refresh timer');
+  for (let tick = 0; tick < 3; tick += 1) {
+    view = { ...view, activity: { ...view.activity, viewerTick: tick } };
+    viewerTick.callback();
+    const refreshedPreviews = Array.from(viewer.querySelectorAll('pre'));
+    viewerPreviews.forEach((preview, index) => {
+      assert(refreshedPreviews[index] === preview, 'viewer tick retains each section scrolling element');
+      assertEqual(preview.scrollTop, 40 + index, 'viewer tick retains each section vertical scroll');
+      assertEqual(preview.scrollLeft, 12 + index, 'viewer tick retains each section horizontal scroll');
+    });
+    assertEqual(viewer.scrollTop, 240, 'viewer tick retains the dialog scroll');
+    assert(viewer.querySelector('[data-recursion-viewer-close]') === viewerClose, 'viewer tick retains its focused close control');
+    assert(fakeDocument.textTree(viewer).includes(`"viewerTick": ${tick}`), 'viewer content stays live while scroll is preserved');
+  }
+
   view = {
     ...view,
     settings: { ...view.settings, enabled: true, mode: 'auto' },

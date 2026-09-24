@@ -2,6 +2,8 @@
 
 This is the implementation-facing V1 storage, retention, privacy, and diagnostics contract.
 
+Fused execution summaries and diagnostics retain original per-family rejection codes, accepted/unresolved families, and whether individual repair was scheduled. The `stages[].fused` projection is normalized by `src/fused-recovery.mjs`; only catalog families, fixed codes, and bounded lists are exported. Repair stages remain separate durable checkpoints, so saved/reloaded progress can distinguish original rejection, active repair, recovered completion, and unresolved failure without retaining rejected model prose. Fused stage version 2 invalidates earlier checkpoints that omitted source instructions or rejection metadata.
+
 ## Principles
 
 1. SillyTavern chat is authority for story state.
@@ -106,6 +108,12 @@ It does not delete SillyTavern messages, character data, World Info, or another 
 
 ## Run Journal
 
+Guidance omissions remain `{ id, reason }` records through composition, Last Brief persistence/reload, and diagnostics (`guidance.omittedCardIds` and `guidanceOmittedCardIds`). Reasons are `duplicate`, `lower-priority`, `unsupported`, or `unsafe`; invalid entries are discarded and IDs are deduplicated. A Guidance omission describes composer treatment of selected evidence. It is distinct from `hand.omitted` and its `omittedCount`, which describe hand selection. Neither count proves that narration ignored a card.
+
+Host-stop events with no supplied failure preserve an explicit reason (`host-stop-cause-unavailable` when unknown, or `recursion-requested-stop` when Recursion requested it). They do not manufacture an internal failure. Supplied structured errors remain failures. Guidance provider journal entries retain bounded field/type errors, `stageAttempt` when supplied by the scheduler, and `semanticNormalization: guidance-request-envelope` when missing request identifiers were locally bound. `retryCount` describes router retries, not scheduler attempts. No returned prose is needed for this evidence.
+
+Turn timing additionally records nullable `hostRequestReadyAt` from `CHAT_COMPLETION_SETTINGS_READY` only for explicitly typed `normal`, `swipe`, `continue`, or `regenerate` requests. Derived milliseconds distinguish `preparedToRequestReadyMs`, `requestReadyToFirstVisibleTokenMs`, `postPreparationMs`, and `visibleStreamingMs`. Missing boundaries stay null. Quiet/raw work, untyped events, pre-preparation events, duplicates, invalidated attempts and late milestones after visible output cannot fill these fields. The event does not establish actual network dispatch: other handlers and host work can still run before fetch. Untyped `GENERATE_AFTER_DATA` and text-completion settings events cannot safely identify primary work and are not used. These observations describe the current active generation; the host supplies no request ID to disambiguate overlapping primary invocations, and they must not be interpreted as server-side timing.
+
 Journal entries use bounded enums and safe identifiers. Useful events include:
 
 - operation started, paused, resumed, completed, stale, or abandoned;
@@ -122,7 +130,7 @@ Entries may include hashes, counts, ids, attempt numbers, failure classes, and s
 
 Diagnostics export normalized settings, provider capability summaries, safe activity history, execution metadata, artifact counts and hashes, Last Brief summaries, and journal entries. Optional excerpts are bounded and sanitized. Default reports use hashes and counts only.
 
-Every warning or error exposes a structured failure with code, stage, category, readable message, retryability, attempted recovery, and suggested action. Secret-bearing thrown errors are converted to fixed safe copy before reaching activity, journal, or caller surfaces.
+Actual failures expose a structured code, stage, category, readable message, retryability, attempted recovery, and suggested action. Host-stop warnings without an underlying error retain cancellation/unknown-cause metadata rather than an invented failure. Secret-bearing thrown errors are converted to fixed safe copy before reaching activity, journal, or caller surfaces.
 
 ## Failure Handling
 

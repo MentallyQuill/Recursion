@@ -180,10 +180,7 @@ function collectProviderLanesFromSteps(steps, lanes = new Set()) {
 
 function progressFooterLabel(modelSource, progressRun, composerLane) {
   const pipeline = pipelineExecutionLabel(modelSource.execution?.pipelineDecision);
-  if (pipeline) {
-    const budget = modelSource.execution?.recoveryBudget;
-    return `${pipeline}${budget?.recoveryUsed ? ` · Recovery ${budget.recoveryUsed}/${budget.recoveryLimit}` : ''}`;
-  }
+  if (pipeline) return pipeline;
   const lanes = collectProviderLanesFromSteps(progressRun?.steps);
   const fallbackLane = cleanText(composerLane, 'utility').toLowerCase();
   if (!lanes.size && (fallbackLane === 'utility' || fallbackLane === 'reasoner')) lanes.add(fallbackLane);

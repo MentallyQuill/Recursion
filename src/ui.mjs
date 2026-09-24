@@ -1539,8 +1539,11 @@ function progressStepTooltip(step, child = false) {
   const state = titleCase(step.state || 'pending', 'Pending');
   const meta = cleanText(step.meta);
   const label = cleanText(step.label, 'Step');
-  const reason = cleanText(step.reason);
-  const suggestedAction = cleanText(step.suggestedAction);
+  const unhealthy = ['warning', 'failed'].includes(step.state);
+  const recovered = ['done', 'cached'].includes(step.state)
+    && (step.recoveryState === 'recovered' || step.retryCount > 0);
+  const reason = recovered && step.id !== 'preprocess.hand' ? '' : cleanText(step.reason);
+  const suggestedAction = unhealthy ? cleanText(step.suggestedAction) : '';
   const parts = [
     `${label}: ${state}`,
     step.providerLane === null ? '' : `${provider} provider`,
@@ -1560,7 +1563,7 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
   const reason = step.reason || '';
   const suggestedAction = step.suggestedAction || '';
   const unhealthy = ['warning', 'failed'].includes(state);
-  const visibleReason = reason && (unhealthy || step.recoveryState || step.id === 'preprocess.hand') ? reason : '';
+  const visibleReason = reason && (unhealthy || step.recoveryState === 'repairing' || step.id === 'preprocess.hand') ? reason : '';
   const visibleAction = suggestedAction && unhealthy ? `Try: ${suggestedAction}` : '';
   const firstRender = row.dataset.recursionProgressRendered !== 'true';
   const changed = !firstRender && (

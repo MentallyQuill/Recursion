@@ -226,7 +226,7 @@ The Hero Pixel Array sits to the right of the card scope selector separator and 
 - Green filled blocks: completed progress items.
 - Blue animated blocks: currently running model calls, prompt work, or cache writes.
 - Purple filled blocks: cards or deck rows read from cache instead of generated this turn.
-- Yellow filled blocks: completed only after retry, fallback, JSON repair, or other repairable caution.
+- Yellow filled blocks: degraded results, unresolved cautions, or work requiring attention. Successful automatic retries and JSON repair finish green.
 - Red filled blocks: blocked or failed progress items.
 - Muted grey filled blocks: skipped or player-canceled progress items.
 
@@ -270,7 +270,7 @@ Color grammar:
 - The bar itself should remain mostly neutral; amber/red should appear only in the array or disclosed menus for attention or blocking conditions.
 - `Working` uses cyan motion treatment.
 - `Issue`, provider failures, and prompt-install failures use red only when blocked or failed.
-- Review, fallback, retried-success, and warning states use amber. Routine cache inspection after source changes is neutral completed work, not amber.
+- Review, degraded fallback, and unresolved warning states use amber. Routine cache inspection and successful automatic recovery are normal completed work.
 - Disabled-but-normal states use muted neutral treatment on the power toggle.
 - Player-canceled generation uses muted skipped treatment, not green, amber, or red.
 
@@ -309,7 +309,7 @@ The Hero Pixel Array and progress menu must render from the same normalized `pro
 
 Fused progress treats `Fused card bundle` as the single parent row for the bundle provider call. The bundle provider role must not also appear as a child row. Fused child rows appear only after there is material card-family progress, such as accepted bundle items under `Fused card bundle` or repaired siblings under `Utility card batch`; the menu must not seed speculative pending children for every requested family while the bundle is still unresolved.
 
-After a bundle settles, each unresolved family follows its individual repair stage within the same operation. Pending/running repairs show `repairing`, successful repairs show green `recovered`, and failed or unavailable repairs remain failed. The wave transition before repair dispatch is pending, not a terminal red error. The Fused parent and its Hero Pixel Array block aggregate these reconciled outcomes. Preserve the original allowlisted rejection code and fixed explanation in child details, including after reload; do not manufacture an internal-error message. A recovered row has no Retry suggestion. Saved summaries supply family rows when the live graph is unavailable.
+After a bundle settles, each unresolved family follows its individual repair stage within the same operation. Pending/running repairs show `repairing`; successful repairs show normal green `done` or purple `cached`, without recovery labels or original rejection explanations. Failed or unavailable repairs remain failed. The wave transition before repair dispatch is pending, not a terminal red error. The Fused parent and its Hero Pixel Array block aggregate these reconciled outcomes, including cached repairs and restored summaries without a live graph. Keep the original allowlisted rejection code and recovery usage in diagnostics; omit the recovery counter from the progress footer. Successful retries carry no corrective suggestion in visible rows, tooltips, or accessibility text.
 
 Selected authored Pre-process cards appear by their saved names as child rows under `Selecting turn hand`. These rows read `included`, carry no provider mark or action, and come only from the current execution's completed or reused hand checkpoint. A new pending hand must not display the previous hand's cards. Authored rows do not add Hero Pixel Array blocks or pretend to be model calls.
 
@@ -332,9 +332,9 @@ When a turn reaches a terminal prompt outcome (`Recursion prompt ready`, prompt 
 
 A successful generic `settled` event may complete `Recursion prompt ready`. A warning or error generic settlement must instead update the step named by its `logicalStage`; an unknown logical stage uses `Preparing Recursion response`. A failed settlement must never render `Recursion prompt ready` as failed.
 
-Successful provider work that required more than one attempt is not plain green success. It is `warning` / amber with visible `retried` row meta and a safe reason such as `Provider card batch needed another attempt before this card completed.` in tooltip/accessibility text. Parent rows follow the normal aggregation rule, so a batch containing recovered cards stays amber until superseded by a later clean run.
+Successful provider work that required more than one attempt is normal completion. Retry counts must not promote completed rows or their parents to amber or leave a historical failed attempt visible after that same work succeeds. Preserve unresolved sibling failures and partial results. Attempt counts and failure history remain available in diagnostics.
 
-A SillyTavern Post-process rewrite that succeeds on a later configured attempt retains the prior stable `recoveredFailureCode`. The category and recovered host-rewrite child show fixed copy for empty text, unchanged text, provider-owned timeout, or generic host failure. Because recovery already succeeded, these rows omit `suggestedAction`; they must not tell the user to retry again or copy a code that was not persisted. The code remains diagnostic metadata and is also stored on the successful category in the Post-process marker.
+A SillyTavern Post-process rewrite that succeeds on a later configured attempt retains its prior stable `recoveredFailureCode` in the successful category and Post-process marker for diagnostics. The category and completed host-rewrite child use normal success state. Suppress resolved failure explanations and corrective suggestions from ordinary progress rows and tooltips; failed categories and committed partial results remain visible.
 
 Swipes and other source mutations start a fresh visible run. The new run must not inherit warning or failed row state from the prior generation. Same-turn swipe reuse may render accepted turn checkpoints as `cached` / purple, not amber. A changed source band starts new turn work instead of trying to infer a scene boundary.
 
@@ -357,7 +357,7 @@ Swipes and other source mutations start a fresh visible run. The new run must no
         { id: "scene-constraints-card", label: "Scene Constraints", providerLane: "utility", state: "cached", meta: "cached", source: "cache", sourceRoleId: "sceneConstraintsCard" },
         { id: "knowledge-secrets-card", label: "Knowledge", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "knowledgeSecretsCard" },
         { id: "clocks-consequences-card", label: "Consequences", providerLane: "utility", state: "running", meta: "running", sourceRoleId: "clocksConsequencesCard" },
-        { id: "character-motivation-card", label: "Character Motivation", providerLane: "utility", state: "warning", meta: "retried", source: "generated", sourceRoleId: "characterMotivationCard", retryCount: 1, reason: "The selected model connection did not respond before the time limit.", suggestedAction: "Check the selected connection profile, then try again.", failureCode: "RECURSION_PROVIDER_TIMEOUT" },
+        { id: "character-motivation-card", label: "Character Motivation", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "characterMotivationCard", retryCount: 1, reason: null, suggestedAction: null, failureCode: "RECURSION_PROVIDER_TIMEOUT" },
         { id: "social-subtext-card", label: "Social Subtext", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "socialSubtextCard" },
         { id: "environment-affordances-card", label: "Environment", providerLane: "utility", state: "done", meta: "generated", source: "generated", sourceRoleId: "environmentAffordancesCard" },
         { id: "possessions-items-card", label: "Items", providerLane: "utility", state: "pending", meta: "waiting", sourceRoleId: "possessionsItemsCard" },
@@ -397,7 +397,7 @@ The Hero Pixel Array continues to allocate blocks only for top-level rows. A gro
 
 Runtime card child rows come from sanitized `cardProgress` activity events. Event detail may include only `parentStepId`, `roleId`, `family`, `source`, `state`, a safe card id, retry count, and one sanitized progress reason. It must not include card prompt text, raw provider output, transcript text, stack traces, hidden reasoning, or secrets.
 
-When the progress state is warning or failed, rows must expose why in the compact list without leaking internals: use terse visible meta such as `retried`, `fallback`, `caution`, or `failed`, then render one sanitized explanatory sentence as a wrapped subline beneath the row label. Warning reasons use the amber state token and failed reasons use the red state token. A tooltip/title may repeat the sentence but cannot be its only visible location. Missing or generic reasons normalize to a readable internal-failure message while the stable code remains diagnostics-only. For generated cards that completed after retry, `cardProgress` may also include `retryCount` and `reason`; it must still omit raw provider errors and raw model payloads.
+When the progress state is warning or failed, rows must expose why in the compact list without leaking internals: use terse visible meta such as `retried`, `fallback`, `caution`, or `failed`, then render one sanitized explanatory sentence as a wrapped subline beneath the row label. Warning reasons use the amber state token and failed reasons use the red state token. A tooltip/title may repeat the sentence but cannot be its only visible location. Missing or generic reasons normalize to a readable internal-failure message while the stable code remains diagnostics-only. For generated cards that completed after retry, `cardProgress` may retain `retryCount` and `reason` for diagnostics; successful rows suppress those historical reasons and corrective suggestions in the main view and tooltips. Raw provider errors and raw model payloads remain excluded.
 
 When an unhealthy step has `suggestedAction`, render `Try: <action>` directly below its reason in subdued helper text. Omit the element from layout when no action exists. `failureCode` is diagnostic metadata and is never ordinary row text.
 
@@ -1378,7 +1378,7 @@ Avoid:
 
 ## Post-process Failure States
 
-Post-process progress rows use severity consistently: green for verified completion, purple for validated reuse, gray for skipped/not applicable, yellow only for retry, recovery, or a committed partial Progressive result, and red for a failed category or Unified operation with a concise reason. Do not hide a red reason behind a generic failure label.
+Post-process progress rows use severity consistently: green for verified completion including successful automatic recovery, purple for validated reuse, gray for skipped/not applicable, yellow for unresolved caution or a committed partial Progressive result, and red for a failed category or Unified operation with a concise reason. Do not hide an unresolved red reason behind a generic failure label.
 
 Empty states should be short and action-oriented.
 

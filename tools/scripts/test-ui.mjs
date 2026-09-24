@@ -3155,6 +3155,24 @@ try {
   );
   assert(retriedProgressRow.className.includes('has-reason'), 'warning progress rows expand for their reason');
   assert(retriedProgressRow.getAttribute('title').includes(`Reason: ${retryReason}`), 'retried generated card row tooltip explains why it is yellow');
+  // A completed retry updates the existing row without advertising its diagnostic history.
+  view.progressRun.title = 'Ready';
+  view.progressRun.steps[0].state = 'done';
+  const completedRetry = view.progressRun.steps[0].children[0];
+  completedRetry.state = 'done';
+  completedRetry.recoveryState = 'recovered';
+  completedRetry.suggestedAction = 'Try again.';
+  ui.update();
+  const completedRetryRow = root.querySelectorAll('[data-recursion-progress-row]')
+    .find((row) => row.dataset.recursionProgressStepId === 'scene-frame-card');
+  assertEqual(completedRetryRow, retriedProgressRow, 'recovery settles the existing row');
+  assertEqual(completedRetryRow.querySelector('[data-recursion-progress-meta]').textContent, 'done', 'recovery uses ordinary completion metadata');
+  assertEqual(completedRetryRow.querySelector('[data-recursion-progress-reason]').textContent, '', 'successful recovery hides historical reasons');
+  assertEqual(completedRetryRow.querySelector('[data-recursion-progress-suggestion]').textContent, '', 'successful recovery needs no corrective action');
+  assert(!completedRetryRow.className.includes('has-reason'), 'successful recovery collapses the warning explanation');
+  assert(!completedRetryRow.getAttribute('title').includes(retryReason), 'successful recovery does not repeat the rejection in its tooltip');
+  assert(!completedRetryRow.getAttribute('title').includes('Try again'), 'successful recovery tooltip has no stale corrective suggestion');
+
   const routineReason = 'Included in category generation.';
   view = {
     ...view,

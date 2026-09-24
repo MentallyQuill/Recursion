@@ -513,9 +513,9 @@ const progressivePostProcessProgress = createProgressRunModel({
 });
 assertEqual(progressivePostProcessProgress.steps.length, 3, 'Post-process progress renders two category parents and one commit row');
 assertEqual(progressivePostProcessProgress.steps[0].label, 'Natural Prose', 'Post-process category retains its product label');
-assertEqual(progressivePostProcessProgress.steps[0].state, 'warning', 'retried Post-process category success is amber');
+assertEqual(progressivePostProcessProgress.steps[0].state, 'done', 'successful Post-process retry is green');
 assertEqual(progressivePostProcessProgress.steps[0].children.length, 2, 'Post-process category has guidance and host children');
-assertEqual(progressivePostProcessProgress.steps[0].children[0].state, 'warning', 'retried guidance child is amber');
+assertEqual(progressivePostProcessProgress.steps[0].children[0].state, 'done', 'successful guidance retry is green');
 assertEqual(progressivePostProcessProgress.steps[0].children[1].state, 'done', 'first-attempt host child is green');
 assertEqual(progressivePostProcessProgress.steps[1].state, 'failed', 'failed Post-process category is red');
 assertEqual(progressivePostProcessProgress.steps[1].children[0].state, 'failed', 'failed guidance child is red');
@@ -562,8 +562,9 @@ const recoveredHostChild = recoveredHostParent.children.find((step) => step.id =
 assertEqual(recoveredHostParent.reason, recoveredHostRewriteReason, 'recovered category shows the preserved first-attempt cause');
 assertEqual(recoveredHostParent.failureCode, 'RECURSION_POST_PROCESS_WRITER_EMPTY', 'recovered category retains diagnostic code');
 assertEqual(recoveredHostParent.suggestedAction, null, 'recovered category omits an unnecessary retry action');
-assertEqual(recoveredHostChild.reason, recoveredHostRewriteReason, 'retried host child shows the preserved first-attempt cause');
-assertEqual(recoveredHostChild.failureCode, 'RECURSION_POST_PROCESS_WRITER_EMPTY', 'retried host child retains diagnostic code');
+assertEqual(recoveredHostChild.state, 'done', 'successful host rewrite retry is green');
+assertEqual(recoveredHostChild.reason, null, 'successful host rewrite needs no failure reason');
+assertEqual(recoveredHostChild.failureCode, null, 'successful host child needs no duplicated failure code');
 assertEqual(recoveredHostChild.suggestedAction, null, 'retried host child omits an unnecessary retry action');
 
 const explainedFailureProgress = createProgressRunModel({
@@ -690,10 +691,23 @@ const retriedGeneratedCardProgress = createProgressRunModel({
 });
 const retriedGeneratedBatch = retriedGeneratedCardProgress.steps.find((step) => step.id === 'utility-card-batch');
 const retriedGeneratedChild = retriedGeneratedBatch.children.find((child) => child.id === 'scene-frame-card');
-assertEqual(retriedGeneratedChild.state, 'warning', 'generated card success after retry stays caution-colored');
-assertEqual(retriedGeneratedChild.meta, 'retried', 'generated card retry has visible retried meta');
+assertEqual(retriedGeneratedChild.state, 'done', 'successful card retry is normal completion');
+assertEqual(retriedGeneratedChild.meta, 'generated', 'successful retry keeps normal generated metadata');
 assert(retriedGeneratedChild.reason.includes('retried once'), 'generated card retry keeps a safe visible reason');
-assertEqual(retriedGeneratedBatch.state, 'warning', 'retried generated child keeps batch caution-colored');
+assertEqual(retriedGeneratedBatch.state, 'done', 'successful card retry leaves its parent complete');
+
+// A later successful attempt replaces the same call's transient error, not a sibling's failure.
+const retryEvents = [
+  { phase: 'providerCallSettled', outcome: 'error', severity: 'error', roleId: 'sceneFrameCard', detail: { reason: 'Temporary timeout.' } },
+  { phase: 'providerCallRetrying', severity: 'warning', roleId: 'sceneFrameCard', detail: { retryCount: 1 } },
+  { phase: 'providerCallSettled', outcome: 'success', severity: 'success', roleId: 'sceneFrameCard', detail: { retryCount: 1 } }
+].map((event, index) => ({ ...event, runId: 'successful-provider-retry', recordedAt: String(index + 1) }));
+const providerRetryProgress = createProgressRunModel({ activityHistory: retryEvents, activity: retryEvents.at(-1) });
+assertEqual(providerRetryProgress.steps[0].state, 'done', 'a successful retry clears the prior attempt warning');
+assertEqual(providerRetryProgress.steps[0].children[0].state, 'done', 'the same provider child completes normally');
+const failedSibling = { ...retryEvents[0], roleId: 'knowledgeSecretsCard', recordedAt: '4' };
+const mixedRetryProgress = createProgressRunModel({ activityHistory: [...retryEvents, failedSibling], activity: failedSibling });
+assertEqual(mixedRetryProgress.steps[0].state, 'failed', 'an unresolved sibling is still a failure');
 
 const tracedCardProgress = createProgressRunModel({
   activityHistory: [

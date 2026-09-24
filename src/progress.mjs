@@ -346,12 +346,6 @@ function retryCountFromSource(source) {
   return normalizeRetryCount(input.retryCount ?? input.providerRetryCount ?? input.diagnostics?.retryCount);
 }
 
-function normalizeStateWithRetry(value, retryCount = 0) {
-  const state = normalizeState(value);
-  if (state === 'done' && normalizeRetryCount(retryCount) > 0) return 'warning';
-  return state;
-}
-
 function reasonMentionsRetry(reason) {
   return /\bretr(?:y|ied|ies|ying)\b/i.test(String(reason || ''));
 }
@@ -422,7 +416,7 @@ function aggregateFailureCode(children = []) {
 }
 
 function metaForState(state, source = '', reason = '', retryCount = 0, recoveryState = '') {
-  if (recoveryState === 'recovered' && ['done', 'cached'].includes(state)) return 'recovered';
+  if (recoveryState === 'recovered' && ['done', 'cached'].includes(state)) return state;
   if (recoveryState === 'repairing' && ['running', 'pending'].includes(state)) return 'repairing';
   const normalizedSource = normalizeChildSource(source);
   if (['done', 'cached'].includes(state) && normalizedSource === 'included') return 'included';
@@ -623,26 +617,20 @@ function eventState(event, isCurrent) {
   const severity = cleanText(event.severity, 'info').toLowerCase();
   const outcome = cleanText(event.outcome).toLowerCase();
   const detail = asObject(event.detail);
-  const retryCount = eventRetryCount(event);
   if (phase === 'postProcessCategory') {
     const stageState = cleanText(detail.state).toLowerCase();
     if (stageState === 'failed') return 'failed';
-    if (stageState === 'success') {
-      return Number(detail.guidanceAttempts || 0) > 1 || Number(detail.hostAttempts || 0) > 1
-        ? 'warning'
-        : 'done';
-    }
+    if (stageState === 'success') return 'done';
     return 'running';
   }
   if (phase === 'postProcessCommitted') return detail.partial === true ? 'warning' : 'done';
   if (phase === 'postProcessCommitting') return 'running';
-  if (phase === 'cardProgress' && detail.state) return normalizeStateWithRetry(detail.state, retryCount);
+  if (phase === 'cardProgress' && detail.state) return normalizeState(detail.state);
   if (phase === 'cacheWarning') return severity === 'error' ? 'failed' : 'done';
   if (phase === 'providerCallSettled' || isProviderSettledEvent(event)) {
     if (outcome === 'skipped' || outcome === 'canceled') return 'skipped';
     if (outcome === 'error' || severity === 'error') return 'failed';
     if (outcome === 'warning' || severity === 'warning') return 'warning';
-    if (retryCount > 0) return 'warning';
     return 'done';
   }
   if (outcome === 'skipped' || outcome === 'canceled') return 'skipped';
@@ -670,12 +658,12 @@ function childStepFromEvent(event, state, order = 0) {
       ? (activeStage === 'host-rewrite' ? 'done' : 'running')
       : (categoryState === 'failed' && failureStage === 'guidance'
           ? 'failed'
-          : (guidanceAttempts > 1 ? 'warning' : 'done'));
+          : 'done');
     const hostState = categoryState === 'running'
       ? (activeStage === 'host-rewrite' ? 'running' : 'pending')
       : (categoryState === 'failed'
           ? (failureStage === 'host-rewrite' ? 'failed' : 'skipped')
-          : (hostAttempts > 1 ? 'warning' : 'done'));
+          : 'done');
     return [
       normalizeChildStep({
         id: `${categoryId}-guidance`,
@@ -859,7 +847,7 @@ function upsertStep(map, step) {
   );
   next.state = next.children?.length
     ? aggregateParentState(mergeState(existing.state, step.state), next.children)
-    : normalizeStateWithRetry(mergeState(existing.state, step.state), next.retryCount);
+    : mergeState(existing.state, step.state);
   next.reason = safeReasonText(step.reason) || safeReasonText(existing.reason) || aggregateReason(next.children) || reasonFromSource(next, next.state, next.retryCount);
   next.suggestedAction = safeDisplayText(step.suggestedAction, '', 180)
     || safeDisplayText(existing.suggestedAction, '', 180)
@@ -876,6 +864,7 @@ function upsertStep(map, step) {
 function mergeState(existingState, nextState) {
   const existing = normalizeState(existingState);
   const next = normalizeState(nextState);
+  if (next === 'done' || next === 'cached') return next;
   if (existing === 'failed' || next === 'failed') return 'failed';
   if (existing === 'warning' || next === 'warning') return 'warning';
   if (next === 'pending' && existing !== 'pending') return existing;
@@ -904,7 +893,6 @@ function mergeChildren(existingChildren = [], nextChildren = []) {
       reason: safeReasonText(child.reason) || safeReasonText(existing.reason),
       state: mergeState(existing.state, child.state)
     };
-    merged.state = normalizeStateWithRetry(merged.state, merged.retryCount);
     merged.meta = metaForState(merged.state, merged.source, merged.reason, merged.retryCount);
     children.set(child.id, merged);
   }
@@ -979,9 +967,7 @@ function normalizeChildStep(input, index = 0) {
         ? childIdFromRole(roleId, `child-${index + 1}`)
         : idFromText(rawId, `child-${index + 1}`));
   const retryCount = retryCountFromSource(source);
-  const state = source.recoveryState === 'recovered'
-    ? normalizeState(source.state)
-    : normalizeStateWithRetry(source.state, retryCount);
+  const state = normalizeState(source.state);
   const childSource = normalizeChildSource(source.source || source.sourceType || (state === 'cached' ? 'cache' : ''));
   const reason = usefulReasonText(
     source.reason
@@ -1033,9 +1019,7 @@ function normalizeStep(input, index = 0) {
     ? source.children.map((child, childIndex) => normalizeChildStep(child, childIndex)).sort(compareChildOrder)
     : [];
   const retryCount = Math.max(retryCountFromSource(source), maxRetryCount(children));
-  const ownState = source.recoveryState === 'recovered'
-    ? normalizeState(source.state)
-    : normalizeStateWithRetry(source.state, retryCount);
+  const ownState = normalizeState(source.state);
   const state = source.partialResult === true && source.state === 'warning'
     ? 'warning'
     : children.length
@@ -1598,8 +1582,8 @@ function fusedOutcomeSteps(stage, operation, stages) {
       && ['running', 'paused'].includes(operation.state);
     const repairing = !acceptedOutcome && (awaitingRepair || ['pending', 'running'].includes(repair?.state));
     const code = normalizeFusedRejections(stage.summary?.rejections).find((entry) => entry.family === family)?.code || 'invalid-card';
-    const reason = !acceptedOutcome && settled
-      ? `${recovered ? 'Recovered with an individual card call. Original rejection' : repairing ? 'Repairing this card. Original rejection' : 'Bundle rejection'} [${code}]: ${fusedRejectionReason(code)}`
+    const reason = !acceptedOutcome && !recovered && settled
+      ? `${repairing ? 'Repairing this card. Original rejection' : 'Bundle rejection'} [${code}]: ${fusedRejectionReason(code)}`
       : null;
     return {
       id,
@@ -1657,10 +1641,10 @@ export function progressFromExecution(execution, queuedReprocess = null) {
       const parent = executionProgressStep(stage, operation, queuedReprocess);
       const children = fusedOutcomeSteps(stage, operation, stages);
       if (children.length) parent.children = children;
-      if (children.some((child) => child.recoveryState === 'recovered') && children.every((child) => child.state === 'done')) {
+      if (children.some((child) => child.recoveryState === 'recovered') && children.every((child) => ['done', 'cached'].includes(child.state))) {
         parent.state = 'done';
         parent.recoveryState = 'recovered';
-        parent.reason = 'Recovered with individual card calls. Accepted bundle cards were preserved.';
+        parent.reason = null;
       } else if (children.some((child) => child.state === 'failed')) {
         parent.state = 'failed';
         parent.reason = aggregateReason(children);

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { progressFromExecution, createProgressRunModel } from '../../src/progress.mjs';
+import { summarizeExecutionForDiagnostics } from '../../src/runtime/diagnostics.mjs';
 
 export function recoveredFusedExecution(repairState = 'completed', { graph = true } = {}) {
   return {
@@ -24,8 +25,14 @@ for (const graph of [true, false]) {
   const child = bundle.children.find((step) => step.label === 'Character Motivation');
   assert.equal(bundle.state, 'done', 'successful repair clears the red Fused parent');
   assert.equal(child.state, 'done', 'successful repair clears the red Fused child');
-  assert.equal(child.meta, 'recovered', 'repair remains visible');
-  assert.match(child.reason, /private-claim/, 'original rejection remains inspectable');
+  assert.equal(child.meta, 'done', 'successful repair reads as normal completion');
+  assert.equal(child.reason, null, 'resolved rejection stays out of ordinary progress');
+  assert.equal(bundle.meta, 'done');
+  assert.equal(bundle.reason, null);
+  const repairGroup = progress.steps.find((step) => step.id === 'preprocess.cards.segmented');
+  assert.equal(repairGroup.meta, 'done');
+  assert.equal(repairGroup.children[0].meta, 'done');
+  assert.equal(repairGroup.children[0].reason, null);
   assert.ok(!JSON.stringify(progress).includes('unexpected internal error'));
   assert.equal(progress.title, 'Ready');
   const normalized = createProgressRunModel({ execution: recoveredFusedExecution('completed', { graph }) });
@@ -63,12 +70,33 @@ const retriedBundle = recoveredFusedExecution();
 retriedBundle.stageRecords.fused.attempts = { total: 2 };
 const recoveredAfterRetries = progressFromExecution(retriedBundle);
 assert.equal(recoveredAfterRetries.steps[0].state, 'done', 'successful recovery supersedes failed bundle attempts');
-assert.equal(recoveredAfterRetries.steps[0].meta, 'recovered');
+assert.equal(recoveredAfterRetries.steps[0].meta, 'done');
 assert.equal(recoveredAfterRetries.steps[0].retryCount, 1, 'attempt history remains available');
 retriedBundle.stageRecords.repair.attempts = { total: 2 };
 const repairedAfterRetries = progressFromExecution(retriedBundle);
 const repairGroup = repairedAfterRetries.steps.find((step) => step.id === 'preprocess.cards.segmented');
 assert.equal(repairGroup.state, 'done', 'a successful targeted repair does not leave its separate group amber');
-assert.equal(repairGroup.children[0].meta, 'recovered');
+assert.equal(repairGroup.children[0].meta, 'done');
 assert.equal(repairGroup.children[0].retryCount, 1);
 assert.equal(repairedAfterRetries.heroPixelState, 'done');
+
+for (const graph of [true, false]) for (const operationState of ['running', 'completed', 'stale']) {
+  const execution = recoveredFusedExecution('cached', { graph });
+  execution.state = operationState;
+  execution.recoveryBudget = { recoveryUsed: 1, recoveryLimit: 9 };
+  execution.stageRecords.fused.state = 'cached';
+  execution.stageRecords.install.state = operationState === 'running' ? 'running' : 'completed';
+  const progress = progressFromExecution(execution);
+  const bundle = progress.steps.find((step) => step.id === 'preprocess.cards.fused');
+  const repaired = bundle.children.find((step) => step.label === 'Character Motivation');
+  assert.equal(bundle.state, 'cached', 'restored successful recovery remains cached');
+  assert.equal(bundle.meta, 'cached');
+  assert.equal(bundle.reason, null);
+  assert.equal(repaired.meta, 'cached');
+  assert.equal(repaired.reason, null);
+  const diagnostics = summarizeExecutionForDiagnostics(execution);
+  assert.equal(diagnostics.recoveryBudget.recoveryUsed, 1, 'quiet UI retains recovery accounting');
+  assert.deepEqual(diagnostics.stages.find((stage) => stage.stageId === 'preprocess.cards.fused').fused.rejections,
+    [{ family: 'Character Motivation', code: 'private-claim' }], 'quiet UI retains original diagnostic rejection');
+}
+console.log('[pass] cached recovery remains quiet with diagnostics intact');

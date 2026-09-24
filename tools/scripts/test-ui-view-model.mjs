@@ -47,4 +47,13 @@ assert(
   'view model exposes the contextual Resume action'
 );
 
+for (const state of ['running', 'completed', 'paused']) {
+  const model = createRecursionViewModel({ execution: {
+    operationId: 'recovery-footer', state,
+    pipelineDecision: { requestedMode: 'fused', effectiveMode: 'fused', selectedLane: 'utility' },
+    recoveryBudget: { recoveryUsed: 1, recoveryLimit: 9 },
+    stages: [{ stageId: 'preprocess.cards.fused', state: 'completed' }]
+  } });
+  assertEqual(model.progressFooterLabel, 'Fused \u00b7 Utility', 'recovery bookkeeping stays out of the progress footer');
+}
 console.log('ui view-model tests passed');

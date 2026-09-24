@@ -168,7 +168,7 @@ Recursion inherits SillyTavern theme variables for the real background, foregrou
 - **Tertiary (#a78bfa):** cached-state purple for card or deck rows reused from cache. It is a state color, not a decorative brand gradient.
 - **Neutral (#202020):** graphite fallback surface for the root bar and viewer background.
 - **Success (#7fcf8a):** ready, done, passing provider checks, and completed Hero Pixel Array blocks.
-- **Warning (#ffd479):** review, fallback, repair, retry, or attention states that are not hard failures. Routine cache inspection after source changes is not a warning by itself.
+- **Warning (#ffd479):** review, fallback, repair, retry, or attention states that are not hard failures. Routine cache inspection and successful automatic retries are not warnings by themselves.
 - **Error (#ff8a8a):** provider failures, blocked states, and prompt-install failures.
 
 The Pre-process guidance row is labeled `Guidance` regardless of provider lane. A completed stage that falls back to raw card evidence remains amber with a visible explanation. A stale-chat prompt-install failure states that the chat changed before installation.
@@ -258,7 +258,7 @@ Play Behavior places `Selection variety` (Off, Low, Medium, High; default Low) a
 - Do keep Recursion chrome compact, stable, and readable at toolbar density.
 - Do use cyan only for active system identity, running work, selection, or focus.
 - Do use amber for repairable attention, green for success, purple for cached, and red only for blocked or failed states.
-- Do reconcile Fused family rows with individual repair stages. Pending/running repairs read `repairing`; successful repairs read `recovered` with green completion. Keep the original fixed rejection explanation visible in the child detail. A recovered child must not leave its parent or Hero Pixel Array block red.
+- Do reconcile Fused family rows with individual repair stages. Successful repairs and retries read as normal completion (or cached reuse), without recovery labels, historical rejection text, retry suggestions, or recovery counters in the progress menu. Keep recovery accounting and allowlisted rejection codes in diagnostics. Unresolved failures, pending repairs, and degraded results retain their relevant state and explanation; successful recovery must not leave the parent or Hero Pixel Array amber or red.
 - Do keep progress, packet, and card inspection surfaces privacy-safe and free of raw provider output, secrets, hidden reasoning, stack traces, and unrelated diagnostics.
 - Do make every icon-only control keyboard reachable and ARIA-labeled.
 - Do preserve reduced-motion behavior for all progress and block animations.

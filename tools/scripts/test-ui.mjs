@@ -4322,6 +4322,23 @@ try {
   assert(cardDetailText.includes('Inspector-only'), 'viewer card detail labels inspector notes');
   assert(cardDetailText.includes('scene opening required fresh frame'), 'viewer card detail includes lifecycle history');
 
+  const originalViewerHand = view.lastHand;
+  const fullViewerSummary = `${'Summary detail. '.repeat(30)}Summary final sentence.`;
+  const fullViewerBody = `${'Card detail. '.repeat(160)}private-secret Final card sentence.`;
+  view = { ...view, lastHand: { cards: [{
+    id: 'viewer-complete-card', family: 'Scene Frame',
+    summary: fullViewerSummary, promptText: fullViewerBody
+  }] } };
+  ui.update();
+  const completeCardDetail = root.querySelector('[data-recursion-viewer-card]');
+  assertEqual(completeCardDetail.children.find((child) => child.className === 'recursion-viewer-card-summary').textContent,
+    fullViewerSummary, 'Deck detail preserves the complete summary beyond 260 characters');
+  assertEqual(completeCardDetail.querySelector('[data-recursion-viewer-card-text]').textContent,
+    fullViewerBody.replace('private-secret', '[redacted]'),
+    'Deck detail preserves the complete body beyond 900 characters with secret redaction');
+  view = { ...view, lastHand: originalViewerHand };
+  ui.update();
+
   const handBeforeRefinement = view.lastHand;
   view = { ...view, lastHand: { ...handBeforeRefinement, metadata: { refinement: {
     targetCount: 2, revisionCount: 0, targets: [

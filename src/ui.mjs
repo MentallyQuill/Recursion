@@ -3683,11 +3683,11 @@ function appendViewerDeckSection(viewer, hand) {
     }
     article.appendChild(el('p', {
       className: 'recursion-viewer-card-summary',
-      text: safeText(cardSummary(cardSource), 260)
+      text: safeText(cardSummary(cardSource), Infinity)
     }));
     article.appendChild(el('p', {
       className: 'recursion-viewer-card-text',
-      text: safeText(cardText(cardSource) || cardSummary(cardSource), 900),
+      text: safeText(cardText(cardSource) || cardSummary(cardSource), Infinity),
       dataset: { recursionViewerCardText: '' }
     }));
 

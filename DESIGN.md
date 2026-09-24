@@ -248,7 +248,7 @@ Selected authored Pre-process cards appear by their saved names as child rows un
 
 **Settings panel:** Three tabs: Play, Providers, Advanced. Keep normal-play controls high level in a Play Behavior disclosure, provider lanes collapsible, and Advanced grouped into Injection, UI, and Diagnostics disclosures. Provider lanes show compact derived capability labels (`Ready`, `Untested`, `Unhealthy`, or `Configure`), never a separate enable switch. Provider field commits autosave only the changed field and preserve the open disclosure. Disable advanced commands that have no V1 runtime handler instead of showing fake working controls.
 
-**Full viewer:** An observatory, not a play surface. Use it for Now, Deck, Activity, Prompt Packet, Settings, and Providers. It can be larger than the bar menus, but it should remain utilitarian and dismissible.
+**Full viewer:** An observatory, not a play surface. Use it for Now, Deck, Activity, Prompt Packet, Settings, and Providers. It can be larger than the bar menus, but it should remain utilitarian and dismissible. Deck details display the complete stored card summary and body at natural height without display character caps or added ellipses; secret redaction remains active.
 
 ## Do's and Don'ts
 

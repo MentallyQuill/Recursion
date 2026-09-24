@@ -1188,6 +1188,8 @@ Reference CSS contract:
 
 The full viewer is an observatory, not a primary play surface. It should open as a full-window panel or modal that can be dismissed quickly.
 
+Deck details display the complete stored card summary and body without display character caps or added ellipses. Text wraps at natural height within the viewer's scroll surface. Secret redaction remains active, including in text beyond the former preview limits.
+
 Recommended sections:
 
 - Now: current Auto Control Plan, last run, active hand, prompt packet summary.

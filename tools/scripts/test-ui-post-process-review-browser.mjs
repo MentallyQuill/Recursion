@@ -195,4 +195,3 @@ try {
   await writeFile(resolve(output, 'report.json'), JSON.stringify({ passed: true, fixture: 'isolated mock runtime; real production UI', checks: ['writer-profile atomic selection', 'output and sampling', 'review toggle', 'starter copy and style save', 'inert HTML', 'highlight/clean', 'manual edit/apply', 'retry pending', 'pending after reload', 'keep pending/applied', 'stale actions disabled', 'mobile width', 'focus trap/restore', 'chat scroll'], errors }, null, 2));
   console.log('Post-process review browser proof: PASS (' + output + ')');
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
-

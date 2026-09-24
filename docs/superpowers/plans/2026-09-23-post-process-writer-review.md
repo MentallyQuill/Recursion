@@ -175,7 +175,7 @@ docs/design/UI_SPEC.md, DESIGN.md, user docs, examples, verification report.
 - [x] Capture only sanitized proof and UI fixtures; never publish live narrative/secrets.
 - [x] Fresh whole-branch review against the spec, fix material findings with RED/GREEN,
   and audit all eleven verification items in the spec with actual evidence.
-- [ ] Use network-enabled gh CLI to inspect remote/auth, fetch current main, integrate
+- [x] Use network-enabled gh CLI to inspect remote/auth, fetch current main, integrate
   without disturbing unrelated checkout state, push scoped commits non-force to main.
 - [ ] Verify remote main contains the final commit and relevant checks. Only then
   mark the goal complete.
@@ -187,3 +187,5 @@ Pre-flight: Task 1 and Task 2 share only the literal writer shape; they own dist
 files. Task 3 owns storage independently. Task 4 waits for contracts/transport/storage;
 Task 5 waits for review API. All final integration, staging, and pushes are serialized.
 
+Final merged verification: 97 offline scripts and 4 browser scripts pass. See
+`../../technical/POST_PROCESS_WRITER_REVIEW_EVIDENCE.md` for the evidence audit.

@@ -33,6 +33,7 @@ function refinementSummary(value) {
     targetCount: value.targets.length,
     reviewCount: value.reviews.length,
     revisionCount: value.revisedCardIds.length ? 1 : 0,
+    revisedCardCount: value.revisedCardIds.length,
     targets: value.targets.map(target => ({
       id: target.id, cardId: target.cardId, name: target.name,
       outcome: value.reviews.at(-1)?.items.find(item => item.targetId === target.id)?.verdict || 'pending'

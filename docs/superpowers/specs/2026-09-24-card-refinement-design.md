@@ -45,7 +45,7 @@ Evaluate the original instruction's scene-specific purpose, source support, char
 
 Guidance, packet evidence, Last Brief, and prepared generation must use the accepted refined hand. Do not inject superseded drafts alongside revisions. Unmarked cards remain unchanged. Changes to deck text/state/order, scene, source message, provider settings, or refinement contracts invalidate dependent checkpoints and prepared packets. Matching same-turn swipe reuse may reuse the already reviewed packet; fresh user turns require fresh evidence and review.
 
-The progress tree exposes Preparing applications, Reviewing cards, Revising cards, Checking revisions, and Refined hand with truthful completed/unchanged/not-needed outcomes. Viewer/diagnostics expose per-target accepted outcome and revision count through bounded metadata. They must not confuse transport retries with semantic review rounds.
+The progress tree exposes Preparing applications, Reviewing cards, Revising cards, Checking revisions, and Refined hand with truthful completed/unchanged/not-needed outcomes. Viewer/diagnostics expose per-target accepted outcome and revision count through bounded metadata. Global `revisionCount` counts semantic rounds (zero or one); `revisedCardCount` counts distinct replaced results. They must not confuse transport retries or revised-card counts with semantic review rounds.
 
 ## Verification
 

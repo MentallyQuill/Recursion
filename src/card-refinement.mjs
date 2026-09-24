@@ -148,5 +148,6 @@ export function finalizeRefinementHand(originalHand, refinedHand, targets, revie
     return { ...card, promptText, tokenEstimate: Math.max(1, Math.ceil(promptText.length / 4)) };
   });
   return { ...refinedHand, cards, tokenEstimate: cards.reduce((total, card) => total + (card.tokenEstimate || Math.ceil(card.promptText.length / 4)), 0),
-    metadata: { ...refinedHand.metadata, refinement: { targets: outcomes, targetCount: outcomes.length, revisionCount: revisedIds.size } } };
+    metadata: { ...refinedHand.metadata, refinement: { targets: outcomes, targetCount: outcomes.length,
+      revisionCount: revisedIds.size ? 1 : 0, revisedCardCount: revisedIds.size } } };
 }

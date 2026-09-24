@@ -83,6 +83,12 @@ assert.ok(final.cards[1].promptText.includes(deckCards.authored.promptText));
 assert.ok(final.cards[1].promptText.includes(draft.items[0].promptText));
 assert.equal(final.cards[2], hand.cards[2]);
 assert.deepEqual(final.metadata.refinement.targets.map(({ revisionCount }) => revisionCount), [1, 1, 0]);
+const multiReview = { ...review, items: review.items.map(item => item.targetId === 'authored'
+  ? { ...review.items[0], targetId: 'authored' } : item) };
+const multiVerify = { ...review, items: review.items.map(item => ({ ...item, verdict: 'accept', findings: [] })) };
+const multiFinal = finalizeRefinementHand(hand, refined, collected.targets, [multiReview, multiVerify]);
+assert.equal(multiFinal.metadata.refinement.revisionCount, 1, 'two revised cards still use one semantic revision round');
+assert.equal(multiFinal.metadata.refinement.revisedCardCount, 2, 'revised-card count is distinct from round count');
 assert.throws(() => finalizeRefinementHand(hand, refined, collected.targets, [review]), { code: 'RECURSION_REFINEMENT_UNRESOLVED' });
 const acceptAll = { ...review, items: review.items.map((item) => ({ ...item, verdict: 'accept', findings: [] })) };
 const unchanged = finalizeRefinementHand(hand, applied, collected.targets, [acceptAll]);

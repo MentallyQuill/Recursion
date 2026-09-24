@@ -1,5 +1,7 @@
 # Schemas
 
+Guidance omission lists contain bounded `{ id: string, reason: 'duplicate' | 'lower-priority' | 'unsupported' | 'unsafe' }` records, including in Last Brief and diagnostics. They are not string-ID lists. Hand-selection omissions retain their own contract. Provider journals may include `stageAttempt` (1–5) and `semanticNormalization: 'guidance-request-envelope'`; neither field contains provider prose. Turn timing includes a nullable host request-ready milestone and derived phase durations; see [Storage and Diagnostics](../docs/architecture/STORAGE_AND_DIAGNOSTICS.md).
+
 Performance execution fields: `pipelineRun.v2` includes nullable `pipelineDecision` and `recoveryBudget`. The decision contains `{requestedMode,effectiveMode,selectedLane,profileIdHash,configHash,certificationState,reasonCode}`. Recovery contains `{windowId,recoveryLimit,recoveryUsed,reservationIds,elapsedActiveMs,activeSince,deadlineMs}`; reservations are durable before dispatch and Resume never resets them. Stage records carry optional `{validationMs,artifactPersistenceMs}` timings. Settings include `requestDeadlineSeconds` (180, range 30–600) and `operationDeadlineSeconds` (300, range 60–1800). Fused router diagnostics include bounded `bundleItemRejections` while retaining only item-valid siblings. Explicit refusal/content-filter codes are non-retryable.
 
 Standalone schema files are not required for the current pre-alpha runtime.

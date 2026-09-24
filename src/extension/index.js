@@ -297,6 +297,14 @@ function registerHostEvents(nextRuntime, currentHost = host) {
   clearHostEventSubscriptions();
   const context = getSillyTavernContextSafe();
   const eventSource = context.eventSource || globalThis.eventSource;
+  // The payload type distinguishes native primary work from raw quiet calls.
+  // Untyped data-ready events cannot safely identify a generation. Never retain
+  // request bodies or claim that this pre-fetch event proves network dispatch.
+  registerRuntimeHostEvent(eventSource, context.event_types?.CHAT_COMPLETION_SETTINGS_READY || 'chat_completion_settings_ready', (data) => {
+    nextRuntime.handleHostGenerationMilestone?.('host-request-ready', {
+      source: 'chat-completion-settings-ready', generationType: data?.type
+    });
+  });
   let lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
   const refreshAssistantSignature = () => {
     lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
@@ -503,7 +511,11 @@ export function createProviderJournal(storage, currentHost) {
             responseId: entry.responseId,
             schema: entry.schema,
             retryCount: entry.retryCount,
+            ...(Number.isInteger(entry.stageAttempt) && entry.stageAttempt >= 1 && entry.stageAttempt <= 5
+              ? { stageAttempt: entry.stageAttempt } : {}),
             structuredOutputRecovery: entry.structuredOutputRecovery,
+            ...(entry.semanticNormalization === 'guidance-request-envelope'
+              ? { semanticNormalization: entry.semanticNormalization } : {}),
             effectiveMaxTokens: entry.effectiveMaxTokens,
             finishReason: entry.finishReason,
             promptTokens: entry.promptTokens,

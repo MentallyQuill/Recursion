@@ -19,6 +19,7 @@ Recursion source is organized around a small host-neutral scene compiler plus a 
 - `ui.mjs` - Recursion Bar, icon-only mode/card controls, Hero Pixel Array progress menu, options menu, Last Brief dropdown, full viewer, autosaving settings, Connection Profile selection, policy controls, and staged profile certification.
 - `ui/` - Pure UI presenters and provider/action helpers used by `ui.mjs`.
 - `safe-values.mjs` - Shared text/object safety helpers for diagnostics and host/provider normalization.
+- `guidance-omissions.mjs` - Typed Guidance omission records shared by persistence and diagnostics.
 - `hosts/sillytavern/` - SillyTavern context, generation, prompt, settings, and file-storage adapters.
 - `hosts/sillytavern/provider-profiles.mjs` - SillyTavern connection-profile discovery owned by the host adapter.
 - `extension/index.js` - SillyTavern entrypoint, lifecycle hooks, and generation interceptor.

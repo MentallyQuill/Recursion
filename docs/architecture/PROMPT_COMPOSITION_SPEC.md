@@ -68,6 +68,8 @@ Guidance is regenerated for the current generation attempt. It is provider-autho
 
 Guidance must stay evidence-bound. It can synthesize selected cards, but it cannot invent lore, hidden motives, future plot, or private analysis.
 
+Missing schema/snapshot identifiers may be bound from the frozen request only when Guidance contains nonempty text and no supplied identifier conflicts. Correction prompts preserve bounded known field/type information and require actual `guidanceText` prose; they do not copy rejected provider prose. The existing bounded scheduler remains responsible for retries. Exhausted Guidance failure prevents installation and narration, while successful upstream checkpoints remain available for a Guidance-only retry.
+
 ### Card Evidence
 
 Card Evidence contains the full raw `promptText` from selected cards. That `promptText` is instruction-shaped private evidence, not story prose. Card Evidence is grouped and labeled as evidence rather than rewritten into a local summary. It preserves:

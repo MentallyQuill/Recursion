@@ -1,5 +1,6 @@
 import { asArray, compact, hashJson, nowIso, redact, truncate } from '../core.mjs';
 import { summarizePreparedGenerationArtifact } from './prepared-generation.mjs';
+import { normalizeGuidanceOmissions } from '../guidance-omissions.mjs';
 
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 const RESUME_BODY_KEY_PATTERN = /(arbiter|card|reference|packet|hand|guidance|draft|prose|prompt|response|artifact).*(body|text|payload|content)|^(body|text|payload|content)$/i;
@@ -197,7 +198,7 @@ function mapPacketDiagnostics(diagnostics) {
     guidanceInvalidSourceIdCount: numberOr(source.guidanceInvalidSourceIdCount, 0),
     guidanceSourceCardIds: asArray(source.guidanceSourceCardIds).slice(0, 24).map((entry) => safeText(entry, 160)),
     guidanceGuardrailCardIds: asArray(source.guidanceGuardrailCardIds).slice(0, 24).map((entry) => safeText(entry, 160)),
-    guidanceOmittedCardIds: asArray(source.guidanceOmittedCardIds).slice(0, 24).map((entry) => safeText(entry, 160)),
+    guidanceOmittedCardIds: normalizeGuidanceOmissions(source.guidanceOmittedCardIds, { limit: 24, sanitizeId: (id) => safeText(id, 160) }),
     guidanceDiagnostics: asArray(source.guidanceDiagnostics).slice(0, 24).map((entry) => safeText(entry, 160)),
     snapshotHash: safeText(source.snapshotHash, 160),
     sectionBudgets: source.sectionBudgets || null,

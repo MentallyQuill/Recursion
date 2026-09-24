@@ -990,6 +990,7 @@ async function createSillyTavernSmokeFixtureServer({
     'src/settings-policy.mjs',
     'src/storage.mjs',
     'src/storage/last-brief.mjs',
+    'src/guidance-omissions.mjs',
     'src/story-form.mjs',
     'src/ui/action-status.mjs',
     'src/ui/bar.mjs',

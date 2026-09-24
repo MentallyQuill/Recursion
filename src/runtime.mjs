@@ -3850,6 +3850,14 @@ export function createRecursionRuntime({
     });
   }
 
+  function handleHostGenerationMilestone(event, details = {}) {
+    if (details.dryRun || !runState.current().hostGenerationActive || postProcessRuntime.postProcessRunning()) return false;
+    if (event !== 'host-request-ready') return false;
+    const marked = turnTiming.mark(turnTiming.snapshot()?.attemptId, event, details);
+    if (marked) recordTurnTiming(event);
+    return marked;
+  }
+
   function handleHostVisibleToken(text) {
     if (typeof text !== 'string' || !text.trim() || !runState.current().hostGenerationActive || postProcessRuntime.postProcessRunning()) return;
     if (turnTiming.mark(turnTiming.snapshot()?.attemptId, 'first-visible-token')) recordTurnTiming('first-visible-token');
@@ -7146,7 +7154,7 @@ export function createRecursionRuntime({
           storyForm: plan.storyForm || UNKNOWN_STORY_FORM
         });
       },
-      async run({ request, signal }) {
+      async run({ request, signal, attempt }) {
         if (!generationRouter || typeof generationRouter.generate !== 'function') {
           return {
             ok: false,
@@ -7160,7 +7168,7 @@ export function createRecursionRuntime({
           const result = await generationRouter.generate(
             request.roleId,
             { ...request.request, signal },
-            { runId: context.runId, signal }
+            { runId: context.runId, signal, stageAttempt: attempt }
           );
           return { ...result, guidanceLane: request.request.lane };
         } catch (error) {
@@ -9091,6 +9099,7 @@ export function createRecursionRuntime({
     handleLatestAssistantSwipeRetry: markLatestAssistantSwipeRetry,
     handleHostGenerationStopped,
     handleHostGenerationEnded,
+    handleHostGenerationMilestone,
     handleHostVisibleToken,
     postProcessPending: postProcessRuntime.postProcessPending,
     postProcessRunning: postProcessRuntime.postProcessRunning,

@@ -3445,9 +3445,14 @@ try {
   firstPreDescription.click();
   assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], 'priority', 'clicking wrapped description text promotes a bundled Default card to Priority');
   root.querySelector('[data-recursion-card-toggle-row]').click();
-  assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], 'off', 'second Auto row tap turns a bundled Default card Off');
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], 'refinement', 'second Auto row tap refines a bundled Default card');
+  assert(root.querySelector('[data-recursion-card-toggle-row]').getAttribute('aria-label').includes('Refinement card'), 'refinement state has an accessible name');
+  assertEqual(root.querySelector('[data-recursion-card-toggle-row]').getAttribute('title'), "Always included. Reviews and improves this card's scene analysis before narration.", 'refinement tooltip explains required inclusion and review');
+  assert(root.querySelectorAll('[data-recursion-card-state-icon]').some(node => node.dataset.recursionCardStateIcon === 'eye-refinement'), 'refinement renders the distinct eye with circular arrow');
   root.querySelector('[data-recursion-card-toggle-row]').click();
-  assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], undefined, 'third Auto row tap restores a bundled Default card to normal Active');
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], 'off', 'third Auto row tap disables a bundled Default card');
+  root.querySelector('[data-recursion-card-toggle-row]').click();
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], undefined, 'fourth Auto row tap restores a bundled Default card to normal Active');
   root.querySelector('[data-recursion-card-deck-deactivate-all]').click();
   assert(
     Object.values(settingsUpdates.at(-1).preProcessDecks.defaultCardStates).every((state) => state === 'off'),
@@ -3537,11 +3542,26 @@ try {
   );
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('1 priority'), 'Cards header reports Priority count when cards are prioritized');
   assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').disabled, false, 'Activate-all action enables when it can clear Priority states');
+  root.querySelector('[data-recursion-card-toggle-row]').click();
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'refinement', 'custom deck persists refinement from Auto cycle');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('1 refinement'), 'header counts refinement separately');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('1 Refinement'), 'category counts refinement separately');
+  assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').disabled, false, 'activate-all remains enabled to clear refinement');
   root.querySelector('[data-recursion-card-deck-activate-all]').click();
   const priorityClearedUpdate = settingsUpdates.at(-1).preProcessDecks;
-  assertEqual(priorityClearedUpdate.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'active', 'Activate-all action clears Priority back to normal Active');
+  assertEqual(priorityClearedUpdate.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'active', 'Activate-all action clears Refinement back to normal Active');
   assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'All cards set Active.', 'Activate-all action reports through main bar status');
   view = { ...view, settings: { ...view.settings, preProcessDecks: priorityClearedUpdate }, activity: { phase: 'idle' }, progressRun: null };
+  ui.update();
+  view = { ...view, settings: { ...view.settings, mode: 'manual' } };
+  ui.update();
+  root.querySelector('[data-recursion-card-toggle-row]').click();
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'refinement', 'Manual active row advances directly to Refinement');
+  root.querySelector('[data-recursion-card-toggle-row]').click();
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'off', 'Manual Refinement row advances to Off');
+  root.querySelector('[data-recursion-card-toggle-row]').click();
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'active', 'Manual Off row advances to Active');
+  view = { ...view, settings: { ...view.settings, mode: 'auto' } };
   ui.update();
   root.querySelector('[data-recursion-card-deck-deactivate-all]').click();
   const deactivatedUpdate = settingsUpdates.at(-1).preProcessDecks;

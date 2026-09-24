@@ -545,6 +545,14 @@ const CARD_STATE_ICON_PATHS = {
 function cardSystemIconSvg(kind) {
   const attrs = { width: '15', height: '15', viewBox: '0 0 16 16', 'aria-hidden': 'true', focusable: 'false' };
   const stroke = { fill: 'none', stroke: 'currentColor', 'stroke-width': '1.35', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
+  if (kind === 'eye-refinement') return el('svg', {
+    attrs: { ...attrs, viewBox: '0 0 24 24' },
+    dataset: { recursionCardStateIcon: kind }
+  }, [
+    el('path', { attrs: { d: 'M2 10c2-4 5.5-6 9-6s7 2 9 6c-.5 1-1.1 1.9-1.8 2.6M2 10c1.7 3.5 4.7 5.7 8 6', ...stroke, 'stroke-width': '1.8' } }),
+    el('circle', { attrs: { cx: '11', cy: '10', r: '2.8', ...stroke, 'stroke-width': '1.8' } }),
+    el('path', { attrs: { d: 'M21 16a4.4 4.4 0 1 0 .2 4M21 12.8V16h-3.2', ...stroke, 'stroke-width': '1.8' } })
+  ]);
   if (CARD_STATE_ICON_PATHS[kind]) return el('svg', {
     attrs: { ...attrs, viewBox: '0 0 24 24' },
     dataset: { recursionCardStateIcon: kind }
@@ -2118,6 +2126,7 @@ function deckCardCounts(deck) {
   let eligible = 0;
   let draft = 0;
   let priority = 0;
+  let refinement = 0;
   for (const card of cards) {
     const status = getDeckCardStatus(card);
     const selected = cardSelectionState(card);
@@ -2125,6 +2134,7 @@ function deckCardCounts(deck) {
       active += 1;
       eligible += 1;
       if (selected === 'priority') priority += 1;
+      if (selected === 'refinement') refinement += 1;
     } else if (status.reason === 'disabled') {
       eligible += 1;
     } else {
@@ -2137,16 +2147,17 @@ function deckCardCounts(deck) {
     eligible,
     draft,
     priority,
+    refinement,
     inactive: Math.max(0, eligible - active),
     allActive: eligible === active,
-    allNormalActive: eligible > 0 && eligible === active && priority === 0
+    allNormalActive: eligible > 0 && eligible === active && priority === 0 && refinement === 0
   };
 }
 
 function deckCardSummary(deck) {
   const counts = deckCardCounts(deck);
   const base = counts.total ? `${counts.active}/${counts.eligible} active` : '0 cards';
-  return `${base}${counts.priority ? `, ${counts.priority} priority` : ''}${counts.draft ? `, ${counts.draft} draft` : ''}`;
+  return `${base}${counts.priority ? `, ${counts.priority} priority` : ''}${counts.refinement ? `, ${counts.refinement} refinement` : ''}${counts.draft ? `, ${counts.draft} draft` : ''}`;
 }
 
 function activateAllRunnableDeckCards(deck) {
@@ -2184,6 +2195,16 @@ function cardDeckCardStatePresentation(card, mode = 'auto') {
     };
   }
   const state = cardSelectionState(card);
+  if (state === 'refinement') {
+    return {
+      state,
+      className: 'is-refinement',
+      icon: 'eye-refinement',
+      title: "Always included. Reviews and improves this card's scene analysis before narration.",
+      label: 'Refinement card',
+      nextStatus: 'Card disabled.'
+    };
+  }
   if (state === 'priority' && mode === 'auto') {
     return {
       state,
@@ -2191,7 +2212,7 @@ function cardDeckCardStatePresentation(card, mode = 'auto') {
       icon: 'eye-priority',
       title: 'Priority: forced into Auto hand before backfill.',
       label: 'Priority card',
-      nextStatus: 'Card disabled.'
+      nextStatus: 'Card refinement enabled.'
     };
   }
   if (state === 'off') {
@@ -2208,13 +2229,14 @@ function cardDeckCardStatePresentation(card, mode = 'auto') {
     state: 'active',
     className: 'is-active',
     icon: 'eye-active',
-    title: mode === 'manual' ? 'Active. Tap to disable.' : 'Active. Tap to prioritize.',
+    title: mode === 'manual' ? 'Active. Tap to enable refinement.' : 'Active. Tap to prioritize.',
     label: 'Active card',
-    nextStatus: mode === 'manual' ? 'Card disabled.' : 'Card prioritized.'
+    nextStatus: mode === 'manual' ? 'Card refinement enabled.' : 'Card prioritized.'
   };
 }
 
 function cardSelectionResultStatus(selectionState) {
+  if (selectionState === 'refinement') return 'Card refinement enabled.';
   if (selectionState === 'priority') return 'Card prioritized.';
   if (selectionState === 'off') return 'Card disabled.';
   return 'Card enabled.';
@@ -2471,6 +2493,7 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
     });
     const activeCategoryCards = eligibleCategoryCards.filter((card) => cardSelectionState(card) !== 'off');
     const priorityCategoryCards = activeCategoryCards.filter((card) => cardSelectionState(card) === 'priority');
+    const refinementCategoryCards = activeCategoryCards.filter((card) => cardSelectionState(card) === 'refinement');
     const categoryDensityWarning = activeCategoryCards.length >= 5;
     const categoryExpanded = preProcessCategoryExpanded(preProcessDecks, activeDeck.id, category.id);
     const categoryDeletePending = deleteConfirmFor(deleteState, 'category', activeDeck.id, category.id);
@@ -2535,7 +2558,7 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
       disclosure: cardSystemIconSvg(categoryExpanded ? 'chevron-up' : 'chevron-down'),
       copy: el('span', { className: 'recursion-card-panel-category-copy recursion-card-deck-category-copy' }, [
         el('strong', { text: category.name }),
-        el('span', { text: `${activeCategoryCards.length}/${eligibleCategoryCards.length} Active Cards${priorityCategoryCards.length ? ` · ${priorityCategoryCards.length} Priority` : ''}${categoryDensityWarning ? ' - focus may be diluted' : ''}` })
+        el('span', { text: `${activeCategoryCards.length}/${eligibleCategoryCards.length} Active Cards${priorityCategoryCards.length ? ` · ${priorityCategoryCards.length} Priority` : ''}${refinementCategoryCards.length ? ` · ${refinementCategoryCards.length} Refinement` : ''}${categoryDensityWarning ? ' - focus may be diluted' : ''}` })
       ]),
       actions: categoryActions,
       auxiliary: categoryEditor ? [categoryEditor] : [],

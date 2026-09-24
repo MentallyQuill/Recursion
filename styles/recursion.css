@@ -2455,6 +2455,15 @@
   color: #8eefff;
 }
 
+.recursion-card-panel-card.is-refinement {
+  border-color: color-mix(in srgb, #8eefff 46%, transparent);
+  box-shadow: inset 3px 0 0 #8eefff;
+}
+
+.recursion-card-panel-card.is-refinement .recursion-card-panel-state-marker {
+  color: #8eefff;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .recursion-card-deck-card,
   .recursion-card-deck-category-head {

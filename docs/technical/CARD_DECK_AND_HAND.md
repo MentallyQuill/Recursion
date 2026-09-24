@@ -20,9 +20,11 @@ flowchart LR
 
 ## Selection State Contract
 
-Editable cards expose `off`, `active`, and `priority`. Auto cycles `off -> active -> priority -> off`; Manual cycles `off -> active -> off`. `off` excludes a card from scope, `active` makes it a normal candidate, and `priority` moves it ahead of normal active cards in Auto. Every runnable Priority card is required, in deck category/card order, even when Priority cards exceed the turn card limit. Ordinary cards fill only the remaining slots.
+Cards expose `off`, `active`, `priority`, and `refinement`. Auto cycles `off -> active -> priority -> refinement -> off`; Manual cycles `off -> active -> refinement -> off`. Manual treats existing Priority as Active. Refinement requires inclusion and bounded scene-analysis review in both modes. `off` excludes a card from scope, `active` makes it a normal candidate, and `priority` moves it ahead of normal active cards in Auto. Every runnable Priority card in Auto and Refinement card in either mode is required, in deck category/card order, even when Priority cards exceed the turn card limit. Ordinary cards fill only the remaining slots.
 
-Authored cards without a built-in generator family enter hand selection directly as `Authored` guidance, with their deck IDs and operator text. They require no provider call and are rebuilt from the active deck rather than stored as generated scene evidence. Disabled and draft cards are excluded. Authored text and ordering participate in the deck revision hash, invalidating prepared swipe reuse after edits.
+Authored cards without a built-in generator family enter hand selection directly as `Authored` guidance, with their deck IDs and operator text. Unmarked authored cards require no provider call and are rebuilt from the active deck rather than stored as generated scene evidence. Disabled and draft cards are excluded. Authored text and ordering participate in the deck revision hash, invalidating prepared swipe reuse after edits.
+
+Marked authored cards first receive an evidence-bound scene application. Refinement then requires a review using the frozen scene, original instructions, and complete selected hand. Unchanged acceptance is success; specific findings may trigger one revision and one verification review. Unresolved findings or provider failure block preparation. Shared generated families are revised once and reviewed against each marked facet. Saved authored instructions remain unchanged and accompany accepted applications in the final hand. Guidance, packet evidence, and Last Brief use only accepted results. Changes to card state, text, order, scene, provider settings, or refinement contracts invalidate dependent checkpoints and prepared packets.
 
 Auto resolves Priority slots before provider work: authored Priority cards reserve slots, and generated Priority families omitted by the Arbiter are added explicitly. Multiple source cards belonging to one generated family share its generated card slot. Both kinds follow source deck order ahead of ordinary candidates. Priority coverage expands the effective card limit when necessary; it is never trimmed to fit it. Remaining generation capacity retains the normal focus and strength policy. The runtime cache contract is version 3 so previously capped Priority artifacts cannot be reused.
 
@@ -31,11 +33,12 @@ stateDiagram-v2
     [*] --> off
     off --> active: Auto or Manual click
     active --> priority: Auto click
-    priority --> off: Auto click
-    active --> off: Manual click
-    note right of priority
-      Auto-first candidate
-      subject to Max Cards
+    priority --> refinement: Auto click
+    active --> refinement: Manual click
+    refinement --> off: Auto or Manual click
+    note right of refinement
+      Mandatory in both modes
+      Required bounded review
     end note
 ```
 
@@ -46,7 +49,7 @@ The runtime resolves the active deck, card state, Manual selection, strict white
 ```mermaid
 flowchart TD
     Settings[Auto or Manual + focus + caps] --> Deck[Resolve active deck]
-    Deck --> State[Filter off / active / priority]
+    Deck --> State[Filter off / active / priority / refinement]
     State --> Mode{Manual?}
     Mode -->|yes| Forced[Force selected family rows]
     Mode -->|no| Auto[Arbiter chooses relevant candidates]
@@ -171,19 +174,20 @@ Runtime applies these decisions only after schema and safety checks. If an expli
 
 The scene deck primitives can represent active, stowed, stale, and discarded cards. The current preprocessor builds its deck for the current turn; it does not load prior-turn scene cards. Only active, validated cards enter the turn hand. Compatible same-turn checkpoints and prepared packets provide reuse.
 
-The turn hand is rebuilt for each generation attempt. Required Priority cards come first in deck order; ordinary Auto candidates follow the Arbiter's scene-specific cardJobs order within remaining turn slots. Focus informs the Arbiter; fixed catalog rankings do not override its choices. Priority coverage can exceed the turn card limit. Runtime reserves required slots before provider generation so ordinary jobs that cannot reach the hand are not dispatched. Token estimates remain diagnostic.
+The turn hand is rebuilt for each generation attempt. Required Priority and Refinement cards come first in deck order; ordinary Auto candidates follow the Arbiter's scene-specific cardJobs order within remaining turn slots. Focus informs the Arbiter; fixed catalog rankings do not override its choices. Priority coverage can exceed the turn card limit. Runtime reserves required slots before provider generation so ordinary jobs that cannot reach the hand are not dispatched. Token estimates remain diagnostic.
 
 Card Deck selection state adds a user-steering layer above normal Auto sorting:
 
 - `off` cards are omitted from runtime scope.
 - `active` cards remain normal candidates.
+- `refinement` cards are mandatory in both modes and reviewed before Guidance.
 - `priority` cards are Auto-first. Runtime derives ordered Priority card ids and, for current built-in deck cards, ordered Priority families. `selectHand(...)` accepts `forcedCardIds` for exact hand-card forcing and `forcedFamilies` for generated family-card forcing.
 
-The Cards dropdown represents those states with the supplied eye icons: slashed eye for `off`, open eye for `active`, and eye-plus for `priority`. The deck header has two bulk actions for editable decks: open eye sets all runnable cards to normal `active` and clears Priority, while slashed eye sets all runnable cards to `off`. Draft cards are left untouched, and the read-only Default deck requires duplication before either bulk action can run.
+The Cards dropdown represents those states with the supplied eye icons: slashed eye for `off`, open eye for `active`, eye-plus for `priority`, and an eye with a circular arrow for `refinement`. The deck header has two bulk actions for all decks: open eye sets all runnable cards to normal `active` and clears Priority and Refinement, while slashed eye sets all runnable cards to `off`. Draft cards are left untouched, and the Default deck persists operator states through its overlay without requiring duplication.
 
 If Priority exceeds the turn card limit, runtime includes every runnable Priority card in deck order and includes no ordinary Active cards. Priority generated families are required stages: a provider failure blocks preparation rather than silently omitting the card.
 
-Card Deck organization is stored directly on the active deck. Category drag handles update `categoryOrder`; card drag handles update `cardOrderByCategory` and, for cross-category drops, the card's `categoryId`. There is no second visible Card Scope selector under Card Decks. Runtime scope derives from the active deck's `off`, `active`, and `priority` states, with category/card order used for Priority ordering and deterministic hand selection.
+Card Deck organization is stored directly on the active deck. Category drag handles update `categoryOrder`; card drag handles update `cardOrderByCategory` and, for cross-category drops, the card's `categoryId`. There is no second visible Card Scope selector under Card Decks. Runtime scope derives from the active deck's `off`, `active`, `priority`, and `refinement` states, with category/card order used for Priority ordering and deterministic hand selection.
 
 ```mermaid
 flowchart LR

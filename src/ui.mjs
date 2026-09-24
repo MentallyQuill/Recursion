@@ -1859,7 +1859,8 @@ function cardRefinementOutcomes(hand, card) {
       targetId: safeText(target.targetId, 120),
       name: safeText(target.name || target.targetId, 80),
       outcome: target.outcome,
-      revisionCount: target.revisionCount === 1 ? 1 : 0
+      revisionCount: target.revisionCount === 1 ? 1 : 0,
+      assessment: target.assessment
     }));
 }
 
@@ -3692,6 +3693,27 @@ function appendViewerDeckSection(viewer, hand) {
         text: `Refinement · ${outcome.name}: ${outcome.outcome} · ${outcome.revisionCount} revision${outcome.revisionCount === 1 ? '' : 's'}`,
         dataset: { recursionViewerRefinementTarget: outcome.targetId }
       }));
+      const assessment = asObject(outcome.assessment);
+      if (['satisfied', 'not-applicable'].includes(assessment.status)) {
+        const detail = el('div', { dataset: { recursionViewerRefinementAssessment: outcome.targetId } }, [
+          el('p', {
+            className: 'recursion-viewer-card-text',
+            text: `${assessment.status === 'satisfied' ? 'Satisfied' : 'Not applicable'} · ${safeText(assessment.summary, 400)}`
+          })
+        ]);
+        for (const [label, values] of [['Evidence', assessment.evidenceRefs], ['Supporting cards', assessment.supportingCardIds]]) {
+          const identifiers = (Array.isArray(values) ? values : [])
+            .filter(value => typeof value === 'string' && (label === 'Evidence' ? /^message:\d+$/.test(value) : value.trim()))
+            .slice(0, 3);
+          if (!identifiers.length) continue;
+          const refs = el('div', { className: 'recursion-viewer-card-evidence' }, [
+            el('span', { className: 'recursion-viewer-label', text: label })
+          ]);
+          appendViewerChips(refs, identifiers);
+          detail.appendChild(refs);
+        }
+        article.appendChild(detail);
+      }
     }
     article.appendChild(el('p', {
       className: 'recursion-viewer-card-summary',

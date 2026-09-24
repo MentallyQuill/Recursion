@@ -252,6 +252,8 @@ Play Behavior places `Selection variety` (Off, Low, Medium, High; default Low) a
 
 **Full viewer:** An observatory, not a play surface. Use it for Now, Deck, Card selection, Activity, Prompt Packet, Settings, and Providers. It can be larger than the bar menus, but it should remain utilitarian and dismissible. Deck details display the complete stored card summary and body at natural height without display character caps or added ellipses; secret redaction remains active.
 
+Each completed Refinement target keeps its outcome and revision count in the existing Deck detail. Beneath it, show the final `Satisfied` or `Not applicable` assessment as subdued plain text (up to 400 characters), with up to three message references and three supporting card IDs in existing compact reference rows. These inspector details wrap naturally and update when only the assessment changes. Keep raw review findings out of the Viewer and keep Last Brief limited to its compact outcome chip.
+
 ## Do's and Don'ts
 
 - Do inherit SillyTavern theme variables before inventing local styling.

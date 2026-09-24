@@ -4399,8 +4399,10 @@ try {
   const handBeforeRefinement = view.lastHand;
   view = { ...view, lastHand: { ...handBeforeRefinement, metadata: { refinement: {
     targetCount: 2, revisionCount: 0, targets: [
-      { targetId: 'facet-a', cardId: 'card-a', name: 'Scene position', outcome: 'unchanged', revisionCount: 0, findings: 'PRIVATE_REVIEW_MARKER' },
-      { targetId: 'facet-b', cardId: 'card-a', name: 'Scene pressure', outcome: 'unchanged', revisionCount: 0 }
+      { targetId: 'facet-a', cardId: 'card-a', name: 'Scene position', outcome: 'unchanged', revisionCount: 0, findings: 'PRIVATE_REVIEW_MARKER',
+        assessment: { status: 'satisfied', summary: 'The locked gate limits the route.', evidenceRefs: ['message:4'], supportingCardIds: ['card-a'] } },
+      { targetId: 'facet-b', cardId: 'card-a', name: 'Scene pressure', outcome: 'unchanged', revisionCount: 0,
+        assessment: { status: 'not-applicable', summary: 'No immediate deadline is established.', evidenceRefs: ['message:3', 'message:4'], supportingCardIds: [] } }
     ]
   } } } };
   ui.update();
@@ -4408,9 +4410,31 @@ try {
     'Refinement · Scene position: unchanged · 0 revisions',
     'Refinement · Scene pressure: unchanged · 0 revisions'
   ], 'Viewer exposes each marked facet outcome on its shared runtime card');
+  assertDeepEqual(root.querySelectorAll('[data-recursion-viewer-refinement-assessment]').map(node => fakeDocument.textTree(node).replace(/\s+/g, ' ').trim()), [
+    'Satisfied · The locked gate limits the route. Evidence message:4 Supporting cards card-a',
+    'Not applicable · No immediate deadline is established. Evidence message:3 message:4'
+  ], 'Viewer shows scene-specific assessment and cited evidence beneath each target outcome');
   assert(!fakeDocument.textTree(viewer).includes('PRIVATE_REVIEW_MARKER'), 'Viewer refinement metadata never exposes review findings');
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-brief-card-meta]')).includes('refinement unchanged'), 'Last Brief reports unchanged review acceptance');
   assertEqual(root.querySelectorAll('[data-recursion-brief-card]')[1].querySelector('[data-recursion-brief-card-meta]').children.length, 1, 'unmarked Last Brief cards gain no refinement marker');
+  view = { ...view, lastHand: { ...view.lastHand, metadata: { refinement: {
+    ...view.lastHand.metadata.refinement,
+    targets: view.lastHand.metadata.refinement.targets.map((target, index) => index ? target : { ...target, assessment: {
+      status: 'satisfied', summary: '<img src=x onerror=alert(1)> api_key=private-secret ' + 'Scene detail. '.repeat(40),
+      evidenceRefs: [{ internal: 'PRIVATE_REVIEW_MARKER' }, 'message:5', 'message:6', 'message:7', 'message:8'],
+      supportingCardIds: ['card-a', 'card-b', 'card-c', 'card-overflow']
+    } })
+  } } } };
+  ui.update();
+  const refreshedAssessment = root.querySelector('[data-recursion-viewer-refinement-assessment]');
+  const assessmentSummary = refreshedAssessment.querySelector('p');
+  assertEqual(assessmentSummary.textContent.length, 'Satisfied · '.length + 400, 'assessment summary stays bounded even for oversized stored text');
+  assert(assessmentSummary.textContent.startsWith('Satisfied · <img src=x onerror=alert(1)> api_key=[redacted]'), 'assessment-only refresh updates the displayed summary with secret redaction');
+  assertEqual(refreshedAssessment.querySelectorAll('img').length, 0, 'assessment markup remains plain text');
+  assertDeepEqual(refreshedAssessment.children.slice(1).flatMap(group => group.children.slice(1).map(node => node.textContent)), [
+    'message:5', 'message:6', 'message:7', 'card-a', 'card-b', 'card-c'
+  ], 'assessment refs include only bounded plain message and supporting card identifiers');
+  assert(!fakeDocument.textTree(viewer).includes('PRIVATE_REVIEW_MARKER'), 'assessment references never stringify private objects');
   const briefPanelForRefinement = root.querySelector('[data-recursion-hand-dropdown]');
   const briefWasHidden = briefPanelForRefinement.hidden;
   briefPanelForRefinement.hidden = false;

@@ -187,5 +187,5 @@ Pre-flight: Task 1 and Task 2 share only the literal writer shape; they own dist
 files. Task 3 owns storage independently. Task 4 waits for contracts/transport/storage;
 Task 5 waits for review API. All final integration, staging, and pushes are serialized.
 
-Final merged verification: 98 offline scripts and 4 browser scripts pass. See
+Final merged verification: 99 offline scripts and 4 browser scripts pass. See
 `../../technical/POST_PROCESS_WRITER_REVIEW_EVIDENCE.md` for the evidence audit.

@@ -770,6 +770,8 @@ function sanitizeHandCard(card) {
   };
   const origin = optionalEnum(card.origin, ORIGIN);
   if (origin) handCard.origin = origin;
+  if (Array.isArray(card.sourceCardIds)) handCard.sourceCardIds = card.sourceCardIds.map(String).filter(Boolean);
+  if (card.deckCardId) handCard.deckCardId = String(card.deckCardId);
   return handCard;
 }
 
@@ -922,7 +924,7 @@ function normalizeDeckCard(card, { preserveId = false } = {}) {
     sourceRevisionHash: card?.source?.sourceRevisionHash || card?.freshness?.sourceRevisionHash || card?.sourceRevisionHash
   });
   if (preserveId && typeof card?.id === 'string' && card.id) normalized.id = card.id;
-  if (Array.isArray(card?.sourceCardIds) && card.sourceCardIds.length) normalized.sourceCardIds = card.sourceCardIds.map(String).filter(Boolean).slice(0, 32);
+  if (Array.isArray(card?.sourceCardIds) && card.sourceCardIds.length) normalized.sourceCardIds = card.sourceCardIds.map(String).filter(Boolean);
   if (Array.isArray(card?.sourceCards) && card.sourceCards.length) normalized.sourceCards = card.sourceCards.slice(0, 32);
   if (card?.sourceCoverage) normalized.sourceCoverage = String(card.sourceCoverage);
   if (card?.inclusionEvidence) normalized.inclusionEvidence = String(card.inclusionEvidence);

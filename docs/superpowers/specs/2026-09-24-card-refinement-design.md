@@ -22,6 +22,8 @@ The first review is mandatory, including for a good initial result. Accepting un
 
 ## Structured boundaries
 
+An explicit Retry after unresolved semantic review starts a fresh bounded review cycle from the prepared initial hand. It retains completed generation and authored preparation, but discards the rejected review, revision, and verification checkpoints. This uses a declared strict-ancestor `retryFromStageId` on the final hand stage; automatic transport retries never reset semantic rounds.
+
 Implement `src/card-refinement.mjs` as pure request/validation/result helpers, separate from execution side effects. Runtime owns the stage graph and transport.
 
 `collectRefinementTargets(settings, hand)` returns `{ targets, cards }`; each target has `id` (deck card ID), `cardId` (selected runtime result ID), `name`, `instruction`, and `authored`. Missing coverage throws a named error. No marked cards returns empty targets.

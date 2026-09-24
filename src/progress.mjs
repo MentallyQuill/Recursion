@@ -85,6 +85,11 @@ const EXECUTION_LABELS = Object.freeze({
   'preprocess.cards.fused': 'Fused card bundle',
   'preprocess.deck': 'Building turn deck',
   'preprocess.hand': 'Selecting turn hand',
+  'preprocess.refinement.prepare': 'Preparing card applications',
+  'preprocess.refinement.review': 'Reviewing cards',
+  'preprocess.refinement.revise': 'Revising cards',
+  'preprocess.refinement.verify': 'Checking revisions',
+  'preprocess.refinement.hand': 'Refined hand',
   'preprocess.guidance': 'Guidance',
   'preprocess.packet': 'Composing prompt packet',
   'preprocess.install': 'Installing Recursion prompt',
@@ -947,6 +952,19 @@ function childIdFromRole(roleId, fallback) {
   return idFromText(role, fallback);
 }
 
+function refinementOutcomeMeta(source, state) {
+  if (!['done', 'cached'].includes(state)) return null;
+  const id = String(source.id || '');
+  if (id.startsWith('preprocess.refinement.') &&
+    ['Not needed; the reviewed cards were accepted.', 'Generated cards already have scene analysis.'].includes(source.reason)) return 'not needed';
+  if (!id.startsWith('refined-')) return null;
+  return ({
+    'Reviewed; unchanged.': 'unchanged',
+    'Reviewed; revised once.': 'revised once',
+    'Reviewed; application accepted.': 'application accepted'
+  })[source.reason] || null;
+}
+
 function normalizeChildStep(input, index = 0) {
   const source = asObject(input);
   const children = Array.isArray(source.children)
@@ -978,11 +996,11 @@ function normalizeChildStep(input, index = 0) {
   const step = {
     id,
     label,
-    providerLane: childSource === 'included' && source.providerLane === null
+    providerLane: (childSource === 'included' || String(source.id).startsWith('refined-')) && source.providerLane === null
       ? null
       : normalizeProviderLane(source.providerLane, roleId === 'reasonerComposer' ? 'reasoner' : 'utility'),
     state,
-    meta: metaForState(state, childSource, reason, retryCount, source.recoveryState),
+    meta: refinementOutcomeMeta(source, state) || metaForState(state, childSource, reason, retryCount, source.recoveryState),
     ...(['recovered', 'repairing'].includes(source.recoveryState) ? { recoveryState: source.recoveryState } : {}),
     source: childSource || null,
     sourcePhase: cleanText(source.sourcePhase || source.phase) || null,
@@ -1031,9 +1049,10 @@ function normalizeStep(input, index = 0) {
     label: definitionLabel || safeDisplayText(source.label, fallbackLabel, 80),
     ...(source.partialResult === true ? { partialResult: true } : {}),
     currentLabel: safeDisplayText(source.currentLabel || definition.currentLabel, '', 80) || null,
-    providerLane: normalizeProviderLane(source.providerLane, definition.providerLane || 'utility'),
+    providerLane: String(source.id).startsWith('preprocess.refinement.') && source.providerLane === null
+      ? null : normalizeProviderLane(source.providerLane, definition.providerLane || 'utility'),
     state,
-    meta: metaForState(state, source.source || source.sourceType, reason, retryCount, source.recoveryState),
+    meta: refinementOutcomeMeta(source, state) || metaForState(state, source.source || source.sourceType, reason, retryCount, source.recoveryState),
     ...(['recovered', 'repairing'].includes(source.recoveryState) ? { recoveryState: source.recoveryState } : {}),
     sourcePhase: cleanText(source.sourcePhase || source.phase) || null,
     sourceRoleId: safeDisplayText(source.sourceRoleId || source.roleId, '', 80) || null,
@@ -1468,18 +1487,24 @@ function progressStateForExecutionStage(stage, operation) {
 
 function executionProgressStep(stage, operation, queuedReprocess, overrides = {}) {
   const source = { ...asObject(stage), ...asObject(overrides) };
+  const refinement = executionStageId(source).startsWith('preprocess.refinement.');
+  const refinementNoop = refinement && source.summary?.status === 'not-needed';
   const state = progressStateForExecutionStage(source, operation);
   const retryCount = normalizeRetryCount(source.attempts?.total);
   const reason = source.failure
     ? safeReasonText(source.failure.message || source.failure.code)
     : (source.summary?.status === 'fallback-raw-only'
         ? 'Guidance unavailable. Using raw card evidence.'
-        : '');
+        : refinementNoop ? (executionStageId(source).endsWith('.prepare')
+          ? 'Generated cards already have scene analysis.'
+          : 'Not needed; the reviewed cards were accepted.') : '');
   return {
     id: executionStageId(source),
     executionStage: true,
     label: executionStageLabel(source),
-    providerLane: source.providerLane || 'utility',
+    providerLane: refinement
+      ? (refinementNoop || executionStageId(source).endsWith('.hand') ? null : 'reasoner')
+      : source.providerLane || 'utility',
     state,
     source: state === 'cached' ? 'cache' : null,
     retryCount: retryCount > 1 ? retryCount - 1 : 0,
@@ -1654,6 +1679,16 @@ export function progressFromExecution(execution, queuedReprocess = null) {
     if (stage.id === 'preprocess.hand') {
       const children = authoredHandSteps(stage, operation);
       if (children.length) step.children = children;
+    }
+    if (stage.id === 'preprocess.refinement.hand' && ['completed', 'cached'].includes(stage.state)) {
+      step.children = (stage.summary?.targets || []).map((target, index) => ({
+        id: `refined-${idFromText(target.targetId || target.id, String(index))}`,
+        label: safeDisplayText(target.name, 'Refined card', 80),
+        state: progressStateForExecutionStage(stage, operation),
+        reason: target.revisionCount > 0 ? 'Reviewed; revised once.'
+          : target.outcome === 'accepted' ? 'Reviewed; application accepted.' : 'Reviewed; unchanged.',
+        providerLane: null, action: null, executable: false, order: index
+      }));
     }
     topLevel.push(step);
   }

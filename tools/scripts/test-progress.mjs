@@ -1458,4 +1458,30 @@ for (const handState of ['pending', 'running', 'failed']) {
   assertEqual(hand.children?.length || 0, 0, 'unsettled current hand never shows old hand or leftover summary as included');
 }
 
+{
+  const progress = progressFromExecution({ operationId: 'refine', state: 'completed', stages: [
+    { id: 'preprocess.refinement.review', state: 'completed', kind: 'model', summary: { status: 'accepted' } },
+    { id: 'preprocess.refinement.revise', state: 'completed', kind: 'model', summary: { status: 'not-needed' } },
+    { id: 'preprocess.refinement.hand', state: 'completed', kind: 'local', summary: {
+      status: 'reviewed-unchanged', targetCount: 2, targets: [
+        { targetId: 'claims', cardId: 'realism', name: 'Claims Need Corroboration', outcome: 'unchanged', revisionCount: 0 },
+        { targetId: 'authored', cardId: 'authored', name: 'Evidence', outcome: 'accepted', revisionCount: 0 }
+      ]
+    } }
+  ] });
+  const review = progress.steps.find(step => step.id === 'preprocess.refinement.review');
+  assertEqual(review.label, 'Reviewing cards', 'refinement review has a readable stage label');
+  assertEqual(review.providerLane, 'reasoner', 'refinement uses the configured Reasoner lane');
+  const revision = progress.steps.find(step => step.id === 'preprocess.refinement.revise');
+  assertEqual(revision.providerLane, null, 'unnecessary revision does not claim a provider call');
+  assertEqual(revision.reason, 'Not needed; the reviewed cards were accepted.', 'conditional no-op is explained');
+  assertEqual(revision.meta, 'not needed', 'no-op is visible without a tooltip');
+  const hand = progress.steps.find(step => step.id === 'preprocess.refinement.hand');
+  assertEqual(hand.children[0].label, 'Claims Need Corroboration', 'refined hand names the marked source card');
+  assertEqual(hand.children[0].reason, 'Reviewed; unchanged.', 'accepted unchanged is distinguished from a rewrite');
+  assertEqual(hand.children[1].reason, 'Reviewed; application accepted.', 'authored scene application is not mislabeled unchanged');
+  assertEqual(hand.children[0].meta, 'unchanged', 'unchanged outcome is visible without a tooltip');
+  assertEqual(hand.children[1].meta, 'application accepted', 'accepted application is visible without a tooltip');
+}
+
 console.log('[pass] progress');

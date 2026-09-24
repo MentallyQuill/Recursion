@@ -1,4 +1,5 @@
 import { createActivityReporter } from './activity.mjs';
+import { createCardRefinementStages, hasCardRefinement, REFINED_HAND_STAGE_ID } from './runtime/card-refinement-stages.mjs';
 import { failureFromError } from './failures.mjs';
 import { normalizeFusedRejections, fusedRejectionReason } from './fused-recovery.mjs';
 import {
@@ -137,7 +138,7 @@ import {
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
 const PROVIDER_TEST_TIMEOUT_MS = 30000;
 const STORAGE_SCHEMA_VERSION = 1;
-const RUNTIME_CACHE_CONTRACT_VERSION = 3;
+const RUNTIME_CACHE_CONTRACT_VERSION = 4;
 const DEFAULT_CHAT_ID = 'chat';
 const DEFAULT_SCENE_KEY = 'scene';
 const INSTALL_FAILURE_LABEL = 'Prompt install failed. Narration stopped.';
@@ -477,6 +478,7 @@ function cardEligibilitySignature(settings = {}) {
     activeDeckId: eligibility.activeDeckId,
     activeCardIds: [...eligibility.activeCardIds].sort(),
     priorityCardIds: [...eligibility.priorityCardIds].sort(),
+    refinementCardIds: [...(eligibility.refinementCardIds || [])].sort(),
     allowedFamilies: [...eligibility.allowedFamilies].sort()
   });
 }
@@ -489,7 +491,7 @@ export function cacheContractVersions(settings = {}) {
     promptPacketVersion: PROMPT_PACKET_VERSION,
     promptContractHash: hashJson({
       promptPacketVersion: PROMPT_PACKET_VERSION,
-      cardSelectionContract: 5,
+      cardSelectionContract: 6,
       guidanceSchema: PROMPT_GUIDANCE_SCHEMA,
       guidanceContract: 2,
       storyFormSchema: STORY_FORM_SCHEMA
@@ -1650,7 +1652,10 @@ function prioritySelectionForSettings(settings = {}) {
   if (settings?.mode === 'manual') {
     const forcedFamilies = runtimeScopePayload(settings).selectedFamilies || [];
     return {
-      forcedCardIds: activeCardDeckAuthoredCards(settings).map((card) => card.id),
+      forcedCardIds: [...new Set([
+        ...deckPriorityCardIds(getActiveCardDeck(settings), settings),
+        ...activeCardDeckAuthoredCards(settings).map((card) => card.id)
+      ])],
       forcedFamilies,
       diagnostics: forcedFamilies.length > 0 ? ['manual-card-scope-active'] : []
     };
@@ -6498,7 +6503,7 @@ export function createRecursionRuntime({
       pipelineMode: pipelineDecision?.effectiveMode || (settings.pipelineMode === 'fused' ? 'fused' : 'segmented'),
       promptVersions: {
         promptPacket: PROMPT_PACKET_VERSION,
-        preprocessGraph: 4
+        preprocessGraph: 5
       },
       providerContractHash: PROVIDER_CONTRACT_HASH,
       deckRevisionHash: activeDeckRevisionHash(settings),
@@ -7132,25 +7137,26 @@ export function createRecursionRuntime({
   }
 
   function durableGuidanceStage(context, plan) {
+    const handStageId = hasCardRefinement(context.settings) ? REFINED_HAND_STAGE_ID : 'preprocess.hand';
     return {
       id: 'preprocess.guidance',
       version: 4,
       kind: 'model',
       executable: true,
-      dependencies: ['preprocess.snapshot', 'preprocess.arbiter', 'preprocess.hand'],
+      dependencies: ['preprocess.snapshot', 'preprocess.arbiter', handStageId],
       checkpoint: 'durable',
       failurePolicy: 'blocking',
       buildInputFingerprint(_runtimeContext, dependencies) {
         return {
           snapshotHash: dependencies['preprocess.snapshot'].checkpoint.outputHash,
           planHash: dependencies['preprocess.arbiter'].checkpoint.outputHash,
-          handHash: dependencies['preprocess.hand'].checkpoint.outputHash,
+          handHash: dependencies[handStageId].checkpoint.outputHash,
           promptContractHash: context.provenance.promptContractHash
         };
       },
       buildRequest(_runtimeContext, dependencies) {
         return buildGuidanceStageRequest({
-          hand: dependencies['preprocess.hand'].artifact,
+          hand: dependencies[handStageId].artifact,
           snapshot: context.snapshot,
           settings: settingsForPlan(
             context.settings,
@@ -7204,7 +7210,7 @@ export function createRecursionRuntime({
           return { ok: false, error: { ...result.error, kind: 'transport' } };
         }
         const validation = validateGuidanceStageResult(result, {
-          hand: validationContext.dependencies?.['preprocess.hand']?.artifact,
+          hand: validationContext.dependencies?.[handStageId]?.artifact,
           snapshot: context.snapshot
         });
         if (validation.ok === true) return {
@@ -7234,6 +7240,7 @@ export function createRecursionRuntime({
   }
 
   function durablePacketStage(context, plan) {
+    const handStageId = hasCardRefinement(context.settings) ? REFINED_HAND_STAGE_ID : 'preprocess.hand';
     return {
       id: 'preprocess.packet',
       version: 1,
@@ -7242,14 +7249,14 @@ export function createRecursionRuntime({
       dependencies: [
         'preprocess.snapshot',
         'preprocess.arbiter',
-        'preprocess.hand',
+        handStageId,
         'preprocess.guidance'
       ],
       checkpoint: 'durable',
       failurePolicy: 'blocking',
       buildInputFingerprint(_runtimeContext, dependencies) {
         return {
-          handHash: dependencies['preprocess.hand'].checkpoint.outputHash,
+          handHash: dependencies[handStageId].checkpoint.outputHash,
           guidanceHash: dependencies['preprocess.guidance'].checkpoint.outputHash,
           promptContractHash: context.provenance.promptContractHash
         };
@@ -7261,7 +7268,7 @@ export function createRecursionRuntime({
           reasonerUse: 'off'
         };
         const packet = await composePromptPacket({
-          hand: dependencies['preprocess.hand'].artifact,
+          hand: dependencies[handStageId].artifact,
           snapshot: context.snapshot,
           settings: effectiveSettings,
           behaviorPolicy: runPolicyForEffectivePlan(context.settings, plan),
@@ -7280,6 +7287,8 @@ export function createRecursionRuntime({
           pipelineMode: context.effectivePipelineMode,
           diagnostics: {
             ...packet.diagnostics,
+            ...(dependencies[handStageId].artifact.metadata?.refinement
+              ? { refinement: dependencies[handStageId].artifact.metadata.refinement } : {}),
             composerLane: guidance.lane || 'utility',
             reasonerStatus: guidance.lane === 'reasoner'
               ? (guidance.status === 'used' ? 'used' : 'fallback')
@@ -7482,6 +7491,14 @@ export function createRecursionRuntime({
 
   function durableFullGraph(context, plan, options = {}) {
     const cardSet = durableCardStageSet(context, plan, options);
+    const refinementStages = createCardRefinementStages({
+      settings: context.settings,
+      snapshot: providerSafeSnapshot(context.snapshot, context.settings.retention),
+      snapshotHash: plan.snapshotHash || hashJson(context.snapshot),
+      generate: (roleId, request, options) => generationRouter.generate(roleId, request, {
+        ...options, runId: context.runId
+      })
+    });
     return createDurableExecutionGraph(context, {
       stages: [
         durableSnapshotStage(context),
@@ -7489,6 +7506,7 @@ export function createRecursionRuntime({
         ...cardSet.stages,
         durableDeckStage(context, plan, cardSet.resultStageIds),
         durableHandStage(context, plan),
+        ...refinementStages,
         durableGuidanceStage(context, plan),
         durablePacketStage(context, plan),
         durableInstallStage(context, plan)
@@ -7692,7 +7710,7 @@ export function createRecursionRuntime({
       installSettlement
     ] = await Promise.all([
       loadExecutionArtifact(manifest, 'preprocess.packet'),
-      loadExecutionArtifact(manifest, 'preprocess.hand'),
+      loadExecutionArtifact(manifest, hasCardRefinement(context.settings) ? REFINED_HAND_STAGE_ID : 'preprocess.hand'),
       loadExecutionArtifact(manifest, 'preprocess.install')
     ]);
     if (!packet || !hand) {
@@ -7924,7 +7942,7 @@ export function createRecursionRuntime({
   } = {}) {
     const [packet, hand] = await Promise.all([
       loadExecutionArtifact(manifest, 'preprocess.packet'),
-      loadExecutionArtifact(manifest, 'preprocess.hand')
+      loadExecutionArtifact(manifest, hasCardRefinement(context.settings) ? REFINED_HAND_STAGE_ID : 'preprocess.hand')
     ]);
     if (!packet || !hand || !plan) return null;
     const candidate = createPreparedGenerationCandidate(
@@ -8797,6 +8815,11 @@ export function createRecursionRuntime({
       'preprocess.cards.fused': 'Fused card bundle',
       'preprocess.deck': 'Updating scene deck',
       'preprocess.hand': 'Selecting turn hand',
+      'preprocess.refinement.prepare': 'Preparing card applications',
+      'preprocess.refinement.review': 'Reviewing cards',
+      'preprocess.refinement.revise': 'Revising cards',
+      'preprocess.refinement.verify': 'Checking revisions',
+      'preprocess.refinement.hand': 'Refined hand',
       'preprocess.guidance': 'Guidance',
       'preprocess.packet': 'Composing prompt packet',
       'preprocess.install': 'Installing Recursion prompt',

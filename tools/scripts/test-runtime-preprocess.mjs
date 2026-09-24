@@ -215,6 +215,35 @@ function roleCounts(calls = []) {
   }, {});
 }
 
+// Refinement is required analysis of the selected result before Guidance.
+{
+  const calls = [];
+  const harness = createHarness({
+    settings: {
+      providers: { reasoner: { connectionProfileId: 'reasoner-profile' } },
+      preProcessDecks: { activeDeckId: 'default', defaultCardStates: {
+        'realismCard:claimsNeedCorroboration': 'refinement'
+      } }
+    },
+    provider: { async generate(roleId, request) {
+      calls.push({ roleId, request });
+      if (roleId === 'utilityArbiter') return arbiterResponse(request, [{ family: 'Realism', reason: 'Check the claim.' }]);
+      if (roleId === 'cardRefinementReview') return { ok: true, data: {
+        schema: request.responseSchema, snapshotHash: request.snapshotHash,
+        items: request.refinementTargetIds.map(targetId => ({ targetId, verdict: 'accept', findings: [] }))
+      } };
+      if (roleId === 'guidanceComposer') return guidanceResponse(request);
+      return cardResponse(roleId, request, { family: request.metadata?.family || 'Realism' });
+    } }
+  });
+  const result = await harness.runtime.prepareForGeneration({ userMessage: 'What do you mean?' });
+  assertEqual(result.ok, true, 'refinement prepares successfully');
+  const roles = calls.map(call => call.roleId);
+  assertEqual(roles.filter(role => role === 'cardRefinementReview').length, 1, 'marked card gets exactly one required review when accepted');
+  assert(roles.indexOf('cardRefinementReview') < roles.indexOf('guidanceComposer'), 'review finishes before Guidance');
+  assertEqual(harness.runtime.view().lastHand.metadata.refinement.targetCount, 1, 'accepted hand exposes per-source review coverage');
+}
+
 {
   const activationAdapter = createMemoryStorageAdapter();
   await activationAdapter.writeJson('recursion-scene-chat-preprocess-retired.v1.json', {

@@ -67,8 +67,8 @@
 
 - [x] Run `npm.cmd test` in the isolated worktree; fix failures with targeted red/green checks.
 - [x] Run an isolated browser render of the card-state cycle and progress state; inspect screenshot/accessibility labels without changing the running host.
-- [ ] Request fresh spec and code review of all changes, including cross-task contracts and malformed-output/replay boundaries. Fix actionable findings and rerun affected tests plus full suite for final code.
-- [ ] Verify `git diff --check`, scoped commit history, clean worktree, and latest origin/main. Rebase onto remote changes if needed and rerun full tests after integration.
+- [x] Request fresh spec and code review of all changes, including cross-task contracts and malformed-output/replay boundaries. Fix actionable findings and rerun affected tests plus full suite for final code.
+- [x] Verify `git diff --check`, scoped commit history, clean worktree, and latest origin/main. Integrate remote changes if needed and rerun full tests after integration.
 - [ ] Push `HEAD:main` without force, verify GitHub SHA using network-enabled `gh`, report commit, tests, and live-provider limitation, then mark the goal complete.
 
 ## Execution ledger
@@ -79,5 +79,7 @@
 - Tasks 1-3 implemented and focused tests pass. Mandatory source lineage survives deck and hand projection without the former 32-ID truncation.
 - Review fixes: preserve provider transport classification; explicit semantic Retry restarts review through a validated strict-ancestor declaration; Manual forced IDs preserve Refinement deck order; progress outcomes remain visible without tooltips.
 - Runtime integration covers Fused/Segmented revision, authored preparation, two facets sharing one result, refusal/unresolved blocking, explicit Retry, cancellation/Resume, swipe reuse, fresh turns, deck text/state invalidation, and Manual mandatory overflow.
-- Final expanded offline suite passed all 91 scripts, including scheduler, runtime, privacy, contracts, UI, and progress tests. No live provider quality claim is made.
+- Final merged offline suite passed all 102 scripts, including scheduler, runtime, privacy, contracts, UI, and progress tests. No live provider quality claim is made.
 - Isolated browser renders verify the 15px eye-arrow state and desktop/mobile layouts without touching the running host. Progress renders identified the visible outcome correction above.
+- Two independent reviews completed; all findings addressed. Global revision rounds and revised-card counts are distinct, with a two-result regression.
+- Concurrent main changes through `432253b3` were merged at `6d662038`, preserving Post-process writer/review, card-budget behavior, and complete-message context. The one design-text conflict retains both features. Combined runtime/cache/selection contract versions were incremented to prevent stale reuse.

@@ -1,4 +1,5 @@
 import { createExecutionGraph } from '../execution/stage-registry.mjs';
+import { summarizeFusedOutcome } from '../fused-recovery.mjs';
 
 function selectedCardKey(card) {
   const source = card && typeof card === 'object' ? card : {};
@@ -156,7 +157,7 @@ export function createFusedCardStages({
 
   return [Object.freeze({
     id: 'preprocess.cards.fused',
-    version: 1,
+    version: 2,
     kind: 'model',
     executable: true,
     dependencies: Object.freeze(['preprocess.arbiter']),
@@ -235,15 +236,7 @@ export function createFusedCardStages({
       };
     },
     summarize(artifact) {
-      return {
-        acceptedFamilies: Array.isArray(artifact?.acceptedFamilies)
-          ? artifact.acceptedFamilies.slice(0, 40)
-          : Object.keys(artifact?.cards || {}).slice(0, 40),
-        unresolvedFamilies: Array.isArray(artifact?.unresolvedFamilies)
-          ? artifact.unresolvedFamilies.slice(0, 40)
-          : [],
-        fallback: artifact?.fallback?.mode || null
-      };
+      return summarizeFusedOutcome(artifact);
     }
   })];
 }

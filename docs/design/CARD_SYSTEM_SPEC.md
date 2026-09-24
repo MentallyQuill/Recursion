@@ -31,9 +31,9 @@ Related design docs:
 
 ## Pre-process And Post-process Decks
 
-The editable deck surface has two independent phases. Pre-process Cards are the scene-evidence catalog used before host generation and retain `off`, `active`, and `priority` participation states. Post-process Cards are an ordered response-revision catalog evaluated after an assistant response lands; each card is binary `On` or `Off`, with category activity derived from its enabled child cards. A Post-process deck does not change the Pre-process hand or prompt packet.
+The editable deck surface has two independent phases. Pre-process Cards are the scene-evidence catalog used before host generation and retain `off`, `active`, `priority`, and `refinement` participation states. Post-process Cards are an ordered response-revision catalog evaluated after an assistant response lands; each card is binary `On` or `Off`, with category activity derived from its enabled child cards. A Post-process deck does not change the Pre-process hand or prompt packet.
 
-Post-process cards carry a description and structured prompt instruction. Runtime freezes the completed response, bounded evidence, Pre-process packet, active Post-process deck, and operation settings before guidance synthesis. `Unified` combines enabled categories into one structured guidance request and one native host rewrite. `Progressive` runs enabled categories in deck order, carrying the latest valid draft forward. `As Swipe` appends a selected Recursion-owned swipe; `Replace` updates the selected response only after complete success. The provider supplies guidance, never prose; SillyTavern native quiet generation remains the sole writer.
+Post-process cards carry a description and structured prompt instruction. Runtime freezes the completed response, bounded evidence, Pre-process packet, active Post-process deck, and operation settings before guidance synthesis. `Unified` combines enabled categories into one structured guidance request and one selected-writer rewrite. `Progressive` runs enabled categories in deck order, carrying the latest valid draft forward. `As Swipe` appends a selected Recursion-owned swipe; `Replace` updates the selected response only after complete success. Utility/Reasoner supply structured guidance, never revised prose. The separate writer uses either native SillyTavern quiet generation or a selected Connection Profile. Polish preserves spoken dialogue wording; Revise permits rephrasing while preserving intent and events. Deck settings version 4 adds `styleBrief` and `styleSample`, bounded at 2000 and 6000 characters without silent truncation. Both scopes override conflicting cards: Follow Through may clarify an action already performed, but cannot complete an action left unperformed.
 
 ## Card Families
 
@@ -291,25 +291,29 @@ A card can exist in the deck without appearing in the hand. A hand can omit a va
 Editable Card Deck cards use one explicit selection field:
 
 ```ts
-type CardSelectionState = "off" | "active" | "priority";
+type CardSelectionState = "off" | "active" | "priority" | "refinement";
 ```
 
 - `off`: the card is inactive and does not contribute to runtime scope or hand selection.
 - `active`: the card is eligible for normal Auto backfill or Manual forcing.
 - `priority`: in Auto, the card is forced ahead of normal Active cards; in Manual, it is treated as Active because Manual already forces selected cards directly.
 
-Auto row clicks cycle `off -> active -> priority -> off`. Manual row clicks cycle `off -> active -> off`.
+- `refinement`: mandatory in Auto and Manual, with a required review of the card's disposable scene analysis before Guidance.
 
-The Card Deck header exposes two bulk state actions for editable decks:
+Auto row clicks cycle `off -> active -> priority -> refinement -> off`. Manual row clicks cycle `off -> active -> refinement -> off`; existing Priority advances as Active.
 
-- open eye: set every runnable card to normal `active`, clearing all `priority` states;
+The Card Deck header exposes two bulk state actions for all decks:
+
+- open eye: set every runnable card to normal `active`, clearing all `priority` and `refinement` states;
 - slashed eye: set every runnable card to `off`.
 
-Draft cards are unchanged by both actions. The bundled Default deck is read-only, so these controls are disabled until the user duplicates it.
+Draft cards are unchanged by both actions. The bundled Default deck keeps a persisted operator-state overlay; its structure remains read-only.
 
-Card state icons use the supplied eye family: slashed eye for Inactive, open eye for Active, and eye-plus for Priority. Check and X remain confirm/cancel/delete-confirm language and must not be used as card-state icons.
+Card state icons use the supplied eye family: slashed eye for Inactive, open eye for Active, eye-plus for Priority, and an eye with a small four-point sparkle for Refinement. Check and X remain confirm/cancel/delete-confirm language and must not be used as card-state icons.
 
-Every runnable Priority card is mandatory and precedes ordinary cards in deck category/card order. Priority cards may exceed the effective turn card limit; the Arbiter fills only remaining slots with ordinary Active cards. Generated Priority families must succeed before preparation completes.
+Every runnable Priority card in Auto and every runnable Refinement card in both modes is mandatory, preceding ordinary cards in deck category/card order. Mandatory cards may exceed the effective turn card limit; the Arbiter fills only remaining slots with ordinary Active cards. Generated mandatory families must succeed before preparation completes. Multiple marked facets sharing a family consume one hand slot, but each Refinement facet requires its own verdict.
+
+Refinement reviews the frozen scene and selected peer cards using the configured Reasoner. A good initial result can be accepted unchanged. Specific evidence-grounded findings can trigger one revision and one verification review; unresolved findings or provider failure block preparation. Authored cards first receive a scene application, preserving the saved instruction and including it with the accepted application. Only marked results may change. The accepted hand feeds Guidance, packet evidence, and Last Brief; no intermediate draft is injected or saved as character memory.
 
 ## Card Deck Organization
 

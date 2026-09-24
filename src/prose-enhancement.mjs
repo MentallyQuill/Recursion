@@ -334,7 +334,7 @@ function contextLine(message = {}) {
     ? String(message.role).toLowerCase()
     : 'assistant';
   const sender = safeText(message.sender || message.name || '', 120);
-  return `${sender ? `${role}(${sender})` : role}: ${safeText(message.text ?? message.mes ?? message.content, 1200)}`;
+  return `${sender ? `${role}(${sender})` : role}: ${String(message.text ?? message.mes ?? message.content ?? '').replace(SECRET_PATTERN, '[redacted]')}`;
 }
 
 function cardLines(cardContext = []) {
@@ -356,7 +356,7 @@ export function buildProseEnhancementRequest({
   reasoningCategory = 'prose-enhancement',
   reasoningIntent = 'minimal'
 } = {}) {
-  const targetText = truncate(String(text ?? '').replace(SECRET_PATTERN, '[redacted]'), MAX_TARGET_TEXT);
+  const targetText = String(text ?? '').replace(SECRET_PATTERN, '[redacted]');
   const limit = Math.max(0, Math.min(35, Math.round(Number(contextMessageLimit) || 0)));
   const sceneContext = (Array.isArray(contextMessages) ? contextMessages : []).slice(-limit).map(contextLine).join('\n');
   const storyFormLine = storyForm && typeof storyForm === 'object'
@@ -522,7 +522,7 @@ export function validateProseEnhancementResult(result = {}, { originalText = '' 
   }
   const text = String(data.text ?? '');
   if (!text.trim()) return validationError('RECURSION_PROSE_EMPTY', 'Prose enhancement returned empty text.');
-  if (text.length > MAX_TARGET_TEXT) {
+  if (text.length > Math.max(MAX_TARGET_TEXT, String(originalText).length * 1.5)) {
     return validationError('RECURSION_PROSE_EXPANDED', 'Prose enhancement expanded the message too much.');
   }
   const originalDialogue = dialogueSpans(originalText);

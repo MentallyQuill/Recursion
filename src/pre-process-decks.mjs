@@ -3,7 +3,7 @@ import { CARD_SCOPE_CATALOG, CARD_SCOPE_VERSION } from './card-scope.mjs';
 export const DEFAULT_PRE_PROCESS_DECK_ID = 'default';
 export const PRE_PROCESS_DECK_SETTINGS_VERSION = 2;
 export const NEW_CARD_NAME = 'New Card';
-export const CARD_SELECTION_STATES = Object.freeze(['off', 'active', 'priority']);
+export const CARD_SELECTION_STATES = Object.freeze(['off', 'active', 'priority', 'refinement']);
 export const DEFAULT_PRE_PROCESS_CARD_DESCRIPTIONS = Object.freeze({
   'sceneFrameCard:locationSituation': 'Tracks the current place, nearby routes, exposure, pressure, and immediate relevance.',
   'sceneFrameCard:immediateDirection': 'Supports useful questions and actions without deciding for the player.',
@@ -101,10 +101,20 @@ export function cardSelectionState(card) {
 
 export function nextCardSelectionState(card, mode = 'auto') {
   const current = cardSelectionState(card);
-  if (mode === 'manual') return current === 'off' ? 'active' : 'off';
   if (current === 'off') return 'active';
+  if (mode === 'manual') return current === 'refinement' ? 'off' : 'refinement';
   if (current === 'active') return 'priority';
+  if (current === 'priority') return 'refinement';
   return 'off';
+}
+
+export function isMandatoryCardState(state) {
+  return state === 'priority' || state === 'refinement';
+}
+
+function mandatoryCardInMode(card, mode) {
+  const state = cardSelectionState(card);
+  return state === 'refinement' || (mode !== 'manual' && state === 'priority');
 }
 
 function normalizedCardSelectionState(raw) {
@@ -446,7 +456,7 @@ export function getActiveCardDeck(settings = {}) {
   const excluded = new Set(settings.mode === 'manual' ? [] : settings.cardSelectionExcludedIds || []);
   if (!excluded.size) return deck;
   return { ...deck, cards: Object.fromEntries(Object.entries(deck.cards).map(([id, card]) => [
-    id, excluded.has(id) && cardSelectionState(card) !== 'priority' ? { ...card, selectionState: 'off' } : card
+    id, excluded.has(id) && !isMandatoryCardState(cardSelectionState(card)) ? { ...card, selectionState: 'off' } : card
   ])) };
 }
 
@@ -919,20 +929,18 @@ export function orderedDeckCardsAcrossCategories(deck) {
 
 export function deckPriorityCardIds(deck, settings = {}) {
   const mode = settings?.mode === 'manual' ? 'manual' : 'auto';
-  if (mode !== 'auto') return [];
   return orderedDeckCardsAcrossCategories(deck)
-    .filter((card) => cardSelectionState(card) === 'priority')
+    .filter((card) => mandatoryCardInMode(card, mode))
     .filter((card) => getDeckCardStatus(card).runnable)
     .map((card) => card.id);
 }
 
 export function deckPriorityFamilies(deck, settings = {}) {
   const mode = settings?.mode === 'manual' ? 'manual' : 'auto';
-  if (mode !== 'auto') return [];
   const seen = new Set();
   const families = [];
   for (const card of orderedDeckCardsAcrossCategories(deck)) {
-    if (cardSelectionState(card) !== 'priority') continue;
+    if (!mandatoryCardInMode(card, mode)) continue;
     if (!getDeckCardStatus(card).runnable) continue;
     const family = String(card.builtinFamily || '').trim();
     if (!family || seen.has(family)) continue;
@@ -952,13 +960,20 @@ export function activeCardDeckEligibility(settings = {}) {
   const priorityCardIds = cards
     .filter((card) => cardSelectionState(card) === 'priority')
     .map((card) => card.id);
+  const refinementCardIds = cards
+    .filter((card) => cardSelectionState(card) === 'refinement')
+    .map((card) => card.id);
+  const mandatoryCardIds = deckPriorityCardIds(deck, settings);
   return {
     activeDeckId: deck.id,
     activeCardIds,
     priorityCardIds,
-    allowedCardIds: [...priorityCardIds, ...activeCardIds],
+    refinementCardIds,
+    mandatoryCardIds,
+    allowedCardIds: [...cards
+      .filter((card) => isMandatoryCardState(cardSelectionState(card)))
+      .map((card) => card.id), ...activeCardIds],
     allowedFamilies: [...new Set(cards
-      .filter((card) => cardSelectionState(card) === 'active' || cardSelectionState(card) === 'priority')
       .map((card) => String(card.builtinFamily || '').trim())
       .filter(Boolean))]
   };
@@ -970,7 +985,6 @@ export function activeCardDeckSourceCards(settings = {}) {
   for (const card of orderedDeckCardsAcrossCategories(deck)) {
     if (!getDeckCardStatus(card).runnable) continue;
     const selectionState = cardSelectionState(card);
-    if (selectionState !== 'active' && selectionState !== 'priority') continue;
     const family = String(card.builtinFamily || '').trim();
     if (!family) continue;
     if (!Array.isArray(grouped[family])) grouped[family] = [];

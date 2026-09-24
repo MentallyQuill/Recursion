@@ -29,6 +29,13 @@ assert.notDeepEqual(preparedGenerationSettingsSignature(settings),preparedGenera
 const emptySettings=cardSelectionSettingsForTurn({...settings,preProcessDecks:{...settings.preProcessDecks,customDecks:{[deck.id]:{...deck,cards:Object.fromEntries(Object.values(deck.cards).map(c=>[c.id,{...c,selectionState:c.selectionState==='priority'?'active':c.selectionState}]))}}}},{cardSelectionHistory:[{deckId:deck.id,cards:Object.values(getActiveCardDeck(settings).cards).map(c=>({cardId:c.id}))}]});
 const empty=reconcileAutoPriorityPlan({action:'refresh-cards',budgets:{maxCards:2},cardJobs:[{family:'Scene Frame'}]},emptySettings,{seed:'empty'});
 assert.equal(empty.cardJobs.length,0); assert.equal(empty.action,'skip');
+const refinementDeck=structuredClone(getActiveCardDeck(settings));
+refinementDeck.cards[scenes[0].id].selectionState='refinement';
+const refinementSettings={...settings,preProcessDecks:{...settings.preProcessDecks,customDecks:{[deck.id]:refinementDeck}}};
+const refinementFiltered=cardSelectionSettingsForTurn(refinementSettings,{cardSelectionHistory:history});
+const refinementPlan=reconcileAutoPriorityPlan({action:'skip',cardJobs:[],budgets:{maxCards:0}},refinementFiltered);
+assert(refinementPlan.selection.mandatoryCardIds.includes(scenes[0].id),'Refinement remains mandatory through cooldown');
+assert(activeCardDeckSourceCards(cardSelectionSettingsForPlan(refinementFiltered,refinementPlan))['Scene Frame'].some(c=>c.id===scenes[0].id),'Refinement survives final source mask');
 console.log('[pass] card selection runtime contracts');
 
 // Edits outside the bounded provider band still invalidate selection eligibility.
@@ -52,7 +59,7 @@ for (const pipelineMode of ['segmented','fused']) {
   sources[1].selectionState='active';sources[1].promptText='SECOND_ONLY_INSTRUCTIONS';
   localDeck.cards.authored={id:'authored',name:'Authored',categoryId:localDeck.categoryOrder[0],promptText:'Authored distinct guidance.',selectionState:'active',kind:'authored'};
   localDeck.cardOrderByCategory[localDeck.categoryOrder[0]].push('authored');
-  const store=createSettingsStore({root:{recursion:{mode:'auto',pipelineMode,minCards:1,maxCards:2,cardSelection:{variety:'off',cooldownTurns:1},preProcessDecks:{activeDeckId:localDeck.id,customDecks:{[localDeck.id]:localDeck}},providers:{utility:{connectionProfileId:'u'},reasoner:{connectionProfileId:'r'}}}}});
+  const store=createSettingsStore({root:{recursion:{mode:'auto',pipelineMode,reasoningLevel:'low',minCards:1,maxCards:2,cardSelection:{variety:'off',cooldownTurns:2},preProcessDecks:{activeDeckId:localDeck.id,customDecks:{[localDeck.id]:localDeck}},providers:{utility:{connectionProfileId:'u'},reasoner:{connectionProfileId:'r'}}}}});
   const normalizedSources=Object.values(getActiveCardDeck(store.get()).cards).filter(c=>c.builtinFamily==='Scene Frame');
   const chat={chatId:`selection-${pipelineMode}`,chat:[{is_user:true,mes:'What changed?'}],async saveChat(){}};
   const realHost=createSillyTavernHost({contextFactory:()=>chat,settingsRoot:{}});
@@ -72,7 +79,10 @@ for (const pipelineMode of ['segmented','fused']) {
     assert.equal(prepared.ok,true,`${pipelineMode} turn ${turn} prepares`);
     assert.equal(prepared.hand.cards.length,1,`${pipelineMode} exactly selected card, no fabricated fallback`);
     if(turn<2)assert.deepEqual(prepared.hand.cards[0].sourceCardIds,[normalizedSources[turn].id]);
-    else assert.equal(prepared.hand.cards[0].id,'authored');
+    else {
+      assert.equal(prepared.hand.cards[0].id,'authored');
+      assert(!prepared.hand.metadata.selection.shortfallReasons.includes('card-generation-failed'),'authored eligibility shortage is not a generation failure');
+    }
     const current=requests.filter(r=>r.turn===turn);
     if(turn===1){
       const cardPrompts=current.filter(r=>r.roleId.endsWith('Card')||r.roleId==='fusedCardBundle').map(r=>r.request.prompt).join('\n');

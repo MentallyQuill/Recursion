@@ -1490,7 +1490,7 @@ const lightStrengthHand = selectHand([
   maxTokens: 500,
   behaviorPolicy: influencePolicyForSettings({ strength: 'light', promptFootprint: 'normal' })
 });
-assertEqual(lightStrengthHand.cards.length, 5, 'light strength reduces normal hand pressure by one inside caps');
+assertEqual(lightStrengthHand.cards.length, 6, 'light strength preserves the configured card count');
 assertEqual(lightStrengthHand.metadata.behaviorPolicy.strength, 'light', 'hand metadata records strength policy');
 
 const tokenOnlyHand = selectHand([
@@ -1505,4 +1505,8 @@ assertEqual(tokenOnlyHand.metadata.tokenBudgetExceeded, true, 'token overage is 
 const hand = selectHand(deck.cards, { maxCards: 4, maxTokens: 500 });
 assertEqual(hand.cards.length, 1, 'hand selected card');
 assert(!hand.cards[0].inspectorNotes, 'hand excludes inspector notes');
+const manySourceIds = Array.from({ length: 40 }, (_, index) => `marked-${index}`);
+const manySourceDeck = applyCardPlan([], { acceptedCards: [{ ...card, sourceCardIds: manySourceIds }] });
+const manySourceHand = selectHand(manySourceDeck.cards, { forcedCardIds: manySourceIds });
+assertDeepEqual(manySourceHand.cards[0].sourceCardIds, manySourceIds, 'mandatory source lineage survives deck and hand projection without truncation');
 console.log('[pass] cards');

@@ -8,6 +8,10 @@ function normalizeStage(stage) {
   }
   const id = cleanId(stage.id);
   if (!id) throw new TypeError('Execution stage id is required.');
+  const retryFromStageId = cleanId(stage.retryFromStageId);
+  if (stage.retryFromStageId !== undefined && !retryFromStageId) {
+    throw new TypeError(`Execution stage "${id}" retryFromStageId must name a strict ancestor.`);
+  }
   const dependencies = [...new Set(
     (Array.isArray(stage.dependencies) ? stage.dependencies : [])
       .map(cleanId)
@@ -19,6 +23,7 @@ function normalizeStage(stage) {
   return Object.freeze({
     ...stage,
     id,
+    ...(retryFromStageId ? { retryFromStageId } : {}),
     version: Number.isInteger(stage.version) && stage.version > 0 ? stage.version : 1,
     kind: cleanId(stage.kind) || 'local',
     executable: stage.executable !== false,
@@ -101,6 +106,12 @@ export function createExecutionGraph({ stages = [] } = {}) {
 
   for (const [stageId, ids] of dependentsById) {
     dependentsById.set(stageId, Object.freeze(orderedByTopological(ids, topologicalStageIds)));
+  }
+
+  for (const stage of normalizedStages) {
+    if (stage.retryFromStageId && !ancestorsById.get(stage.id).includes(stage.retryFromStageId)) {
+      throw new TypeError(`Execution stage "${stage.id}" retryFromStageId must name a strict ancestor.`);
+    }
   }
 
   const executableStageIds = Object.freeze(

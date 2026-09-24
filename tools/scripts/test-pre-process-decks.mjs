@@ -19,6 +19,8 @@ import {
   getActiveCardDeck,
   getDeckCardStatus,
   activeCardDeckEligibility,
+  activeCardDeckSourceCards,
+  activeCardDeckAuthoredCards,
   cardSelectionState,
   deckPriorityCardIds,
   deckPriorityFamilies,
@@ -188,9 +190,12 @@ assertEqual(normalizeCustomDeck({
 assertEqual(cardSelectionState({ selectionState: 'priority', enabled: false }), 'priority', 'selectionState wins over legacy enabled');
 assertEqual(nextCardSelectionState({ selectionState: 'off' }, 'auto'), 'active', 'auto card cycle enables inactive card');
 assertEqual(nextCardSelectionState({ selectionState: 'active' }, 'auto'), 'priority', 'auto card cycle prioritizes active card');
-assertEqual(nextCardSelectionState({ selectionState: 'priority' }, 'auto'), 'off', 'auto card cycle disables priority card');
-assertEqual(nextCardSelectionState({ selectionState: 'active' }, 'manual'), 'off', 'manual card cycle disables active card');
-assertEqual(nextCardSelectionState({ selectionState: 'priority' }, 'manual'), 'off', 'manual card cycle treats priority as active then disables');
+assertEqual(nextCardSelectionState({ selectionState: 'priority' }, 'auto'), 'refinement', 'auto card cycle adds refinement after priority');
+assertEqual(nextCardSelectionState({ selectionState: 'refinement' }, 'auto'), 'off', 'auto card cycle disables refinement');
+assertEqual(nextCardSelectionState({ selectionState: 'active' }, 'manual'), 'refinement', 'manual card cycle refines active card');
+assertEqual(nextCardSelectionState({ selectionState: 'priority' }, 'manual'), 'refinement', 'manual card cycle treats priority as active then refines');
+assertEqual(nextCardSelectionState({ selectionState: 'refinement' }, 'manual'), 'off', 'manual card cycle disables refinement');
+assertEqual(cardSelectionState({ selectionState: 'refinement' }), 'refinement', 'refinement is a persisted state');
 
 const normalizedDecks = normalizeCardDeckSettings({
   activeDeckId: customDeck.id,
@@ -375,6 +380,31 @@ const priorityFamilyDeck = normalizeCustomDeck({
   cardOrderByCategory: { general: ['scene1', 'scene2', 'cast'] }
 });
 assertDeepEqual(deckPriorityFamilies(priorityFamilyDeck, { mode: 'auto' }), ['Scene Frame', 'Active Cast'], 'priority families collapse duplicate built-in family rows in deck order');
+
+const refinementDeck = updateCardSelectionState(priorityOrderedDeck, 'c', 'refinement');
+refinementDeck.cards.c.builtinFamily = 'Scene Frame';
+const refinementSettings = { mode: 'auto', preProcessDecks: normalizeCardDeckSettings({
+  activeDeckId: refinementDeck.id, customDecks: { [refinementDeck.id]: refinementDeck }
+}) };
+assertDeepEqual(deckPriorityCardIds(refinementDeck, { mode: 'auto' }), ['c', 'b', 'a'], 'Auto mandatory cards include refinement and priority in authored deck order');
+assertDeepEqual(deckPriorityCardIds(refinementDeck, { mode: 'manual' }), ['c'], 'Manual mandatory IDs include only refinement');
+assertDeepEqual(deckPriorityFamilies(refinementDeck, { mode: 'manual' }), ['Scene Frame'], 'Manual forces refinement families');
+assertDeepEqual(activeCardDeckEligibility(refinementSettings).mandatoryCardIds, ['c', 'b', 'a'], 'eligibility exposes all mandatory IDs');
+assertDeepEqual(activeCardDeckEligibility(refinementSettings).refinementCardIds, ['c'], 'eligibility distinguishes refinement from priority');
+assertDeepEqual(activeCardDeckEligibility(refinementSettings).allowedCardIds, ['c', 'b', 'a'], 'eligibility never omits refinement');
+assertEqual(activeCardDeckSourceCards(refinementSettings)['Scene Frame'][0].selectionState, 'refinement', 'generated source lineage preserves refinement');
+const authoredRefinementDeck = updateCardSelectionState(refinementDeck, 'a', 'refinement');
+assertEqual(activeCardDeckAuthoredCards({ preProcessDecks: { activeDeckId: authoredRefinementDeck.id, customDecks: { [authoredRefinementDeck.id]: authoredRefinementDeck } } }).find(card => card.id === 'a').selectionState, 'refinement', 'authored projection preserves refinement');
+const refinementExport = serializeCustomCardDecksForExport(refinementSettings);
+assertEqual(normalizeCustomDeck(JSON.parse(JSON.stringify(refinementExport.decks[refinementDeck.id]))).cards.c.selectionState, 'refinement', 'export/import roundtrip preserves refinement');
+const refinementDuplicate = duplicateCardDeck(refinementSettings, refinementDeck.id);
+assert(Object.values(refinementDuplicate.customDecks[refinementDuplicate.activeDeckId].cards).some(card => card.selectionState === 'refinement'), 'deck duplication preserves refinement');
+const refinementCardDuplicate = duplicateCard(refinementDeck, 'c');
+assertEqual(Object.values(refinementCardDuplicate.cards).filter(card => card.selectionState === 'refinement').length, 2, 'card duplication preserves refinement');
+const bundledRefinement = updateActivePreProcessDeckSelection(normalizedBundledStates, updateCardSelectionState(defaultWithPriority, firstCardId, 'refinement'));
+assertEqual(getActiveCardDeck({ preProcessDecks: normalizeCardDeckSettings(JSON.parse(JSON.stringify(bundledRefinement))) }).cards[firstCardId].selectionState, 'refinement', 'bundled refinement overlay survives reload');
+const refinementDraftDeck = updateCardSelectionState(refinementDeck, 'd', 'refinement');
+assertDeepEqual(deckPriorityCardIds(refinementDraftDeck, { mode: 'manual' }), ['c'], 'marked drafts do not become mandatory');
 
 const withoutCard = deleteCard(reorderedCardsDeck, draftCard.id);
 assertEqual(withoutCard.cards[draftCard.id], undefined, 'deleteCard removes card');

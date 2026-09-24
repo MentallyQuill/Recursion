@@ -2,6 +2,7 @@ import { nowIso, redact, stableStringify } from './core.mjs';
 import { normalizeCardSelectionSettings } from './card-selection.mjs';
 import { pipelineExecutionLabel } from './runtime/pipeline-policy.mjs';
 import { downloadDiagnostics } from './ui/diagnostics-download.mjs';
+import { createPostProcessReviewDialog, renderPostProcessWritingControls } from './ui/post-process-review.mjs';
 import {
   defaultCardScope,
   enforceManualSelectionCap,
@@ -45,6 +46,8 @@ import {
   deletePostProcessCategory,
   duplicatePostProcessCard,
   duplicatePostProcessDeck,
+  exportPostProcessDeck,
+  importPostProcessDeck,
   getActivePostProcessDeck,
   movePostProcessCard,
   normalizePostProcessDeckSettings,
@@ -271,15 +274,15 @@ const PROVIDER_AUTOSAVE_DATASETS = Object.freeze([
 const SETTINGS_TOOLTIPS = Object.freeze({
   behavior: 'Controls how strongly Recursion shapes the next prompt packet. These settings affect card pressure, focus, and prompt size without changing provider credentials.',
   strength: 'Bias strength for the composed prompt packet. Light stays subtle, Balanced is the normal default, and Strong gives Recursion more room to steer scene adhesion.',
-  minCards: 'Low Reasoning Level card target. Use fewer cards for faster, cheaper turns or more cards when sparse scenes need extra grounding.',
-  maxCards: 'Upper Manual card-selection cap and Ultra Reasoning Level card target. Medium and High use the average, so this also sets the upper range for busier scenes.',
-  selectionVariety: 'Auto only. Keeps the strongest choices and may replace one optional slot with another relevant card. Off keeps rank order; Low uses 25% / next two alternatives, Medium 50% / next four, High 100% / all alternatives. Priority cards are exempt. Provider temperature is unchanged.',
-  cardCooldown: 'Auto only. Excludes recently used cards for the next 0 to 10 completed response turns. Zero disables cooldown. Priority cards are exempt; a shortage produces a smaller hand.',
+  minCards: 'Total hand target at Low. Medium and High use the average of Min and Max. Authored and generated cards both count; unavailable cards are reported in progress.',
+  maxCards: 'Total hand target at Ultra and upper Manual selection cap. Priority and Refinement cards are always included and may exceed the target. Fused and Segmented use the same selection.',
+  selectionVariety: 'Auto only. Keeps the strongest choices and may replace one optional slot with another relevant card. Off keeps rank order; Low uses 25% / next two alternatives, Medium 50% / next four, High 100% / all alternatives. Priority and Refinement cards are exempt. Provider temperature is unchanged.',
+  cardCooldown: 'Auto only. Excludes recently used cards for the next 0 to 10 completed response turns. Zero disables cooldown. Priority and Refinement cards are exempt; a shortage produces a smaller hand.',
   focus: 'Temporary creative priority for card selection and composition. It nudges Recursion toward character, constraints, scene, or plot without becoming a hard whitelist.',
   footprint: 'Prompt budget for the composed Recursion packet. Compact spends fewer tokens, Rich preserves more scene detail when the moment is complex.',
   contextWindows: 'Bounds the Recursion-owned evidence and analysis windows used before and after generation. These do not replace or limit SillyTavern writer context.',
-  postProcess: 'Bounds only the frozen evidence used to synthesize Post-process guidance. SillyTavern still assembles the writer context.',
-  postProcessContextMessages: 'Recent visible messages available to Post-process guidance synthesis. This does not replace or limit SillyTavern writer context.',
+  postProcess: 'Bounds the frozen Post-process editing evidence. The current-model writer retains native context; a profile writer receives the bounded editing context.',
+  postProcessContextMessages: 'Recent visible messages used for Post-process guidance and profile-writer editing evidence. Current-model rewriting keeps the native SillyTavern context.',
   injection: 'Compatibility controls for where the final composed Recursion packet lands in SillyTavern. These do not create per-card prompt controls.',
   injectionPlacement: 'Choose the SillyTavern prompt lane for the composed Recursion packet. In Prompt is the recommended default; In Chat can help presets that weight recent chat harder.',
   injectionRole: 'Role SillyTavern assigns to Recursion prompt blocks. System is safest for instruction-like scene guidance; User or Assistant exist for preset compatibility.',
@@ -550,6 +553,13 @@ const CARD_STATE_ICON_PATHS = {
 function cardSystemIconSvg(kind) {
   const attrs = { width: '15', height: '15', viewBox: '0 0 16 16', 'aria-hidden': 'true', focusable: 'false' };
   const stroke = { fill: 'none', stroke: 'currentColor', 'stroke-width': '1.35', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
+  if (kind === 'eye-refinement') return el('svg', {
+    attrs: { ...attrs, viewBox: '0 0 24 24' },
+    dataset: { recursionCardStateIcon: kind }
+  }, [
+    el('path', { attrs: { fill: 'currentColor', d: 'M12,7a4,4,0,1,0,4,4A4,4,0,0,0,12,7Zm0,6a2,2,0,1,1,2-2A2,2,0,0,1,12,13Zm9.938-2.345a.987.987,0,0,1,0,.69,13.339,13.339,0,0,1-1.08,2.264,1,1,0,1,1-1.715-1.028A11.3,11.3,0,0,0,19.928,11C18.451,7.343,15.373,5,12,5S5.549,7.343,4.072,11a9.315,9.315,0,0,0,6.167,5.787,1,1,0,1,1-.478,1.942,11.393,11.393,0,0,1-7.7-7.383.99.99,0,0,1,0-.691C3.773,6,7.674,3,12,3S20.227,6,21.938,10.655Z' } }),
+    el('path', { attrs: { fill: 'currentColor', d: 'M18 13l1.3 3.7L23 18l-3.7 1.3L18 23l-1.3-3.7L13 18l3.7-1.3Z' } })
+  ]);
   if (CARD_STATE_ICON_PATHS[kind]) return el('svg', {
     attrs: { ...attrs, viewBox: '0 0 24 24' },
     dataset: { recursionCardStateIcon: kind }
@@ -1550,7 +1560,7 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
   const reason = step.reason || '';
   const suggestedAction = step.suggestedAction || '';
   const unhealthy = ['warning', 'failed'].includes(state);
-  const visibleReason = reason && unhealthy ? reason : '';
+  const visibleReason = reason && (unhealthy || step.recoveryState || step.id === 'preprocess.hand') ? reason : '';
   const visibleAction = suggestedAction && unhealthy ? `Try: ${suggestedAction}` : '';
   const firstRender = row.dataset.recursionProgressRendered !== 'true';
   const changed = !firstRender && (
@@ -1836,6 +1846,28 @@ function briefCardDomId(card, index) {
   return cleanText(source.id || source.cardId || source.refId || `${cardFamily(source)}-${index}`, `card-${index}`);
 }
 
+function cardRefinementOutcomes(hand, card) {
+  const cardId = cleanText(card?.id || card?.cardId);
+  const targets = hand?.metadata?.refinement?.targets;
+  if (!cardId || !Array.isArray(targets)) return [];
+  return targets.filter(target => target?.cardId === cardId && ['accepted', 'unchanged'].includes(target.outcome))
+    .slice(0, 100)
+    .map(target => ({
+      targetId: safeText(target.targetId, 120),
+      name: safeText(target.name || target.targetId, 80),
+      outcome: target.outcome,
+      revisionCount: target.revisionCount === 1 ? 1 : 0
+    }));
+}
+
+function cardRefinementChip(hand, card) {
+  const outcomes = cardRefinementOutcomes(hand, card);
+  if (!outcomes.length) return '';
+  if (outcomes.every(target => target.outcome === 'unchanged')) return 'refinement unchanged';
+  const revisions = Math.max(...outcomes.map(target => target.revisionCount));
+  return `refinement accepted · ${revisions} revision${revisions === 1 ? '' : 's'}`;
+}
+
 function handDropdownRenderKey(view, model, cards, packetText, packetMeta) {
   return stableStringify({
     tooltipsEnabled: model.tooltipsEnabled,
@@ -1859,6 +1891,7 @@ function handDropdownRenderKey(view, model, cards, packetText, packetMeta) {
         family,
         priority,
         text: cardText(source) || cardSummary(source),
+        refinement: cardRefinementChip(view.lastBriefHand ?? view.lastHand, source),
         chips: [
           ['critical', 'strong'].includes(priority) ? priority : '',
           ...metaChips
@@ -2021,6 +2054,7 @@ function renderHandDropdown(panel, view, model, options = {}) {
     const priorityLabel = ['critical', 'strong'].includes(priority) ? priority : '';
     const rawChips = [
       priorityLabel,
+      cardRefinementChip(briefHand, source),
       ...metaChips
     ].map((chip) => cleanText(chip, '')).filter(Boolean);
     const visibleChips = compactBriefChips(rawChips, 4);
@@ -2123,6 +2157,7 @@ function deckCardCounts(deck) {
   let eligible = 0;
   let draft = 0;
   let priority = 0;
+  let refinement = 0;
   for (const card of cards) {
     const status = getDeckCardStatus(card);
     const selected = cardSelectionState(card);
@@ -2130,6 +2165,7 @@ function deckCardCounts(deck) {
       active += 1;
       eligible += 1;
       if (selected === 'priority') priority += 1;
+      if (selected === 'refinement') refinement += 1;
     } else if (status.reason === 'disabled') {
       eligible += 1;
     } else {
@@ -2142,16 +2178,17 @@ function deckCardCounts(deck) {
     eligible,
     draft,
     priority,
+    refinement,
     inactive: Math.max(0, eligible - active),
     allActive: eligible === active,
-    allNormalActive: eligible > 0 && eligible === active && priority === 0
+    allNormalActive: eligible > 0 && eligible === active && priority === 0 && refinement === 0
   };
 }
 
 function deckCardSummary(deck) {
   const counts = deckCardCounts(deck);
   const base = counts.total ? `${counts.active}/${counts.eligible} active` : '0 cards';
-  return `${base}${counts.priority ? `, ${counts.priority} priority` : ''}${counts.draft ? `, ${counts.draft} draft` : ''}`;
+  return `${base}${counts.priority ? `, ${counts.priority} priority` : ''}${counts.refinement ? `, ${counts.refinement} refinement` : ''}${counts.draft ? `, ${counts.draft} draft` : ''}`;
 }
 
 function activateAllRunnableDeckCards(deck) {
@@ -2189,6 +2226,16 @@ function cardDeckCardStatePresentation(card, mode = 'auto') {
     };
   }
   const state = cardSelectionState(card);
+  if (state === 'refinement') {
+    return {
+      state,
+      className: 'is-refinement',
+      icon: 'eye-refinement',
+      title: "Always included. Reviews and improves this card's scene analysis before narration.",
+      label: 'Refinement card',
+      nextStatus: 'Card disabled.'
+    };
+  }
   if (state === 'priority' && mode === 'auto') {
     return {
       state,
@@ -2196,7 +2243,7 @@ function cardDeckCardStatePresentation(card, mode = 'auto') {
       icon: 'eye-priority',
       title: 'Priority: forced into Auto hand before backfill.',
       label: 'Priority card',
-      nextStatus: 'Card disabled.'
+      nextStatus: 'Card refinement enabled.'
     };
   }
   if (state === 'off') {
@@ -2213,13 +2260,14 @@ function cardDeckCardStatePresentation(card, mode = 'auto') {
     state: 'active',
     className: 'is-active',
     icon: 'eye-active',
-    title: mode === 'manual' ? 'Active. Tap to disable.' : 'Active. Tap to prioritize.',
+    title: mode === 'manual' ? 'Active. Tap to enable refinement.' : 'Active. Tap to prioritize.',
     label: 'Active card',
-    nextStatus: mode === 'manual' ? 'Card disabled.' : 'Card prioritized.'
+    nextStatus: mode === 'manual' ? 'Card refinement enabled.' : 'Card prioritized.'
   };
 }
 
 function cardSelectionResultStatus(selectionState) {
+  if (selectionState === 'refinement') return 'Card refinement enabled.';
   if (selectionState === 'priority') return 'Card prioritized.';
   if (selectionState === 'off') return 'Card disabled.';
   return 'Card enabled.';
@@ -2476,6 +2524,7 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
     });
     const activeCategoryCards = eligibleCategoryCards.filter((card) => cardSelectionState(card) !== 'off');
     const priorityCategoryCards = activeCategoryCards.filter((card) => cardSelectionState(card) === 'priority');
+    const refinementCategoryCards = activeCategoryCards.filter((card) => cardSelectionState(card) === 'refinement');
     const categoryDensityWarning = activeCategoryCards.length >= 5;
     const categoryExpanded = preProcessCategoryExpanded(preProcessDecks, activeDeck.id, category.id);
     const categoryDeletePending = deleteConfirmFor(deleteState, 'category', activeDeck.id, category.id);
@@ -2540,7 +2589,7 @@ function renderCardsPanel(panel, view, model, notice = '', editorState = null, c
       disclosure: cardSystemIconSvg(categoryExpanded ? 'chevron-up' : 'chevron-down'),
       copy: el('span', { className: 'recursion-card-panel-category-copy recursion-card-deck-category-copy' }, [
         el('strong', { text: category.name }),
-        el('span', { text: `${activeCategoryCards.length}/${eligibleCategoryCards.length} Active Cards${priorityCategoryCards.length ? ` · ${priorityCategoryCards.length} Priority` : ''}${categoryDensityWarning ? ' - focus may be diluted' : ''}` })
+        el('span', { text: `${activeCategoryCards.length}/${eligibleCategoryCards.length} Active Cards${priorityCategoryCards.length ? ` · ${priorityCategoryCards.length} Priority` : ''}${refinementCategoryCards.length ? ` · ${refinementCategoryCards.length} Refinement` : ''}${categoryDensityWarning ? ' - focus may be diluted' : ''}` })
       ]),
       actions: categoryActions,
       auxiliary: categoryEditor ? [categoryEditor] : [],
@@ -2703,7 +2752,8 @@ function postProcessDeleteConfirmation(deleteState = {}, deck = {}) {
 function renderPostProcessPanel(panel, view, {
   editorState = null,
   deleteState = null,
-  deckDeleteState = null
+  deckDeleteState = null,
+  writingControls = {}
 } = {}) {
   const deckSettings = normalizePostProcessDeckSettings(view.settings?.postProcessDecks);
   const deck = getActivePostProcessDeck(deckSettings);
@@ -2819,6 +2869,7 @@ function renderPostProcessPanel(panel, view, {
     actionsClassName: 'recursion-post-process-deck-actions',
     dataset: { recursionPostProcessDeckBar: '' }
   }));
+  panel.appendChild(renderPostProcessWritingControls({ el, settings: view.settings?.postProcess, deck, ...writingControls }));
   if (!deck.readonly) {
     panel.appendChild(el('div', { className: 'recursion-card-deck-tools' }, [
       cardSystemIconButton('plus', 'Create a new Category', { recursionPostProcessCategoryCreate: '', recursionPostProcessDeckToolAdd: '' }, { className: 'recursion-card-deck-tool-add' }),
@@ -2951,7 +3002,7 @@ function renderHighLevelSettings(panel, settings) {
     settingsNumberRow('Max Cards', 'recursionSettingMaxCards', integerInRange(settings.maxCards, DEFAULT_RECURSION_SETTINGS.maxCards, 0, 20), { tooltip: SETTINGS_TOOLTIPS.maxCards, tooltipsEnabled }),
     settingsSelectRow('Selection variety', 'recursionSettingSelectionVariety', selection.variety, [['off', 'Off'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], SETTINGS_TOOLTIPS.selectionVariety, tooltipsEnabled),
     settingsNumberRow('Card cooldown (turns)', 'recursionSettingCardCooldown', selection.cooldownTurns, { min: 0, max: 10, tooltip: SETTINGS_TOOLTIPS.cardCooldown, tooltipsEnabled }),
-    el('p', { className: 'recursion-help', text: 'Auto only; Manual ignores these settings. Priority cards are exempt. 0 turns disables cooldown. Fewer eligible cards means a smaller hand.' }),
+    el('p', { className: 'recursion-help', text: 'Auto only; Manual ignores these settings. Priority and Refinement cards are exempt. 0 turns disables cooldown. Fewer eligible cards means a smaller hand.' }),
     settingsSelectRow('Focus', 'recursionSettingFocus', cleanText(settings.focus, 'balanced'), FOCUS_OPTIONS, SETTINGS_TOOLTIPS.focus, tooltipsEnabled),
     settingsSelectRow('Prompt Footprint', 'recursionSettingFootprint', cleanText(settings.promptFootprint, 'normal'), FOOTPRINT_OPTIONS, SETTINGS_TOOLTIPS.footprint, tooltipsEnabled)
   ], { tooltip: SETTINGS_TOOLTIPS.behavior, tooltipsEnabled }));
@@ -3632,13 +3683,20 @@ function appendViewerDeckSection(viewer, hand) {
     appendViewerChips(meta, [...new Set(metaChips)]);
     article.appendChild(header);
     if (meta.children.length) article.appendChild(meta);
+    for (const outcome of cardRefinementOutcomes(hand, cardSource)) {
+      article.appendChild(el('p', {
+        className: 'recursion-viewer-card-summary',
+        text: `Refinement · ${outcome.name}: ${outcome.outcome} · ${outcome.revisionCount} revision${outcome.revisionCount === 1 ? '' : 's'}`,
+        dataset: { recursionViewerRefinementTarget: outcome.targetId }
+      }));
+    }
     article.appendChild(el('p', {
       className: 'recursion-viewer-card-summary',
-      text: safeText(cardSummary(cardSource), 260)
+      text: safeText(cardSummary(cardSource), Infinity)
     }));
     article.appendChild(el('p', {
       className: 'recursion-viewer-card-text',
-      text: safeText(cardText(cardSource) || cardSummary(cardSource), 900),
+      text: safeText(cardText(cardSource) || cardSummary(cardSource), Infinity),
       dataset: { recursionViewerCardText: '' }
     }));
 
@@ -3827,7 +3885,7 @@ function cardSelectionPreview(hand) {
     'variety-alternative': 'Variety alternative'
   };
   return {
-    Priority: Array.isArray(selection.mandatoryCardIds) ? selection.mandatoryCardIds : [],
+    Mandatory: Array.isArray(selection.mandatoryCardIds) ? selection.mandatoryCardIds : [],
     Selected: retained.map((row) => `${identity(row)}${cleanText(row.reason) ? `: ${cleanText(row.reason)}` : ''}`),
     Cooldown: omitted.filter((row) => row.reason === 'cooldown').map((row) => {
       const turns = integerInRange(row.turnsRemaining, 0, 0, 10);
@@ -4193,6 +4251,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   let pendingPreProcessDecks = null;
   let cardsPanelRenderKey = '';
   let postProcessPanelRenderKey = '';
+  let postProcessRenderedDeckId = '';
+  const postProcessStyleDrafts = new Map();
   let postProcessEditorState = null;
   let postProcessDeleteState = null;
   let postProcessDeckDeleteState = null;
@@ -4879,6 +4939,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const settings = asObject(view?.settings);
     return stableStringify({
       postProcess: settings.postProcess,
+      connectionProfiles: runtimeConnectionProfiles(view, runtime),
       postProcessDecks: normalizePostProcessDeckSettings(settings.postProcessDecks),
       tooltipsEnabled: settings.ui?.tooltipsEnabled !== false,
       editor: postProcessEditorState,
@@ -4887,17 +4948,92 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     });
   }
 
+  const postProcessReview = createPostProcessReviewDialog({
+    runtime,
+    onError: (message) => showCardSystemStatus(message, 'warning')
+  });
+
+  function exportActivePostProcessDeck() {
+    const payload = exportPostProcessDeck(getActivePostProcessDeck(currentView().settings?.postProcessDecks));
+    const url = URL.createObjectURL(new Blob([payload], { type: 'application/json;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'recursion-post-process-deck.json';
+    anchor.hidden = true;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    const cleanup = setTimeout(() => URL.revokeObjectURL(url), 60000);
+    cleanup?.unref?.();
+  }
+
+  function importPostProcessDeckFile() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.addEventListener('change', () => runAction((async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) throw new Error('Deck file must be at most 2 MB.');
+      const next = importPostProcessDeck(currentView().settings?.postProcessDecks, await file.text());
+      await applyPostProcessDeckSettings(next, 'Post-process Deck imported.');
+    })()));
+    input.click();
+  }
+
   function renderPostProcessPanelForView(view = currentView()) {
     if (cardDragState?.started && cardDragState.panel === postProcessPanel) return;
     const effectiveView = viewWithPendingDeckSettings(view);
     const nextKey = postProcessPanelViewKey(effectiveView);
     if (postProcessPanelRenderKey === nextKey) return;
     postProcessPanelRenderKey = nextKey;
+    const styleFields = ['brief', 'sample'];
+    if (postProcessRenderedDeckId) {
+      const draft = {};
+      for (const field of styleFields) {
+        const input = postProcessPanel.querySelector(`[data-recursion-post-process-style-${field}]`);
+        if (input && !input.readOnly && input.value !== input.defaultValue) draft[field] = input.value;
+      }
+      if (Object.keys(draft).length) postProcessStyleDrafts.set(postProcessRenderedDeckId, draft);
+      else postProcessStyleDrafts.delete(postProcessRenderedDeckId);
+    }
+    postProcessRenderedDeckId = getActivePostProcessDeck(effectiveView.settings?.postProcessDecks).id;
+    const openDetails = [...postProcessPanel.querySelectorAll('details')].filter(node => node.open).map(node => Object.keys(node.dataset)[0]);
+    const focused = document.activeElement;
+    const focusKey = postProcessPanel.contains?.(focused) ? Object.keys(focused.dataset || {})[0] : null;
+    const scrollTop = postProcessPanel.scrollTop;
+    const writingScrollTop = postProcessPanel.querySelector('.recursion-post-process-writing')?.scrollTop || 0;
     renderPostProcessPanel(postProcessPanel, effectiveView, {
       editorState: postProcessEditorState,
       deleteState: postProcessDeleteState,
-      deckDeleteState: postProcessDeckDeleteState
+      deckDeleteState: postProcessDeckDeleteState,
+      writingControls: {
+        profiles: runtimeConnectionProfiles(effectiveView, runtime),
+        onSettings: (patch) => runAction(applyPostProcessSettings(patch), () => { postProcessPanelRenderKey = ''; renderPostProcessPanelForView(); }),
+        onStyle: (style) => mutateActivePostProcessDeck(deck => ({ ...deck, ...style, updatedAt: nowIso() }), 'Deck style saved.'),
+        onCopy: () => {
+          const settings = normalizePostProcessDeckSettings(currentView().settings?.postProcessDecks);
+          runAction(applyPostProcessDeckSettings(duplicatePostProcessDeck(settings, settings.activeDeckId), 'Deck copied. Style is now editable.'));
+        },
+        onReview: () => runAction(postProcessReview.open()),
+        onImport: importPostProcessDeckFile,
+        onExport: exportActivePostProcessDeck,
+        onError: message => showCardSystemStatus(message, 'warning')
+      }
     });
+    const styleDraft = postProcessStyleDrafts.get(postProcessRenderedDeckId);
+    for (const field of styleFields) {
+      const input = postProcessPanel.querySelector(`[data-recursion-post-process-style-${field}]`);
+      if (input && !input.readOnly && styleDraft?.[field] !== undefined) input.value = styleDraft[field];
+    }
+    for (const details of postProcessPanel.querySelectorAll('details')) if (openDetails.includes(Object.keys(details.dataset)[0])) details.open = true;
+    if (focusKey) {
+      const nextFocus = [...postProcessPanel.querySelectorAll('input, select, textarea, button')].find(node => Object.hasOwn(node.dataset, focusKey));
+      nextFocus?.focus?.({ preventScroll: true });
+    }
+    postProcessPanel.scrollTop = scrollTop;
+    const writingSection = postProcessPanel.querySelector('.recursion-post-process-writing');
+    if (writingSection) writingSection.scrollTop = writingScrollTop;
   }
 
   function applyPostProcessSettings(postProcess, status = '') {
@@ -7234,6 +7370,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
         )
       },
       postProcess: {
+        ...asObject(currentView().settings?.postProcess),
         enabled: currentView().settings?.postProcess?.enabled === true,
         applyMode: currentView().settings?.postProcess?.applyMode === 'replace' ? 'replace' : 'as-swipe',
         rewriteFlow: currentView().settings?.postProcess?.rewriteFlow === 'progressive' ? 'progressive' : 'unified',
@@ -7423,7 +7560,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   return {
     root,
     update,
+    openPostProcessReview: (options) => postProcessReview.open(options),
     destroy() {
+      postProcessReview.destroy();
       destroyed = true;
       if (timer !== null && typeof clearInterval === 'function') clearInterval(timer);
       clearRibbonRevealTimer();

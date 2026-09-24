@@ -1,233 +1,86 @@
 # Post-process Cards Runtime Boundary
 
-**Status:** V1 implementation boundary
-**Approved design:** [Post-process Cards Design](../superpowers/specs/2026-07-18-recursion-post-process-cards-design.md)
-**Implementation plan:** [Post-process Cards Implementation Plan](../superpowers/plans/2026-07-18-recursion-post-process-cards.md)
+**Status:** Current implementation contract; verification evidence is recorded separately.
+**Approved design:** [Post-process Writer and Revision Review](../superpowers/specs/2026-09-23-post-process-writer-review-design.md)
 
-The dated design remains the product origin, but its fixed two-attempt and
-ephemeral-intermediate claims are superseded by this runtime boundary and the
-[resumable execution design](../superpowers/specs/2026-07-29-recursion-resumable-pipeline-execution-design.md).
+Post-process Cards are independent from the Pre-process evidence deck. They edit a completed assistant response; they do not continue the story or replace the primary generation route. This contract supersedes the earlier native-only writer and final-draft-only retention descriptions.
 
-## Supersession Boundary
+## Frozen evidence and guidance
 
-Post-process Cards replace the old Generation Review, Enhancements, Dialogue
-Enhancement, Prose Enhancement, and Editorial Transformation feature family.
-They are not a renamed setting or an adapter over that runtime.  Recursion is
-pre-alpha: the replacement uses one V1 contract and does not migrate old
-Enhancement settings, modes, markers, prompt keys, provider roles, or UI
-selectors.
+An operation captures chat, message, selected swipe, source hash, active character/group, originating turn, complete original draft, ordered runnable cards, scope, style, writer configuration, and supporting evidence. Evidence includes the latest user message, selected recent visible messages, character context, applicable Pre-process packet, and story form.
 
-The existing Card system becomes **Pre-process Cards**.  Its deck model,
-selection, and prompt packet remain independent from Post-process Decks.  An
-operation uses a frozen Post-process deck snapshot; changing either deck or
-settings while it runs affects the next operation only.
+`postProcess.contextMessages` defaults to 13 and ranges from 0 to 35. It bounds Recursion's evidence window. A profile writer receives this editing context; a native writer also retains native host context. Supporting evidence is budgeted as complete fields/messages with omission metadata. Never shorten the writable draft or slice a serialized JSON document to fit.
 
-## Evidence and Writer Boundary
+Utility synthesizes guidance at Low/Medium; Reasoner does so at High/Ultra. This lane remains fixed for the operation. Guidance returns exactly `{ "guidanceText": "..." }`, with a nonempty string of at most 6000 characters, and never revised prose. The runtime envelope binds `recursion.postProcessGuidance.v1`, `snapshotHash`, and `sourceHash` locally. Guidance routing and certification are separate from prose writing.
 
-At the point the original assistant response has fully landed, Recursion
-captures an immutable operation snapshot: chat/source/swipe identity and hash,
-original draft, reasoning level and assigned lane, apply mode, rewrite flow,
-ordered runnable Post-process categories, and bounded supporting evidence.
-Supporting evidence contains the latest user message, bounded prior messages,
-character context, the Pre-process prompt packet, and story form.
+## Writer ownership
 
-`postProcess.contextMessages` bounds only this Recursion evidence.  It never
-limits, recreates, or substitutes for the writer's context.
-
-Utility or Reasoner synthesizes concise structured guidance from the frozen
-evidence, current writable draft, and selected cards.  It returns
-exactly `{ "guidanceText": "..." }`, never revised prose. The request includes
-this complete contract in its prompt so Prompt JSON and native JSON modes use
-the same shape. Guidance must be a nonempty string of at most 6000 characters;
-oversized or wrong-type output is rejected, never silently shortened. The
-normalizer binds `schema: "recursion.postProcessGuidance.v1"`, `snapshotHash`,
-and `sourceHash` locally from the frozen request for the internal runtime envelope.
-Supporting evidence is budgeted as whole fields and whole prior messages with
-explicit omission metadata; the current writable draft is included in full.
-Lane assignment is
-frozen for the operation: Low/Medium use `postProcessGuidanceUtility` on
-Utility; High/Ultra use `postProcessGuidanceReasoner` on Reasoner.
-
-SillyTavern is the sole prose writer.  Recursion installs a transient
-Post-process system packet and calls the native host path:
+`postProcess.writer` contains:
 
 ```js
-await context.generate("quiet", {
-  automatic_trigger: true,
-  quiet_prompt: writerDirective,
-  quietToLoud: true,
-  signal
-});
+{
+  mode: 'native', // or 'profile'
+  connectionProfileId: '',
+  maxOutputTokens: null,
+  samplerMode: 'profile', // or 'override'
+  samplerOverrides: { temperature: 0.7, topP: 1 }
+}
 ```
 
-That quiet generation retains the user's active preset, character, lore, World
-Info, Author's Note, host-managed context, token budget, and active host model.
-It returns text before `saveReply`, so it does not itself create or replace a
-chat message.  Recursion must not use `generateRaw`, `generateQuietPrompt`,
-`host.generation.generate`, a connection profile, Utility, or Reasoner as the
-prose writer.
+The native default installs a transient editing packet and calls `context.generate('quiet', { automatic_trigger: true, quiet_prompt: writerDirective, quietToLoud: true, signal })`. It retains the active host preset, model, sampling, and host-managed context. Returned text is settled separately through guarded host mutation.
 
-## Operation Sequences
+The profile route resolves a saved Connection Manager profile and dispatches request-local prose generation. It imports the selected profile's sampling and required completion formatting, not a full narrative preset that asks for continuation. It must not mutate the active main connection or fall back to another writer. It sends no JSON schema, requests no JSON repair, and does not require Utility/Reasoner certification.
 
-### Unified
+The output budget inherits the selected saved profile preset when present; otherwise the user must provide an integer from 256 to 65536. Optional temperature (0..2) and top-p (0..1) overrides are request-local. Invalid edits fail before persistence. Persisted settings normalize to the current shape.
 
-![Unified Post-process flow from enabled revision cards through one guidance synthesis, one native host rewrite, and one final commit](../../assets/documentation/renders/recursion-post-process-unified-flow.png)
+Profile writing receives the full draft, ordered cards, validated guidance, scope/style, and bounded supporting evidence. It does not promise native World Info or Author's Note equivalence. Known context-limit failures are reported without cutting required input. The selected provider remains responsible for limits that cannot be checked reliably with its tokenizer.
 
-```text
-ordered runnable categories/cards
-  -> one same-lane guidance model stage
-  -> one native quiet host rewrite model stage
-  -> one final commit
-```
+Resolve effective model, output budget, samplers, and profile/preset fingerprint at operation creation. Later dispatches and reuse must validate the fingerprint and stop if configuration changed. Store safe labels and fingerprints, never secrets. Both writers use the same prose-result boundary: unchanged nonempty text is a successful no-op; empty, truncated, failed, and canceled results are not accepted revisions.
 
-All runnable categories and cards are supplied in deck order.  With no runnable
-cards, there is no provider or host call.  The host rewrite receives the
-original draft, the ordered cards, synthesized guidance, and immutable writer
-boundaries; it returns only the revised assistant response.
+## Editing scope, style, and precedence
 
-### Progressive
+Settings add `editingScope: 'polish' | 'revise'` (default Polish) and `reviewBeforeApplying: boolean` (default false). Deck settings version 4 adds `styleBrief` and `styleSample`. Limits are 2000 and 6000 characters. Empty text is valid; oversize editing/import input is rejected without truncation. Copy, save, rename, import, and export preserve the fields. The bundled deck has empty read-only style fields; copy it before editing.
 
-![Progressive Post-process flow carrying each successful category rewrite forward while preserving frozen evidence](../../assets/documentation/renders/recursion-post-process-progressive-flow.png)
+Guidance and prose writing both receive this order of precedence:
 
-```text
-frozen evidence + original draft + category 1
-  -> guidance -> quiet rewrite -> latest valid draft
+1. Preserve narrative events, outcomes, user agency, consent, and character knowledge.
+2. Obey the selected editing scope.
+3. Apply enabled cards in deck order.
+4. Apply the brief and use the sample only for style.
 
-frozen evidence + latest valid draft + category 2
-  -> guidance -> quiet rewrite -> latest valid draft
+Polish improves narration phrasing, rhythm, readability, and local paragraph structure while preserving spoken dialogue wording. Attribution and punctuation may be corrected. Revise permits restructuring and dialogue rephrasing while preserving intent, established voice, events, outcomes, tense, and viewpoint. Neither scope permits new actions, decisions, revelations, attraction, boundaries, or endings.
 
-latest valid draft -> one final commit
-```
+Follow Through can clarify an action already performed in the draft. It cannot complete an action left unperformed. Character facts do not grant unacquired knowledge. The sample supplies rhythm and texture only: its names, facts, plot, commands, and distinctive phrases are not content to import. Comparison remains necessary for judging meaning; these prompts do not prove semantic preservation.
 
-Each category receives unchanged frozen evidence and only its enabled cards.
-After a successful category, its host result is the writable draft for the next
-category; the original draft is not reintroduced. Progressive is per category,
-not per card. Guidance and drafts are isolated durable artifacts while the
-operation is resumable, then intermediate artifacts are deleted after commit.
+## Unified and Progressive
 
-## Retries, Failure, and Cancellation
+Unified is recommended: frozen original -> combined ordered guidance -> selected writer -> candidate -> review or commit.
 
-Guidance and native quiet rewrite are model stages. Each receives the configured
-`Attempts per step` total window, from one through five, and preserves its frozen
-role/lane or identical host packet across attempts. There is no cross-lane
-fallback. An accepted guidance checkpoint is reused while its rewrite stage
-retries or resumes; guidance is not synthesized again. Empty and invalid host
-results can consume another attempt. Unchanged nonempty output is successful:
-processing continues to the next category, or finishes without a chat mutation
-when the final draft equals the source. Returned provider errors retain their
-classification; authentication failures, refusals, and cancellation do not
-become retryable empty-output errors.
+Progressive runs guidance and writing once per runnable category, in order. Each successful draft becomes the next category's writable draft, while supporting evidence remains frozen. The writer is the same for every category. With no runnable cards there is no model work, even if the deck has style text.
 
-Exhausting Unified leaves the original unchanged and pauses at the blocking
-stage for explicit Retry. Durable Progressive processing likewise pauses at its
-blocking failed category and preserves earlier accepted drafts.
+Accepted guidance and drafts are checkpointed. A writer retry can reuse matching guidance; it does not automatically repeat successful analysis. Failed durable stages pause at their recoverable frontier. Stop aborts active calls and prevents late results from mutating chat; recovery uses fresh cancellation ownership. Internal writer and revision-selection events must not recursively arm another Post-process operation.
 
-Post-processing shares two additional model dispatches across the operation,
-beyond the first dispatch of each stage. Resume preserves the spent allowance;
-explicit Retry starts a new recovery window. The existing operation deadline
-(default 300 seconds of active execution) also covers post-processing. A native
-quiet rewrite has a 180-second deadline and an owned abort signal. A host that
-ignores abort cannot keep the Recursion call pending indefinitely or commit a
-late result. Old writer cleanup cannot clear a newer writer's transient prompt.
+`Attempts per step` and operation recovery/deadline policies still apply to model work. Waiting for review is not an active model call and must release generation controls rather than consume a generation deadline.
 
-The operation is stale, and therefore cannot commit, when chat, source message,
-selected swipe, source hash, active character, or active group changes. The
-unified Stop action aborts the active guidance request or quiet generation,
-checkpoints the paused frontier, and preserves completed guidance and drafts for
-Resume. Resume and Retry acquire fresh cancellation ownership while old work
-retains its aborted signal; Stop also applies during resume activation.
+## Comparison and settlement
 
-Before Resume or Retry, current source identity, supporting evidence, selected
-provider configuration/profile, native writer settings/preset contents, and
-revision deck are fingerprinted again. Changed inputs mark the operation stale;
-frozen artifacts are not reused against changed input. Only fingerprints of
-host settings are persisted, not their raw contents.
-While quiet generation runs, its internal host events belong to the active
-Post-process operation: they cannot arm or recurse into another operation.
-Host controls stay locked, normal Pre-process cleanup settles safely, and the
-transient prompt key is cleared in `finally`.
+Persist the original and candidate before application. `Review before applying` leaves the host response unchanged and exposes a pending review. Otherwise the completed candidate uses the selected As Swipe or Replace mode. As Swipe appends/selects the revision; Replace updates the verified current target. Partial-result settlement, where supported, uses As Swipe rather than Replace.
 
-Control ownership begins before guidance synthesis, not only when the quiet
-writer starts. SillyTavern's native `#mes_stop` therefore remains visible for
-guidance attempts, native rewrite attempts, source validation, and final
-commit. Its native `GENERATION_STOPPED` event is the authoritative cancellation
-input for both Recursion provider work and the host writer.
-If native control acquisition fails, Post-process cancels before guidance and
-performs one best-effort unlock. Switching Post-process Off after a generation
-was queued for Post-process also cancels before control acquisition. Terminal
-progress settles any running pixel blocks.
+Each comparison binds an immutable original identity separately from the currently writable target identity. Every mutation rechecks chat, turn, message, swipe, text hash, character, and group. A Recursion marker alone does not authorize editing a changed target. Concurrent actions serialize, and revision-specific receipts plus host markers reconcile a mutation whose local receipt was lost.
 
-SillyTavern emits scalar `GENERATION_ENDED` with `chat.length`. Recursion
-normalizes that count to the current latest assistant identity before final
-target validation. Explicit object message ids are preserved. Valid,
-invalid, and duplicate terminal events all settle host-generation state;
-only one verified target may claim the queued Post-process operation.
+Review actions follow these contracts:
 
-## Final Output, Marker, and Privacy
+- **Use revision:** apply the candidate once through the guarded host commit path.
+- **Keep original:** discard a pending candidate without mutation, or restore the verified original from an owned applied result. As Swipe selects the original without deleting other swipes; Replace restores only while the target still matches the owned candidate.
+- **Edit revision:** save nonempty candidate text with a new hash/revision identity, then use the same guarded application path.
+- **Try another revision:** start from the immutable original, use current editing settings, and present the new candidate for review. The prior applied result remains until acceptance.
 
-Only the final result persists.  Unified success and fully successful
-Progressive runs commit once using the requested mode: **As Swipe** appends and
-selects exactly one distinct swipe; **Replace** updates the selected source in
-place without changing swipe count.  A partial Progressive result is always
-committed As Swipe, even when Replace was requested.  A stale, canceled,
-all-failed, empty, or exact-no-op operation creates no final mutation.
+Retry may reuse guidance only when source/evidence, scope, cards, style, guidance configuration, and prompt version match. Writer-only changes invalidate writer results while permitting matching guidance reuse. Progressive retry restarts the draft chain from the original; later guidance depends on the newly produced earlier draft. New turns or externally changed source/context invalidate retry eligibility.
 
-The final result stores one `recursion.postProcessMarker.v1` containing only
-structural evidence: operation/source/candidate hashes, deck id, flow, requested
-and committed modes, lane, partial state, and per-category status plus attempt
-counts.  It must not persist raw card prompts, guidance text, provider output,
-transcript excerpts, intermediate drafts, hidden reasoning, or provider
-secrets.  Generation-enabled proof likewise stores only safe metadata and no
-screenshots, traces, or raw text.
+## Retention and privacy
 
-Durable execution keeps Post-process bodies only in isolated artifact records.
-After the host-commit receipt is safely checkpointed, runtime deletes the frozen
-source artifact, guidance artifacts, and earlier Progressive drafts while
-retaining the final accepted draft and receipt. Resume checks the receipt and
-the source-bound host marker before mutation; if the commit is already present,
-`resume-commit-already-applied` completes without creating a duplicate swipe or
-replacement.
+Comparison records use `recursion.postProcessComparison.v1` and live in repository storage, separate from execution manifests, progress rows, normal diagnostics, and host message metadata. They retain original/candidate text, hashes, target binding, writer/scope metadata, state, retry inputs, and receipt. Retain at most ten completed comparisons per chat and protect pending review. Release retry-only evidence/guidance when stale or rejected; remove disposable Progressive intermediate drafts after settlement.
 
-## Dependency Classification
+Reset Turn Cache, chat cleanup, storage repair, and retention must recognize comparison records. Missing or expired originals yield an unavailable result; do not reconstruct text or offer unsafe restoration. Storage failure must preserve the host source, especially before Replace. Diagnostics contain safe structural metadata, not comparison prose, raw prompts, hidden reasoning, or secrets.
 
-The required dependency scan was classified before implementation.  The old
-feature-only runtime family is deleted with the old feature rather than
-preserved as compatibility: `generation-review.mjs`, `editorial-transform.mjs`,
-`dialogue-enhancement.mjs`, `prose-enhancement.mjs`,
-`enhancement-context.mjs`, `enhancement-metrics.mjs`, and their old roles,
-schemas, markers, progress rows, selectors, tests, proof scripts, and settings.
-
-`runtime.mjs`, `providers.mjs`, `settings.mjs`, `ui.mjs`,
-`extension/index.js`, and `hosts/sillytavern/host.mjs` contain mixed ownership.
-Their old Enhancement/Editorial branches are deleted and replaced by
-Post-process branches; their generic runtime, provider routing, settings, UI,
-event ownership, chat mutation, prompt lifecycle, and host adapter helpers are
-retained only after their non-Enhancement consumers remain proven by search and
-tests.  Generic structured-output recovery, source hashing, cancellation,
-activity/journal, and host message helpers are retained; they are not an old
-feature contract.
-
-The scan's historical documentation matches—including old Enhancement,
-Generation Review, Editorial Transformation, and Redirect designs/plans,
-release notes, operator manuals, technical manuals, provider specifications,
-and proof descriptions—are historical rather than current Post-process
-authority.  They are marked superseded from the documentation index until Task
-11 removes or rewrites their affected material.  Broad uses of words such as
-“repair” that describe JSON recovery or generic failure handling remain current
-when they have a non-Enhancement consumer.
-
-## Latency decision (2026-09-21)
-
-Unified processing retains one guidance call and one native rewrite. Progressive
-processing retains two dependent calls per category because each category edits
-the preceding result. Immediate savings come from avoiding no-op retries,
-stopping terminal provider failures promptly, reusing valid guidance on Resume,
-and bounding total recovery work. Existing stage timings and failure codes
-separate guidance, native rewriting, and commit work.
-
-A direct native rewrite from the authored cards would remove one round trip in
-Unified mode, but also remove the explicit guidance analysis boundary. This
-repair keeps the established editing behavior; switching to direct rewrite
-requires a representative quality comparison. No live latency or quality gain
-is claimed from offline verification. Utility reasoning remains disabled by its
-lane policy; the native writer retains the user's primary generation settings.
+The host marker remains `recursion.postProcessMarker.v1`. It identifies source/candidate/revision ownership and settlement without embedding original or revised bodies. Host mutation and local receipt persistence are separate boundaries; duplicate acceptance or reload must reconcile rather than append again.

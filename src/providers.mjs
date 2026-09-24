@@ -80,8 +80,8 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'postProcessGuidanceUtility',
   'providerTest'
 ]);
-export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer', 'postProcessGuidanceReasoner']);
-export const PROVIDER_CONTRACT_VERSION = 10;
+export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer', 'postProcessGuidanceReasoner', 'cardRefinementDraft', 'cardRefinementReview']);
+export const PROVIDER_CONTRACT_VERSION = 11;
 const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   utilityArbiter: 'recursion.utilityArbiter.v1',
   sceneFrameCard: 'recursion.cardPayload.v1',
@@ -107,6 +107,8 @@ const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   postProcessGuidanceUtility: POST_PROCESS_GUIDANCE_SCHEMA,
   reasonerComposer: 'recursion.reasonerComposer.v1',
   postProcessGuidanceReasoner: POST_PROCESS_GUIDANCE_SCHEMA,
+  cardRefinementDraft: 'recursion.cardRefinementDraft.v1',
+  cardRefinementReview: 'recursion.cardRefinementReview.v1',
   providerTest: 'recursion.providerTest.v1'
 });
 const SEGMENTED_CARD_ROLES = new Set(
@@ -498,6 +500,43 @@ function editorialVerificationChecksSchema(validEvidenceIds) {
 export function jsonSchemaForRequest(request = {}) {
   const schema = String(request?.responseSchema || '').trim();
   if (!schema) return null;
+  if (schema === 'recursion.cardRefinementDraft.v1' || schema === 'recursion.cardRefinementReview.v1') {
+    const draft = schema === 'recursion.cardRefinementDraft.v1';
+    const ids = uniqueRequestStrings(draft ? request.refinementCardIds : request.refinementTargetIds);
+    const evidenceRefs = {
+      type: 'array', minItems: 1, maxItems: 12, uniqueItems: true,
+      items: { type: 'string', enum: uniqueRequestStrings(request.validEvidenceRefs) }
+    };
+    const properties = draft ? {
+      cardId: { type: 'string', enum: ids },
+      promptText: { type: 'string', minLength: 1, maxLength: 6000 },
+      evidenceRefs
+    } : {
+      targetId: { type: 'string', enum: ids },
+      verdict: { enum: ['accept', 'revise'] },
+      findings: {
+        type: 'array', maxItems: 8,
+        items: {
+          type: 'object', properties: { message: { type: 'string', minLength: 1, maxLength: 1000 }, evidenceRefs },
+          required: ['message', 'evidenceRefs'], additionalProperties: false
+        }
+      }
+    };
+    return {
+      name: schemaSafeName(schema),
+      schema: {
+        type: 'object',
+        properties: {
+          schema: { const: schema }, snapshotHash: { const: String(request.snapshotHash || '') },
+          items: {
+            type: 'array', minItems: ids.length, maxItems: ids.length,
+            items: { type: 'object', properties, required: Object.keys(properties), additionalProperties: false }
+          }
+        },
+        required: ['schema', 'snapshotHash', 'items'], additionalProperties: false
+      }
+    };
+  }
   if (schema === 'recursion.guidanceComposer.v1') {
     const cardIds = uniqueRequestStrings(request.guidanceCardIds);
     const cardId = cardIds.length ? { enum: cardIds } : { type: 'string' };
@@ -2341,6 +2380,9 @@ export function createGenerationRouter({ client, activity = null, journal = null
       : activityStart(activity, startedActivityEvent);
     if (options.lockRunId !== true) runId = activityRunId || runId;
     lastDiagnostics = diagnosticsBase({ roleId, lane, request, runId, startedAt, timeoutMs: effectiveTimeoutMs });
+    if (Number.isInteger(options.stageAttempt) && options.stageAttempt >= 1 && options.stageAttempt <= 5) {
+      lastDiagnostics.stageAttempt = options.stageAttempt;
+    }
     const settleProviderActivity = (event) => {
       if (nestedActivityLifecycle) {
         activityStage(activity, {

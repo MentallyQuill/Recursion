@@ -1,4 +1,8 @@
+import strictAssert from 'node:assert/strict';
 import {
+  exportPostProcessDeck,
+  importPostProcessDeck,
+  updatePostProcessDeckStyle,
   POST_PROCESS_DECK_SETTINGS_VERSION,
   STARTER_POST_PROCESS_DECK_ID,
   createStarterPostProcessDeck,
@@ -30,7 +34,7 @@ import { assert, assertDeepEqual as deepEqual, assertEqual as equal } from '../.
 const now = '2026-07-18T00:00:00.000Z';
 const starter = createStarterPostProcessDeck({ now });
 
-equal(POST_PROCESS_DECK_SETTINGS_VERSION, 3, 'expanded starter deck uses the V3 Post-process deck contract');
+equal(POST_PROCESS_DECK_SETTINGS_VERSION, 4, 'style fields use the V4 Post-process deck contract');
 equal(starter.id, STARTER_POST_PROCESS_DECK_ID, 'starter id is stable');
 equal(starter.name, 'Starter Post-process Deck', 'starter name is approved');
 deepEqual(
@@ -260,4 +264,33 @@ const active = getActivePostProcessDeck({ ...settings, activeDeckId: customId })
 active.name = 'Mutated';
 assert(getActivePostProcessDeck({ ...settings, activeDeckId: customId }).name !== 'Mutated', 'custom deck reads are deeply cloned');
 
+equal(starter.styleBrief, '', 'bundled style brief is empty');
+equal(starter.styleSample, '', 'bundled style sample is empty');
+for (const card of Object.values(starter.cards).filter((entry) => entry.categoryId === 'follow-through')) {
+  assert(card.promptText.includes('cannot complete an action the draft leaves unperformed'), 'Follow Through never introduces an event');
+}
+const copiedStyleSettings = duplicatePostProcessDeck({}, STARTER_POST_PROCESS_DECK_ID, { now });
+const copiedStyleDeck = getActivePostProcessDeck(copiedStyleSettings, { now });
+const styledDeck = updatePostProcessDeckStyle(copiedStyleDeck, { styleBrief: ' Short sentences. ', styleSample: '  The rain fell.\n' }, { now });
+assert(!styledDeck.readonly, 'copied bundled deck allows style edits');
+equal(styledDeck.styleSample, '  The rain fell.\n', 'sample keeps exact whitespace');
+const importedStyles = importPostProcessDeck(copiedStyleSettings, exportPostProcessDeck(styledDeck), { now });
+const importedStyleDeck = getActivePostProcessDeck(importedStyles, { now });
+equal(importedStyleDeck.styleBrief, styledDeck.styleBrief, 'brief survives export/import');
+equal(importedStyleDeck.styleSample, styledDeck.styleSample, 'sample survives export/import');
+assert(importedStyleDeck.id !== copiedStyleDeck.id, 'import never overwrites existing deck');
+strictAssert.throws(() => updatePostProcessDeckStyle(starter, { styleBrief: 'change' }), /copy/i);
+strictAssert.throws(() => updatePostProcessDeckStyle(styledDeck, { styleBrief: 'b'.repeat(2001) }), /2000/);
+strictAssert.throws(() => importPostProcessDeck({}, JSON.stringify({ ...styledDeck, styleSample: 's'.repeat(6001) })), /6000/);
+equal(styledDeck.styleBrief, ' Short sentences. ', 'rejected edits leave source deck intact');
+const createdWithStyle = createCustomPostProcessDeck({}, { name: 'Styled', styleBrief: 'Brief', styleSample: 'Sample', now });
+equal(getActivePostProcessDeck(createdWithStyle).styleBrief, 'Brief', 'new custom deck accepts a style brief');
+equal(getActivePostProcessDeck(createdWithStyle).styleSample, 'Sample', 'new custom deck accepts a style sample');
+strictAssert.throws(() => createCustomPostProcessDeck({}, { styleBrief: 'b'.repeat(2001), now }), /2000/);
+const disabledStyleDeck = { ...styledDeck, cards: Object.fromEntries(Object.entries(styledDeck.cards).map(([id, card]) => [id, { ...card, enabled: false }])) };
+equal(orderedRunnablePostProcessCategories(disabledStyleDeck).length, 0, 'style alone never schedules processing');
+const savedStyleSettings = updateActivePostProcessDeckState(copiedStyleSettings, styledDeck, { now });
+const renamedStyleDeck = { ...getActivePostProcessDeck(savedStyleSettings), name: 'Renamed' };
+const renamedStyleSettings = updateActivePostProcessDeckState(savedStyleSettings, renamedStyleDeck, { now });
+equal(getActivePostProcessDeck(renamedStyleSettings).styleSample, styledDeck.styleSample, 'save and rename retain exact sample');
 console.log('[pass] post-process-decks');

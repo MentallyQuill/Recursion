@@ -1,6 +1,8 @@
 import { normalizeCardSelectionSettings, cooldownExclusions, selectCardCandidates } from './card-selection.mjs';
 import { createActivityReporter } from './activity.mjs';
+import { createCardRefinementStages, hasCardRefinement, REFINED_HAND_STAGE_ID } from './runtime/card-refinement-stages.mjs';
 import { failureFromError } from './failures.mjs';
+import { normalizeFusedRejections, fusedRejectionReason } from './fused-recovery.mjs';
 import {
   CARD_CATALOG,
   applyCardPlan,
@@ -137,15 +139,13 @@ import {
 const UTILITY_ARBITER_SCHEMA = 'recursion.utilityArbiter.v1';
 const PROVIDER_TEST_TIMEOUT_MS = 30000;
 const STORAGE_SCHEMA_VERSION = 1;
-const RUNTIME_CACHE_CONTRACT_VERSION = 3;
+const RUNTIME_CACHE_CONTRACT_VERSION = 5;
 const DEFAULT_CHAT_ID = 'chat';
 const DEFAULT_SCENE_KEY = 'scene';
 const INSTALL_FAILURE_LABEL = 'Prompt install failed. Narration stopped.';
 const CLEAR_FAILURE_LABEL = 'Prompt clear failed. Recursion skipped without clearing host prompt.';
 const STALE_INSTALL_LABEL = 'Recursion skipped: host turn changed before prompt install.';
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
-const SNAPSHOT_MESSAGE_TEXT_LIMIT = 1200;
-const PROVIDER_MESSAGE_TEXT_LIMIT = 900;
 const PLAN_ACTIONS = new Set(['skip', 'reuse-cache', 'refresh-cards', 'compose-brief']);
 const REASONER_DECISION_MODES = new Set(['use', 'skip']);
 const PROMPT_FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
@@ -223,6 +223,11 @@ function safeText(value, limit = 700) {
   return truncate(compact(safeTextSource(value, limit).replace(SECRET_TEXT_PATTERN, '[redacted]'), limit), limit);
 }
 
+// Story evidence must retain its ending. Bound the selected history, not each message.
+function safeMessageText(value) {
+  return safeTextSource(value, Infinity).replace(SECRET_TEXT_PATTERN, '[redacted]');
+}
+
 export function preserveFusedProviderFailure(providerResult = {}) {
   if (!providerResult || providerResult.ok !== false) return null;
   const source = providerResult?.diagnostics?.failure
@@ -262,13 +267,14 @@ export function validateFusedProviderResult(providerResult = {}, {
     ])
   );
   const selected = Array.isArray(selectedCards) ? selectedCards : [];
+  const rejections = normalizeFusedRejections(parsed.rejections);
   const outcomes = Object.fromEntries(selected.map((selectedCard) => {
     const family = safeText(selectedCard?.family || selectedCard?.role || '', 120);
     return [
       family,
       cards[family]
         ? { state: 'completed', reason: null }
-        : { state: 'failed', reason: 'invalid-card' }
+        : { state: 'failed', reason: rejections.find((entry) => entry.family === family)?.code || 'missing-family' }
     ];
   }));
   const acceptedFamilies = Object.keys(cards);
@@ -283,6 +289,7 @@ export function validateFusedProviderResult(providerResult = {}, {
         outcomes,
         acceptedFamilies,
         unresolvedFamilies,
+        rejections,
         fallback: unresolvedFamilies.length
           ? {
               mode: 'segmented',
@@ -295,6 +302,7 @@ export function validateFusedProviderResult(providerResult = {}, {
   }
   return {
     ok: false,
+    value: { cards, outcomes, acceptedFamilies, unresolvedFamilies, rejections },
     error: {
       code: 'RECURSION_FUSED_ZERO_USEFUL_CARDS',
       category: 'validation',
@@ -475,6 +483,7 @@ function cardEligibilitySignature(settings = {}) {
     activeDeckId: eligibility.activeDeckId,
     activeCardIds: [...eligibility.activeCardIds].sort(),
     priorityCardIds: [...eligibility.priorityCardIds].sort(),
+    refinementCardIds: [...(eligibility.refinementCardIds || [])].sort(),
     allowedFamilies: [...eligibility.allowedFamilies].sort()
   });
 }
@@ -487,9 +496,9 @@ export function cacheContractVersions(settings = {}) {
     promptPacketVersion: PROMPT_PACKET_VERSION,
     promptContractHash: hashJson({
       promptPacketVersion: PROMPT_PACKET_VERSION,
-      cardSelectionContract: 6,
+      cardSelectionContract: 8,
       guidanceSchema: PROMPT_GUIDANCE_SCHEMA,
-      guidanceContract: 2,
+      guidanceContract: 3,
       storyFormSchema: STORY_FORM_SCHEMA
     }),
     providerContractHash: PROVIDER_CONTRACT_HASH,
@@ -548,7 +557,7 @@ function normalizeMessage(message, index) {
     mesid,
     role,
     ...(sender ? { sender } : {}),
-    text: safeText(rawText, SNAPSHOT_MESSAGE_TEXT_LIMIT),
+    text: safeMessageText(rawText),
     textHash: hashJson(String(rawText ?? '')),
     ...(Number.isFinite(swipeId) ? { swipeId: Math.max(0, Math.round(swipeId)) } : {}),
     ...(Number.isFinite(swipeCount) ? { swipeCount: Math.max(0, Math.round(swipeCount)) } : {}),
@@ -602,7 +611,7 @@ function safeProviderRole(value) {
 function providerSafeMessage(message) {
   const source = asObject(message);
   if (source.visible === false) return null;
-  const text = safeText(source.text ?? '', PROVIDER_MESSAGE_TEXT_LIMIT);
+  const text = safeMessageText(source.text ?? '');
   if (!text) return null;
   return {
     mesid: numberOr(source.mesid, 0),
@@ -680,13 +689,13 @@ function normalizePendingUserMessage(userMessage) {
   if (typeof userMessage === 'string') {
     return {
       rawText: userMessage,
-      text: safeText(userMessage, PROVIDER_MESSAGE_TEXT_LIMIT),
+      text: safeMessageText(userMessage),
       textHash: hashJson(userMessage)
     };
   }
   const source = asObject(userMessage);
   const rawText = source.text ?? source.mes ?? '';
-  const text = safeText(rawText, PROVIDER_MESSAGE_TEXT_LIMIT);
+  const text = safeMessageText(rawText);
   const mesid = Number(source.mesid ?? source.id ?? source.messageId);
   return {
     rawText: String(rawText ?? ''),
@@ -709,7 +718,7 @@ function snapshotWithPendingUserMessage(snapshot, userMessage) {
   const alreadyVisible = latest?.role === 'user'
     && (
       (latest?.textHash && pending.textHash && latest.textHash === pending.textHash)
-      || safeText(latest?.text || '', PROVIDER_MESSAGE_TEXT_LIMIT) === pendingText
+      || safeMessageText(latest?.text || '') === pendingText
     )
     && (!Number.isFinite(pending.mesid) || numberOr(latest?.mesid, null) === pending.mesid);
   if (alreadyVisible) return snapshot;
@@ -749,7 +758,7 @@ function snapshotWithoutVisiblePendingUserMessage(snapshot, userMessage) {
   const matchesLatestPending = latest?.role === 'user'
     && (
       (latest?.textHash && pending.textHash && latest.textHash === pending.textHash)
-      || safeText(latest?.text || '', PROVIDER_MESSAGE_TEXT_LIMIT) === pendingText
+      || safeMessageText(latest?.text || '') === pendingText
     )
     && (!Number.isFinite(pending.mesid) || numberOr(latest?.mesid, null) === pending.mesid);
   if (!matchesLatestPending) return snapshot;
@@ -777,9 +786,7 @@ function localFallbackPlan(snapshot, settings) {
   const cardBudget = asObject(behaviorPolicy.cardBudget);
   const reasoningPolicy = reasoningPolicyForSettings(settings);
   const promptFootprint = normalizePromptFootprint(footprintPolicy.level, normalizePromptFootprint(settings.promptFootprint, 'normal'));
-  const fallbackMaxCards = reasoningPolicy.maxCardsFloor > 0
-    ? reasoningPolicy.maxCardsFloor
-    : (reasoningPolicy.maxCardsCap > 0 ? reasoningPolicy.maxCardsCap : DEFAULT_NORMAL_REASONING_MAX_CARDS);
+  const fallbackMaxCards = configuredCardTarget(reasoningPolicy);
   return {
     schema: UTILITY_ARBITER_SCHEMA,
     snapshotHash,
@@ -902,19 +909,16 @@ function reasoningPolicyPromptLine(settings) {
   return `Reasoning level policy: ${policy.prompt} Runtime-enforced card budgets: lowMinCards=${budget.minCards}; normalCards=${budget.normalCards}; ultraMaxCards=${budget.maxCards}. Runtime-enforced routing: composer=${policy.composer}; arbiterLane=${policy.arbiterLane}; cardLane=${policy.cardLane}.`;
 }
 
-function adjustedMaxCardsForPolicy(value, policy) {
-  const current = normalizeBudget(value, DEFAULT_NORMAL_REASONING_MAX_CARDS);
-  if (current <= 0) return current;
-  let next = current;
-  if (policy.maxCardsCap > 0) next = Math.min(next, policy.maxCardsCap);
-  if (policy.maxCardsFloor > 0) next = Math.max(next, policy.maxCardsFloor);
-  return next;
+function configuredCardTarget(policy) {
+  const budget = policy.cardBudget;
+  return policy.level === 'low' ? budget.minCards
+    : policy.level === 'ultra' ? budget.maxCards : budget.normalCards;
 }
 
 function applyReasoningPolicyToPlan(plan, settings) {
   const policy = reasoningPolicyForSettings(settings);
   const budgets = asObject(plan?.budgets);
-  const nextMaxCards = adjustedMaxCardsForPolicy(budgets.maxCards, policy);
+  const nextMaxCards = configuredCardTarget(policy);
   if (nextMaxCards === budgets.maxCards) return plan;
   return {
     ...plan,
@@ -1332,10 +1336,7 @@ function pendingUserInstallStillCurrent(expected, current, pendingUserMessage, o
     && numberOr(message?.mesid, 0) === expectedSignature.latestMesId
     && (
       (message?.textHash && pending.textHash && message.textHash === pending.textHash)
-      || (
-        String(pending.rawText || '').length <= SNAPSHOT_MESSAGE_TEXT_LIMIT
-        && String(message?.text ?? '') === String(pending.rawText || '')
-      )
+      || String(message?.text ?? '') === String(pending.rawText || '')
     );
   if (!latestMatches(expectedLatest) || !latestMatches(currentLatest)) return false;
   if (prefixContentMatches) return true;
@@ -1380,7 +1381,7 @@ function promptInstallComparisonDiagnostics(expected, current, pendingUserMessag
   const expectedLatest = latestVisibleMessage(expected);
   const currentLatest = latestVisibleMessage(current);
   const rawText = String(pending.rawText || '');
-  const rawTextComparable = rawText.length > 0 && rawText.length <= SNAPSHOT_MESSAGE_TEXT_LIMIT;
+  const rawTextComparable = rawText.length > 0;
   const latestDiagnostics = (message) => ({
     role: safeProviderRole(message?.role),
     mesid: numberOr(message?.mesid, -1),
@@ -1668,7 +1669,10 @@ function prioritySelectionForSettings(settings = {}) {
   if (settings?.mode === 'manual') {
     const forcedFamilies = runtimeScopePayload(settings).selectedFamilies || [];
     return {
-      forcedCardIds: activeCardDeckAuthoredCards(settings).map((card) => card.id),
+      forcedCardIds: [...new Set([
+        ...deckPriorityCardIds(getActiveCardDeck(settings), settings),
+        ...activeCardDeckAuthoredCards(settings).map((card) => card.id)
+      ])],
       forcedFamilies,
       diagnostics: forcedFamilies.length > 0 ? ['manual-card-scope-active'] : []
     };
@@ -1701,7 +1705,7 @@ export function cardSelectionSettingsForPlan(settings, plan) {
   for (const job of plan.cardJobs || []) {
     const requested = Array.isArray(job.sourceCardIds) ? new Set(job.sourceCardIds) : null;
     for (const card of sources[job.family] || []) {
-      if (!requested || requested.has(card.id) || card.selectionState === 'priority') allowed.add(card.id);
+      if (!requested || requested.has(card.id) || ['priority', 'refinement'].includes(card.selectionState)) allowed.add(card.id);
     }
   }
   return { ...settings, cardSelectionExcludedIds: [...new Set([
@@ -1719,8 +1723,9 @@ export function reconcileAutoPriorityPlan(plan, settings, { seed = '', history =
   const mandatoryAuthored = priorityIds.filter((id) => !deck.cards[id].builtinFamily);
   const sources = activeCardDeckSourceCards(settings);
   const authored = new Map(activeCardDeckAuthoredCards(settings).map((card) => [card.id, card]));
+  const targetCount = configuredCardTarget(reasoningPolicyForSettings(settings));
   const maximum = limitCardJobsForHandBudget([], {
-    maxCards: budgetOr(plan.budgets?.maxCards, 6), behaviorPolicy: policy,
+    maxCards: targetCount, behaviorPolicy: policy,
     reservedCardSlots: mandatoryAuthored.length, forcedFamilies: families
   }).metadata.maxCards;
   const candidates = [];
@@ -1743,29 +1748,47 @@ export function reconcileAutoPriorityPlan(plan, settings, { seed = '', history =
     if (families.includes(family)) { if (!mandatoryJobs.has(family)) mandatoryJobs.set(family, candidate); }
     else candidates.push(candidate);
   }
+  // Complete the configured target from eligible sources without reviving cooldown exclusions.
+  // Only Arbiter-ranked alternatives participate in variety; completion is stable.
+  const rankedKeys = new Set(candidates.map((candidate) => candidate.key));
+  const eligibleJobs = filterCardJobsForRuntimeScope(CARD_CATALOG.map(({ family, role }) => ({ family, role })), settings).cardJobs;
+  const fillCandidates = [
+    ...eligibleJobs.filter((job) => !families.includes(job.family)).map((job) => ({
+      ...job, key: `family:${job.family}`, sourceCardIds: (sources[job.family] || []).map((card) => card.id),
+      reason: 'Fill the configured hand target from eligible deck families.'
+    })),
+    ...[...authored.values()].filter((card) => !prioritySet.has(card.id)).map((card) => ({
+      cardId: card.id, key: `card:${card.id}`, reason: 'Fill the configured hand target from eligible authored cards.'
+    }))
+  ].filter((candidate) => !rankedKeys.has(candidate.key));
   const selection = selectCardCandidates(candidates, {
     slots: Math.max(0, maximum - families.length),
     variety: normalizeCardSelectionSettings(settings.cardSelection).variety, seed
   });
+  const remainingSlots = Math.max(0, maximum - families.length - selection.selected.length);
+  selection.selected.push(...fillCandidates.slice(0, remainingSlots));
   const requiredJobs = families.map((family) => ({
     ...(mandatoryJobs.get(family) || { family, role: resolveCatalogForFamily(family).role,
       sourceCardIds: (sources[family] || []).filter((card) => prioritySet.has(card.id)).map((card) => card.id),
-      reason: 'Priority card selected by the user.' }), forcedBy: 'priority-selection'
+      reason: 'Mandatory card selected by the user.' }), forcedBy: 'priority-selection'
   }));
   const jobs = [...requiredJobs, ...selection.selected.filter((job) => !job.cardId)];
   const selectedAuthoredCardIds = [...mandatoryAuthored, ...selection.selected.filter((job) => job.cardId).map((job) => job.cardId)];
   const cleanJob = ({ key, ...job }) => job;
-  const missingRefreshJobs = plan.action === 'refresh-cards' && !(plan.cardJobs || []).length
-    && (Object.keys(sources).length > 0 || authored.size > 0);
+  const plannedCount = jobs.length + selectedAuthoredCardIds.length;
   return {
     ...plan,
-    action: jobs.length || missingRefreshJobs ? 'refresh-cards' : selectedAuthoredCardIds.length || plan.action === 'compose-brief' ? 'compose-brief' : 'skip',
+    budgets: { ...plan.budgets, maxCards: Math.max(targetCount, mandatoryAuthored.length + families.length) },
+    action: jobs.length ? 'refresh-cards' : selectedAuthoredCardIds.length || plan.action === 'compose-brief' ? 'compose-brief' : 'skip',
     cardJobs: jobs.map(cleanJob),
     selection: {
       ...plan.selection,
       source: plan.diagnostics?.includes('arbiter-model-plan') ? 'arbiter' : 'fallback',
       proposed: (plan.cardJobs || []).map(({ family, cardId, reason }) => ({ family: family || '', cardId: cardId || '', reason: reason || '' })),
       mandatoryCardIds: priorityIds, mandatoryFamilies: families,
+      targetCount, plannedCount, authoredCardIds: selectedAuthoredCardIds,
+      eligibleCount: eligibleJobs.length + authored.size,
+      shortfallReason: plannedCount < targetCount ? 'insufficient-eligible-cards' : '',
       authoredSlots: selectedAuthoredCardIds.length, selectedAuthoredCardIds,
       availableSlots: Math.max(0, maximum - families.length),
       selectionOrder: [...requiredJobs.map((job) => job.family), ...selection.selected.map((job) => job.cardId || job.family)],
@@ -1951,7 +1974,10 @@ function safeSettingsView(settings, capabilityResolver = providerCapability) {
       enabled: normalizedSettings.postProcess.enabled === true,
       applyMode: safeText(normalizedSettings.postProcess.applyMode, 40),
       rewriteFlow: safeText(normalizedSettings.postProcess.rewriteFlow, 40),
-      contextMessages: numberOr(normalizedSettings.postProcess.contextMessages, 13)
+      contextMessages: numberOr(normalizedSettings.postProcess.contextMessages, 13),
+      writer: normalizedSettings.postProcess.writer,
+      editingScope: normalizedSettings.postProcess.editingScope,
+      reviewBeforeApplying: normalizedSettings.postProcess.reviewBeforeApplying
     },
     postProcessDecks: normalizedSettings.postProcessDecks,
     injection: {
@@ -2158,8 +2184,8 @@ function runtimeError(error) {
 function localCards(snapshot) {
   const latest = latestVisibleMessage(snapshot);
   const latestUser = latestVisibleUserMessage(snapshot);
-  const latestText = safeText(latest?.text || '', 700);
-  const latestUserText = safeText(latestUser?.text || '', 700);
+  const latestText = safeMessageText(latest?.text || '');
+  const latestUserText = safeMessageText(latestUser?.text || '');
   const evidenceMesId = latest?.mesid ?? snapshot.latestMesId ?? 0;
   const userEvidenceMesId = latestUser?.mesid ?? evidenceMesId;
   const context = cardSourceContext(snapshot);
@@ -2281,8 +2307,8 @@ function arbiterCardJobContractLine() {
     'Card job contract:',
     '- To create or refresh a card, emit a cardJobs entry.',
     '- Order cardJobs by contribution to this specific next reply, most useful first. This order governs discretionary selection; catalog priority does not.',
-    '- Settings.selectionBudget gives mandatory cards and remaining discretionary slots after Priority reservations. Keep budgets.maxCards as the TOTAL hand budget, not remaining slots; choosing a smaller total reduces remaining slots further.',
-    '- Mandatory families are covered regardless of your choices. List ranked useful candidates, including up to four worthwhile alternatives beyond availableSlots; runtime fills only available slots. Fresh turns do not reuse previous-turn scene cards; same-turn swipes reuse the whole prepared packet without another Arbiter call.',
+    '- Settings.selectionBudget gives the runtime-owned TOTAL hand target, mandatory cards, and remaining discretionary slots after Priority and Refinement reservations. Set budgets.maxCards to that total; a smaller budget or skip action cannot lower the configured target.',
+    '- Mandatory families are covered regardless of your choices. List ranked useful candidates, including up to four worthwhile alternatives beyond availableSlots; runtime fills only available slots, completing shortages from currently eligible sources in stable order. Fresh turns do not reuse previous-turn scene cards; same-turn swipes reuse the whole prepared packet without another Arbiter call.',
     '- First identify what changed this turn, what the user is asking or attempting, and the remaining needs. For each candidate include need, a short reason naming its distinct contribution, and coverageKey identifying the need it covers. Shared coverageKey means redundant optional candidates. Optional jobs may specify sourceCardIds to narrow a family, or cardId for an authored card from Authored candidates. Omitted sourceCardIds means all currently eligible family sources. Never name excluded sources.',
     '- Give each selected family a short reason naming its distinct contribution. Avoid multiple cards repeating the same setting, posture, or restriction. No discretionary family is automatically required.',
     '- Prefer Knowledge, Character Motivation, or Relationship when interpretation, personal stakes, or trust is the unresolved work; prefer physical or consequence families when those are what the scene needs. Do not rotate cards merely for variety.',
@@ -2473,6 +2499,17 @@ export function createRecursionRuntime({
   generationRouter = null
 } = {}) {
   const runState = createRuntimeRunState();
+  const reviewSubscribers = new Set();
+  let reviewActionTail = Promise.resolve();
+  let reviewActionActive = false;
+  let reviewActionEpoch = 0;
+  let reviewMutationIdentity = null;
+  let comparisonChatKey = '';
+  function publishReviewChanged() {
+    for (const subscriber of reviewSubscribers) {
+      try { subscriber(); } catch { /* UI observers never own settlement. */ }
+    }
+  }
   const activeProviderOperations = new Map();
   const activeProviderTests = new Map();
   const baseGenerationRouter = generationRouter;
@@ -2622,7 +2659,8 @@ export function createRecursionRuntime({
       repository: storage,
       onQueuedReprocessChanged(intent) {
         queuedReprocessView = intent || null;
-      }
+      },
+      onReviewChanged: publishReviewChanged
     }
   });
 
@@ -3594,7 +3632,7 @@ export function createRecursionRuntime({
   async function resetTurnCache() {
     const runId = makeId('turn-reset');
     supersedeActiveRun();
-    postProcessRuntime.cancelPostProcess('reset-turn-cache');
+    cancelPostProcess('reset-turn-cache');
     const operationId = safeText(executionView?.operationId || '', 180);
     return trackRuntimeMutation(async () => {
       startRuntimeActivity({
@@ -3613,6 +3651,9 @@ export function createRecursionRuntime({
       }
       lastSnapshot = snapshot;
       const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 160) || DEFAULT_CHAT_ID;
+      const reviewIdentity = await host?.messages?.postProcessSourceIdentity?.();
+      await invalidatePostProcessComparisons({ chatKey, reason: 'reset-turn-cache', clear: true,
+        sourceMessageId: reviewIdentity?.messageId });
       const revoke = operationId
         ? await storage.revokeTurnExecution(chatKey, {
             operationId,
@@ -3763,7 +3804,7 @@ export function createRecursionRuntime({
     preserveLastBrief = false,
     clearSwipeRetry = true
   }) {
-    postProcessRuntime.cancelPostProcess(reason);
+    cancelPostProcess(reason);
     const runId = makeId(idPrefix);
     if (clearSwipeRetry) clearPendingLatestAssistantSwipeRetry();
     clearPendingFreshNextGeneration();
@@ -3802,6 +3843,7 @@ export function createRecursionRuntime({
   }
 
   async function handleChatChanged() {
+    await invalidatePostProcessComparisons({ chatKey: lastSnapshot?.chatKey || activeExecutionChatKey || comparisonChatKey, reason: 'chat-changed' });
     turnTiming.mark(turnTiming.snapshot()?.attemptId, 'invalidate', { reason: 'chat-changed' });
     return clearForHostEvent({
       idPrefix: 'chat-change',
@@ -3813,6 +3855,7 @@ export function createRecursionRuntime({
   }
 
   async function handleSourceChanged() {
+    await invalidatePostProcessComparisons({ reason: 'source-changed' });
     turnTiming.mark(turnTiming.snapshot()?.attemptId, 'invalidate', { reason: 'source-changed' });
     return clearForHostEvent({
       idPrefix: 'source-change',
@@ -3871,7 +3914,7 @@ export function createRecursionRuntime({
             }
           })
         : Promise.resolve(null);
-      postProcessRuntime.cancelPostProcess('host-generation-stopped');
+      cancelPostProcess('host-generation-stopped');
       const postProcessSettlement = postProcessRuntime.waitForPostProcessSettlement();
       const cancellation = cancelActiveProseEnhancement('prose-enhancement-canceled');
       await Promise.all([cancellation, stopJournal, postProcessSettlement, selectionSettlement]);
@@ -3919,6 +3962,14 @@ export function createRecursionRuntime({
       event: `turn.timing.${event}`, severity: 'info', summary: 'Turn latency measured.',
       runId: timing.attemptId, details: timing
     });
+  }
+
+  function handleHostGenerationMilestone(event, details = {}) {
+    if (details.dryRun || !runState.current().hostGenerationActive || postProcessRuntime.postProcessRunning()) return false;
+    if (event !== 'host-request-ready') return false;
+    const marked = turnTiming.mark(turnTiming.snapshot()?.attemptId, event, details);
+    if (marked) recordTurnTiming(event);
+    return marked;
   }
 
   function handleHostVisibleToken(text) {
@@ -5576,7 +5627,7 @@ export function createRecursionRuntime({
   async function stopGeneration(details = {}) {
     if (stopGenerationPromise) return stopGenerationPromise;
     const task = (async () => {
-      postProcessRuntime.cancelPostProcess('stop-generation');
+      cancelPostProcess('stop-generation');
       cancelPendingProseEnhancement('prose-enhancement-canceled');
       recursionStopRequest = {
         source: safeText(details.source || 'recursion-ui', 80),
@@ -6594,7 +6645,7 @@ export function createRecursionRuntime({
       pipelineMode: pipelineDecision?.effectiveMode || (settings.pipelineMode === 'fused' ? 'fused' : 'segmented'),
       promptVersions: {
         promptPacket: PROMPT_PACKET_VERSION,
-        preprocessGraph: 4
+        preprocessGraph: 6
       },
       providerContractHash: PROVIDER_CONTRACT_HASH,
       deckRevisionHash: activeDeckRevisionHash(settings),
@@ -6887,11 +6938,15 @@ export function createRecursionRuntime({
       storyForm: scopedPlan.storyForm || UNKNOWN_STORY_FORM
     };
     const requests = buildCardRequests(scopedPlan, requestContext)
-      .map((request) => applyReasoningLaneToCardRequest(
-        request,
-        context.settings,
-        runtimeProviderCapability
-      ));
+      .map((request) => {
+        const job = selectedCards.find((entry) => entry.family === request.metadata.family);
+        const rejection = normalizeFusedRejections([{ family: request.metadata.family, code: job?.fusedRejectionCode }])[0];
+        const corrected = rejection ? {
+          ...request,
+          prompt: `${request.prompt}\n\nRepair this family from the Fused bundle [${rejection.code}]: ${fusedRejectionReason(rejection.code)}\nReturn only this corrected card; accepted sibling cards are already preserved.`
+        } : request;
+        return applyReasoningLaneToCardRequest(corrected, context.settings, runtimeProviderCapability);
+      });
     const requestByKey = new Map();
     for (const request of requests) {
       for (const key of [request.metadata?.family, request.roleId]) {
@@ -7125,7 +7180,7 @@ export function createRecursionRuntime({
                 .map(sanitizeGeneratedCard),
               'generated'
             ));
-        const generatedCards = !reuseCacheOnly && !cacheCards.length && !providerCards.length
+        const generatedCards = !plan.selection && !reuseCacheOnly && !cacheCards.length && !providerCards.length
           ? filterScopedCards(cardsWithOrigin(
               localCards(snapshot).map(sanitizeGeneratedCard),
               'fallback'
@@ -7222,6 +7277,11 @@ export function createRecursionRuntime({
           handId: safeIdentifier(artifact?.handId || '', 'hand', 160),
           cardCount: artifact?.cards?.length || 0,
           omittedCount: artifact?.omitted?.length || 0,
+          authoredCount: (artifact?.cards || []).filter((card) => card.origin === 'authored').length,
+          generatedCount: (artifact?.cards || []).filter((card) => card.origin !== 'authored').length,
+          targetCount: artifact?.metadata?.selection?.targetCount ?? artifact?.metadata?.requestedMaxCards ?? 0,
+          shortfallCount: artifact?.metadata?.selection?.shortfallCount || 0,
+          shortfallReasons: artifact?.metadata?.selection?.shortfallReasons || [],
           authoredCards: (artifact?.cards || []).filter((card) => card.origin === 'authored').map((card) => ({
             id: safeIdentifier(card.id, 'card', 160),
             name: safeText(getActiveCardDeck(context.settings).cards[card.id]?.name || 'Authored card', 120),
@@ -7233,25 +7293,26 @@ export function createRecursionRuntime({
   }
 
   function durableGuidanceStage(context, plan) {
+    const handStageId = hasCardRefinement(context.settings) ? REFINED_HAND_STAGE_ID : 'preprocess.hand';
     return {
       id: 'preprocess.guidance',
       version: 4,
       kind: 'model',
       executable: true,
-      dependencies: ['preprocess.snapshot', 'preprocess.arbiter', 'preprocess.hand'],
+      dependencies: ['preprocess.snapshot', 'preprocess.arbiter', handStageId],
       checkpoint: 'durable',
       failurePolicy: 'blocking',
       buildInputFingerprint(_runtimeContext, dependencies) {
         return {
           snapshotHash: dependencies['preprocess.snapshot'].checkpoint.outputHash,
           planHash: dependencies['preprocess.arbiter'].checkpoint.outputHash,
-          handHash: dependencies['preprocess.hand'].checkpoint.outputHash,
+          handHash: dependencies[handStageId].checkpoint.outputHash,
           promptContractHash: context.provenance.promptContractHash
         };
       },
       buildRequest(_runtimeContext, dependencies) {
         return buildGuidanceStageRequest({
-          hand: dependencies['preprocess.hand'].artifact,
+          hand: dependencies[handStageId].artifact,
           snapshot: context.snapshot,
           settings: settingsForPlan(
             context.settings,
@@ -7263,7 +7324,7 @@ export function createRecursionRuntime({
           storyForm: plan.storyForm || UNKNOWN_STORY_FORM
         });
       },
-      async run({ request, signal }) {
+      async run({ request, signal, attempt }) {
         if (!generationRouter || typeof generationRouter.generate !== 'function') {
           return {
             ok: false,
@@ -7277,7 +7338,7 @@ export function createRecursionRuntime({
           const result = await generationRouter.generate(
             request.roleId,
             { ...request.request, signal },
-            { runId: context.runId, signal }
+            { runId: context.runId, signal, stageAttempt: attempt }
           );
           return { ...result, guidanceLane: request.request.lane };
         } catch (error) {
@@ -7305,7 +7366,7 @@ export function createRecursionRuntime({
           return { ok: false, error: { ...result.error, kind: 'transport' } };
         }
         const validation = validateGuidanceStageResult(result, {
-          hand: validationContext.dependencies?.['preprocess.hand']?.artifact,
+          hand: validationContext.dependencies?.[handStageId]?.artifact,
           snapshot: context.snapshot
         });
         if (validation.ok === true) return {
@@ -7335,6 +7396,7 @@ export function createRecursionRuntime({
   }
 
   function durablePacketStage(context, plan) {
+    const handStageId = hasCardRefinement(context.settings) ? REFINED_HAND_STAGE_ID : 'preprocess.hand';
     return {
       id: 'preprocess.packet',
       version: 1,
@@ -7343,14 +7405,14 @@ export function createRecursionRuntime({
       dependencies: [
         'preprocess.snapshot',
         'preprocess.arbiter',
-        'preprocess.hand',
+        handStageId,
         'preprocess.guidance'
       ],
       checkpoint: 'durable',
       failurePolicy: 'blocking',
       buildInputFingerprint(_runtimeContext, dependencies) {
         return {
-          handHash: dependencies['preprocess.hand'].checkpoint.outputHash,
+          handHash: dependencies[handStageId].checkpoint.outputHash,
           guidanceHash: dependencies['preprocess.guidance'].checkpoint.outputHash,
           promptContractHash: context.provenance.promptContractHash
         };
@@ -7362,7 +7424,7 @@ export function createRecursionRuntime({
           reasonerUse: 'off'
         };
         const packet = await composePromptPacket({
-          hand: dependencies['preprocess.hand'].artifact,
+          hand: dependencies[handStageId].artifact,
           snapshot: context.snapshot,
           settings: effectiveSettings,
           behaviorPolicy: runPolicyForEffectivePlan(context.settings, plan),
@@ -7381,6 +7443,8 @@ export function createRecursionRuntime({
           pipelineMode: context.effectivePipelineMode,
           diagnostics: {
             ...packet.diagnostics,
+            ...(dependencies[handStageId].artifact.metadata?.refinement
+              ? { refinement: dependencies[handStageId].artifact.metadata.refinement } : {}),
             composerLane: guidance.lane || 'utility',
             reasonerStatus: guidance.lane === 'reasoner'
               ? (guidance.status === 'used' ? 'used' : 'fallback')
@@ -7530,7 +7594,9 @@ export function createRecursionRuntime({
         : []
     );
     return (Array.isArray(plan?.cardJobs) ? plan.cardJobs : [])
-      .filter((job) => unresolved.has(safeText(job?.family || job?.role || '', 120)));
+      .filter((job) => unresolved.has(safeText(job?.family || job?.role || '', 120)))
+      .map((job) => ({ ...job, fusedRejectionCode: normalizeFusedRejections(fusedArtifact?.rejections)
+        .find((entry) => entry.family === job.family)?.code || 'invalid-card' }));
   }
 
   function durableCardStageSet(context, plan, {
@@ -7582,6 +7648,14 @@ export function createRecursionRuntime({
 
   function durableFullGraph(context, plan, options = {}) {
     const cardSet = durableCardStageSet(context, plan, options);
+    const refinementStages = createCardRefinementStages({
+      settings: context.settings,
+      snapshot: providerSafeSnapshot(context.snapshot, context.settings.retention),
+      snapshotHash: plan.snapshotHash || hashJson(context.snapshot),
+      generate: (roleId, request, options) => generationRouter.generate(roleId, request, {
+        ...options, runId: context.runId
+      })
+    });
     return createDurableExecutionGraph(context, {
       stages: [
         durableSnapshotStage(context),
@@ -7589,6 +7663,7 @@ export function createRecursionRuntime({
         ...cardSet.stages,
         durableDeckStage(context, plan, cardSet.resultStageIds),
         durableHandStage(context, plan),
+        ...refinementStages,
         durableGuidanceStage(context, plan),
         durablePacketStage(context, plan),
         durableInstallStage(context, plan)
@@ -7792,7 +7867,7 @@ export function createRecursionRuntime({
       installSettlement
     ] = await Promise.all([
       loadExecutionArtifact(manifest, 'preprocess.packet'),
-      loadExecutionArtifact(manifest, 'preprocess.hand'),
+      loadExecutionArtifact(manifest, hasCardRefinement(context.settings) ? REFINED_HAND_STAGE_ID : 'preprocess.hand'),
       loadExecutionArtifact(manifest, 'preprocess.install')
     ]);
     if (!packet || !hand) {
@@ -8026,7 +8101,7 @@ export function createRecursionRuntime({
   } = {}) {
     const [packet, hand] = await Promise.all([
       loadExecutionArtifact(manifest, 'preprocess.packet'),
-      loadExecutionArtifact(manifest, 'preprocess.hand')
+      loadExecutionArtifact(manifest, hasCardRefinement(context.settings) ? REFINED_HAND_STAGE_ID : 'preprocess.hand')
     ]);
     if (!packet || !hand || !plan) return null;
     const candidate = createPreparedGenerationCandidate(
@@ -8164,7 +8239,7 @@ export function createRecursionRuntime({
       const visibleUser = latestVisibleUserMessage(hostSnapshot);
       if (
         visibleUser
-        && safeText(visibleUser.text || '', PROVIDER_MESSAGE_TEXT_LIMIT) === pendingUserMessage.text
+        && safeMessageText(visibleUser.text || '') === pendingUserMessage.text
       ) {
         pendingUserMessage = normalizePendingUserMessage({
           text: pendingUserMessage.rawText,
@@ -8434,6 +8509,7 @@ export function createRecursionRuntime({
   async function prepareForGeneration({ userMessage = '', refreshReason = '', hostGeneration = false, generationType = '' } = {}) {
     if (cardSelectionCompletionPromise) await cardSelectionCompletionPromise;
     pendingCardSelectionUsage = null;
+    if (hostGeneration) await invalidatePostProcessComparisons({ reason: 'new-host-generation' });
     const timingAttemptId = hostGeneration ? makeId('timing') : '';
     if (timingAttemptId) turnTiming.start(timingAttemptId);
     const settings = settingsStore.get();
@@ -8444,7 +8520,7 @@ export function createRecursionRuntime({
       await cancelActiveProseEnhancement(explicitSwipe ? 'latest-assistant-swipe' : 'new-host-generation');
     }
     if (hostGeneration === true && postProcessRuntime.postProcessRunning()) {
-      postProcessRuntime.cancelPostProcess(explicitSwipe ? 'latest-assistant-swipe' : 'new-host-generation');
+      cancelPostProcess(explicitSwipe ? 'latest-assistant-swipe' : 'new-host-generation');
       await postProcessRuntime.waitForPostProcessSettlement();
     }
     setHostGenerationActive(hostGeneration);
@@ -8483,7 +8559,7 @@ export function createRecursionRuntime({
           pendingProseEnhancement.cautionReported = true;
         }
       } else {
-        postProcessRuntime.cancelPostProcess('not-host-generation');
+        cancelPostProcess('not-host-generation');
         clearPendingProseEnhancement();
       }
       if (explicitSwipe && !runState.current().pendingLatestAssistantSwipeRetry) {
@@ -8545,7 +8621,7 @@ export function createRecursionRuntime({
           generationType: hostGenerationType || 'normal'
         });
       } else if (hostGeneration === true) {
-        postProcessRuntime.cancelPostProcess('preprocess-not-ready');
+        cancelPostProcess('preprocess-not-ready');
       }
       if (timingAttemptId && durableResult?.continuePrimaryGeneration !== false && durableResult?.ok === true) {
         turnTiming.mark(timingAttemptId, 'prepared', {
@@ -8558,7 +8634,7 @@ export function createRecursionRuntime({
       return durableResult;
     }
     if (settings.enabled === false) {
-      postProcessRuntime.cancelPostProcess('recursion-disabled');
+      cancelPostProcess('recursion-disabled');
       clearPendingProseEnhancement();
       clearPendingLatestAssistantSwipeRetry();
       clearPendingFreshNextGeneration();
@@ -8920,6 +8996,11 @@ export function createRecursionRuntime({
       'preprocess.cards.fused': 'Fused card bundle',
       'preprocess.deck': 'Updating scene deck',
       'preprocess.hand': 'Selecting turn hand',
+      'preprocess.refinement.prepare': 'Preparing card applications',
+      'preprocess.refinement.review': 'Reviewing cards',
+      'preprocess.refinement.revise': 'Revising cards',
+      'preprocess.refinement.verify': 'Checking revisions',
+      'preprocess.refinement.hand': 'Refined hand',
       'preprocess.guidance': 'Guidance',
       'preprocess.packet': 'Composing prompt packet',
       'preprocess.install': 'Installing Recursion prompt',
@@ -9189,7 +9270,74 @@ export function createRecursionRuntime({
     return { ok: true, queuedReprocess: next };
   }
 
+  function cancelPostProcess(reason) {
+    reviewActionEpoch++;
+    return postProcessRuntime.cancelPostProcess(reason);
+  }
+
+  async function postProcessComparisons() {
+    const identity = await host?.messages?.postProcessSourceIdentity?.();
+    comparisonChatKey = safeText(identity?.chatKey || lastSnapshot?.chatKey || comparisonChatKey || DEFAULT_CHAT_ID, 180);
+    return postProcessRuntime.postProcessComparisons();
+  }
+
+  async function invalidatePostProcessComparisons(options = {}) {
+    cancelPostProcess(options.reason || 'source-changed');
+    if (typeof host?.messages?.postProcessSourceIdentity !== 'function') return { ok: true, skipped: true };
+    const identity = options.chatKey ? null : await host.messages.postProcessSourceIdentity();
+    const chatKey = options.chatKey || identity?.chatKey || comparisonChatKey || lastSnapshot?.chatKey || DEFAULT_CHAT_ID;
+    const result = await postProcessRuntime.invalidatePostProcessComparisons({ ...options, chatKey });
+    publishReviewChanged();
+    return result;
+  }
+
+  function reviewPostProcess(input = {}) {
+    const requestedEpoch = reviewActionEpoch;
+    const canceled = () => ({ ok: false, reason: 'Review canceled because the source or generation changed.' });
+    const run = reviewActionTail.catch(() => {}).then(() => trackRuntimeMutation(async () => {
+      if (requestedEpoch !== reviewActionEpoch) return canceled();
+      if (runState.current().hostGenerationActive || postProcessRuntime.postProcessRunning()
+          || activeProseEnhancementPromise || durablePreparePromises.size > 0) {
+        return { ok: false, reason: 'Wait for the current generation to finish before reviewing a revision.' };
+      }
+      if (!['apply', 'keep', 'edit', 'retry'].includes(input.action)) return { ok: false, reason: 'Unknown review action.' };
+      reviewActionActive = true;
+      let attemptedLock = false;
+      try {
+        // Even candidate edits serialize with new host generation and source mutation.
+        if (input.action !== 'edit') {
+          if (typeof host?.generation?.lockControls !== 'function') return { ok: false, reason: 'Host generation controls are unavailable.' };
+          attemptedLock = true;
+          const locked = await host.generation.lockControls();
+          if (locked?.ok === false) return { ok: false, reason: 'Could not lock host generation controls.' };
+        }
+        if (requestedEpoch !== reviewActionEpoch) return canceled();
+        if (input.action === 'apply' || input.action === 'keep') {
+          const record = (await postProcessRuntime.postProcessComparisons()).find(entry => entry.id === input.id);
+          if (record) {
+            const source = record.originalSnapshot;
+            reviewMutationIdentity = input.action === 'keep'
+              ? { chatIdentityHash: source.chatIdentityHash, messageId: source.sourceMessageId, swipeId: source.sourceSwipeId,
+                originalHash: source.sourceHash, activeCharacterHash: source.activeCharacterHash, activeGroupHash: source.activeGroupHash }
+              : { ...record.targetIdentity, originalHash: record.candidateHash,
+                // A new swipe index is host allocated; its candidate hash is still exact.
+                swipeId: record.applyMode === 'as-swipe' ? null : record.targetIdentity.swipeId };
+          }
+        }
+        if (requestedEpoch !== reviewActionEpoch) return canceled();
+        return await postProcessRuntime.reviewPostProcess(input);
+      } finally {
+        try { if (attemptedLock) await host.generation.unlockControls?.(); }
+        finally { reviewActionActive = false; reviewMutationIdentity = null; publishReviewChanged(); }
+      }
+    }));
+    reviewActionTail = run;
+    return run;
+  }
+
   async function runPostProcessForLatestAssistant(details = {}) {
+    const comparisonIdentity = await host?.messages?.postProcessSourceIdentity?.();
+    comparisonChatKey = safeText(comparisonIdentity?.chatKey || lastSnapshot?.chatKey || comparisonChatKey || DEFAULT_CHAT_ID, 180);
     const rawResult = await postProcessRuntime.runPostProcessForLatestAssistant(details);
     const result = rawResult?.canceled === true && !rawResult.reason
       ? { ...rawResult, reason: 'canceled' }
@@ -9219,10 +9367,11 @@ export function createRecursionRuntime({
     async dispose() {
       await pauseOperation({ reason: 'runtime-disposed' });
       supersedeActiveRun();
-      postProcessRuntime.cancelPostProcess('runtime-disposed');
+      cancelPostProcess('runtime-disposed');
       clearPendingFreshNextGeneration();
       await waitForExternalMutations();
       clearPreparedGeneration();
+      reviewSubscribers.clear();
     },
     async refreshScene() {
       return prepareForGeneration({ refreshReason: 'user-refresh' });
@@ -9233,16 +9382,35 @@ export function createRecursionRuntime({
     handleHostGenerationStopped,
     handleHostGenerationEnded,
     completeCardSelectionTurn,
+    handleHostGenerationMilestone,
     handleHostVisibleToken,
     postProcessPending: postProcessRuntime.postProcessPending,
     postProcessRunning: postProcessRuntime.postProcessRunning,
     preparePostProcessTrigger: postProcessRuntime.preparePostProcessTrigger,
     runPostProcessForLatestAssistant,
-    cancelPostProcess: postProcessRuntime.cancelPostProcess,
+    cancelPostProcess,
     waitForPostProcessSettlement: postProcessRuntime.waitForPostProcessSettlement,
     postProcessFinalTargetReady: postProcessRuntime.postProcessFinalTargetReady,
     postProcessHostRunReady: postProcessRuntime.postProcessHostRunReady,
     postProcessDiagnostics: postProcessRuntime.postProcessDiagnostics,
+    postProcessComparisons,
+    reviewPostProcess,
+    invalidatePostProcessComparisons,
+    postProcessReviewRunning: () => reviewActionActive,
+    async postProcessReviewOwnsSourceMutation(details = {}) {
+      const expected = reviewMutationIdentity;
+      if (!expected || details.deleted) return false;
+      if (details.messageId != null && String(details.messageId) !== String(expected.messageId)) return false;
+      const actual = await host?.messages?.postProcessSourceIdentity?.();
+      return Boolean(actual && ['chatIdentityHash', 'messageId', 'originalHash', 'activeCharacterHash', 'activeGroupHash']
+        .every(key => String(actual[key] ?? '') === String(expected[key] ?? ''))
+        && (expected.swipeId == null || Number(actual.swipeId) === Number(expected.swipeId)));
+    },
+    subscribe(listener) {
+      if (typeof listener !== 'function') return () => {};
+      reviewSubscribers.add(listener);
+      return () => reviewSubscribers.delete(listener);
+    },
     enhanceLatestAssistantMessage,
     proseEnhancementPending,
     proseEnhancementRunning,

@@ -1,3 +1,4 @@
+import { hashJson, safeId } from '../core.mjs';
 import { createActivityReporter } from '../activity.mjs';
 import { createSillyTavernHost } from '../hosts/sillytavern/host.mjs';
 import { createGenerationRouter } from '../providers.mjs';
@@ -12,6 +13,7 @@ let hostEventUnsubscribers = [];
 let settingsBootstrapUnsubscribers = [];
 let settingsLoadEventObserved = false;
 let runtimeRestorePromise = null;
+let cleanupPostProcessMessageActions = null;
 
 export function installHostGenerationProbe(module = {}) {
   if (typeof module?.isGenerating !== 'function') return false;
@@ -123,6 +125,8 @@ function runtimePostProcessEnabled(nextRuntime) {
 }
 
 function destroyUi() {
+  cleanupPostProcessMessageActions?.();
+  cleanupPostProcessMessageActions = null;
   try {
     ui?.destroy?.();
   } catch {
@@ -293,10 +297,82 @@ function deferPostProcessFinalization(task) {
   }, 0);
 }
 
+export function installPostProcessMessageActions(nextRuntime, nextUi, { document = globalThis.document, contextProvider = getSillyTavernContextSafe } = {}) {
+  if (!document?.querySelectorAll || typeof nextRuntime?.postProcessComparisons !== 'function') return () => {};
+  let disposed = false, pending = false, refreshAgain = false, revision = 0;
+  const selector = '[data-recursion-message-review]';
+  async function refresh() {
+    if (disposed) return;
+    if (pending) { refreshAgain = true; return; }
+    pending = true;
+    const version = ++revision;
+    try {
+      const records = await nextRuntime.postProcessComparisons();
+      if (disposed || version !== revision) return;
+      const context = contextProvider();
+      for (const message of document.querySelectorAll('.mes[mesid]')) {
+        const messageId = message.getAttribute('mesid');
+        const raw = context.chat?.[Number(messageId)];
+        const swipeId = Number(raw?.swipe_id ?? 0);
+        const record = records.find(entry => String(entry.targetIdentity?.messageId) === String(messageId)
+          && Number(entry.targetIdentity?.swipeId ?? 0) === swipeId);
+        const existing = message.querySelector(selector);
+        if (!record) { existing?.remove(); continue; }
+        const targetIdentity = { ...record.targetIdentity };
+        const binding = JSON.stringify(targetIdentity);
+        const label = record.state === 'pending' ? 'Review revision' : 'Compare revision';
+        if (existing?.dataset.recursionMessageReview === binding) {
+          if (existing.getAttribute('aria-label') !== label) {
+            existing.setAttribute('aria-label', label); existing.setAttribute('title', label);
+          }
+          continue;
+        }
+        existing?.remove();
+        const actions = message.querySelector('.mes_buttons') || message.querySelector('.extraMesButtons');
+        if (!actions) continue;
+        const button = document.createElement('div');
+        button.className = 'mes_button fa-solid fa-code-compare interactable';
+        button.dataset.recursionMessageReview = binding;
+        button.setAttribute('role', 'button'); button.setAttribute('tabindex', '0');
+        button.setAttribute('title', label); button.setAttribute('aria-label', label);
+        const open = event => {
+          event.preventDefault(); event.stopPropagation();
+          Promise.resolve(nextUi.openPostProcessReview({ targetIdentity })).catch(error => warn('Open revision comparison failed.', error));
+        };
+        button.addEventListener('click', open);
+        button.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') open(event); });
+        actions.appendChild(button);
+      }
+    } catch (error) { warn('Refresh revision message actions failed.', error); }
+    finally {
+      pending = false;
+      if (refreshAgain && !disposed) { refreshAgain = false; queueMicrotask(() => { void refresh(); }); }
+    }
+  }
+  const unsubscribe = nextRuntime.subscribe?.(refresh);
+  const Observer = globalThis.MutationObserver;
+  const chat = document.querySelector?.('#chat');
+  const observer = Observer && chat ? new Observer(() => { void refresh(); }) : null;
+  observer?.observe(chat, { childList: true, subtree: true });
+  void refresh();
+  return () => {
+    disposed = true; revision++; unsubscribe?.(); observer?.disconnect();
+    for (const button of document.querySelectorAll(selector)) button.remove();
+  };
+}
+
 function registerHostEvents(nextRuntime, currentHost = host) {
   clearHostEventSubscriptions();
   const context = getSillyTavernContextSafe();
   const eventSource = context.eventSource || globalThis.eventSource;
+  // The payload type distinguishes native primary work from raw quiet calls.
+  // Untyped data-ready events cannot safely identify a generation. Never retain
+  // request bodies or claim that this pre-fetch event proves network dispatch.
+  registerRuntimeHostEvent(eventSource, context.event_types?.CHAT_COMPLETION_SETTINGS_READY || 'chat_completion_settings_ready', (data) => {
+    nextRuntime.handleHostGenerationMilestone?.('host-request-ready', {
+      source: 'chat-completion-settings-ready', generationType: data?.type
+    });
+  });
   let lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
   const refreshAssistantSignature = () => {
     lastAssistantIdentity = latestAssistantMessageIdentityFromHost(currentHost);
@@ -309,7 +385,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
       && nextAssistantIdentity === lastAssistantIdentity;
     lastAssistantIdentity = nextAssistantIdentity;
     runtime ||= nextRuntime;
-    if (postProcessOwnedChatMutation) {
+    if (postProcessOwnedChatMutation || await nextRuntime.postProcessReviewOwnsSourceMutation?.()) {
       return { ok: true, skipped: true, reason: 'post-process-owned-chat-mutation' };
     }
     nextRuntime.cancelPostProcess?.('chat-changed');
@@ -328,7 +404,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
     registerRuntimeHostEvent(eventSource, eventName, async (payload) => {
       const details = normalizeHostMessageEvent(currentHost, eventName, payload);
       runtime ||= nextRuntime;
-      if (postProcessOwnedSourceMutation(details, currentHost)) {
+      if (postProcessOwnedSourceMutation(details, currentHost) || await nextRuntime.postProcessReviewOwnsSourceMutation?.(details)) {
         return { ok: true, skipped: true, reason: 'post-process-owned-source-mutation' };
       }
       nextRuntime.cancelPostProcess?.(
@@ -337,6 +413,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
           : (details.swiped ? 'source-swiped' : 'source-edited')
       );
       if (details.swiped && details.latestAssistant) {
+        await nextRuntime.invalidatePostProcessComparisons?.({ reason: 'source-swiped' });
         refreshAssistantSignature();
         return invokeRuntimeCleanup('handleLatestAssistantSwipeRetry', 'Latest assistant swipe retry marker failed.', details);
       }
@@ -351,6 +428,25 @@ function registerHostEvents(nextRuntime, currentHost = host) {
         'restoreExecutionState',
         'Source execution restore failed.'
       );
+    });
+  }
+  const eventTypes = hostEventTypes(context);
+  if (eventTypes.MESSAGE_SENT) registerRuntimeHostEvent(eventSource, eventTypes.MESSAGE_SENT, async payload => {
+    const details = normalizeHostMessageEvent(currentHost, eventTypes.MESSAGE_SENT, payload);
+    const activeContext = getSillyTavernContextSafe();
+    const message = activeContext.chat?.[Number(details.messageId)] || activeContext.chat?.at?.(-1);
+    if (message?.is_user === true) await nextRuntime.invalidatePostProcessComparisons?.({ reason: 'new-user-message' });
+  });
+  for (const eventName of [eventTypes.CHAT_DELETED, eventTypes.GROUP_CHAT_DELETED].filter(Boolean)) {
+    registerRuntimeHostEvent(eventSource, eventName, async payload => {
+      const chatId = typeof payload?.chatId === 'string' ? payload.chatId
+        : typeof payload === 'string' ? payload : '';
+      if (chatId) {
+        await nextRuntime.invalidatePostProcessComparisons?.({ chatKey: safeId(chatId, 'chat'),
+          expectedChatIdentityHash: hashJson(chatId), reason: 'chat-deleted', clear: true });
+      } else if (typeof payload?.chatKey === 'string' && payload.chatKey) {
+        await nextRuntime.invalidatePostProcessComparisons?.({ chatKey: payload.chatKey, reason: 'chat-deleted', clear: true });
+      }
     });
   }
   for (const eventName of resolveAssistantStreamingEvents(context)) {
@@ -385,8 +481,7 @@ function registerHostEvents(nextRuntime, currentHost = host) {
         || String(details.eventName || '').toLowerCase() === 'generation_ended';
       if (
         finalGenerationEvent
-        && typeof nextRuntime.postProcessRunning === 'function'
-        && nextRuntime.postProcessRunning()
+        && (nextRuntime.postProcessRunning?.() || nextRuntime.postProcessReviewRunning?.())
       ) {
         return { ok: true, skipped: true, reason: 'post-process-owned-generation-ended' };
       }
@@ -506,7 +601,11 @@ export function createProviderJournal(storage, currentHost) {
             responseId: entry.responseId,
             schema: entry.schema,
             retryCount: entry.retryCount,
+            ...(Number.isInteger(entry.stageAttempt) && entry.stageAttempt >= 1 && entry.stageAttempt <= 5
+              ? { stageAttempt: entry.stageAttempt } : {}),
             structuredOutputRecovery: entry.structuredOutputRecovery,
+            ...(entry.semanticNormalization === 'guidance-request-envelope'
+              ? { semanticNormalization: entry.semanticNormalization } : {}),
             effectiveMaxTokens: entry.effectiveMaxTokens,
             finishReason: entry.finishReason,
             promptTokens: entry.promptTokens,
@@ -613,6 +712,8 @@ export function bootstrapRecursion() {
     host = nextHost;
     runtime = nextRuntime;
     ui = nextUi;
+    cleanupPostProcessMessageActions?.();
+    cleanupPostProcessMessageActions = installPostProcessMessageActions(nextRuntime, nextUi);
     publishLiveHarnessRuntime(nextRuntime);
     registerHostEvents(nextRuntime, nextHost);
     runtimeRestorePromise = Promise.resolve(nextRuntime.restoreExecutionState?.())

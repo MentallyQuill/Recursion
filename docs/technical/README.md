@@ -8,7 +8,7 @@ These manuals explain how Recursion works behind the SillyTavern UI. They are re
 | --- | --- |
 | [Recursion Technical Manual](RECURSION_TECHNICAL_MANUAL.md) | System overview, boundaries, resumable runtime spine, Segmented/Fused pipelines, component ownership, UI observability, fail-soft invariants, evidence, and non-goals. |
 | [Runtime Turn Sequence](RUNTIME_TURN_SEQUENCE.md) | Auto/Manual lifecycle, Segmented/Fused execution, independent Pre-process/Post-process phases, checkpoints, stage controls, injection, storage, and failure branches. |
-| [Post-process Cards Runtime](../architecture/POST_PROCESS_CARDS_RUNTIME.md) | Frozen post-generation evidence, guidance synthesis, native host rewriting, Unified/Progressive flow, retries, settlement, and privacy. |
+| [Post-process Cards Runtime](../architecture/POST_PROCESS_CARDS_RUNTIME.md) | Frozen post-generation evidence, guidance synthesis, native/profile writing, editing scope/style, Unified/Progressive flow, source-bound review, retry, retention, and privacy. |
 | [Card Deck And Hand](CARD_DECK_AND_HAND.md) | Fixed V1 card families, card contract, deck lifecycle, hand selection, invalidation, Character Motivation safety, and inspector visibility. |
 | [Prompt Packet And Injection](PROMPT_PACKET_AND_INJECTION.md) | Guidance, Card Evidence, Guardrails, composer inputs, Utility/Reasoner composition, budgets, omissions, injection lanes, cleanup, and privacy guardrails. |
 | [Model Calls And Provider Routing](MODEL_CALLS_AND_PROVIDER_ROUTING.md) | Utility and Reasoner Connection Profile lanes, independent generation policies, staged certification, structured-output recovery, per-profile queuing, stage budgets, retries, fallbacks, diagnostics, and aborts. |

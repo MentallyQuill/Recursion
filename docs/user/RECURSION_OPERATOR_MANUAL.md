@@ -56,9 +56,9 @@ The Pipeline control is a small icon-only dropdown immediately to the left of th
 
 Pre-process Cards and Post-process Cards sit together immediately to the right of Mode. Both use the stacked-card icon with a small inset arrow: left for work before generation and right for work after generation. Pre-process controls the evidence and guidance deck. Post-process controls an independent ordered rewrite deck and is grey when its top-level feature is Off.
 
-When Post-process is On, Recursion synthesizes contextual guidance from the enabled Post-process cards, then gives that guidance to SillyTavern's native quiet generation path so the active host preset and model remain the prose writer. `As Swipe` preserves the original and selects the final rewritten swipe; `Replace` withholds replacement until the operation completes successfully. Unified performs one combined guidance-and-rewrite operation. Progressive performs one operation per runnable category and continues from the last valid draft after a category failure.
+When Post-process is On, Recursion synthesizes contextual guidance from the enabled Post-process cards, then gives it to the selected writer: the current SillyTavern model by default, or a separate Connection Profile. `As Swipe` preserves the original and selects the final rewritten swipe; `Replace` withholds replacement until the operation completes successfully. Unified performs one combined guidance-and-rewrite operation. Progressive performs one operation per runnable category and continues from the last valid draft after a category failure.
 
-The progress menu shows `Post-processing response`, guidance synthesis, SillyTavern rewrite, category progress for Progressive, and final swipe or replacement. Green means complete, purple means cached or checkpointed, gray means skipped, amber means recovery or a committed partial Progressive result, and red identifies a failed category or Unified operation. A Unified failure leaves the original response selected. A partial Progressive result is committed As Swipe even when Replace was configured.
+The progress menu shows `Post-processing response`, guidance synthesis, writer revision, category progress for Progressive, and final swipe or replacement. Green means complete, purple means cached or checkpointed, gray means skipped, amber means recovery or a committed partial Progressive result, and red identifies a failed category or Unified operation. A Unified failure leaves the original response selected. A partial Progressive result is committed As Swipe even when Replace was configured.
 
 The Tense & PoV control sits in the compact left-side control cluster after Post-process Cards. Leave it on `Auto` for normal play. In Auto, the Utility Arbiter infers the active story form from the latest visible assistant narration first, using the pending user message only when no assistant narration exists. Use a forced option only when the Arbiter is clearly steering card evidence or guidance toward the wrong form. The menu uses two axes: Past or Present tense, then first person, second person, third-person limited, third-person omniscient, or mixed POV. A forced selection creates a high-confidence user story-form override for card prompts, guidance composition, checkpoint metadata, and Prompt Packet metadata; it does not rewrite the transcript, change SillyTavern character data, or add style coaching beyond the story-form contract.
 
@@ -153,9 +153,10 @@ Editable cards use one eye-state cycle:
 
 - `off`: excluded from scope and hand selection;
 - `active`: a normal candidate;
-- `priority`: selected ahead of normal active cards in Auto.
+- `priority`: selected ahead of normal active cards in Auto;
+- `refinement`: always included in both modes, with automatic scene-analysis review before narration.
 
-Auto cycles `off → active → priority → off`. Manual cycles `off → active → off`, because selected Manual families are already forced. The deck header open eye sets all runnable cards active and clears Priority; the slashed eye sets all runnable cards off. Draft cards are left unchanged. These state controls work on the Default Deck even though its content and organization are read-only.
+Auto cycles `off -> active -> priority -> refinement -> off`. Manual cycles `off -> active -> refinement -> off`, because selected Manual families are already forced. Refinement remains mandatory beyond the ordinary card cap. The deck header open eye sets all runnable cards active and clears Priority and Refinement; the slashed eye sets all runnable cards off. Draft cards are left unchanged. These state controls work on the Default Deck even though its content and organization are read-only.
 
 ### Decks and authored cards
 
@@ -171,13 +172,13 @@ Post-process Cards uses the same compact deck layout after generation. Its cards
 
 - `Off` / `On` controls the entire Post-process feature;
 - `As Swipe` / `Replace` chooses how the rewritten response is applied;
-- `Unified` / `Progressive` chooses one combined pass or sequential card passes;
+- `Unified` / `Progressive` chooses one combined pass or sequential category passes;
 - the open eye enables all runnable cards;
 - the slashed eye disables all runnable cards.
 
 Changing Apply, Flow, or the global feature state briefly reports the change in the main status line and mobile status drawer. The concise acknowledgements explain the selected behavior without creating a generation-progress row.
 
-The bundled Starter Post-process Deck is structurally read-only, but its card and bulk enabled states are editable. Duplicate it only to rename, add, remove, reorder, or rewrite deck content.
+The bundled Starter Post-process Deck is structurally read-only, but its card and bulk enabled states are editable. Duplicate it to rename, add, remove, reorder, rewrite deck content, or edit its style brief/example.
 
 On a fresh starter deck, the six cards under Natural Prose and Follow Through are On. `Strip False Weight`, `Earn the Attraction`, and `Ground the Deflection` are Off, leaving their optional Concrete Meaning and Character-Specific Relationships categories inactive. Categories have no On/Off control in either card phase. Turning on any child card automatically makes its category active; turning every child card Off makes it inactive. Concrete Meaning removes manufactured profundity by restoring concrete meaning, behavior, or consequence. Character-Specific Relationships repairs stock attraction and defensive scripts through established character, relationship, consent, and boundary evidence.
 
@@ -185,7 +186,7 @@ Editable Post-process decks use the same compact `Categories` plus row and the s
 
 ### Scope and caps
 
-Auto lets the Arbiter choose relevant cards from the active deck. Manual lets you select family rows directly and use sub-items as focus facets. `Min Cards` and `Max Cards` constrain the resulting hand; every runnable Priority card survives, in deck order, even when that exceeds the effective maximum. Ordinary cards use the remaining capacity. Strict whitelist settings keep unselected families out of planning and reuse.
+Auto lets the Arbiter choose relevant cards from the active deck. Manual lets you select family rows directly and use sub-items as focus facets. `Min Cards` and `Max Cards` constrain the resulting hand; every runnable Priority or Refinement card survives in Auto, in deck order, even when that exceeds the effective maximum. Ordinary cards use the remaining capacity. Strict whitelist settings keep unselected families out of planning and reuse.
 
 ### Inspecting the result
 
@@ -201,11 +202,27 @@ Last Brief shows the latest selected hand, card families, state/emphasis, concis
 
 Post-processing revises the completed assistant response according to the active Post-process Deck. It uses the frozen response, bounded visible context, generation-time Prompt Packet, ordered enabled categories, and ordered enabled cards.
 
-Recursion's Utility lane synthesizes guidance at Low and Medium; Reasoner does so at High and Ultra. That sidecar call does not write prose. SillyTavern's native quiet generation path receives the guidance and writes the revised response with the active host preset, character, lore, model, and normal context.
+Recursion's Utility lane synthesizes guidance at Low and Medium; Reasoner does so at High and Ultra. That sidecar call does not write prose. The selected prose writer receives the guidance. Current SillyTavern model uses native quiet generation with the active preset and normal host context. Connection Profile uses a separate saved profile without switching the main connection; it receives the full draft and bounded editing evidence, not the entire native prompt.
 
 Unified performs one guidance synthesis and one host rewrite for all runnable categories. Progressive performs one guidance synthesis and one host rewrite per runnable category in deck order. Accepted guidance and drafts are checkpointed. A failed Unified operation writes nothing. A failed Progressive category preserves the last valid draft and exposes contextual recovery. The final host commit uses an idempotent receipt so Resume cannot duplicate a swipe or replacement.
 
 Choose `As Swipe` to preserve the original and select the final rewritten swipe. Choose `Replace` to replace the selected assistant response only after complete success. A partial Progressive result always falls back to As Swipe so the original remains available. Intermediate Progressive drafts never enter chat persistence.
+
+### Writer, scope, and style
+
+Writer defaults to Current SillyTavern model. For a separate prose model, choose Connection Profile and select its saved profile. Advanced writer settings let you inherit its output limit or set 256..65536 tokens, and use profile sampling or explicit temperature/top-p. A missing profile or absent inherited output limit produces an actionable error rather than changing writers.
+
+Polish is the default: it improves narration while preserving spoken dialogue wording. Revise allows restructuring and dialogue rephrasing while preserving intent and events. Both preserve user agency, consent, character knowledge, tense, and viewpoint. Follow Through can tighten actions already in the draft, but cannot complete an action the draft leaves unperformed.
+
+Deck Style holds a brief (up to 2000 characters) and optional example (up to 6000). The sample guides rhythm and texture; its facts, names, commands, and distinctive phrases are not material to import. Oversized text is rejected. Duplicate the bundled deck to edit style; custom deck copies, saves, and JSON import/export preserve it. At least one card must be On for processing.
+
+### Review a revision
+
+Turn on Review before applying to hold the completed candidate for inspection. This setting is Off by default and is independent of As Swipe/Replace. The comparison viewer offers original/revised reading, highlighted changes, Keep original, Use revision, and Edit revision. Inspect meaning as well as wording: the editing rules are model instructions, not a guarantee that meaning cannot change.
+
+Use revision applies only to the still-matching source. Keep original discards pending work; for an applied owned revision it selects the original swipe or restores retained original text, provided the current target has not changed. Missing comparison data or a changed turn/source disables unsafe actions. Large revisions use coarser highlighting to keep the viewer responsive.
+
+Try another revision begins with the retained original, using current writer, scope, style, and cards, and returns the new candidate for review. A previous applied revision stays selected until you accept its replacement. Matching guidance may be reused for writer-only changes; changed editing inputs regenerate guidance. Retry is unavailable after the source or turn changes.
 
 ## Modes
 
@@ -294,7 +311,7 @@ Use Reprocess from here on the next swipe when one stage and its dependents need
 
 `Selection variety` defaults to **Low**. It keeps the strongest Auto choices and may replace just the last optional slot with another relevant Arbiter candidate. Off preserves ranking; Low has a 25% chance of a replacement from the next two alternatives, Medium a 50% chance from the next four, and High a 100% chance from all remaining relevant alternatives. With no useful alternative, the hand stays unchanged. This does not change provider temperature or add a model call.
 
-`Card cooldown (turns)` defaults to **0 (off)** and accepts whole numbers from 0 to 10. A value of 2 excludes a used source card during the next two completed response turns. Cooldown is strict: if too few cards remain eligible, Recursion uses a smaller or empty optional hand. Both controls apply only in Auto; Manual ignores them. Priority cards are always included in deck order and are exempt from both variety and cooldown.
+`Card cooldown (turns)` defaults to **0 (off)** and accepts whole numbers from 0 to 10. A value of 2 excludes a used source card during the next two completed response turns. Cooldown is strict: if too few cards remain eligible, Recursion uses a smaller or empty optional hand. Both controls apply only in Auto; Manual ignores them. Priority and Refinement cards are mandatory in Auto, included in deck order, and exempt from both variety and cooldown. Refinement also remains mandatory in Manual.
 
 Only completed assistant responses advance usage history; preparation, failed or stopped generation, retries and same-response swipes do not add turns. Selection is saved with the active chat branch, and same-turn resumes reuse the chosen hand. These controls auto-save in Play Behavior and Reset Defaults restores Low/0. Open the Full Viewer and inspect Card selection to see selected reasons, cooldown exclusions with turns remaining, and any variety replacement.
 
@@ -313,6 +330,10 @@ flowchart LR
 Default injection settings use Recursion's recommended concrete plan: `In Prompt`, `System`, depth `1`. Injection settings apply only to the composed final prompt packet after Utility or Reasoner composition. Users should not need to manage per-turn action, card families, relevance rules, or card-level prompt depths turn by turn.
 
 Context-window caps are local Recursion tuning controls. Lower Source Freshness Messages or Source Freshness Text Budget if a very long chat makes Recursion feel slow. Storage Retention controls only the bounded diagnostic journal. Generated work belongs to one exact turn and prior-turn artifacts are pruned automatically. None of these controls prune SillyTavern chat history.
+
+Selected chat messages retain their full text, including paragraph breaks and endings. Recursion does not apply an additional per-message character cutoff. Window budgets select whole messages; a smaller window includes less history rather than shortening every reply. The newest source message is retained whole even when it exceeds the source-window budget. Complete evidence may use more input tokens than older versions did.
+
+Generated cards and guidance must preserve completed actions and discoveries. Character reactions should respond to new information and practical precautions: an unanswered question about a threat's cause does not erase a reduction in its risk. Earlier fear or resistance does not require repeated escalation, and an update does not force calm, agreement, or trust.
 
 ![Advanced Context Windows and Storage Retention controls for source windows, provider analysis, and the run journal](../../assets/documentation/renders/recursion-operator-retention-settings.png)
 
@@ -443,7 +464,7 @@ Recursion storage is turn- and checkpoint-oriented. The runtime owns durable V2 
 - queued Reprocess from here, Reset Turn Cache, Clear Run Journal, and Export Diagnostics;
 - extension disable when Recursion should be fully inactive.
 
-Completed Pre-process operations retain only referenced reusable checkpoints. Completed Post-process operations retain only the final accepted rewrite and host-commit receipt. Stale operations keep bounded metadata but no artifact bodies; abandoned runs are fully pruned.
+Completed Pre-process operations retain only referenced reusable checkpoints. Completed Post-process execution retains the final accepted rewrite and host-commit receipt. Separate comparison records retain original/final text for up to ten completed comparisons per chat, with pending review protected; stale retry inputs are released. Comparison text is excluded from normal diagnostics. Stale operations keep bounded metadata but no artifact bodies; abandoned runs are fully pruned.
 
 These controls must touch only Recursion-owned settings, active-turn execution state, journals, prompt lanes, and diagnostics. They must not delete SillyTavern chats, character data, World Info, Memory Books, Summaryception data, VectFox data, or other extension records.
 
@@ -499,6 +520,6 @@ Export Diagnostics downloads a timestamped `recursion-diagnostics-*.json` file o
 
 ### Why these cards were selected
 
-Auto ranks ordinary cards by their distinct value to the current reply. Priority cards are mandatory; the remaining hand follows the Arbiter's order rather than a fixed preference for scene bookkeeping. Diagnostics show proposed families and reasons, mandatory cards, budget omissions, and the actual selected evidence. Repeated swipes can reuse the same prepared hand without a new Arbiter call.
+Auto ranks ordinary cards by their distinct value to the current reply. Priority and Refinement cards are mandatory; the remaining hand follows the Arbiter's order rather than a fixed preference for scene bookkeeping. Diagnostics show proposed families and reasons, mandatory cards, budget omissions, and the actual selected evidence. Repeated swipes can reuse the same prepared hand without a new Arbiter call.
 
 For a surprising claim, the stock cards support character-specific sense-making: clarifying what was meant, reacting to personal stakes, asking answerable questions, and taking proportionate action while still uncertain. They preserve real constraints without requiring a stalled confrontation or impossible proof. Existing custom card wording remains yours; copying the updated Default deck is separate from editing an existing custom deck.

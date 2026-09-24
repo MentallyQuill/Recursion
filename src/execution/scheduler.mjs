@@ -1146,7 +1146,8 @@ export function createExecutionScheduler({
       runtime.graph = graph || runtime.graph;
       runtime.context = context;
       runtime.provenance = expectedProvenance;
-      runtime.forcedStageIds = new Set([stageId]);
+      const retryFromStageId = stage.retryFromStageId || stageId;
+      runtime.forcedStageIds = new Set([retryFromStageId]);
       runtime.queuedStageIds = new Set();
       await queueMutation(runtime, (draft) => {
         draft.recoveryBudget = ['preprocess', 'postprocess'].includes(draft.phase) ? normalizeOperationBudget(null, {
@@ -1157,16 +1158,7 @@ export function createExecutionScheduler({
         draft.state = 'running';
         draft.pauseReason = '';
         draft.staleChangedFields = [];
-        draft.stageRecords[stageId] = {
-          ...draft.stageRecords[stageId],
-          state: 'pending',
-          checkpoint: null,
-          summary: null,
-          failure: null,
-          executionToken: null,
-          updatedAt: now()
-        };
-        for (const descendantId of runtime.graph.descendantIds(stageId)) {
+        for (const descendantId of [retryFromStageId, ...runtime.graph.descendantIds(retryFromStageId)]) {
           const descendant = draft.stageRecords[descendantId];
           if (!descendant) continue;
           draft.stageRecords[descendantId] = {

@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const browserDependentTests = new Set([
+  'test-ui-post-process-review-browser.mjs',
   'test-live-harness.mjs',
   'test-live-pipeline-proof.mjs'
 ]);

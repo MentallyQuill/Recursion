@@ -1,6 +1,6 @@
 # Provider And Generation Spec
 
-This document is the normative architecture for Recursion model calls. It applies to Utility, Reasoner, provider certification, Segmented card generation, Fused card generation, and model-backed Enhancement stages.
+This document is the normative architecture for Recursion model calls. It applies to Utility, Reasoner, provider certification, Segmented card generation, Fused card generation, and Post-process guidance and prose writing.
 
 Related documents:
 
@@ -25,6 +25,12 @@ Recursion does not own:
 SillyTavern owns those concerns. Recursion stores only a selected Connection Profile id and generation policy for each lane.
 
 A model stage cannot run unless its lane references a Connection Profile that SillyTavern exposes through the supported Connection Manager API. Missing or unsupported profile access is a configuration failure, not a retryable model failure.
+
+## Post-process Prose Writer
+
+Post-process writer selection is independent of Utility and Reasoner. The default current-model route uses native SillyTavern quiet generation. A selected Connection Profile uses request-local Connection Manager transport, profile sampling and required completion formatting. It returns prose with no JSON schema, JSON repair, or Utility/Reasoner certification requirement, and does not change the main connection. Missing or changed profiles fail visibly instead of switching writers.
+
+Profile output limits inherit the selected saved preset when available; otherwise an explicit integer from 256 to 65536 is required. Optional temperature (0..2) and top-p (0..1) overrides apply only to the writer request. The profile receives the complete writable draft, editing instructions, cards, guidance, and bounded supporting evidence; this does not promise native World Info or Author's Note equivalence. See [Post-process runtime](POST_PROCESS_CARDS_RUNTIME.md).
 
 ## Provider Lanes
 
@@ -358,11 +364,14 @@ Automatic attempts apply only to Recursion model stages. They do not retry Silly
 
 Fused validation is item-scoped.
 
+Fused request text includes the ID, name, selection state, and full sanitized instruction text of every selected source card, as individual-card requests do. Metadata alone does not count as model-visible inclusion. No new provider call is required for this contract.
+
 - Valid requested items are accepted and checkpointed.
 - Duplicate, unrequested, or invalid items are rejected independently.
 - Accepted families and unresolved families are explicit artifact fields.
 - When at least one item is useful, only unresolved families receive Segmented repair stages.
 - Accepted Fused cards are not regenerated.
+- Fused artifacts and stage summaries retain bounded `{ family, code }` rejections. The first individual repair request includes the family's fixed rejection explanation, without the rejected response text. A repaired sibling does not mutate the original bundle's acceptance history.
 - When no useful item survives and attempts are exhausted, the scheduler invokes the stage's explicit exhaustion settlement hook once and starts the full Segmented path.
 
 The exhaustion hook may settle an artifact but may not launch provider calls or mutate the graph directly.

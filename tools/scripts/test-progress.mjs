@@ -229,6 +229,35 @@ assertEqual(completedPartialFailure.reason, 'Active Cast provider output did not
 assertEqual(completedPartialFailure.failureCode, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'completed partial card exposes its stable failure code');
 assertEqual(completedPartialFailure.suggestedAction, 'Retry Active Cast. If it repeats, use a model with reliable JSON Schema output.', 'completed partial card exposes its suggested action');
 
+for (const [operationState, stageState] of [
+  ['completed', 'completed'], ['stale', 'completed'], ['completed', 'cached']
+]) {
+  const restoredFused = progressFromExecution({
+    operationId: 'restored-fused',
+    phase: 'preprocess',
+    state: operationState,
+    stageRecords: {
+      'preprocess.cards.fused': {
+        stageId: 'preprocess.cards.fused',
+        state: stageState,
+        kind: 'model',
+        summary: {
+          acceptedFamilies: ['Scene Frame', 'Active Cast', 'Character Motivation'],
+          unresolvedFamilies: ['Knowledge']
+        }
+      }
+    }
+  });
+  const children = restoredFused.steps.find((step) => step.id === 'preprocess.cards.fused')?.children || [];
+  assertDeepEqual(children.map((child) => child.label),
+    ['Scene Frame', 'Active Cast', 'Character Motivation', 'Knowledge'],
+    `restored ${operationState}/${stageState} Fused progress retains checkpoint family rows without the in-memory graph`);
+  assert(children.slice(0, 3).every((child) => child.state === (stageState === 'cached' ? 'cached' : 'done')),
+    'accepted Fused outcomes preserve completion or cache state');
+  assertEqual(children[3].state, 'failed', 'unresolved Fused family remains visibly failed');
+  assert(children.every((child) => child.action === null), 'restored Fused outcome rows have no independent actions');
+}
+
 const diagnosticProgress = progressFromExecution({
   operationId: 'run-diagnostics',
   phase: 'preprocess',
@@ -1456,6 +1485,32 @@ for (const handState of ['completed', 'cached']) {
 for (const handState of ['pending', 'running', 'failed']) {
   const hand = authoredHandProgress(handState).steps.find((step) => step.id === 'preprocess.hand');
   assertEqual(hand.children?.length || 0, 0, 'unsettled current hand never shows old hand or leftover summary as included');
+}
+
+{
+  const progress = progressFromExecution({ operationId: 'refine', state: 'completed', stages: [
+    { id: 'preprocess.refinement.review', state: 'completed', kind: 'model', summary: { status: 'accepted' } },
+    { id: 'preprocess.refinement.revise', state: 'completed', kind: 'model', summary: { status: 'not-needed' } },
+    { id: 'preprocess.refinement.hand', state: 'completed', kind: 'local', summary: {
+      status: 'reviewed-unchanged', targetCount: 2, targets: [
+        { targetId: 'claims', cardId: 'realism', name: 'Claims Need Corroboration', outcome: 'unchanged', revisionCount: 0 },
+        { targetId: 'authored', cardId: 'authored', name: 'Evidence', outcome: 'accepted', revisionCount: 0 }
+      ]
+    } }
+  ] });
+  const review = progress.steps.find(step => step.id === 'preprocess.refinement.review');
+  assertEqual(review.label, 'Reviewing cards', 'refinement review has a readable stage label');
+  assertEqual(review.providerLane, 'reasoner', 'refinement uses the configured Reasoner lane');
+  const revision = progress.steps.find(step => step.id === 'preprocess.refinement.revise');
+  assertEqual(revision.providerLane, null, 'unnecessary revision does not claim a provider call');
+  assertEqual(revision.reason, 'Not needed; the reviewed cards were accepted.', 'conditional no-op is explained');
+  assertEqual(revision.meta, 'not needed', 'no-op is visible without a tooltip');
+  const hand = progress.steps.find(step => step.id === 'preprocess.refinement.hand');
+  assertEqual(hand.children[0].label, 'Claims Need Corroboration', 'refined hand names the marked source card');
+  assertEqual(hand.children[0].reason, 'Reviewed; unchanged.', 'accepted unchanged is distinguished from a rewrite');
+  assertEqual(hand.children[1].reason, 'Reviewed; application accepted.', 'authored scene application is not mislabeled unchanged');
+  assertEqual(hand.children[0].meta, 'unchanged', 'unchanged outcome is visible without a tooltip');
+  assertEqual(hand.children[1].meta, 'application accepted', 'accepted application is visible without a tooltip');
 }
 
 console.log('[pass] progress');

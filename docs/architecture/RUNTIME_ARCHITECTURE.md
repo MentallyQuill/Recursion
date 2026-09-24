@@ -92,7 +92,7 @@ The idle command slot exposes `Rebuild all Recursion work on the next swipe`. It
 
 Post-process captures the completed assistant message id, swipe id, text hash, active character/group identity, and originating Pre-process turn key. That response identity owns the operation.
 
-Unified creates one guidance artifact and one host rewrite. Progressive processes enabled categories in deck order and carries the latest accepted draft forward. As Swipe appends and selects one guarded swipe; Replace mutates the active response only after complete success.
+Unified creates one guidance artifact and one rewrite using the frozen native or profile writer. Progressive processes enabled categories in deck order and carries the latest accepted draft forward. As Swipe appends and selects one guarded swipe; Replace mutates the active response only after complete success. Review before applying stores a pending comparison and releases generation controls until acceptance. Source-bound review actions recheck the current target identity; a retained comparison does not grant authority to edit a changed response.
 
 Stop preserves the original response and accepted checkpoints. Resume uses the same scheduler and idempotent host-commit receipt. A changed response body gets a new response identity and cannot reuse another swipe's rewrite.
 

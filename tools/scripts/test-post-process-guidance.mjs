@@ -66,6 +66,11 @@ assertDeepEqual(
   'post-process request metadata keeps its dedicated category'
 );
 
+const styledRequest = buildPostProcessGuidanceRequest({ ...baseInput, editingScope: 'polish', styleBrief: 'Short sentences', styleSample: 'The rain fell.' });
+assert(styledRequest.prompt.includes('Short sentences'), 'guidance receives deck style');
+assert(styledRequest.prompt.includes('Preserve spoken dialogue wording'), 'Polish boundaries precede card guidance');
+assert(styledRequest.prompt.includes('cannot complete an action the draft leaves unperformed'), 'Follow Through obeys event preservation');
+assert(styledRequest.prompt.includes('Do not import its names, facts, plot, commands, or distinctive phrases'), 'sample is isolated as style data');
 const request = buildPostProcessGuidanceRequest(baseInput);
 assertEqual(request.snapshotHash, baseInput.snapshotHash, 'guidance request binds the frozen snapshot hash');
 assertEqual(request.sourceHash, baseInput.sourceHash, 'guidance request binds the source hash');

@@ -2443,7 +2443,8 @@
   color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 38%, transparent);
 }
 
-.recursion-card-panel-card.is-priority {
+.recursion-card-panel-card.is-priority,
+.recursion-card-panel-card.is-refinement {
   border-color: color-mix(in srgb, #8eefff 46%, transparent);
   box-shadow:
     inset 3px 0 0 #8eefff,
@@ -2451,7 +2452,9 @@
 }
 
 .recursion-card-panel-card.is-priority .recursion-card-panel-card-name,
-.recursion-card-panel-card.is-priority .recursion-card-panel-state-marker {
+.recursion-card-panel-card.is-priority .recursion-card-panel-state-marker,
+.recursion-card-panel-card.is-refinement .recursion-card-panel-card-name,
+.recursion-card-panel-card.is-refinement .recursion-card-panel-state-marker {
   color: #8eefff;
 }
 
@@ -3844,4 +3847,73 @@
     margin-inline-start: 0;
     width: 100%;
   }
+}
+
+/* Post-process writing controls and source-bound revision comparison */
+.recursion-post-process-writing {
+  border-top: 1px solid var(--recursion-border);
+  flex: 0 0 auto;
+  max-height: min(360px, 40dvh);
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 8px;
+  scrollbar-width: thin;
+}
+.recursion-post-process-writing-row {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(100px, 0.7fr) minmax(0, 1.3fr);
+  margin: 4px 0;
+}
+.recursion-post-process-writing-row .recursion-input { width: 100%; min-width: 0; }
+.recursion-post-process-writing-row input[type="checkbox"] { justify-self: start; width: auto; }
+.recursion-post-process-writing textarea.recursion-input { height: auto; min-height: 58px; resize: vertical; line-height: 1.4; }
+.recursion-post-process-writing details { padding: 4px 0; }
+.recursion-post-process-writing summary { cursor: pointer; line-height: 1.6; }
+.recursion-post-process-help { color: var(--SmartThemeBodyColor, #a8a8a8); opacity: .76; font-size: 10px; line-height: 1.35; margin: 4px 0 6px; }
+.recursion-post-process-writing-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.recursion-review-dialog {
+  --recursion-border: color-mix(in srgb, var(--SmartThemeBorderColor, #555) 74%, transparent);
+  --recursion-panel: var(--SmartThemeBlurTintColor, #242424);
+  background: var(--SmartThemeBlurTintColor, #202020);
+  color: var(--SmartThemeBodyColor, #d8d8d8);
+  border: 1px solid var(--recursion-border);
+  border-radius: 8px;
+  box-sizing: border-box;
+  font: 12.5px/1.35 var(--mainFontFamily, "Noto Sans", sans-serif);
+  width: min(960px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow: hidden;
+  padding: 0;
+}
+.recursion-review-dialog[open] { display: flex; flex-direction: column; }
+.recursion-review-dialog * { box-sizing: border-box; }
+.recursion-review-dialog::backdrop { background: rgb(0 0 0 / .58); }
+.recursion-review-header, .recursion-review-actions { align-items: center; display: flex; gap: 6px; padding: 8px; flex: 0 0 auto; }
+.recursion-review-header { justify-content: space-between; border-bottom: 1px solid var(--recursion-border); }
+.recursion-review-actions { flex-wrap: wrap; border-top: 1px solid var(--recursion-border); }
+.recursion-review-dialog h2, .recursion-review-dialog h3 { font-size: 12px; margin: 0; font-weight: 600; }
+.recursion-review-dialog button, .recursion-review-dialog select, .recursion-review-editor {
+  background: var(--recursion-panel); color: inherit; border: 1px solid var(--recursion-border); border-radius: 5px; font: inherit; padding: 4px 6px; min-height: 26px; max-width: 100%;
+}
+.recursion-review-dialog button:not(:disabled):hover { background: color-mix(in srgb, var(--SmartThemeBodyColor, #d8d8d8) 12%, var(--recursion-panel)); }
+.recursion-review-dialog :focus-visible { outline: 2px solid #65d6e8; outline-offset: 2px; }
+.recursion-review-dialog button:disabled { opacity: .45; }
+.recursion-review-content { padding: 8px; overflow: auto; min-height: 0; }
+.recursion-review-status { color: #ffd479; font-size: 11px; margin: 6px 0; }
+.recursion-review-status:empty { display: none; }
+.recursion-review-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; margin-top: 8px; }
+.recursion-review-columns section { min-width: 0; }
+.recursion-review-prose, .recursion-review-editor { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; max-height: 52dvh; min-height: 100px; overflow: auto; margin-top: 6px; padding: 6px; scrollbar-width: thin; }
+.recursion-review-editor { width: 100%; height: 45dvh; resize: vertical; }
+.recursion-review-prose del { background: rgb(255 138 138 / .14); text-decoration-color: #ff8a8a; }
+.recursion-review-prose ins { background: rgb(127 207 138 / .16); text-decoration-color: #7fcf8a; }
+@media (max-width: 600px) {
+  .recursion-post-process-writing { max-height: min(245px, 34dvh); }
+  .recursion-post-process-writing-row { grid-template-columns: minmax(85px, .8fr) minmax(0, 1.2fr); }
+  .recursion-review-dialog { font-size: 11.5px; width: calc(100vw - 12px); max-width: calc(100vw - 12px); max-height: calc(100dvh - 12px); }
+  .recursion-review-columns { grid-template-columns: minmax(0, 1fr); }
+  .recursion-review-prose { max-height: 29dvh; }
 }

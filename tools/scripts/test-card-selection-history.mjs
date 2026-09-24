@@ -190,4 +190,20 @@ for (const withSwipes of [false, true]) {
   pending.context.chat[0].mes = 'Changed earlier input';
   assert.notEqual((await pending.host.snapshot()).cardSelectionPreviousPrefixHash, before.cardSelectionSourcePrefixHash, 'older branch edits cannot masquerade as a pending input append');
 }
+for (const mode of ['replace', 'as-swipe']) {
+  const restore = fixture(); await complete(restore, 'Original response');
+  const initial = await restore.host.messages.postProcessSourceIdentity();
+  const mutation = mode === 'replace' ? 'replaceAssistantMessageText' : 'appendAssistantMessageSwipe';
+  assert.equal((await restore.host.messages[mutation](1, 'Postprocessed response', {
+    markerNamespace: 'postProcess', expectedSourceIdentity: initial,
+    marker: { schema: 'recursion.postProcessMarker.v1', candidateHash: hashJson('Postprocessed response') }
+  })).ok, true);
+  const restored = await restore.host.messages.restorePostProcessOriginal({
+    mode, originalSnapshot: { sourceMessageId: 1, sourceSwipeId: 0, sourceHash: hashJson('Original response'), originalDraft: 'Original response' },
+    expectedSourceIdentity: await restore.host.messages.postProcessSourceIdentity(), operationId: 'restore-selection', revisionId: 'revision-selection'
+  });
+  assert.equal(restored.ok, true);
+  assert.equal((await restore.host.snapshot()).cardSelectionHistory[0].cards[0]?.cardId, 'card-one', 'restoring original prose preserves selection provenance in ' + mode);
+  assert.equal((await fixture(restore.persisted()).host.snapshot()).cardSelectionHistory[0].cards[0]?.cardId, 'card-one', 'restored provenance persists after reload');
+}
 console.log('card selection history tests passed');

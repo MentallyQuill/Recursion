@@ -1127,4 +1127,40 @@ await assertRejects(
   'scheduler requires durable repository methods'
 );
 
+{
+  const repository = createRepository();
+  const calls = { prepare: 0, review: 0, verify: 0, hand: 0, sibling: 0 };
+  const graph = createExecutionGraph({ stages: [
+    stage('prepare', [], () => ({ count: ++calls.prepare }), { kind: 'local' }),
+    stage('review', ['prepare'], () => ({ count: ++calls.review }), { kind: 'local' }),
+    stage('verify', ['review'], ({ dependencies }) => {
+      calls.verify += 1;
+      return { accepted: dependencies.review.artifact.count > 1 };
+    }, { kind: 'local' }),
+    { ...stage('hand', ['verify'], ({ dependencies }) => {
+      calls.hand += 1;
+      if (!dependencies.verify.artifact.accepted) throw new Error('Review unresolved');
+      return { accepted: true };
+    }, { kind: 'local' }), retryFromStageId: 'review' },
+    stage('sibling', ['prepare'], () => ({ count: ++calls.sibling }), { kind: 'local' })
+  ] });
+  const scheduler = createExecutionScheduler({ repository, now: createClock(), createId: createIds(), attemptsPerStep: 1 });
+  const failed = await scheduler.start({ manifest: manifest({ operationId: 'semantic-retry' }), graph, context: {} });
+  assertEqual(failed.stageRecords.hand.state, 'failed', 'semantic rejection pauses at final local gate');
+  await assertRejects(() => scheduler.retry({ operationId: 'semantic-retry', stageId: 'review', graph, provenance }),
+    /blocking failed stage/, 'ancestor declaration does not authorize directly retrying a completed stage');
+  const retried = await scheduler.retry({ operationId: 'semantic-retry', stageId: 'hand', graph, provenance });
+  assertEqual(retried.state, 'completed', 'explicit Retry restarts declared ancestor and resolves semantic rejection');
+  assertDeepEqual(calls, { prepare: 1, review: 2, verify: 2, hand: 2, sibling: 1 }, 'Retry preserves prepared input and independent sibling');
+}
+
+for (const retryFromStageId of ['missing', 'sibling', 'hand', 'descendant', '', null, 1]) {
+  await assertRejects(() => createExecutionGraph({ stages: [
+    stage('root', [], () => ({})),
+    stage('sibling', ['root'], () => ({})),
+    { ...stage('hand', ['root'], () => ({})), retryFromStageId },
+    stage('descendant', ['hand'], () => ({}))
+  ] }), /retryFromStageId.*ancestor/, 'retry restart target must be a strict ancestor');
+}
+
 console.log('Execution scheduler tests passed.');

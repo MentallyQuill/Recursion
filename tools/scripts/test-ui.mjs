@@ -2328,6 +2328,12 @@ try {
   assert(root.querySelector('[data-recursion-post-process-apply-replace]'), 'Post-process panel exposes Replace');
   assert(root.querySelector('[data-recursion-post-process-flow-unified]'), 'Post-process panel exposes Unified');
   assert(root.querySelector('[data-recursion-post-process-flow-progressive]'), 'Post-process panel exposes Progressive');
+  assert(root.querySelector('[data-recursion-post-process-writer-mode]'), 'Post-process exposes writer selection');
+  assert(root.querySelector('[data-recursion-post-process-editing-scope]'), 'Post-process exposes editing scope');
+  assert(root.querySelector('[data-recursion-post-process-review-before-applying]'), 'Post-process exposes review before applying');
+  assert(root.querySelector('[data-recursion-post-process-style-brief]').getAttribute('readonly') !== null, 'starter style is read only');
+  assert(root.querySelector('[data-recursion-post-process-style-copy]'), 'starter offers copy to customize style');
+
   assertEqual(root.querySelector('[data-recursion-post-process-apply-as-swipe]').getAttribute('title'), 'Add the rewritten response as a new swipe while preserving the current response.', 'As Swipe exposes the approved tooltip');
   assertEqual(root.querySelector('[data-recursion-post-process-apply-replace]').getAttribute('title'), 'Replace the current response with the rewritten result.', 'Replace exposes the approved tooltip');
   assertEqual(root.querySelector('[data-recursion-post-process-flow-unified]').getAttribute('title'), 'Rewrite once using all enabled Post-process cards together.', 'Unified exposes the approved tooltip');
@@ -2767,6 +2773,38 @@ try {
   assert(!postProcessDeckPatch.preProcessDecks, 'Post-process deck actions do not mutate the Pre-process deck store');
   const customPostProcessDeckId = postProcessDeckPatch.postProcessDecks.activeDeckId;
   ui.update();
+  const writerMode = root.querySelector('[data-recursion-post-process-writer-mode]');
+  writerMode.value = 'profile'; writerMode.dispatchEvent({ type: 'change' });
+  assertEqual(settingsUpdates.at(-1).postProcess.writer.mode, 'profile', 'writer mode persists through actual handler');
+  assert(settingsUpdates.at(-1).postProcess.writer.connectionProfileId, 'profile writer mode atomically saves a selected profile');
+  ui.update();
+  const writerLimit = root.querySelector('[data-recursion-post-process-writer-limit]');
+  writerLimit.value = '4096'; writerLimit.dispatchEvent({ type: 'change' });
+  assertEqual(settingsUpdates.at(-1).postProcess.writer.maxOutputTokens, 4096, 'writer output override persists');
+  ui.update();
+  const invalidLimit = root.querySelector('[data-recursion-post-process-writer-limit]');
+  const changesBeforeInvalidLimit = settingsUpdates.length;
+  invalidLimit.value = '255'; invalidLimit.dispatchEvent({ type: 'change' });
+  assertEqual(settingsUpdates.length, changesBeforeInvalidLimit, 'invalid output limit does not silently persist inheritance');
+  const scopeControl = root.querySelector('[data-recursion-post-process-editing-scope]');
+  scopeControl.value = 'revise'; scopeControl.dispatchEvent({ type: 'change' });
+  assertEqual(settingsUpdates.at(-1).postProcess.editingScope, 'revise', 'editing scope persists through handler');
+  ui.update();
+  const reviewControl = root.querySelector('[data-recursion-post-process-review-before-applying]');
+  reviewControl.checked = true; reviewControl.dispatchEvent({ type: 'change' });
+  assertEqual(settingsUpdates.at(-1).postProcess.reviewBeforeApplying, true, 'review preference persists through handler');
+  ui.update();
+  const styleBrief = root.querySelector('[data-recursion-post-process-style-brief]');
+  assertEqual(styleBrief.getAttribute('readonly'), null, 'copied deck style is editable');
+  styleBrief.value = 'Short sentences, deliberate fragments.';
+  root.querySelector('[data-recursion-post-process-style-sample]').value = 'Rain. Then silence.';
+  root.querySelector('[data-recursion-post-process-style-save]').click();
+  assertEqual(settingsUpdates.at(-1).postProcessDecks.customDecks[customPostProcessDeckId].styleBrief, 'Short sentences, deliberate fragments.', 'custom deck style persists through Save handler');
+  const styleChangesBeforeOversize = settingsUpdates.length;
+  root.querySelector('[data-recursion-post-process-style-brief]').value = 'x'.repeat(2001);
+  root.querySelector('[data-recursion-post-process-style-save]').click();
+  assertEqual(settingsUpdates.length, styleChangesBeforeOversize, 'oversized style rejects without truncating or saving');
+
   assert(root.querySelectorAll('[data-recursion-post-process-category-drag-handle]').length >= 2, 'editable duplicate exposes category drag handles');
   assert(root.querySelectorAll('[data-recursion-post-process-card-drag-handle]').length >= 6, 'editable duplicate exposes card drag handles');
   assert(root.querySelector('[data-recursion-post-process-category-drag-handle]').className.includes('recursion-card-drag-region-category'), 'editable Post-process category uses the shared category handle visual');
@@ -3445,9 +3483,14 @@ try {
   firstPreDescription.click();
   assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], 'priority', 'clicking wrapped description text promotes a bundled Default card to Priority');
   root.querySelector('[data-recursion-card-toggle-row]').click();
-  assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], 'off', 'second Auto row tap turns a bundled Default card Off');
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], 'refinement', 'second Auto row tap refines a bundled Default card');
+  assert(root.querySelector('[data-recursion-card-toggle-row]').getAttribute('aria-label').includes('Refinement card'), 'refinement state has an accessible name');
+  assertEqual(root.querySelector('[data-recursion-card-toggle-row]').getAttribute('title'), "Always included. Reviews and improves this card's scene analysis before narration.", 'refinement tooltip explains required inclusion and review');
+  assert(root.querySelectorAll('[data-recursion-card-state-icon]').some(node => node.dataset.recursionCardStateIcon === 'eye-refinement'), 'refinement renders the distinct eye with a small four-point sparkle');
   root.querySelector('[data-recursion-card-toggle-row]').click();
-  assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], undefined, 'third Auto row tap restores a bundled Default card to normal Active');
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], 'off', 'third Auto row tap disables a bundled Default card');
+  root.querySelector('[data-recursion-card-toggle-row]').click();
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.defaultCardStates[defaultCardId], undefined, 'fourth Auto row tap restores a bundled Default card to normal Active');
   root.querySelector('[data-recursion-card-deck-deactivate-all]').click();
   assert(
     Object.values(settingsUpdates.at(-1).preProcessDecks.defaultCardStates).every((state) => state === 'off'),
@@ -3537,11 +3580,26 @@ try {
   );
   assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('1 priority'), 'Cards header reports Priority count when cards are prioritized');
   assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').disabled, false, 'Activate-all action enables when it can clear Priority states');
+  root.querySelector('[data-recursion-card-toggle-row]').click();
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'refinement', 'custom deck persists refinement from Auto cycle');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('1 refinement'), 'header counts refinement separately');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-cards-panel]')).includes('1 Refinement'), 'category counts refinement separately');
+  assertEqual(root.querySelector('[data-recursion-card-deck-activate-all]').disabled, false, 'activate-all remains enabled to clear refinement');
   root.querySelector('[data-recursion-card-deck-activate-all]').click();
   const priorityClearedUpdate = settingsUpdates.at(-1).preProcessDecks;
-  assertEqual(priorityClearedUpdate.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'active', 'Activate-all action clears Priority back to normal Active');
+  assertEqual(priorityClearedUpdate.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'active', 'Activate-all action clears Refinement back to normal Active');
   assertEqual(root.querySelector('[data-recursion-current-step]').textContent, 'All cards set Active.', 'Activate-all action reports through main bar status');
   view = { ...view, settings: { ...view.settings, preProcessDecks: priorityClearedUpdate }, activity: { phase: 'idle' }, progressRun: null };
+  ui.update();
+  view = { ...view, settings: { ...view.settings, mode: 'manual' } };
+  ui.update();
+  root.querySelector('[data-recursion-card-toggle-row]').click();
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'refinement', 'Manual active row advances directly to Refinement');
+  root.querySelector('[data-recursion-card-toggle-row]').click();
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'off', 'Manual Refinement row advances to Off');
+  root.querySelector('[data-recursion-card-toggle-row]').click();
+  assertEqual(settingsUpdates.at(-1).preProcessDecks.customDecks[duplicatedDeckId].cards[disableCardId].selectionState, 'active', 'Manual Off row advances to Active');
+  view = { ...view, settings: { ...view.settings, mode: 'auto' } };
   ui.update();
   root.querySelector('[data-recursion-card-deck-deactivate-all]').click();
   const deactivatedUpdate = settingsUpdates.at(-1).preProcessDecks;
@@ -3811,7 +3869,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-setting-selection-variety]')?.value, 'low', 'selection variety defaults to Low');
   assertEqual(root.querySelector('[data-recursion-setting-card-cooldown]')?.value, '0', 'card cooldown defaults to zero');
   assertEqual(root.querySelector('[data-recursion-setting-card-cooldown]').getAttribute('max'), '10', 'card cooldown caps at ten turns');
-  assert(fakeDocument.textTree(root.querySelector('[data-recursion-settings-section-play-behavior]')).includes('Auto only; Manual ignores these settings. Priority cards are exempt. 0 turns disables cooldown. Fewer eligible cards means a smaller hand.'), 'selection helper explains Manual, Priority, zero and strict shortages');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-settings-section-play-behavior]')).includes('Auto only; Manual ignores these settings. Priority and Refinement cards are exempt. 0 turns disables cooldown. Fewer eligible cards means a smaller hand.'), 'selection helper explains Manual, Priority, zero and strict shortages');
   const selectionVarietyControl = root.querySelector('[data-recursion-setting-selection-variety]');
   selectionVarietyControl.value = 'medium';
   for (const listener of root.querySelector('[data-recursion-settings-panel]').eventListeners.change || []) listener({ target: selectionVarietyControl });
@@ -4073,6 +4131,9 @@ try {
       enabled: true,
       applyMode: 'replace',
       rewriteFlow: 'progressive',
+      writer: { mode: 'profile', connectionProfileId: 'quiet-profile-a', maxOutputTokens: 4096, samplerMode: 'profile', samplerOverrides: { temperature: 0.7, topP: 1 } },
+      editingScope: 'revise',
+      reviewBeforeApplying: true,
       contextMessages: 21
     },
     diagnostics: {
@@ -4253,8 +4314,9 @@ try {
   assert(!copiedPromptPacket.includes('"packetId"'), 'copy prompt packet omits packet JSON wrapper');
   assert(copiedPromptPacket.includes('Door stays blocked and the brass lock remains warped.'), 'copy prompt packet includes actual injected prompt text');
 
+  const briefHandBeforeSelectionInspection = view.lastBriefHand;
   view = { ...view, lastBriefHand: { ...(view.lastBriefHand ?? view.lastHand), metadata: { selection: {
-    mandatoryCardIds: ['priority-source'],
+    mandatoryCardIds: ['priority-source', 'refinement-source'],
     retained: [{ cardId: 'chosen-source', family: 'Scene Frame', reason: 'anchors the blocked exit' }],
     omitted: [{ cardId: 'cooled-source', reason: 'cooldown', turnsRemaining: 2 }, { family: 'Open Threads', reason: 'overlapping-coverage' }],
     variety: { level: 'low', replacement: { from: 'ranked-source', to: 'chosen-source' } },
@@ -4294,8 +4356,57 @@ try {
   assert(selectionInspection.includes('cooled-source: 2 turns remaining'), 'selection inspector explains cooldown exclusions');
   assert(selectionInspection.includes('Overlapping coverage'), 'selection inspector translates duplicate coverage');
   assert(selectionInspection.includes('ranked-source -> chosen-source'), 'selection inspector shows the variety replacement');
-  assert(selectionInspection.includes('priority-source'), 'selection inspector identifies mandatory sources');
+  assert(selectionInspection.includes('priority-source') && selectionInspection.includes('refinement-source') && selectionInspection.includes('Mandatory'), 'selection inspector identifies mandatory Priority and Refinement sources');
   assert(!selectionInspection.includes('PRIVATE_HISTORY_SENTINEL'), 'selection inspector never dumps raw history');
+  view = { ...view, lastBriefHand: briefHandBeforeSelectionInspection };
+  ui.update();
+
+  const originalViewerHand = view.lastHand;
+  const fullViewerSummary = `${'Summary detail. '.repeat(30)}Summary final sentence.`;
+  const fullViewerBody = `${'Card detail. '.repeat(160)}private-secret Final card sentence.`;
+  view = { ...view, lastHand: { cards: [{
+    id: 'viewer-complete-card', family: 'Scene Frame',
+    summary: fullViewerSummary, promptText: fullViewerBody
+  }] } };
+  ui.update();
+  const completeCardDetail = root.querySelector('[data-recursion-viewer-card]');
+  assertEqual(completeCardDetail.children.find((child) => child.className === 'recursion-viewer-card-summary').textContent,
+    fullViewerSummary, 'Deck detail preserves the complete summary beyond 260 characters');
+  assertEqual(completeCardDetail.querySelector('[data-recursion-viewer-card-text]').textContent,
+    fullViewerBody.replace('private-secret', '[redacted]'),
+    'Deck detail preserves the complete body beyond 900 characters with secret redaction');
+  view = { ...view, lastHand: originalViewerHand };
+  ui.update();
+
+  const handBeforeRefinement = view.lastHand;
+  view = { ...view, lastHand: { ...handBeforeRefinement, metadata: { refinement: {
+    targetCount: 2, revisionCount: 0, targets: [
+      { targetId: 'facet-a', cardId: 'card-a', name: 'Scene position', outcome: 'unchanged', revisionCount: 0, findings: 'PRIVATE_REVIEW_MARKER' },
+      { targetId: 'facet-b', cardId: 'card-a', name: 'Scene pressure', outcome: 'unchanged', revisionCount: 0 }
+    ]
+  } } } };
+  ui.update();
+  assertDeepEqual(root.querySelectorAll('[data-recursion-viewer-refinement-target]').map(node => node.textContent), [
+    'Refinement · Scene position: unchanged · 0 revisions',
+    'Refinement · Scene pressure: unchanged · 0 revisions'
+  ], 'Viewer exposes each marked facet outcome on its shared runtime card');
+  assert(!fakeDocument.textTree(viewer).includes('PRIVATE_REVIEW_MARKER'), 'Viewer refinement metadata never exposes review findings');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-brief-card-meta]')).includes('refinement unchanged'), 'Last Brief reports unchanged review acceptance');
+  assertEqual(root.querySelectorAll('[data-recursion-brief-card]')[1].querySelector('[data-recursion-brief-card-meta]').children.length, 1, 'unmarked Last Brief cards gain no refinement marker');
+  const briefPanelForRefinement = root.querySelector('[data-recursion-hand-dropdown]');
+  const briefWasHidden = briefPanelForRefinement.hidden;
+  briefPanelForRefinement.hidden = false;
+  view = { ...view, lastHand: { ...view.lastHand, metadata: { refinement: {
+    ...view.lastHand.metadata.refinement, revisionCount: 1,
+    targets: view.lastHand.metadata.refinement.targets.map(target => ({ ...target, outcome: 'accepted', revisionCount: 1 }))
+  } } } };
+  ui.update();
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-brief-card-meta]')).includes('refinement accepted · 1 revision'), 'metadata-only updates refresh visible Last Brief acceptance and semantic revision count');
+  assert(root.querySelectorAll('[data-recursion-viewer-refinement-target]').every(node => node.textContent.includes('accepted · 1 revision')), 'Viewer reports semantic revision count for each marked facet');
+  briefPanelForRefinement.hidden = briefWasHidden;
+  view = { ...view, lastHand: handBeforeRefinement };
+  ui.update();
+
   const viewerPreviews = Array.from(viewer.querySelectorAll('pre'));
   assertEqual(viewer.querySelector('h2').textContent, 'Recursion Viewer', 'viewer retains its heading');
   const viewerClose = viewer.querySelector('[data-recursion-viewer-close]');

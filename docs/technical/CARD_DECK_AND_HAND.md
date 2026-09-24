@@ -20,9 +20,11 @@ flowchart LR
 
 ## Selection State Contract
 
-Editable cards expose `off`, `active`, and `priority`. Auto cycles `off -> active -> priority -> off`; Manual cycles `off -> active -> off`. `off` excludes a card from scope, `active` makes it a normal candidate, and `priority` moves it ahead of normal active cards in Auto. Every runnable Priority card is required, in deck category/card order, even when Priority cards exceed the turn card limit. Ordinary cards fill only the remaining slots.
+Cards expose `off`, `active`, `priority`, and `refinement`. Auto cycles `off -> active -> priority -> refinement -> off`; Manual cycles `off -> active -> refinement -> off`. Manual treats existing Priority as Active. Refinement requires inclusion and bounded scene-analysis review in both modes. `off` excludes a card from scope, `active` makes it a normal candidate, and `priority` moves it ahead of normal active cards in Auto. Every runnable Priority card in Auto and Refinement card in either mode is required, in deck category/card order, even when Priority cards exceed the turn card limit. Ordinary cards fill only the remaining slots.
 
-Authored cards without a built-in generator family enter hand selection directly as `Authored` guidance, with their deck IDs and operator text. They require no provider call and are rebuilt from the active deck rather than stored as generated scene evidence. Disabled and draft cards are excluded. Authored text and ordering participate in the deck revision hash, invalidating prepared swipe reuse after edits.
+Authored cards without a built-in generator family enter hand selection directly as `Authored` guidance, with their deck IDs and operator text. Unmarked authored cards require no provider call and are rebuilt from the active deck rather than stored as generated scene evidence. Disabled and draft cards are excluded. Authored text and ordering participate in the deck revision hash, invalidating prepared swipe reuse after edits.
+
+Marked authored cards first receive an evidence-bound scene application. Refinement then requires a review using the frozen scene, original instructions, and complete selected hand. Unchanged acceptance is success; specific findings may trigger one revision and one verification review. Unresolved findings or provider failure block preparation. Shared generated families are revised once and reviewed against each marked facet. Saved authored instructions remain unchanged and accompany accepted applications in the final hand. Guidance, packet evidence, and Last Brief use only accepted results. Changes to card state, text, order, scene, provider settings, or refinement contracts invalidate dependent checkpoints and prepared packets.
 
 Auto resolves Priority slots before provider work: authored Priority cards reserve slots, and generated Priority families omitted by the Arbiter are added explicitly. Multiple source cards belonging to one generated family share its generated card slot. Both kinds follow source deck order ahead of ordinary candidates. Priority coverage expands the effective card limit when necessary; it is never trimmed to fit it. Remaining generation capacity retains the normal focus and strength policy. The runtime cache contract is version 3 so previously capped Priority artifacts cannot be reused.
 
@@ -31,11 +33,12 @@ stateDiagram-v2
     [*] --> off
     off --> active: Auto or Manual click
     active --> priority: Auto click
-    priority --> off: Auto click
-    active --> off: Manual click
-    note right of priority
-      Auto-first candidate
-      subject to Max Cards
+    priority --> refinement: Auto click
+    active --> refinement: Manual click
+    refinement --> off: Auto or Manual click
+    note right of refinement
+      Mandatory in both modes
+      Required bounded review
     end note
 ```
 
@@ -46,7 +49,7 @@ The runtime resolves the active deck, card state, Manual selection, strict white
 ```mermaid
 flowchart TD
     Settings[Auto or Manual + focus + caps] --> Deck[Resolve active deck]
-    Deck --> State[Filter off / active / priority]
+    Deck --> State[Filter off / active / priority / refinement]
     State --> Mode{Manual?}
     Mode -->|yes| Forced[Force selected family rows]
     Mode -->|no| Auto[Arbiter chooses relevant candidates]
@@ -171,19 +174,20 @@ Runtime applies these decisions only after schema and safety checks. If an expli
 
 The scene deck primitives can represent active, stowed, stale, and discarded cards. The current preprocessor builds its deck for the current turn; it does not load prior-turn scene cards. Only active, validated cards enter the turn hand. Compatible same-turn checkpoints and prepared packets provide reuse.
 
-The turn hand is rebuilt for each generation attempt. Required Priority cards come first in deck order; ordinary Auto candidates follow the Arbiter's scene-specific cardJobs order within remaining turn slots. Focus informs the Arbiter; fixed catalog rankings do not override its choices. Priority coverage can exceed the turn card limit. Runtime reserves required slots before provider generation so ordinary jobs that cannot reach the hand are not dispatched. Token estimates remain diagnostic.
+The turn hand is rebuilt for each generation attempt. Required Priority and Refinement cards come first in deck order; ordinary Auto candidates follow the Arbiter's scene-specific cardJobs order within remaining turn slots, with an optional seeded replacement of the final discretionary slot. Focus informs the Arbiter; fixed catalog rankings do not override its choices. Priority coverage can exceed the turn card limit. Runtime reserves required slots before provider generation so ordinary jobs that cannot reach the hand are not dispatched. Token estimates remain diagnostic.
 
 Card Deck selection state adds a user-steering layer above normal Auto sorting:
 
 - `off` cards are omitted from runtime scope.
 - `active` cards remain normal candidates.
+- `refinement` cards are mandatory in both modes and reviewed before Guidance.
 - `priority` cards are Auto-first. Runtime derives ordered Priority card ids and, for current built-in deck cards, ordered Priority families. `selectHand(...)` accepts `forcedCardIds` for exact hand-card forcing and `forcedFamilies` for generated family-card forcing.
 
-The Cards dropdown represents those states with the supplied eye icons: slashed eye for `off`, open eye for `active`, and eye-plus for `priority`. The deck header has two bulk actions for editable decks: open eye sets all runnable cards to normal `active` and clears Priority, while slashed eye sets all runnable cards to `off`. Draft cards are left untouched, and the read-only Default deck requires duplication before either bulk action can run.
+The Cards dropdown represents those states with the supplied eye icons: slashed eye for `off`, open eye for `active`, eye-plus for `priority`, and an eye with a small four-point sparkle for `refinement`. The deck header has two bulk actions for all decks: open eye sets all runnable cards to normal `active` and clears Priority and Refinement, while slashed eye sets all runnable cards to `off`. Draft cards are left untouched, and the Default deck persists operator states through its overlay without requiring duplication.
 
 If Priority exceeds the turn card limit, runtime includes every runnable Priority card in deck order and includes no ordinary Active cards. Priority generated families are required stages: a provider failure blocks preparation rather than silently omitting the card.
 
-Card Deck organization is stored directly on the active deck. Category drag handles update `categoryOrder`; card drag handles update `cardOrderByCategory` and, for cross-category drops, the card's `categoryId`. There is no second visible Card Scope selector under Card Decks. Runtime scope derives from the active deck's `off`, `active`, and `priority` states, with category/card order used for Priority ordering and deterministic hand selection.
+Card Deck organization is stored directly on the active deck. Category drag handles update `categoryOrder`; card drag handles update `cardOrderByCategory` and, for cross-category drops, the card's `categoryId`. There is no second visible Card Scope selector under Card Decks. Runtime scope derives from the active deck's `off`, `active`, `priority`, and `refinement` states, with category/card order used for Priority ordering and deterministic hand selection.
 
 ```mermaid
 flowchart LR
@@ -246,11 +250,11 @@ The inspector is read-oriented. V1 actions stay broad: refresh scene, copy promp
 
 ## Scene-specific selection and sense-making
 
-The Arbiter receives Settings.selectionBudget: the effective total maxCards, mandatoryCardIds, mandatoryFamilies, authoredSlots, and availableSlots. Built-in Priority facets sharing a generator consume one family slot; every required source card remains covered. Priority may expand the hand beyond its ordinary limit. The model's budgets.maxCards is still a total, so a smaller model-selected budget can reduce availableSlots further.
+The Arbiter receives Settings.selectionBudget: the effective total maxCards, mandatoryCardIds, mandatoryFamilies, authoredSlots, and availableSlots. Built-in Priority facets sharing a generator consume one family slot; every required source card remains covered. Priority may expand the hand beyond its ordinary limit. Play settings own the total target; a smaller model-selected budget cannot reduce it. Runtime completes undersized rankings from currently eligible sources in stable order.
 
 cardJobs is ordered from greatest to least contribution to this particular reply. Each reason should name a distinct contribution; three copies of a setting restriction should not crowd out an important uncertainty or relationship. The runtime reserves Priority capacity before dispatch, keeps discretionary jobs in proposal order, and carries that order through final hand construction. Generation completion order and static catalog priority cannot reorder those choices. No extra selection model call is added.
 
-Fresh turns have no previous-turn scene-card cache. Same-turn swipes reuse the settled packet; Resume reuses compatible execution checkpoints. Selection provenance is therefore the original proposal, not a claim that a new Arbiter ran for each swipe. Selection contract 2 invalidates old prompt and execution checkpoints.
+Fresh turns have no previous-turn scene-card cache. Same-turn swipes reuse the settled packet; Resume reuses compatible execution checkpoints. Selection provenance is therefore the original proposal, not a claim that a new Arbiter ran for each swipe. Selection contract 8 invalidates incompatible prompt and execution checkpoints.
 
 The normalized Auto plan adds runtime-owned selection diagnostics: source, proposed (family/reason), mandatoryCardIds, mandatoryFamilies, authoredSlots, availableSlots, retained (family/reason/mandatory), and omitted (family/reason). Hand metadata adds selected (id/family/source/mandatory) and handOmissions. The compact diagnostic export and hand.selected journal retain this evidence. Successful model plans report arbiter-model-plan, not local-fallback-plan. Existing turn classification and checkpoint diagnostics identify reuse. These are operator diagnostics, never story text.
 
@@ -283,3 +287,13 @@ Card and packet validators share clause-aware handling for explicit protective i
 After preparation completes with an optional failed card omitted, the Segmented cards parent shows a warning and names the missing card. The child remains failed with its precise rejection and retry action. During a failure, the parent identifies failed cards rather than substituting an internal-error message.
 
 Ordinary mention of “future plot” is not a validation failure. Explicit hidden-future-content and private-reasoning checks remain active; topic words alone do not establish disclosure.
+
+## Selection variety and cooldown
+
+Auto settings use `cardSelection: { variety: 'low', cooldownTurns: 0 }`. Variety accepts off/low/medium/high. It can replace at most the final optional slot: Low uses a 25% chance and the next two ranked alternatives; Medium 50% and four; High 100% and all remaining ranked alternatives. Earlier choices and mandatory Priority/Refinement coverage stay fixed. No alternatives means no change. The deterministic seed binds turn identity, deck revision and settings; retries, resumes and prepared swipes reuse the selected plan. Stable target completion does not enter the variety draw.
+
+Cooldown accepts 0–10 completed assistant turns. Zero disables it. Nonmandatory source deck IDs used in the preceding N completed response positions are excluded before arbitration and both Fused/Segmented generation, including fallback. Strict shortages yield smaller hands; mandatory Priority and Refinement sources remain included without restoring cooled siblings. Manual bypasses both policies. Settings masks are transient and never change saved card states.
+
+The Arbiter receives current needs, eligible family/authored sources and the last three body-free selection summaries. Candidates may include `sourceCardIds`, authored `cardId`, `need`, `reason`, and `coverageKey`. Duplicate optional coverage is omitted. Selection diagnostics include original rank, mandatory IDs, actual retained identities, cooldown/coverage/budget omissions and any variety replacement.
+
+Completed native responses store `recursion.cardSelectionUsage.v1` in message/active-swipe extras through the guarded host save boundary. Receipts contain source IDs and short purposes, bound to full visible branch prefix and target response hash. Full-chat validation precedes the provider window; only the latest ten completed response rows are exposed to cooldown. Incomplete stream markers survive native Stop text cleanup via generation-start identity. Duplicate events, preparation, failed/stopped generations and inactive swipes do not advance use; post-process replacement/swipe/Restore original preserve provenance. Same-message swipes occupy one response position. Full-prefix edits invalidate stale selection and final installation even outside retained model context.

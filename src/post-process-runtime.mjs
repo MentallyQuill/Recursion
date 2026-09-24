@@ -1,3 +1,5 @@
+import { createPostProcessReview, postProcessSnapshotIdentity, postProcessIdentityMatches } from './post-process-review.mjs';
+import { normalizePostProcessWriter, normalizePostProcessEditingScope, normalizePostProcessStyle, buildPostProcessEditingInstructions } from './post-process-editing.mjs';
 import { hashJson, makeId, safeId as canonicalId } from './core.mjs';
 import {
   getActivePostProcessDeck,
@@ -91,6 +93,11 @@ function safeCode(value, fallback) {
     : 'RECURSION_POST_PROCESS_FAILED';
 }
 
+function semanticCategories(categories = []) {
+  return categories.map(category => ({ id: category.id, name: category.name,
+    cards: (category.cards || []).map(card => ({ id: card.id, name: card.name, promptText: card.promptText })) }));
+}
+
 function normalizedApplyMode(value) {
   return value === 'replace' ? 'replace' : 'as-swipe';
 }
@@ -123,9 +130,27 @@ function latestMessageByRole(messages, role) {
   return null;
 }
 
+function boundSupportingEvidence(source) {
+  const evidence = {};
+  const omissions = Array.isArray(source?.omissions) ? cloneValue(source.omissions) : [];
+  for (const [field, value] of Object.entries(source || {})) {
+    if (field === 'omissions') continue;
+    if (Array.isArray(value)) {
+      evidence[field] = [];
+      for (const [index, message] of value.entries()) {
+        const candidate = { ...evidence, [field]: [...evidence[field], message] };
+        if (JSON.stringify(candidate).length <= 12000) evidence[field].push(cloneValue(message));
+        else omissions.push({ path: `${field}[${index}]`, reason: 'evidence-budget' });
+      }
+    } else if (JSON.stringify({ ...evidence, [field]: value }).length <= 12000) evidence[field] = cloneValue(value);
+    else omissions.push({ path: field, reason: 'evidence-budget' });
+  }
+  return { ...evidence, ...(omissions.length ? { omissions } : {}) };
+}
+
 function boundedSupportingContext(rawSnapshot, settings, assistantIndex) {
   if (isObject(rawSnapshot.supportingContext)) {
-    return cloneValue(rawSnapshot.supportingContext);
+    return boundSupportingEvidence(rawSnapshot.supportingContext);
   }
   const messages = Array.isArray(rawSnapshot.messages) ? rawSnapshot.messages : [];
   const prior = assistantIndex >= 0 ? messages.slice(0, assistantIndex) : messages;
@@ -135,7 +160,7 @@ function boundedSupportingContext(rawSnapshot, settings, assistantIndex) {
     : 13;
   const bounded = limit > 0 ? prior.slice(-limit) : [];
   const latestUser = latestMessageByRole(prior, 'user')?.message;
-  return {
+  return boundSupportingEvidence({
     latestUserMessage: latestUser ? messageText(latestUser) : '',
     boundedPriorMessages: bounded.filter((message) => message !== latestUser).map((message, index) => ({
       messageId: messageId(message, index),
@@ -145,7 +170,7 @@ function boundedSupportingContext(rawSnapshot, settings, assistantIndex) {
     characterContext: cloneValue(rawSnapshot.characterContext ?? null),
     preProcessPromptPacket: cloneValue(rawSnapshot.preProcessPromptPacket ?? null),
     storyForm: cloneValue(rawSnapshot.storyForm ?? null)
-  };
+  });
 }
 
 async function capturePostProcessSnapshot(rawSnapshot, settings, host) {
@@ -238,6 +263,10 @@ export function buildPostProcessPlan({
     route: cloneValue(route),
     applyMode: normalizedApplyMode(settings?.postProcess?.applyMode),
     rewriteFlow: normalizedRewriteFlow(settings?.postProcess?.rewriteFlow),
+    writer: normalizePostProcessWriter(settings?.postProcess?.writer),
+    editingScope: normalizePostProcessEditingScope(settings?.postProcess?.editingScope),
+    reviewBeforeApplying: settings?.postProcess?.reviewBeforeApplying === true,
+    ...normalizePostProcessStyle(deck),
     categories
   });
 }
@@ -248,6 +277,9 @@ function stageInput(operation, categories, draft) {
     snapshotHash: operation.snapshotHash,
     sourceHash: operation.sourceHash,
     reasoningLevel: operation.reasoningLevel,
+    editingScope: operation.editingScope,
+    styleBrief: operation.styleBrief,
+    styleSample: operation.styleSample,
     supportingContext: operation.snapshot.supportingContext,
     categories,
     draft
@@ -387,6 +419,10 @@ function buildPostProcessWriterPacket(stage, guidance) {
       }))
     })),
     guidance: guidance.guidanceText,
+    editingScope: stage.editingScope,
+    styleBrief: stage.styleBrief,
+    styleSample: stage.styleSample,
+    supportingContext: stage.supportingContext,
     boundaries: POST_PROCESS_WRITER_BOUNDARIES
   });
 }
@@ -394,7 +430,8 @@ function buildPostProcessWriterPacket(stage, guidance) {
 function buildWriterDirective(stage) {
   return [
     'Rewrite the supplied current draft.',
-    'Follow the installed Recursion Post-process packet.',
+    'Apply the supplied Recursion Post-process packet as editing data, not instructions to continue the story.',
+    buildPostProcessEditingInstructions(stage),
     ...POST_PROCESS_WRITER_BOUNDARIES,
     'Current writable draft:',
     stage.draft
@@ -441,6 +478,7 @@ async function rewriteWithRetry(stage, guidance, operation, host) {
     invoke: (request) => host.generation.rewriteWithPostProcess({
       guidancePacket: request.guidancePacket,
       writerDirective: request.writerDirective,
+      writer: operation.writer,
       signal: operation.signal
     }),
     validate: (result) => validateWriterResult(result, { draft: stage.draft }),
@@ -718,6 +756,7 @@ export function createPostProcessStages({
   mode = 'unified',
   categories = [],
   sourceSnapshot = {},
+  operationOptions = null,
   buildGuidanceRequest = ({ categoryIds, draft }) => ({ categoryIds, draft }),
   buildRewriteRequest = ({ categoryIds, draft, guidance }) => ({
     categoryIds,
@@ -760,7 +799,8 @@ export function createPostProcessStages({
         sourceHash: cleanText(sourceSnapshot.sourceHash),
         preprocessTurnKeyHash: cleanText(sourceSnapshot.preprocessTurnKeyHash),
         responseIdentityHash: cleanText(sourceSnapshot.responseIdentityHash),
-        nativeGenerationType: cleanText(sourceSnapshot.nativeGenerationType)
+        nativeGenerationType: cleanText(sourceSnapshot.nativeGenerationType),
+        operationOptionsHash: hashJson(operationOptions)
       };
     },
     run() {
@@ -768,7 +808,8 @@ export function createPostProcessStages({
         snapshot: cloneValue(sourceSnapshot),
         originalDraft: String(sourceSnapshot.originalDraft || ''),
         mode: normalizedMode,
-        categories: cloneValue(orderedCategories)
+        categories: cloneValue(orderedCategories),
+        ...(operationOptions ? { operationOptions: cloneValue(operationOptions) } : {})
       };
     },
     validate(artifact) {
@@ -960,7 +1001,8 @@ export function createPostProcessStages({
     },
     async run({ dependencies, signal }) {
       const text = String(dependencies[finalRewriteStageId].artifact?.text || '');
-      if (cleanText(text) === cleanText(dependencies[sourceStageId].artifact?.originalDraft)) {
+      if (!operationOptions?.comparisonId
+          && cleanText(text) === cleanText(dependencies[sourceStageId].artifact?.originalDraft)) {
         return { ok: true, applied: false, reason: 'no-change' };
       }
       const finalArtifactHash = hashJson(text);
@@ -981,7 +1023,7 @@ export function createPostProcessStages({
       });
     },
     validate(artifact) {
-      return artifact?.ok !== false && (artifact?.applied === true || ['already-applied', 'no-change'].includes(artifact?.reason))
+      return artifact?.ok !== false && (artifact?.applied === true || ['already-applied', 'no-change', 'awaiting-review'].includes(artifact?.reason))
         ? { ok: true, value: artifact }
         : {
             ok: false,
@@ -1051,6 +1093,81 @@ export function createPostProcessRuntime({
   const durableScheduler = durableExecution?.scheduler || null;
   const durableRepository = durableExecution?.repository || null;
   const durableEnabled = Boolean(durableScheduler && durableRepository);
+  async function reviewContextCurrent(comparison) {
+    const raw = await snapshotProvider();
+    const visible = (Array.isArray(raw?.messages) ? raw.messages : []).filter((message) =>
+      message?.visible !== false && message?.hidden !== true && messageRole(message) !== 'system');
+    if (visible.length && messageRole(visible.at(-1)) !== 'assistant') return false;
+    const snapshot = await capturePostProcessSnapshot(raw, settingsStore.get(), host);
+    return snapshot.chatIdentityHash === comparison.originalSnapshot.chatIdentityHash
+      && (!comparison.originalSnapshot.supportingContext
+        || hashJson(snapshot.supportingContext) === hashJson(comparison.originalSnapshot.supportingContext));
+  }
+  const review = durableRepository?.savePostProcessComparison
+    && typeof host?.messages?.postProcessSourceIdentity === 'function'
+    ? createPostProcessReview({
+      repository: durableRepository,
+      getChatKey: async () => {
+        const identity = await host.messages.postProcessSourceIdentity();
+        if (identity?.chatKey) return identity.chatKey;
+        const snapshot = await snapshotProvider();
+        return canonicalId(snapshot.chatKey || snapshot.chatId || 'chat', 'chat');
+      },
+      readIdentity: () => host.messages.postProcessSourceIdentity(),
+      checkContext: reviewContextCurrent,
+      commit: (input) => typeof host.commitPostProcessResult === 'function'
+        ? host.commitPostProcessResult(input) : commitResult(input),
+      reconcile: typeof host.findPostProcessCommit === 'function'
+        ? (input) => host.findPostProcessCommit(input) : undefined,
+      reconcileRestore: (input) => host.messages.findPostProcessRestore?.(input),
+      restore: (input) => host.messages.restorePostProcessOriginal(input),
+      retry: retryComparison,
+      onChange: () => durableExecution?.onReviewChanged?.()
+    }) : null;
+
+
+  async function retryComparison(comparison, { signal } = {}) {
+    if (!durableEnabled || active) return { ok: false, reason: 'post-process-running' };
+    if (signal?.aborted) return { ok: false, reason: 'canceled' };
+    if (!await reviewContextCurrent(comparison)
+        || !postProcessIdentityMatches(await host.messages.postProcessSourceIdentity(), comparison.targetIdentity)) {
+      return { ok: false, reason: 'stale-source' };
+    }
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) controller.abort();
+    const record = { controller, phase: 'pending', activityStarted: false, activitySettled: false,
+      retryComparison: cloneValue(comparison), promise: null };
+    active = record;
+    record.promise = execute(record).finally(() => {
+      signal?.removeEventListener('abort', onAbort);
+      if (active === record) active = null;
+    });
+    return record.promise;
+  }
+
+  function guardedSnapshot(operation) {
+    const target = operation.commitTargetIdentity;
+    return target ? { ...operation.snapshot, chatIdentityHash: target.chatIdentityHash,
+      sourceMessageId: target.messageId, sourceSwipeId: target.swipeId, sourceHash: target.sourceTextHash,
+      activeCharacterHash: target.activeCharacterHash, activeGroupHash: target.activeGroupHash } : operation.snapshot;
+  }
+
+  async function guidanceProviderFingerprint(operation) {
+    const settings = settingsStore.get();
+    const provider = settings.providers?.[operation.route.lane] || {};
+    const hostInputs = await host.generation?.postProcessProvenance?.({ connectionProfileId: provider.connectionProfileId }) || {};
+    const { writerHash: _writerHash, ...guidanceInputs } = hostInputs;
+    return hashJson({ provider, guidanceInputs, route: operation.route });
+  }
+
+  async function guidanceCacheKey(operation, request) {
+    const categories = semanticCategories(request.categories);
+    return hashJson({ request, provider: await guidanceProviderFingerprint(operation),
+      draft: request.draft, categories, evidence: request.supportingContext,
+      editingScope: operation.editingScope, styleBrief: operation.styleBrief, styleSample: operation.styleSample });
+  }
 
   function publish(method, event) {
     try {
@@ -1180,19 +1297,29 @@ export function createPostProcessRuntime({
   }
 
   async function durableProvenance(operation, currentSettings, { frozen = false } = {}) {
-    const currentSnapshot = frozen ? operation.snapshot
+    const currentSnapshot = frozen ? guardedSnapshot(operation)
       : await capturePostProcessSnapshot(await snapshotProvider(), currentSettings, host);
-    const currentDeck = frozen ? { id: operation.deckId } : await deckProvider(currentSettings);
+    const currentDeck = frozen ? { id: operation.deckId, styleBrief: operation.styleBrief, styleSample: operation.styleSample } : await deckProvider(currentSettings);
     const categories = frozen ? operation.categories : orderedRunnablePostProcessCategories(currentDeck);
     const provider = currentSettings.providers?.[postProcessGuidanceRoute(currentSettings.reasoningLevel).lane] || {};
     const hostInputs = await host?.generation?.postProcessProvenance?.({
       connectionProfileId: provider.connectionProfileId
     }) || {};
+    let currentWriter = operation.writer;
+    if (!frozen) {
+      const configured = normalizePostProcessWriter(currentSettings.postProcess?.writer);
+      try {
+        currentWriter = typeof host.generation?.resolvePostProcessWriter === 'function'
+          ? await host.generation.resolvePostProcessWriter(configured) : configured;
+      } catch (error) {
+        currentWriter = { unavailable: true, code: error?.code || 'RECURSION_POST_PROCESS_WRITER_UNAVAILABLE' };
+      }
+    }
     return buildRunProvenance({
       chatKey: operation.snapshot.chatKey,
       sourceIdentity: {
         sourceRevisionHash: hashJson({
-          draft: currentSnapshot.originalDraft,
+          draftHash: currentSnapshot.sourceHash,
           evidence: currentSnapshot.supportingContext,
           chat: currentSnapshot.chatIdentityHash
         }),
@@ -1208,6 +1335,7 @@ export function createPostProcessRuntime({
         postProcessDecks: currentSettings.postProcessDecks,
         provider,
         hostInputs,
+        writer: currentWriter,
         operationDeadlineSeconds: currentSettings.operationDeadlineSeconds || 300
       }),
       provider: {
@@ -1219,9 +1347,10 @@ export function createPostProcessRuntime({
       providerContractHash: 'recursion.postprocess.provider.v2',
       deckRevisionHash: hashJson({
         deckId: safeId(currentDeck?.id, 'post-process-deck'),
-        categories
+        ...normalizePostProcessStyle(currentDeck),
+        categories: semanticCategories(categories)
       }),
-      cardConfigurationHash: hashJson(categories),
+      cardConfigurationHash: hashJson(semanticCategories(categories)),
       promptContractHash: hashJson({
         writerPacketSchema: POST_PROCESS_WRITER_PACKET_SCHEMA,
         boundaries: POST_PROCESS_WRITER_BOUNDARIES
@@ -1244,6 +1373,11 @@ export function createPostProcessRuntime({
       mode: operation.rewriteFlow,
       categories: operation.categories,
       sourceSnapshot: operation.snapshot,
+      operationOptions: Object.fromEntries([
+        'writer', 'editingScope', 'styleBrief', 'styleSample', 'reviewBeforeApplying',
+        'comparisonId', 'commitTargetIdentity', 'route', 'deckId', 'reasoningLevel',
+        'applyMode', 'rewriteFlow', 'modelAttemptsPerStep'
+      ].filter(key => operation[key] !== undefined).map(key => [key, cloneValue(operation[key])])),
       buildGuidanceRequest({ categories, draft }) {
         return guidanceRequestForStage(
           stageInput(operation, categories, draft),
@@ -1259,16 +1393,24 @@ export function createPostProcessRuntime({
             retryable: false
           });
         }
-        return generationRouter.generate(
-          operation.route.roleId,
-          request,
-          {
-            signal,
-            runId: operation.operationId,
-            lockRunId: true,
-            activityLifecycle: 'nested'
-          }
-        );
+        const key = await guidanceCacheKey(operation, request);
+        if (signal?.aborted) throw Object.assign(new Error('Stopped.'), { name: 'AbortError' });
+        operation.guidanceCache ||= {};
+        if (operation.guidanceCache[key]) return cloneValue(operation.guidanceCache[key]);
+        const result = await generationRouter.generate(operation.route.roleId, request, {
+          signal, runId: operation.operationId, lockRunId: true, activityLifecycle: 'nested'
+        });
+        if (signal?.aborted) throw Object.assign(new Error('Stopped.'), { name: 'AbortError' });
+        const data = isObject(result?.data) ? result.data : result;
+        if (result?.ok !== false && cleanText(data?.guidanceText)
+            && (!data.snapshotHash || data.snapshotHash === operation.snapshotHash)
+            && (!data.sourceHash || data.sourceHash === operation.sourceHash)) {
+          operation.guidanceCache[key] = { ok: true, data: { schema: cleanText(data.schema),
+            guidanceText: data.guidanceText, snapshotHash: operation.snapshotHash, sourceHash: operation.sourceHash } };
+          const keys = Object.keys(operation.guidanceCache);
+          while (keys.length > 64) delete operation.guidanceCache[keys.shift()];
+        }
+        return result;
       },
       validateGuidance(result) {
         const data = isObject(result?.data) ? result.data : result;
@@ -1303,8 +1445,12 @@ export function createPostProcessRuntime({
           }
         };
       },
-      buildRewriteRequest({ categories, draft, guidance }) {
+      async buildRewriteRequest({ categories, draft, guidance }) {
         const stage = stageInput(operation, categories, draft);
+        // Rehydrate comparison reuse data even when Resume reused a guidance checkpoint.
+        const key = await guidanceCacheKey(operation, guidanceRequestForStage(stage, operation));
+        operation.guidanceCache ||= {};
+        operation.guidanceCache[key] = { ok: true, data: cloneValue(guidance) };
         return {
           draft,
           guidancePacket: buildPostProcessWriterPacket(stage, guidance),
@@ -1323,6 +1469,7 @@ export function createPostProcessRuntime({
         return host.generation.rewriteWithPostProcess({
           guidancePacket: request.guidancePacket,
           writerDirective: request.writerDirective,
+          writer: operation.writer,
           signal
         });
       },
@@ -1336,10 +1483,14 @@ export function createPostProcessRuntime({
         let current = false;
         try {
           current = guardAllowsCommit(
-            await sourceGuard(operation.snapshot, operation)
+            await sourceGuard(guardedSnapshot(operation), operation)
           );
         } catch {
           current = false;
+        }
+        if (current && operation.commitTargetIdentity) {
+          current = postProcessIdentityMatches(await host.messages.postProcessSourceIdentity(), operation.commitTargetIdentity)
+            && await reviewContextCurrent({ originalSnapshot: operation.snapshot });
         }
         if (!current) {
           return {
@@ -1359,6 +1510,16 @@ export function createPostProcessRuntime({
             }
           };
         }
+        if (review) {
+          const result = await review.stage({ operation: { ...operation, signal: commitSignal }, text,
+            retryInputs: { categories: operation.categories, editingScope: operation.editingScope,
+              styleBrief: operation.styleBrief, styleSample: operation.styleSample,
+              guidanceCache: operation.guidanceCache || {} } });
+          return { ok: result.ok, applied: result.applied === true, reason: result.reason,
+            comparisonId: result.comparison?.id || '', receipt: result.comparison?.receipt || null };
+        }
+        if (operation.reviewBeforeApplying) return {ok:false,applied:false,
+          error:{code:'RECURSION_POST_PROCESS_REVIEW_UNAVAILABLE'}};
         const marker = markerForCommit(
           operation,
           text,
@@ -1451,6 +1612,7 @@ export function createPostProcessRuntime({
     });
     const candidate = cleanText(draftArtifact?.text);
     const noChange = commitArtifact?.reason === 'no-change';
+    const awaitingReview = commitArtifact?.reason === 'awaiting-review';
     const outcomes = operation.categories.map((category) => {
       const suffix = operation.rewriteFlow === 'progressive'
         ? safeId(category.id, 'category')
@@ -1468,12 +1630,12 @@ export function createPostProcessRuntime({
     });
     lastDiagnostics = diagnosticsFor(operation, {
       outcomes,
-      status: noChange ? 'no-change' : 'committed',
+      status: noChange ? 'no-change' : awaitingReview ? 'awaiting-review' : 'committed',
       committedApplyMode: noChange ? null : operation.applyMode
     });
     settleActivity(record, operation, {
       outcome: 'success',
-      label: noChange ? 'Post-processing complete. No changes needed.' : 'Post-processing complete.',
+      label: noChange ? 'Post-processing complete. No changes needed.' : awaitingReview ? 'Revision ready for review.' : 'Post-processing complete.',
       detail: {
         partial: false,
         requestedApplyMode: operation.applyMode,
@@ -1484,8 +1646,9 @@ export function createPostProcessRuntime({
     });
     return {
       ok: true,
-      committed: !noChange,
-      reason: noChange ? 'no-change' : 'applied',
+      committed: !noChange && !awaitingReview,
+      reason: noChange ? 'no-change' : awaitingReview ? 'awaiting-review' : 'applied',
+      comparisonId: commitArtifact?.comparisonId || '',
       candidate,
       partial: false,
       requestedApplyMode: operation.applyMode,
@@ -1573,11 +1736,18 @@ export function createPostProcessRuntime({
 
       const rawSnapshot = await snapshotProvider();
       if (record.controller.signal.aborted) return finishWithoutCommit(null, 'canceled');
-      const capturedSnapshot = await capturePostProcessSnapshot(
+      const currentSnapshot = await capturePostProcessSnapshot(
         rawSnapshot,
         currentSettings,
         host
       );
+      if (record.retryComparison && (!postProcessIdentityMatches(
+        postProcessSnapshotIdentity(currentSnapshot), record.retryComparison.targetIdentity)
+        || !await reviewContextCurrent(record.retryComparison))) {
+        return finishWithoutCommit(null, 'stale-source', [], {}, record);
+      }
+      const capturedSnapshot = record.retryComparison
+        ? cloneValue(record.retryComparison.originalSnapshot) : currentSnapshot;
       const responseIdentityHash = hashJson({
         messageId: String(capturedSnapshot.sourceMessageId ?? ''),
         swipeId: Number(capturedSnapshot.sourceSwipeId || 0),
@@ -1619,7 +1789,7 @@ export function createPostProcessRuntime({
         return finishWithoutCommit(null, 'final-target-unverified', [], {}, record);
       }
       const responseOwnerKey = `${capturedSnapshot.chatKey}|${responseIdentityHash}`;
-      if (responseOwners.has(responseOwnerKey)) {
+      if (!record.retryComparison && responseOwners.has(responseOwnerKey)) {
         return finishWithoutCommit(null, 'response-already-owned', [], {}, record);
       }
       responseOwners.set(responseOwnerKey, true);
@@ -1636,7 +1806,10 @@ export function createPostProcessRuntime({
         preprocessTurnKeyHash,
         responseIdentityHash,
         nativeGenerationType,
-        signal: record.controller.signal
+        signal: record.controller.signal,
+        guidanceCache: cloneValue(record.retryComparison?.retryInputs?.guidanceCache || {}),
+        ...(record.retryComparison ? { comparisonId: record.retryComparison.id,
+          commitTargetIdentity: cloneValue(record.retryComparison.targetIdentity), reviewBeforeApplying: true } : {})
       };
       record.phase = 'running';
 
@@ -1646,6 +1819,12 @@ export function createPostProcessRuntime({
       if (operation.categories.length === 0) {
         return finishWithoutCommit(operation, 'no-runnable-cards', [], {}, record);
       }
+      if (typeof host?.generation?.resolvePostProcessWriter === 'function') {
+        operation.writer = deepFreeze(cloneValue(await host.generation.resolvePostProcessWriter(operation.writer)));
+      } else if (operation.writer.mode === 'profile') {
+        throw Object.assign(new Error('Profile writer is unavailable.'), {code:'RECURSION_POST_PROCESS_WRITER_UNAVAILABLE'});
+      }
+      if (record.controller.signal.aborted) return finishWithoutCommit(operation, 'canceled', [], {}, record);
       startActivity(record, operation);
 
       if (durableEnabled) {
@@ -1675,7 +1854,7 @@ export function createPostProcessRuntime({
 
       let current = false;
       try {
-        current = guardAllowsCommit(await sourceGuard(operation.snapshot, operation));
+        current = guardAllowsCommit(await sourceGuard(guardedSnapshot(operation), operation));
       } catch {
         current = false;
       }
@@ -1893,8 +2072,9 @@ export function createPostProcessRuntime({
     return { ok: true, pending: true };
   }
 
-  function cancelPostProcess() {
-    const canceled = Boolean(pendingTrigger || active);
+  function cancelPostProcess(reason = 'post-process-stopped') {
+    const reviewCanceled = review?.cancel?.(reason);
+    const canceled = Boolean(pendingTrigger || active || reviewCanceled?.canceled);
     pendingTrigger = null;
     finalizationClaim = null;
     if (!active) return { ok: true, canceled };
@@ -1912,13 +2092,17 @@ export function createPostProcessRuntime({
 
   async function waitForPostProcessSettlement() {
     const pendingRun = active?.promise;
-    if (!pendingRun) return { ok: true, settled: true, active: false };
+    if (!pendingRun) {
+      await review?.waitForSettlement?.();
+      return { ok: true, settled: true, active: false };
+    }
     try {
       await pendingRun;
     } catch {
       // Execute normalizes failures, but settlement must remain fail-soft.
     }
-    return { ok: true, settled: true, active: Boolean(active) };
+    await review?.waitForSettlement?.();
+    return { ok: true, settled: true, active: Boolean(active) || Boolean(review?.isRunning?.()) };
   }
 
   async function postProcessFinalTargetReady(details = {}) {
@@ -2048,6 +2232,7 @@ export function createPostProcessRuntime({
     });
     const operation = {
       ...basePlan,
+      ...cloneValue(sourceArtifact.operationOptions || {}),
       operationId: manifest.operationId,
       preprocessTurnKeyHash: cleanText(sourceArtifact.snapshot.preprocessTurnKeyHash),
       responseIdentityHash: cleanText(sourceArtifact.snapshot.responseIdentityHash),
@@ -2059,6 +2244,7 @@ export function createPostProcessRuntime({
         ? cloneValue(sourceArtifact.categories)
         : basePlan.categories
     };
+    operation.writer = deepFreeze(cloneValue(operation.writer));
     if (operation.responseIdentityHash) {
       responseOwners.set(
         `${operation.snapshot.chatKey}|${operation.responseIdentityHash}`,
@@ -2132,7 +2318,7 @@ export function createPostProcessRuntime({
     },
     preparePostProcessTrigger,
     postProcessRunning() {
-      return Boolean(active);
+      return Boolean(active || review?.isRunning?.());
     },
     runPostProcessForLatestAssistant,
     cancelPostProcess,
@@ -2144,6 +2330,11 @@ export function createPostProcessRuntime({
     retryStage,
     executionGraph(operationId) {
       return durableOperations.get(cleanText(operationId))?.graph || null;
+    },
+    async invalidatePostProcessComparisons(options) { return review?.invalidate?.(options); },
+    async postProcessComparisons() { return review ? review.list() : []; },
+    async reviewPostProcess(input) {
+      return review ? review.act(input) : {ok:false,reason:'review-unavailable'};
     },
     postProcessDiagnostics() {
       return cloneValue(lastDiagnostics);

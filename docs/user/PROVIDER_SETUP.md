@@ -177,3 +177,13 @@ Related documents:
 - [Operator Manual](RECURSION_OPERATOR_MANUAL.md)
 - [Prompt Privacy And Safety](PROMPT_PRIVACY_AND_SAFETY.md)
 - [Provider And Generation Spec](../architecture/PROVIDER_AND_GENERATION_SPEC.md)
+
+## A separate Post-process writer
+
+In Post-process Cards, choose `Writer: Connection Profile`, then select a saved SillyTavern profile. This writer edits completed replies independently of the main story model and Utility/Reasoner guidance lanes. It requires usable prose output, not structured-output certification.
+
+Under Advanced writer settings, leave Output token limit empty to inherit the profile's saved limit, or enter an integer from 256 to 65536. A profile without a saved limit requires an explicit value. Sampling defaults to Profile; Override exposes temperature and top-p for this writer only. Invalid or unavailable profiles show an error without falling back to the main model.
+
+The profile receives the full draft, editing instructions, and bounded evidence. It does not receive the entire native SillyTavern prompt or promise identical World Info and Author's Note context. Choose Current SillyTavern model when you want native quiet-generation context and preset behavior.
+
+Text-completion writers also require a saved context limit in their selected generation preset and an available Connection Manager prompt formatter. Before sending, Recursion checks the complete formatted input using its UTF-8 byte count, the output token allowance, and a 128-token formatting reserve. This conservative check can reject a prompt that the model's tokenizer could fit. Increase the selected preset's saved context limit only within the model's supported capacity, lower the writer output allowance, or reduce optional evidence. Recursion does not use the active main model's tokenizer or shorten the draft to fit. Ollama and llama.cpp receive their native output-budget fields and the selected saved context budget.

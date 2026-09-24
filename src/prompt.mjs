@@ -57,7 +57,7 @@ const FOOTPRINT_BUDGETS = FOOTPRINT_SECTION_BUDGETS;
 const STATIC_GUARDRAILS = Object.freeze([
   'Output only the story reply, without planning, self-correction, or discussion of prompts. Keep Recursion analysis invisible.',
   'Explicit user instructions and established story facts outrank generated cards and guidance. Treat generated interpretations as tentative, not new constraints. Preserve player control and established knowledge boundaries.',
-  'Follow the established viewpoint; cards cannot choose a different viewpoint character. Check current positions and actions already completed. An unanswered question does not require continued delay.'
+  'Follow the established viewpoint and current positions. Preserve actions already completed and discoveries. Update reactions when information or precautions change stakes; prior fear need not persist. Unresolved causes do not erase mitigated risks. Allow answers and progress without forcing calm or agreement.'
 ]);
 
 const INJECTION_TEMPLATE = Object.freeze([
@@ -454,7 +454,7 @@ function recentGuidanceSources(snapshot = {}) {
     .map(message => ({
       mesid: message.mesid,
       role: message.role,
-      text: safeTextSource(message.text || '', 3000).slice(0, 3000)
+      text: safeTextSource(message.text || '', Infinity)
     }));
 }
 
@@ -537,6 +537,7 @@ export function validateGuidanceStageResult(result, {
   const readableReason = reason === 'schema-mismatch'
     ? 'wrong schema'
     : reason.replace(/[-_]+/g, ' ');
+  const responseShape = guidanceResponseShape(result);
   return {
     ok: false,
     error: {
@@ -544,9 +545,25 @@ export function validateGuidanceStageResult(result, {
       category: 'validation',
       retryable: true,
       reason,
-      message: `Guidance response is invalid: ${readableReason}.`
+      responseShape,
+      message: `Guidance response is invalid: ${readableReason}.${responseShape.length ? ` Returned field types: ${responseShape.join(', ')}.` : ''}`
     }
   };
+}
+
+function guidanceResponseShape(result) {
+  const fields = ['schema', 'snapshotHash', 'guidanceText', 'sourceCardIds', 'guardrailCardIds', 'omittedCardIds', 'diagnostics'];
+  if (result?.ok && result.data && typeof result.data === 'object') {
+    return fields.filter((key) => Object.hasOwn(result.data, key)).map((key) => {
+      const value = result.data[key];
+      const type = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+      return `${key}:${type}`;
+    });
+  }
+  return (Array.isArray(result?.error?.responseShape) ? result.error.responseShape : [])
+    .map((entry) => typeof entry === 'string' ? entry.match(/^([a-zA-Z]+):(string|object|array|null|number|boolean)(?:\(|$)/) : null)
+    .filter((match) => match && fields.includes(match[1]))
+    .map((match) => `${match[1]}:${match[2]}`).slice(0, fields.length);
 }
 
 export function buildGuidanceCorrectionRequest({
@@ -565,6 +582,9 @@ export function buildGuidanceCorrectionRequest({
       safeTextSource(source.prompt, MAX_PACKET_SECTION),
       'Correction required.',
       `The previous response was rejected after attempt ${Math.max(1, Number(attempt) || 1)}: ${reason}`,
+      ...(Array.isArray(failure.responseShape) && failure.responseShape.length
+        ? [`Returned field types: ${guidanceResponseShape({ error: failure }).join(', ')}.`] : []),
+      'guidanceText must be a nonempty string containing the actual response guidance, not an object or a schema definition.',
       `Return one corrected JSON object only using schema "${GUIDANCE_SCHEMA}".`
     ].filter(Boolean).join('\n\n')
   };

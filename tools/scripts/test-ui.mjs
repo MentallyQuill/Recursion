@@ -4281,6 +4281,35 @@ try {
   assert(cardDetailText.includes('Inspector-only'), 'viewer card detail labels inspector notes');
   assert(cardDetailText.includes('scene opening required fresh frame'), 'viewer card detail includes lifecycle history');
 
+  const handBeforeRefinement = view.lastHand;
+  view = { ...view, lastHand: { ...handBeforeRefinement, metadata: { refinement: {
+    targetCount: 2, revisionCount: 0, targets: [
+      { targetId: 'facet-a', cardId: 'card-a', name: 'Scene position', outcome: 'unchanged', revisionCount: 0, findings: 'PRIVATE_REVIEW_MARKER' },
+      { targetId: 'facet-b', cardId: 'card-a', name: 'Scene pressure', outcome: 'unchanged', revisionCount: 0 }
+    ]
+  } } } };
+  ui.update();
+  assertDeepEqual(root.querySelectorAll('[data-recursion-viewer-refinement-target]').map(node => node.textContent), [
+    'Refinement · Scene position: unchanged · 0 revisions',
+    'Refinement · Scene pressure: unchanged · 0 revisions'
+  ], 'Viewer exposes each marked facet outcome on its shared runtime card');
+  assert(!fakeDocument.textTree(viewer).includes('PRIVATE_REVIEW_MARKER'), 'Viewer refinement metadata never exposes review findings');
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-brief-card-meta]')).includes('refinement unchanged'), 'Last Brief reports unchanged review acceptance');
+  assertEqual(root.querySelectorAll('[data-recursion-brief-card]')[1].querySelector('[data-recursion-brief-card-meta]').children.length, 1, 'unmarked Last Brief cards gain no refinement marker');
+  const briefPanelForRefinement = root.querySelector('[data-recursion-hand-dropdown]');
+  const briefWasHidden = briefPanelForRefinement.hidden;
+  briefPanelForRefinement.hidden = false;
+  view = { ...view, lastHand: { ...view.lastHand, metadata: { refinement: {
+    ...view.lastHand.metadata.refinement, revisionCount: 1,
+    targets: view.lastHand.metadata.refinement.targets.map(target => ({ ...target, outcome: 'accepted', revisionCount: 1 }))
+  } } } };
+  ui.update();
+  assert(fakeDocument.textTree(root.querySelector('[data-recursion-brief-card-meta]')).includes('refinement accepted · 1 revision'), 'metadata-only updates refresh visible Last Brief acceptance and semantic revision count');
+  assert(root.querySelectorAll('[data-recursion-viewer-refinement-target]').every(node => node.textContent.includes('accepted · 1 revision')), 'Viewer reports semantic revision count for each marked facet');
+  briefPanelForRefinement.hidden = briefWasHidden;
+  view = { ...view, lastHand: handBeforeRefinement };
+  ui.update();
+
   const viewerPreviews = Array.from(viewer.querySelectorAll('pre'));
   assertEqual(viewer.querySelector('h2').textContent, 'Recursion Viewer', 'viewer retains its heading');
   const viewerClose = viewer.querySelector('[data-recursion-viewer-close]');

@@ -1839,6 +1839,28 @@ function briefCardDomId(card, index) {
   return cleanText(source.id || source.cardId || source.refId || `${cardFamily(source)}-${index}`, `card-${index}`);
 }
 
+function cardRefinementOutcomes(hand, card) {
+  const cardId = cleanText(card?.id || card?.cardId);
+  const targets = hand?.metadata?.refinement?.targets;
+  if (!cardId || !Array.isArray(targets)) return [];
+  return targets.filter(target => target?.cardId === cardId && ['accepted', 'unchanged'].includes(target.outcome))
+    .slice(0, 100)
+    .map(target => ({
+      targetId: safeText(target.targetId, 120),
+      name: safeText(target.name || target.targetId, 80),
+      outcome: target.outcome,
+      revisionCount: target.revisionCount === 1 ? 1 : 0
+    }));
+}
+
+function cardRefinementChip(hand, card) {
+  const outcomes = cardRefinementOutcomes(hand, card);
+  if (!outcomes.length) return '';
+  if (outcomes.every(target => target.outcome === 'unchanged')) return 'refinement unchanged';
+  const revisions = Math.max(...outcomes.map(target => target.revisionCount));
+  return `refinement accepted · ${revisions} revision${revisions === 1 ? '' : 's'}`;
+}
+
 function handDropdownRenderKey(view, model, cards, packetText, packetMeta) {
   return stableStringify({
     tooltipsEnabled: model.tooltipsEnabled,
@@ -1862,6 +1884,7 @@ function handDropdownRenderKey(view, model, cards, packetText, packetMeta) {
         family,
         priority,
         text: cardText(source) || cardSummary(source),
+        refinement: cardRefinementChip(view.lastBriefHand ?? view.lastHand, source),
         chips: [
           ['critical', 'strong'].includes(priority) ? priority : '',
           ...metaChips
@@ -2024,6 +2047,7 @@ function renderHandDropdown(panel, view, model, options = {}) {
     const priorityLabel = ['critical', 'strong'].includes(priority) ? priority : '';
     const rawChips = [
       priorityLabel,
+      cardRefinementChip(briefHand, source),
       ...metaChips
     ].map((chip) => cleanText(chip, '')).filter(Boolean);
     const visibleChips = compactBriefChips(rawChips, 4);
@@ -3646,6 +3670,13 @@ function appendViewerDeckSection(viewer, hand) {
     appendViewerChips(meta, [...new Set(metaChips)]);
     article.appendChild(header);
     if (meta.children.length) article.appendChild(meta);
+    for (const outcome of cardRefinementOutcomes(hand, cardSource)) {
+      article.appendChild(el('p', {
+        className: 'recursion-viewer-card-summary',
+        text: `Refinement · ${outcome.name}: ${outcome.outcome} · ${outcome.revisionCount} revision${outcome.revisionCount === 1 ? '' : 's'}`,
+        dataset: { recursionViewerRefinementTarget: outcome.targetId }
+      }));
+    }
     article.appendChild(el('p', {
       className: 'recursion-viewer-card-summary',
       text: safeText(cardSummary(cardSource), 260)

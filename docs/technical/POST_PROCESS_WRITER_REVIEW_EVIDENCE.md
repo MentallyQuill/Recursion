@@ -1,7 +1,7 @@
 # Post-process writer and review verification
 
 The feature was implemented on `codex/post-process-writer` in an isolated managed
-worktree and integrated with main through `73ff268b`. The original checkout and
+worktree and integrated with main through `70469277`. The original checkout and
 its unrelated uncommitted changes were not modified.
 
 ## Verification boundaries
@@ -19,7 +19,7 @@ mandatory draft to make a request fit. See `../user/PROVIDER_SETUP.md`.
 
 ## Final merged gates
 
-- `npm.cmd test`: PASS, 97 offline test scripts.
+- `npm.cmd test`: PASS, 98 offline test scripts.
 - `npm.cmd run test:browser`: PASS, 4 browser/isolated-host test scripts.
 - `git diff origin/main --check`: PASS.
 - Targeted re-review of transport and cancellation fixes: clean.

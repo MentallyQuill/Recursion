@@ -5,7 +5,9 @@ import {
   buildRefinementRequest,
   validateRefinementResult,
   applyRefinementDraft,
-  finalizeRefinementHand
+  finalizeRefinementHand,
+  summarizeRefinementMetadata,
+  CARD_REFINEMENT_CONTRACT_VERSION
 } from '../card-refinement.mjs';
 
 export const REFINED_HAND_STAGE_ID = 'preprocess.refinement.hand';
@@ -62,7 +64,9 @@ export function createCardRefinementStages({ settings, snapshot, snapshotHash, g
       const affected = new Set(targets.filter(target => rejected.has(target.id)).map(target => target.cardId));
       targets = targets.filter(target => affected.has(target.cardId));
     }
-    if (phase === 'verify') targets = targets.filter(target => input.revisedCardIds.includes(target.cardId));
+    if (phase === 'verify') targets = targets.filter(target => input.revisedCardIds.includes(target.cardId)
+      || input.reviews[0].items.find(item => item.targetId === target.id)?.assessment.supportingCardIds
+        .some(id => input.revisedCardIds.includes(id)));
     if (!targets.length) return null;
     return buildRefinementRequest({
       phase, snapshot, snapshotHash, hand: input.hand, targets,
@@ -70,7 +74,7 @@ export function createCardRefinementStages({ settings, snapshot, snapshotHash, g
     });
   };
   const phases = Object.keys(PHASE_IDS).map(phase => ({
-    id: PHASE_IDS[phase], version: 1, kind: 'model', executable: true,
+    id: PHASE_IDS[phase], version: CARD_REFINEMENT_CONTRACT_VERSION, kind: 'model', executable: true,
     dependencies: phase === 'prepare'
       ? ['preprocess.hand', 'preprocess.snapshot']
       : [PHASE_IDS[{ review: 'prepare', revise: 'review', verify: 'revise' }[phase]]],
@@ -120,7 +124,7 @@ export function createCardRefinementStages({ settings, snapshot, snapshotHash, g
     summarizeArtifact: refinementSummary
   }));
   return [...phases, {
-    id: REFINED_HAND_STAGE_ID, version: 1, kind: 'local', executable: true,
+    id: REFINED_HAND_STAGE_ID, version: CARD_REFINEMENT_CONTRACT_VERSION, kind: 'local', executable: true,
     retryFromStageId: PHASE_IDS.review,
     dependencies: ['preprocess.hand', PHASE_IDS.verify], checkpoint: 'durable', failurePolicy: 'blocking',
     buildInputFingerprint(_context, dependencies) {
@@ -146,7 +150,7 @@ export function createCardRefinementStages({ settings, snapshot, snapshotHash, g
     },
     summarizeArtifact(result) {
       return { status: result.metadata.refinement.revisionCount ? 'reviewed-revised' : 'reviewed-unchanged',
-        ...result.metadata.refinement };
+        ...summarizeRefinementMetadata(result.metadata.refinement) };
     }
   }];
 }

@@ -31,15 +31,19 @@ Implement `src/card-refinement.mjs` as pure request/validation/result helpers, s
 `buildRefinementRequest({ phase, snapshot, snapshotHash, hand, targets, review })` returns a provider request with role `cardRefinementDraft` for prepare/revise or `cardRefinementReview` for review/verify, lane reasoner, responseSchema, prompt, snapshotHash, refinementCardIds, refinementTargetIds, and validEvidenceRefs. Only affected authored/runtime cards are requested for draft phases. Runtime determines target subsets for verification.
 
 Draft schema `recursion.cardRefinementDraft.v1`: `{ schema, snapshotHash, items: [{ cardId, promptText, evidenceRefs }] }`.
-Review schema `recursion.cardRefinementReview.v1`: `{ schema, snapshotHash, items: [{ targetId, verdict: 'accept'|'revise', findings: [{ message, evidenceRefs }] }] }`.
+Review schema `recursion.cardRefinementReview.v1`: `{ schema, snapshotHash, items: [{ targetId, verdict: 'accept'|'revise', assessment: { status, summary, evidenceRefs, supportingCardIds }, findings: [{ message, evidenceRefs }] }] }`.
 
-Validators reject unknown/duplicate/missing IDs, stale hashes, unsupported references, empty/oversized text, unsafe instructions, and inconsistent verdict/findings. A revise verdict needs findings; accept has none. Drafts require evidence references. Findings and intermediate cards remain local checkpoint artifacts; progress summaries expose only IDs, names, counts, and outcomes, never raw prompts or source text.
+Each assessment has status `satisfied`, `not-applicable`, or `needs-work`, a scene-specific summary of 1-400 characters, 1-3 unique visible evidence references, and 0-3 unique selected result IDs. Satisfied requires at least one supporting result. Satisfied and not-applicable require accept; needs-work requires revise. The request carries authoritative `reviewCardIds` for the complete selected hand. Provider contract version 12 and Refinement stage version 2 invalidate earlier unchecked review artifacts.
+
+Validators reject unknown/duplicate/missing IDs, stale hashes, unsupported evidence or supporting-card references, empty/oversized text, unsafe instructions, and inconsistent verdict/assessment/findings. A revise verdict needs findings; accept has none. Drafts require evidence references. Findings and intermediate cards remain local checkpoint artifacts; progress summaries expose only IDs, names, counts, and outcomes, never raw prompts or source text. Final assessments remain on hand metadata for the Viewer and opted-in hand excerpts; Guidance input, narrator packets, and compact packet diagnostics omit assessment prose.
 
 `validateRefinementResult(result, request)` returns `{ ok, value }` or `{ ok:false, error }`, preserving provider error classification. `applyRefinementDraft(hand, draft)` replaces only returned result bodies/evidence while retaining authoritative identity and lineage. `finalizeRefinementHand(originalHand, refinedHand, targets, reviews)` adds compact per-target refinement outcomes to hand metadata and original authored instructions to accepted applications. Marked facets sharing a family do not multiply hand slots.
 
 ## Review criteria
 
 Evaluate the original instruction's scene-specific purpose, source support, character knowledge boundaries, separation of assertions and observations, unresolved assumptions, conflicts with other cards, and useful implications for the next response. Do not reward verbosity, invent corroboration, require universal rationality, or output private monologues. Include actionable findings rather than hidden deliberation. Unknown world truth remains unknown.
+
+Review material omissions as well as incorrect statements. Generic uncertainty does not satisfy a missing scene-specific distinction, plausible alternative, or useful check. Corroborating a detail does not establish an extraordinary explanation for it. A peer result can supply the required guidance when explicitly cited, and a criterion may be not-applicable with scene evidence; neither case requires a cosmetic rewrite. Preserve a useful check already underway. If a cited supporting result is revised, recheck the dependent accepted target within the existing verification call. These rules do not add a phase or provider call.
 
 ## Integration, freshness, and visibility
 

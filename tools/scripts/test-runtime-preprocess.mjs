@@ -233,7 +233,9 @@ function roleCounts(calls = []) {
       if (roleId === 'utilityArbiter') return arbiterResponse(request, [{ family: 'Realism', reason: 'Check the claim.' }]);
       if (roleId === 'cardRefinementReview') return { ok: true, data: {
         schema: request.responseSchema, snapshotHash: request.snapshotHash,
-        items: request.refinementTargetIds.map(targetId => ({ targetId, verdict: 'accept', findings: [] }))
+        items: request.refinementTargetIds.map(targetId => ({ targetId, verdict: 'accept', assessment: {
+          status: 'satisfied', summary: 'The guidance keeps the visible question grounded.', evidenceRefs: request.validEvidenceRefs.slice(0, 1), supportingCardIds: request.refinementCardIds.slice(0, 1)
+        }, findings: [] }))
       } };
       if (roleId === 'guidanceComposer') return guidanceResponse(request);
       return cardResponse(roleId, request, { family: request.metadata?.family || 'Realism' });

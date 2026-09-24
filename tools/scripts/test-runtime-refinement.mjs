@@ -29,7 +29,7 @@ function deckSettings({ authored = false, refinement = true } = {}) {
     categories: { general: { id: 'general', name: 'General' } }, categoryOrder: ['general'], cards,
     cardOrderByCategory: { general: Object.keys(cards) } } } };
 }
-function createHarness({ pipelineMode = 'segmented', authored = false, refinement = true, rejectTwice = false, providerFailure = false, draftGate = null, mode = 'auto', maxCards = 4 } = {}) {
+function createHarness({ pipelineMode = 'segmented', authored = false, refinement = true, rejectTwice = false, providerFailure = false, draftGate = null, mode = 'auto', maxCards = 4, acceptUnchanged = false } = {}) {
   const calls = [];
   const installed = [];
   let currentSnapshot = initialSnapshot();
@@ -54,8 +54,11 @@ function createHarness({ pipelineMode = 'segmented', authored = false, refinemen
       if (providerFailure) return { ok: false, error: { code: 'RECURSION_PROVIDER_REFUSAL', message: 'Provider refused refinement.', retryable: false } };
       return { ok: true, data: { schema: request.responseSchema, snapshotHash: request.snapshotHash,
         items: request.refinementTargetIds.map(targetId => {
-          const revise = targetId === 'facet-a' && (request.phase === 'review' || rejectTwice);
-          return { targetId, verdict: revise ? 'revise' : 'accept', findings: revise
+          const revise = !acceptUnchanged && targetId === 'facet-a' && (request.phase === 'review' || rejectTwice);
+          return { targetId, verdict: revise ? 'revise' : 'accept', assessment: {
+            status: revise ? 'needs-work' : 'satisfied', summary: revise ? 'Audit assessment: distinguish the seal from its unknown mechanism.' : 'Audit assessment: the selected result keeps the seal established and the mechanism uncertain.',
+            evidenceRefs: ['message:1'], supportingCardIds: [request.targets.find(target => target.id === targetId).cardId]
+          }, findings: revise
             ? [{ message: 'A sealed archive does not establish a lock mechanism.', evidenceRefs: ['message:1'] }] : [] };
         })
       } };
@@ -98,12 +101,25 @@ for (const pipelineMode of ['segmented', 'fused']) {
   assert.ok(!guidance.prompt.includes(ORIGINAL), 'Guidance does not receive the superseded result');
   assert.ok(JSON.stringify(harness.installed[0]).includes(REVISED), 'accepted result reaches narration packet');
   assert.ok(!JSON.stringify(harness.installed[0]).includes(ORIGINAL), 'superseded draft stays out of narration packet');
+  assert.ok(!guidance.prompt.includes('Audit assessment:'), 'assessments stay out of Guidance input');
+  assert.ok(!JSON.stringify(harness.installed[0]).includes('Audit assessment:'), 'assessments stay out of narration packets');
   const hand = harness.runtime.view().lastHand;
   assert.equal(hand.cards.filter(card => card.family === 'Realism').length, 1);
   assert.equal(hand.cards.find(card => card.id === 'plain').promptText, PLAIN, 'unmarked authored instruction stays unchanged');
   assert.deepEqual(hand.metadata.refinement.targets.map(target => target.revisionCount), [1, 1]);
+  assert.ok(hand.metadata.refinement.targets.every(target => target.assessment.status === 'satisfied'), 'final accepted assessments are visible to the Viewer');
   const manifest = await harness.storage.loadPipelineRun('refinement-runtime');
   assert.equal(manifest.stageRecords['preprocess.refinement.hand'].state, 'completed');
+  assert.ok(!JSON.stringify(manifest.stageRecords).includes('Audit assessment:'), 'compact execution records exclude assessment prose');
+}
+
+for (const pipelineMode of ['segmented', 'fused']) {
+  const harness = createHarness({ pipelineMode, acceptUnchanged: true });
+  assert.equal((await prepare(harness)).ok, true);
+  assert.deepEqual(phaseCalls(harness).map(call => call.request.phase), ['review'], 'supported acceptance adds no model call');
+  assert.ok(harness.runtime.view().lastHand.metadata.refinement.targets.every(target =>
+    target.outcome === 'unchanged' && target.assessment.summary.startsWith('Audit assessment:')),
+  'both modes retain inspectable unchanged assessments');
 }
 
 for (const pipelineMode of ['segmented', 'fused']) {

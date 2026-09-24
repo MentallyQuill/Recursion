@@ -3,7 +3,7 @@ import { jsonSchemaForRequest, roleLane, REASONER_ROLE_IDS } from '../../src/pro
 
 const contracts = await import('../../src/card-refinement.mjs').catch(() => ({}));
 assert.equal(typeof contracts.collectRefinementTargets, 'function', 'refinement target collector exists');
-const { collectRefinementTargets, buildRefinementRequest, validateRefinementResult, applyRefinementDraft, finalizeRefinementHand } = contracts;
+const { collectRefinementTargets, buildRefinementRequest, validateRefinementResult, applyRefinementDraft, finalizeRefinementHand, summarizeRefinementMetadata } = contracts;
 const deckCards = Object.fromEntries(['focus-a', 'focus-b', 'authored', 'plain'].map((id) => [id, {
   id, categoryId: 'general', name: id, promptText: `Track ${id} using established evidence.`,
   kind: id.startsWith('focus') ? 'generated' : 'authored',
@@ -41,16 +41,34 @@ const review = { schema: reviewRequest.responseSchema, snapshotHash: 'frozen', i
   { targetId: 'focus-b', verdict: 'accept', findings: [] },
   { targetId: 'authored', verdict: 'accept', findings: [] }
 ] };
+const assessment = (status = 'satisfied') => ({ status, summary: 'The selected guidance preserves the observed closed door without asserting a lock.', evidenceRefs: ['message:12'], supportingCardIds: ['family'] });
+review.items = review.items.map(item => ({ ...item, assessment: assessment(item.verdict === 'revise' ? 'needs-work' : 'satisfied') }));
 assert.equal(validateRefinementResult({ ok: true, data: review }, reviewRequest).ok, true);
 const revise = buildRefinementRequest({ ...context, phase: 'revise', review });
 assert.deepEqual(revise.refinementCardIds, ['family'], 'revision deduplicates runtime families');
 assert.deepEqual(revise.refinementTargetIds, ['focus-a', 'focus-b'], 'revision preserves all marked family instructions');
 assert.ok(revise.prompt.includes(review.items[0].findings[0].message), 'revision carries actual findings');
+for (const request of [prepare, revise]) {
+  assert.ok(!request.prompt.includes('Return a brief assessment'), 'draft phase does not request fields excluded by its schema');
+  assert.ok(!request.prompt.includes('Each assessment requires'), 'assessment output rules apply only to reviews');
+}
 const draft = { schema: prepare.responseSchema, snapshotHash: 'frozen', items: [
   { cardId: 'authored', promptText: 'Track the closed door without assuming it is locked.', evidenceRefs: ['message:12'] }
 ] };
 assert.equal(validateRefinementResult({ ok: true, data: draft }, prepare).ok, true);
 function rejected(value, request = prepare) { assert.equal(validateRefinementResult(value, request).ok, false); }
+const acceptedItem = review.items[1];
+for (const patch of [{ status: 'needs-work' }, { summary: '' }, { summary: 'x'.repeat(401) },
+  { evidenceRefs: [] }, { evidenceRefs: ['message:13'] }, { evidenceRefs: ['message:12', 'message:12'] },
+  { supportingCardIds: [] }, { supportingCardIds: ['not-in-hand'] }, { supportingCardIds: ['family', 'family'] }, { extra: true }]) {
+  rejected({ ...review, items: [review.items[0], { ...acceptedItem, assessment: { ...acceptedItem.assessment, ...patch } }, review.items[2]] }, reviewRequest);
+}
+const { assessment: removedAssessment, ...bareAcceptance } = acceptedItem;
+rejected({ ...review, items: [review.items[0], bareAcceptance, review.items[2]] }, reviewRequest);
+const peerAcceptance = { ...acceptedItem, assessment: { ...assessment(), supportingCardIds: ['plain'] } };
+assert.equal(validateRefinementResult({ ...review, items: [review.items[0], peerAcceptance, review.items[2]] }, reviewRequest).ok, true, 'explicit selected peer coverage is allowed');
+const inapplicable = { ...acceptedItem, assessment: { ...assessment('not-applicable'), summary: 'The current beat is inspecting an already identified object, so repeating the question adds no useful work.', supportingCardIds: [] } };
+assert.equal(validateRefinementResult({ ...review, items: [review.items[0], inapplicable, review.items[2]] }, reviewRequest).ok, true, 'evidence-grounded inapplicability does not force a rewrite');
 rejected({ ...draft, snapshotHash: 'stale' });
 rejected({ ...draft, items: [] });
 rejected({ ...draft, extra: true });
@@ -77,7 +95,9 @@ const revisedDraft = { ...draft, items: [{ ...draft.items[0], cardId: 'family' }
 const refined = applyRefinementDraft(applied, revisedDraft);
 assert.equal(refined.cards.length, 3);
 assert.deepEqual(refined.cards[0].sourceCardIds, hand.cards[0].sourceCardIds);
-const verify = { ...review, items: review.items.slice(0, 2).map((item) => ({ ...item, verdict: 'accept', findings: [] })) };
+const verify = { ...review, items: review.items.map((item) => ({ ...item, verdict: 'accept', assessment: assessment(), findings: [] })) };
+assert.throws(() => finalizeRefinementHand(hand, refined, collected.targets, [review, { ...verify, items: verify.items.slice(0, 2) }]),
+  { code: 'RECURSION_REFINEMENT_UNRESOLVED' }, 'acceptance based on a revised peer needs a fresh assessment');
 const final = finalizeRefinementHand(hand, refined, collected.targets, [review, verify]);
 assert.ok(final.cards[1].promptText.includes(deckCards.authored.promptText));
 assert.ok(final.cards[1].promptText.includes(draft.items[0].promptText));
@@ -85,15 +105,19 @@ assert.equal(final.cards[2], hand.cards[2]);
 assert.deepEqual(final.metadata.refinement.targets.map(({ revisionCount }) => revisionCount), [1, 1, 0]);
 const multiReview = { ...review, items: review.items.map(item => item.targetId === 'authored'
   ? { ...review.items[0], targetId: 'authored' } : item) };
-const multiVerify = { ...review, items: review.items.map(item => ({ ...item, verdict: 'accept', findings: [] })) };
+const multiVerify = { ...review, items: review.items.map(item => ({ ...item, verdict: 'accept', assessment: assessment(), findings: [] })) };
 const multiFinal = finalizeRefinementHand(hand, refined, collected.targets, [multiReview, multiVerify]);
 assert.equal(multiFinal.metadata.refinement.revisionCount, 1, 'two revised cards still use one semantic revision round');
 assert.equal(multiFinal.metadata.refinement.revisedCardCount, 2, 'revised-card count is distinct from round count');
 assert.throws(() => finalizeRefinementHand(hand, refined, collected.targets, [review]), { code: 'RECURSION_REFINEMENT_UNRESOLVED' });
-const acceptAll = { ...review, items: review.items.map((item) => ({ ...item, verdict: 'accept', findings: [] })) };
+const acceptAll = { ...review, items: review.items.map((item) => ({ ...item, verdict: 'accept', assessment: assessment(), findings: [] })) };
 const unchanged = finalizeRefinementHand(hand, applied, collected.targets, [acceptAll]);
 assert.equal(unchanged.cards[0], hand.cards[0]);
 assert.equal(unchanged.metadata.refinement.targets[0].outcome, 'unchanged');
+assert.deepEqual(unchanged.metadata.refinement.targets[0].assessment, assessment(), 'accepted assessment stays inspectable');
+assert.equal(JSON.stringify(summarizeRefinementMetadata(unchanged.metadata.refinement)).includes(assessment().summary), false, 'compact metadata excludes assessment prose');
+assert.equal(final.metadata.refinement.targets[0].assessment.status, 'satisfied', 'final metadata uses verification assessment, not superseded needs-work');
+assert.ok(reviewRequest.prompt.includes('Generic reminders to stay uncertain or realistic are insufficient'), 'review explicitly checks missing scene application');
 const motivationRequest = { ...revise, refinementCards: [{ ...hand.cards[0], family: 'Character Motivation' }] };
 rejected({ ...revisedDraft, items: [{ ...revisedDraft.items[0], promptText: 'Track how Alice secretly wants to betray the group.' }] }, motivationRequest);
 assert.throws(() => finalizeRefinementHand(hand, refined, collected.targets, [review, { ...verify, items: verify.items.slice(0, 1) }]),
@@ -114,5 +138,10 @@ for (const request of [prepare, reviewRequest]) {
   assert.equal(schema.properties.items.maxItems, isDraft ? 1 : 3);
   const refs = isDraft ? itemSchema.properties.evidenceRefs : itemSchema.properties.findings.items.properties.evidenceRefs;
   assert.deepEqual(refs.items.enum, ['message:12']);
+  if (!isDraft) {
+    assert.equal(itemSchema.properties.assessment.properties.summary.maxLength, 400);
+    assert.deepEqual(itemSchema.properties.assessment.properties.supportingCardIds.items.enum, ['family', 'authored', 'plain']);
+    assert.ok(itemSchema.required.includes('assessment'));
+  }
 }
 console.log('[pass] card-refinement');

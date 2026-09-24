@@ -1,5 +1,6 @@
 import { normalizeCardSelectionSettings, cooldownExclusions, selectCardCandidates } from './card-selection.mjs';
 import { createActivityReporter } from './activity.mjs';
+import { summarizeRefinementMetadata } from './card-refinement.mjs';
 import { createCardRefinementStages, hasCardRefinement, REFINED_HAND_STAGE_ID } from './runtime/card-refinement-stages.mjs';
 import { failureFromError } from './failures.mjs';
 import { normalizeFusedRejections, fusedRejectionReason } from './fused-recovery.mjs';
@@ -7444,7 +7445,7 @@ export function createRecursionRuntime({
           diagnostics: {
             ...packet.diagnostics,
             ...(dependencies[handStageId].artifact.metadata?.refinement
-              ? { refinement: dependencies[handStageId].artifact.metadata.refinement } : {}),
+              ? { refinement: summarizeRefinementMetadata(dependencies[handStageId].artifact.metadata.refinement) } : {}),
             composerLane: guidance.lane || 'utility',
             reasonerStatus: guidance.lane === 'reasoner'
               ? (guidance.status === 'used' ? 'used' : 'fallback')

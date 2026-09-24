@@ -81,7 +81,7 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'providerTest'
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer', 'postProcessGuidanceReasoner', 'cardRefinementDraft', 'cardRefinementReview']);
-export const PROVIDER_CONTRACT_VERSION = 11;
+export const PROVIDER_CONTRACT_VERSION = 12;
 const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   utilityArbiter: 'recursion.utilityArbiter.v1',
   sceneFrameCard: 'recursion.cardPayload.v1',
@@ -514,6 +514,17 @@ export function jsonSchemaForRequest(request = {}) {
     } : {
       targetId: { type: 'string', enum: ids },
       verdict: { enum: ['accept', 'revise'] },
+      assessment: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          status: { type: 'string', enum: ['satisfied', 'not-applicable', 'needs-work'] },
+          summary: { type: 'string', minLength: 1, maxLength: 400 },
+          evidenceRefs: { ...evidenceRefs, maxItems: 3 },
+          supportingCardIds: { type: 'array', minItems: 0, maxItems: 3, uniqueItems: true,
+            items: { type: 'string', enum: uniqueRequestStrings(request.reviewCardIds) } }
+        },
+        required: ['status', 'summary', 'evidenceRefs', 'supportingCardIds']
+      },
       findings: {
         type: 'array', maxItems: 8,
         items: {

@@ -33,7 +33,9 @@ assert.equal(rateResult.attempts[0].action, 'retry-same', 'provider failure rema
 assert.equal(rateResult.attempts[0].diagnosticCode, 'provider-rate-limit-retry');
 
 const accepted = { schema: request.responseSchema, snapshotHash: request.snapshotHash,
-  items: request.refinementTargetIds.map(targetId => ({ targetId, verdict: 'accept', findings: [] })) };
+  items: request.refinementTargetIds.map(targetId => ({ targetId, verdict: 'accept', assessment: {
+    status: 'satisfied', summary: 'The guidance treats the reported world as a claim.', evidenceRefs: ['message:1'], supportingCardIds: request.refinementCardIds
+  }, findings: [] })) };
 dependencies[review.id] = { artifact: review.validate({ response: { ok: true, data: accepted } }, { dependencies }).value };
 for (const stage of stages.slice(2, 4)) {
   const nextRequest = stage.buildRequest({}, dependencies);
@@ -43,4 +45,16 @@ for (const stage of stages.slice(2, 4)) {
 const final = stages.at(-1).run({ dependencies });
 assert.equal(final.metadata.refinement.targetCount, 1);
 assert.equal(final.cards[0], hand.cards[0], 'accepted original remains unchanged');
+assert.equal(JSON.stringify(stages.at(-1).summarizeArtifact(final)).includes('The guidance treats'), false, 'execution summaries do not expose assessment prose');
+const originalVerifyInput = dependencies[stages[2].id].artifact;
+const peerTarget = { id: 'peer-target', cardId: 'peer', name: 'Peer criterion', instruction: 'Track evidence.', authored: false };
+dependencies[stages[2].id] = { artifact: { ...originalVerifyInput,
+  targets: [...originalVerifyInput.targets, peerTarget],
+  hand: { cards: [...hand.cards, { id: 'peer', family: 'Knowledge', promptText: 'Ask what supports the claim.' }] },
+  revisedCardIds: ['realism'], reviews: [{ ...accepted, items: [...accepted.items,
+    { targetId: peerTarget.id, verdict: 'accept', findings: [], assessment: { ...accepted.items[0].assessment, supportingCardIds: ['realism'] } }
+  ] }]
+} };
+assert.deepEqual(stages[3].buildRequest({}, dependencies).refinementTargetIds, [accepted.items[0].targetId, 'peer-target'],
+  'existing verification call includes acceptances that cite changed peers');
 console.log('[pass] card-refinement durable stages');

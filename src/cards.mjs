@@ -835,9 +835,7 @@ function effectiveMaxCardsForPolicy(maxCards, policy) {
   const base = numberInRange(maxCards, 6, 0, 64);
   if (!policy) return base;
   const ceiling = numberInRange(policy.cardBudget?.maxCards, base, 0, 64);
-  let next = Math.min(base, ceiling);
-  if (policy.strength?.selectionPressure === 'lean' && next > 0) next = Math.max(1, next - 1);
-  return next;
+  return Math.min(base, ceiling);
 }
 
 function plannedCardForJob(job) {
@@ -1470,7 +1468,6 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
           selectedFamilies: selected.map((card) => card.family),
           planShaping: [
             policy.focus?.level && policy.focus.level !== 'balanced' ? 'focus-family-ordering' : '',
-            policy.strength?.selectionPressure === 'lean' ? 'light-selection-pressure' : '',
             policy.cardBudget?.maxCards && policy.cardBudget.maxCards < requestedCardLimit ? 'card-budget-ceiling' : ''
           ]
         }),
@@ -1489,6 +1486,15 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
       maxTokens: tokenLimit,
       ...(selectionDiagnostics ? { selection: {
         ...selectionDiagnostics,
+        selectedCount: selected.length,
+        authoredCount: selected.filter((card) => card.origin === 'authored').length,
+        generatedCount: selected.filter((card) => card.origin !== 'authored').length,
+        shortfallCount: Math.max(0, Number(selectionDiagnostics.targetCount || 0) - selected.length),
+        shortfallReasons: [
+          ...(selectionDiagnostics.shortfallReason ? [selectionDiagnostics.shortfallReason] : []),
+          ...((selectionDiagnostics.retained || []).some((job) => !selected.some((card) => card.family === job.family))
+            ? ['card-generation-failed'] : [])
+        ],
         selected: selected.map((card) => ({
           id: card.id, family: card.family,
           source: card.origin || 'cache',

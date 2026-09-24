@@ -229,6 +229,35 @@ assertEqual(completedPartialFailure.reason, 'Active Cast provider output did not
 assertEqual(completedPartialFailure.failureCode, 'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'completed partial card exposes its stable failure code');
 assertEqual(completedPartialFailure.suggestedAction, 'Retry Active Cast. If it repeats, use a model with reliable JSON Schema output.', 'completed partial card exposes its suggested action');
 
+for (const [operationState, stageState] of [
+  ['completed', 'completed'], ['stale', 'completed'], ['completed', 'cached']
+]) {
+  const restoredFused = progressFromExecution({
+    operationId: 'restored-fused',
+    phase: 'preprocess',
+    state: operationState,
+    stageRecords: {
+      'preprocess.cards.fused': {
+        stageId: 'preprocess.cards.fused',
+        state: stageState,
+        kind: 'model',
+        summary: {
+          acceptedFamilies: ['Scene Frame', 'Active Cast', 'Character Motivation'],
+          unresolvedFamilies: ['Knowledge']
+        }
+      }
+    }
+  });
+  const children = restoredFused.steps.find((step) => step.id === 'preprocess.cards.fused')?.children || [];
+  assertDeepEqual(children.map((child) => child.label),
+    ['Scene Frame', 'Active Cast', 'Character Motivation', 'Knowledge'],
+    `restored ${operationState}/${stageState} Fused progress retains checkpoint family rows without the in-memory graph`);
+  assert(children.slice(0, 3).every((child) => child.state === (stageState === 'cached' ? 'cached' : 'done')),
+    'accepted Fused outcomes preserve completion or cache state');
+  assertEqual(children[3].state, 'failed', 'unresolved Fused family remains visibly failed');
+  assert(children.every((child) => child.action === null), 'restored Fused outcome rows have no independent actions');
+}
+
 const diagnosticProgress = progressFromExecution({
   operationId: 'run-diagnostics',
   phase: 'preprocess',

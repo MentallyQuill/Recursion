@@ -12,6 +12,8 @@ const SMOKE_PROFILE_ID = 'recursion-smoke-profile';
 function profileBackedSettings(settings = {}) {
   return {
     recursion: {
+      minCards: 0,
+      maxCards: 0,
       ...settings,
       providers: {
         utility: { connectionProfileId: SMOKE_PROFILE_ID },
@@ -682,6 +684,9 @@ if (lifecycleFailures.length) {
         })
       };
     }
+    if (prompt.includes('Create one compact')) return { text: JSON.stringify({
+      promptText: 'Preserve the visible user request.', evidenceRefs: ['message:1']
+    }) };
     return {
       text: JSON.stringify({
         schema: 'recursion.utilityArbiter.v1',
@@ -694,7 +699,7 @@ if (lifecycleFailures.length) {
       })
     };
   };
-  globalThis.extension_settings = profileBackedSettings({ pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' });
+  globalThis.extension_settings = profileBackedSettings({ pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off', minCards: 1, maxCards: 1 });
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 

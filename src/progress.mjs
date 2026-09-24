@@ -1546,11 +1546,14 @@ function groupedExecutionStep({
 
 function fusedOutcomeSteps(stage, operation, stages) {
   const graphOutcomes = Array.isArray(stage.outcomeChildren) ? stage.outcomeChildren : [];
+  // Reloaded and stale runs may have only the durable stage summary, without a graph.
   const savedFamilies = [...new Set([
-    ...(stage.summary?.acceptedFamilies || []), ...(stage.summary?.unresolvedFamilies || [])
-  ])];
+    ...(Array.isArray(stage.summary?.acceptedFamilies) ? stage.summary.acceptedFamilies : []),
+    ...(Array.isArray(stage.summary?.unresolvedFamilies) ? stage.summary.unresolvedFamilies : [])
+  ].map((family) => cleanText(family)).filter(Boolean))];
   const outcomes = graphOutcomes.length ? graphOutcomes : savedFamilies.map((family) => ({
-    id: `preprocess.cards.fused.${idFromText(family, 'card')}`, family
+    id: `preprocess.cards.fused.${idFromText(family, 'card')}`,
+    family
   }));
   const accepted = new Set(
     Array.isArray(stage.summary?.acceptedFamilies)
@@ -1578,7 +1581,8 @@ function fusedOutcomeSteps(stage, operation, stages) {
       executionStage: true,
       label: family,
       providerLane: stage.providerLane || 'utility',
-      state: !settled ? 'pending' : (acceptedOutcome || recovered ? 'done' : repairing ? repair?.state || 'pending' : 'failed'),
+      state: !settled ? 'pending' : acceptedOutcome ? (stage.state === 'cached' ? 'cached' : 'done')
+        : recovered ? (repair.state === 'cached' ? 'cached' : 'done') : repairing ? repair?.state || 'pending' : 'failed',
       ...(settled && (recovered || repairing) ? { recoveryState: recovered ? 'recovered' : 'repairing' } : {}),
       reason,
       executable: false,
@@ -1654,6 +1658,20 @@ export function progressFromExecution(execution, queuedReprocess = null) {
     if (stage.id === 'preprocess.hand') {
       const children = authoredHandSteps(stage, operation);
       if (children.length) step.children = children;
+      if (['completed', 'cached'].includes(stage.state) && Number.isFinite(stage.summary?.authoredCount)) {
+        const summary = stage.summary;
+        step.reason = `${summary.cardCount} cards included · ${summary.authoredCount} authored · ${summary.generatedCount} generated`;
+        if (summary.shortfallCount > 0) {
+          const reasons = new Set(summary.shortfallReasons || []);
+          const explanation = [
+            reasons.has('insufficient-eligible-cards') ? 'not enough eligible cards' : '',
+            reasons.has('card-generation-failed') ? 'selected cards failed generation' : ''
+          ].filter(Boolean).join('; ') || 'selected cards unavailable';
+          step.reason += `. ${summary.shortfallCount} below target: ${explanation}.`;
+          step.state = 'warning';
+          step.partialResult = true;
+        }
+      }
     }
     topLevel.push(step);
   }

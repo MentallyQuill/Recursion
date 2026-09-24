@@ -268,8 +268,8 @@ const PROVIDER_AUTOSAVE_DATASETS = Object.freeze([
 const SETTINGS_TOOLTIPS = Object.freeze({
   behavior: 'Controls how strongly Recursion shapes the next prompt packet. These settings affect card pressure, focus, and prompt size without changing provider credentials.',
   strength: 'Bias strength for the composed prompt packet. Light stays subtle, Balanced is the normal default, and Strong gives Recursion more room to steer scene adhesion.',
-  minCards: 'Low Reasoning Level card target. Use fewer cards for faster, cheaper turns or more cards when sparse scenes need extra grounding.',
-  maxCards: 'Upper Manual card-selection cap and Ultra Reasoning Level card target. Medium and High use the average, so this also sets the upper range for busier scenes.',
+  minCards: 'Total hand target at Low. Medium and High use the average of Min and Max. Authored and generated cards both count; unavailable cards are reported in progress.',
+  maxCards: 'Total hand target at Ultra and upper Manual selection cap. Priority cards are always included and may exceed the target. Fused and Segmented use the same selection.',
   focus: 'Temporary creative priority for card selection and composition. It nudges Recursion toward character, constraints, scene, or plot without becoming a hard whitelist.',
   footprint: 'Prompt budget for the composed Recursion packet. Compact spends fewer tokens, Rich preserves more scene detail when the moment is complex.',
   contextWindows: 'Bounds the Recursion-owned evidence and analysis windows used before and after generation. These do not replace or limit SillyTavern writer context.',
@@ -1545,7 +1545,7 @@ function updateProgressRow(row, step, child = false, tooltipsEnabled = true) {
   const reason = step.reason || '';
   const suggestedAction = step.suggestedAction || '';
   const unhealthy = ['warning', 'failed'].includes(state);
-  const visibleReason = reason && (unhealthy || step.recoveryState) ? reason : '';
+  const visibleReason = reason && (unhealthy || step.recoveryState || step.id === 'preprocess.hand') ? reason : '';
   const visibleAction = suggestedAction && unhealthy ? `Try: ${suggestedAction}` : '';
   const firstRender = row.dataset.recursionProgressRendered !== 'true';
   const changed = !firstRender && (

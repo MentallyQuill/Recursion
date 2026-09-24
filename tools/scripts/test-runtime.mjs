@@ -46,7 +46,7 @@ function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
-async function waitUntil(predicate, message, { attempts = 100, delayMs = 1 } = {}) {
+async function waitUntil(predicate, message, { attempts = 1000, delayMs = 1 } = {}) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -1067,6 +1067,8 @@ function createLivePostProcessRuntimeHarness({
   host.settingsStore.update({
     providers: { utility: { connectionProfileId: 'preprocess-test-profile' } },
     reasoningLevel: 'medium',
+    minCards: 0,
+    maxCards: 0,
     postProcess: {
       enabled: true,
       applyMode,
@@ -2403,6 +2405,10 @@ for (const pipelineMode of ['segmented', 'fused']) {
             }
           };
         }
+        if (roleId === 'fusedCardBundle') return { ok: true, data: { items: request.requestedCards.map(card => ({
+          family: card.family, promptText: 'Keep the visible scene grounded.', evidenceRefs: ['message:2']
+        })) } };
+        if (CARD_CATALOG.some(card => card.role === roleId)) return cardProviderResponse(roleId, request);
         if (roleId !== 'generationReviewer') throw new Error(`Unexpected reviewer fixture role: ${roleId}`);
         reviewerRequests.push(request);
         const cardIds = request.reviewSnapshot?.installedHand?.map((card) => card.cardId).filter(Boolean) || [];
@@ -2511,7 +2517,7 @@ function immediateDurableCardRouter() {
   const roleCalls = [];
   const hostStartCalls = [];
   const harness = createRuntimeHarness({
-    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' },
+    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off', minCards: 1, maxCards: 1 },
     hostGeneration: {
       async start(details = {}) {
         hostStartCalls.push(details);
@@ -2565,7 +2571,7 @@ function immediateDurableCardRouter() {
 {
   const roleCalls = [];
   const harness = createRuntimeHarness({
-    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' },
+    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off', minCards: 1, maxCards: 1 },
     generationRouter: {
       async generate(roleId, request = {}) {
         roleCalls.push(roleId);
@@ -2733,6 +2739,7 @@ function immediateDurableCardRouter() {
       pipelineMode: 'fused',
       mode: 'auto',
       reasonerUse: 'off',
+      minCards: 1, maxCards: 1,
       enhancements: { mode: 'recompose', applyMode: 'as-swipe', contextMessages: 13 }
     },
     snapshot: async () => {
@@ -2899,7 +2906,7 @@ function immediateDurableCardRouter() {
   });
   let activeSnapshot = snapshotFromMessages(initialMessages);
   const { runtime, installed } = createRuntimeHarness({
-    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off' },
+    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off', minCards: 1, maxCards: 1 },
     snapshot: () => activeSnapshot,
     generationRouter: {
       async generate(roleId, request = {}) {
@@ -2994,7 +3001,7 @@ function immediateDurableCardRouter() {
   let utilityCallCount = 0;
   let releaseSecondArbiter;
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
+    settings: { mode: 'auto', reasonerUse: 'off', minCards: 1, maxCards: 1 },
     generationRouter: {
       async generate(roleId, request = {}) {
         if (roleId === 'utilityArbiter') {
@@ -3885,11 +3892,11 @@ function immediateDurableCardRouter() {
   const result = await runtime.prepareForGeneration({ userMessage: 'Router budgets.' });
   const view = runtime.view();
   assertEqual(result.ok, true, 'router arbiter success still installs');
-  assertDeepEqual(view.lastPlan.cardJobs, [{ family: 'Open Threads', reason: 'Need one open thread card.' }], 'router card jobs merged');
-  assertEqual(view.lastPlan.budgets.maxCards, 1, 'router maxCards budget merged');
+  assertDeepEqual(view.lastPlan.cardJobs[0], { family: 'Open Threads', reason: 'Need one open thread card.' }, 'router ranking is retained ahead of target completion');
+  assertEqual(view.lastPlan.budgets.maxCards, 3, 'Play target overrides the smaller router budget');
   assertEqual(view.lastPlan.budgets.targetBriefTokens, 60, 'router token budget merged');
   assertEqual(view.lastPlan.reasonerDecision.mode, 'use', 'arbiter reasoner decision preserved in plan');
-  assertEqual(view.lastHand.cards.length, 1, 'router card budget changes selected hand');
+  assertEqual(view.lastHand.cards.length, 3, 'runtime fills the configured Low target');
   assertEqual(view.lastPacket.diagnostics.reasonerStatus, 'skipped', 'low reasoning level skips reasoner routing');
   assert(!routerCalls.some((call) => call.roleId === 'reasonerComposer'), 'reasoner composer not called when reasoning level is low');
 }
@@ -4047,7 +4054,7 @@ for (const scenario of [
   assertEqual(view.lastPlan.budgets.maxCards, 6, 'high reasoning uses the configured normal card budget even under compact footprint');
   assert(view.lastPlan.diagnostics.includes('behavior-footprint-clamped'), 'plan records footprint clamp diagnostic');
   assert(!view.lastPlan.diagnostics.includes('behavior-max-cards-clamped'), 'compact footprint no longer records a card-count clamp');
-  assertEqual(view.lastHand.cards.length, 5, 'light strength applies lean hand pressure after normal card budget');
+  assertEqual(view.lastHand.cards.length, 6, 'light strength preserves the normal card target');
   assertEqual(view.lastPacket.footprint, 'compact', 'packet uses effective compact footprint');
   assertEqual(view.lastPacket.diagnostics.behaviorPolicy.strength, 'light', 'packet diagnostics record light strength');
   assertEqual(view.lastPacket.diagnostics.behaviorPolicy.focus, 'character', 'packet diagnostics record character focus');
@@ -4064,8 +4071,8 @@ for (const scenario of [
     settings: { mode: 'auto', promptFootprint: 'normal', reasoningLevel: 'low' },
     generationRouter: {
       async generate(roleId, request) {
-        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
-        assertEqual(roleId, 'utilityArbiter', 'compact footprint override only calls utility arbiter');
+        if (roleId === 'guidanceComposer' || CARD_CATALOG.some(card => card.role === roleId)) return cardProviderResponse(roleId, request);
+        assertEqual(roleId, 'utilityArbiter', 'compact footprint override accepts planning and card calls');
         return {
           ok: true,
           data: {
@@ -4133,6 +4140,7 @@ for (const scenario of [
           };
         }
         if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
+        if (CARD_CATALOG.some(card => card.role === roleId)) return cardProviderResponse(roleId, request);
         throw new Error(`${scenario.label} should not call reasonerComposer`);
       }
     }
@@ -4154,8 +4162,8 @@ for (const scenario of [
     settings: { mode: 'auto', promptFootprint: 'compact', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
-        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
-        assertEqual(roleId, 'utilityArbiter', 'invalid footprint fallback only calls utility arbiter');
+        if (roleId === 'guidanceComposer' || CARD_CATALOG.some(card => card.role === roleId)) return cardProviderResponse(roleId, request);
+        assertEqual(roleId, 'utilityArbiter', 'invalid footprint fixture handles planning and cards');
         return {
           ok: true,
           data: {
@@ -4183,8 +4191,8 @@ for (const scenario of [
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
-        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
-        assertEqual(roleId, 'utilityArbiter', 'invalid scene status fallback only calls utility arbiter');
+        if (roleId === 'guidanceComposer' || CARD_CATALOG.some(card => card.role === roleId)) return cardProviderResponse(roleId, request);
+        assertEqual(roleId, 'utilityArbiter', 'invalid scene fixture handles planning and cards');
         return {
           ok: true,
           data: {
@@ -4209,7 +4217,7 @@ for (const scenario of [
 {
   let arbiterPrompt = '';
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
+    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
     snapshot: {
       chatId: 'pending-chat',
       chatKey: 'pending-chat',
@@ -4247,7 +4255,7 @@ for (const scenario of [
 
 {
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
+    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
     snapshot: {
       chatId: 'pending-mesid-chat',
       chatKey: 'pending-mesid-chat',
@@ -4318,7 +4326,8 @@ for (const scenario of [
   assertEqual(result.skipped, undefined, 'committed pending user turn is not treated as stale');
   assertEqual(calls.snapshot, 2, 'committed pending install reads the source and final install snapshot');
   assertEqual(installed.length, 1, 'committed pending user turn installs prompt');
-  assert(JSON.stringify(installed[0]).includes(pendingText), 'installed prompt includes committed pending user turn');
+  assert(runtime.view().lastSnapshot.messages.some(message => message.text === pendingText), 'planning snapshot includes the committed pending turn');
+  assertEqual(installed[0].snapshotHash, runtime.view().lastPlan.snapshotHash, 'installed generated hand retains the committed turn provenance');
 }
 
 
@@ -4366,7 +4375,7 @@ for (const scenario of [
 
 {
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
+    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
     snapshot: {
       chatId: 'repeat-pending-chat',
       chatKey: 'repeat-pending-chat',
@@ -4403,7 +4412,7 @@ for (const scenario of [
 {
   const arbiterPrompts = [];
   const { runtime } = createRuntimeHarness({
-    settings: providerCertificationSettings({
+    settings: providerCertificationSettings({ minCards: 0, maxCards: 0,
       mode: 'auto',
       strength: 'strong',
       focus: 'character',
@@ -4544,6 +4553,7 @@ for (const scenario of [
             }
           };
         }
+        if (CARD_CATALOG.some(card => card.role === roleId)) return cardProviderResponse(roleId, request);
         throw new Error(`unexpected role ${roleId}`);
       }
     }
@@ -4574,7 +4584,7 @@ for (const scenario of [
     settings: { mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
-        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
+        if (roleId === 'guidanceComposer' || CARD_CATALOG.some(card => card.role === roleId)) return cardProviderResponse(roleId, request);
         return {
           ok: true,
           data: {
@@ -4675,7 +4685,7 @@ for (const scenario of [
 
 {
   const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
+    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
         if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
@@ -4743,7 +4753,7 @@ for (const scenario of [
 
 {
   const { runtime, installed } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
+    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
         return {
@@ -4769,7 +4779,7 @@ for (const scenario of [
 
 {
   const { runtime, installed, calls } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
+    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
     hostPrompt: { methods: { clear: undefined } },
     generationRouter: {
       async generate(roleId, request) {
@@ -4825,7 +4835,7 @@ for (const scenario of [
 {
   const roleCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },
+    settings: { minCards: 2, maxCards: 2, pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request = {}) {
         roleCalls.push(roleId);
@@ -4929,7 +4939,7 @@ for (const scenario of [
   const roleCalls = [];
   let fusedRequest = null;
   const { runtime } = createRuntimeHarness({
-    settings: { pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },
+    settings: { minCards: 1, maxCards: 1, pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request = {}) {
         roleCalls.push(roleId);
@@ -5002,7 +5012,7 @@ for (const scenario of [
 {
   const roleCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },
+    settings: { minCards: 2, maxCards: 2, pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request = {}) {
         roleCalls.push(roleId);
@@ -5088,8 +5098,8 @@ for (const scenario of [
       reasoningLevel: 'medium',
       reasonerUse: 'off',
       promptFootprint: 'normal',
-      minCards: 5,
-      maxCards: 12
+      minCards: 6,
+      maxCards: 6
     },
     generationRouter: {
       async generate(roleId, request) {
@@ -5242,16 +5252,16 @@ for (const scenario of [
   const result = await runtime.prepareForGeneration({ userMessage: 'Cost regression turn.' });
   const view = runtime.view();
   assertEqual(result.ok, true, 'cost regression run installs prompt');
-  assertEqual(generatedRoles.length, 6, 'runtime does not call providers for card jobs beyond the hand budget');
+  assertEqual(generatedRoles.length, 8, 'runtime generates the configured midpoint target and no extra jobs');
   assertDeepEqual(
     view.lastHand.cards.map((card) => card.family),
-    ['Scene Frame', 'Active Cast', 'Scene Constraints', 'Knowledge', 'Consequences', 'Character Motivation'],
+    requestedFamilies.slice(0, 8),
     'runtime hand preserves the budgeted Arbiter family order'
   );
   assertEqual(view.lastHand.omitted.filter((entry) => entry.reason === 'max-cards').length, 0, 'ungenerated over-budget cards are not later omitted from the hand');
   assert(view.lastPlan.diagnostics.includes('card-jobs-budgeted'), 'runtime records card job budgeting diagnostic');
   assert(guidancePrompts[0].includes('Character Motivation'), 'guidance sees the last kept selected family');
-  for (const family of requestedFamilies.slice(6)) {
+  for (const family of requestedFamilies.slice(8)) {
     assert(!guidancePrompts[0].includes(`Keep ${family} active`), `${family} was not generated for discarded evidence`);
   }
 }
@@ -5451,13 +5461,12 @@ for (const scenario of [
             }
           };
         }
-        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
-        throw new Error(`Auto focus test expected batch routing, got generate ${roleId}`);
+        return cardProviderResponse(roleId, request);
       },
       async batch(requests) {
         routerCalls.push(...requests.map((request) => request.roleId));
-        assertDeepEqual(requests, [], 'Auto Pre-process Deck eligibility filters an Off card before generation');
-        return [];
+        assert(!requests.some(request => request.roleId === 'sceneConstraintsCard'), 'Off cards remain ineligible');
+        return requests.map(request => cardProviderResponse(request.roleId, request));
       }
     }
   });
@@ -5490,12 +5499,11 @@ for (const scenario of [
             }
           };
         }
-        if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
-        throw new Error(`Auto non-continuity exception test expected batch routing, got generate ${roleId}`);
+        return cardProviderResponse(roleId, request);
       },
       async batch(requests) {
-        assertDeepEqual(requests, [], 'Auto Pre-process Deck eligibility filters an Off non-continuity card');
-        return [];
+        assert(!requests.some(request => request.roleId === 'environmentAffordancesCard'), 'Off non-continuity cards remain ineligible');
+        return requests.map(request => cardProviderResponse(request.roleId, request));
       }
     }
   });
@@ -5675,6 +5683,7 @@ for (const scenario of [
     settings: {
       mode: 'auto',
       reasoningLevel: 'low',
+      minCards: 0, maxCards: 0,
       retention: { providerVisibleMessages: 5 }
     },
     snapshot: {
@@ -5898,7 +5907,7 @@ for (const scenario of [
   let firstGenerateStarted = false;
   let firstAbortObserved = false;
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
+    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request = {}) {
         assertEqual(roleId, 'utilityArbiter', 'provider supersession test only calls utility arbiter');
@@ -6262,7 +6271,7 @@ for (const scenario of [
   let snapshotCalls = 0;
   const sideEffects = [];
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off' },
+    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
     snapshot: () => {
       snapshotCalls += 1;
       const snapshotRun = snapshotCalls === 1 ? 1 : 2;
@@ -6292,7 +6301,7 @@ for (const scenario of [
         return { ok: true, cleared: true };
       },
       async install(packet) {
-        sideEffects.push(`install:${JSON.stringify(packet).includes('Newer install after clear.') ? 'newer' : 'older'}`);
+        sideEffects.push(`install:${packet.snapshotHash}`);
         return { ok: true };
       }
     },
@@ -6332,7 +6341,8 @@ for (const scenario of [
   const [firstResult, secondResult] = await Promise.all([first, second]);
   assertEqual(firstResult.skipped, true, 'older clear run remains skipped');
   assertEqual(secondResult.ok, true, 'newer install run completes after prompt clear');
-  assertDeepEqual(sideEffects, ['clear:first', 'install:newer'], 'prompt clear completes before newer install');
+  assertDeepEqual(sideEffects, ['clear:first', `install:${runtime.view().lastPlan.snapshotHash}`], 'prompt clear completes before newer snapshot installs');
+  assert(runtime.view().lastSnapshot.messages.some(message => message.text === 'Newer install after clear.'), 'installed snapshot belongs to the newer run');
 }
 
 {
@@ -6384,8 +6394,8 @@ for (const scenario of [
   assertEqual(firstResult.ok, true, 'first install completes before queued newer run starts');
   assertEqual(secondResult.ok, true, 'queued newer run completes');
   assertEqual(sideEffects.length, 2, 'both installs complete in serialized order');
-  assert(sideEffects[0].includes('Older install packet.'), 'older install finishes first');
-  assert(sideEffects[1].includes('Newer install packet.'), 'newer install overwrites after older install');
+  assertEqual(JSON.parse(sideEffects[0]).chatId, 'install-run-1', 'older install finishes first');
+  assertEqual(JSON.parse(sideEffects[1]).chatId, 'install-run-2', 'newer install overwrites after older install');
 }
 
 
@@ -6449,7 +6459,7 @@ for (const scenario of [
   const providerTest = await runtime.testProvider('utility');
   assertEqual(providerTest.ok, true, 'runtime profile certification returns success');
   assertEqual(providerTest.certification.status, 'pass', 'runtime returns full profile certification');
-  const certificationCalls = routerCalls.filter((entry) => ['providerTest', 'sceneFrameCard', 'fusedCardBundle'].includes(entry.roleId));
+  const certificationCalls = routerCalls.filter((entry) => entry.request.reasoningCategory === 'provider-test');
   assertDeepEqual(certificationCalls.map((entry) => entry.roleId), [
     'providerTest',
     'sceneFrameCard',
@@ -6534,6 +6544,7 @@ for (const scenario of [
   let generationStarted = false;
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
+    settings: { minCards: 0, maxCards: 0 },
     generationRouter: {
       async generate(roleId, request) {
         routerCalls.push({ roleId, request });
@@ -6603,7 +6614,7 @@ for (const scenario of [
 for (const reasoningLevel of ['medium', 'high', 'ultra']) {
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: {
+    settings: { minCards: 0, maxCards: 0,
       mode: 'auto',
       reasoningLevel,
       reasonerUse: 'auto',
@@ -6643,7 +6654,7 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
   const proseHost = createProseMessageHarness('Mara hesitated at the dialing console.');
   const routerCalls = [];
   const { runtime, storage } = createRuntimeHarness({
-    settings: {
+    settings: { minCards: 0, maxCards: 0,
       mode: 'auto',
       reasoningLevel: 'medium',
       reasonerUse: 'auto',
@@ -6703,6 +6714,7 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
     settings: {
       mode: 'auto',
       reasonerUse: 'off',
+      minCards: 0, maxCards: 0,
       storyFormOverride: 'present-mixed'
     },
     snapshot: {

@@ -12,10 +12,12 @@ import {
   requireConnectionManagerService
 } from './provider-profiles.mjs';
 import { projectProfileSamplerPayload } from './profile-samplers.mjs';
+import { resolvePostProcessWriter, sendPostProcessProfileWriter } from './post-process-profile-writer.mjs';
 import { profileSecretOverride, readSillyTavernSecretMetadata } from './profile-secrets.mjs';
 import { resolveGenerationPolicy } from '../../providers/generation-policy.mjs';
 import { normalizeReasoningIntent } from '../../reasoning-policy.mjs';
 import { normalizeProviderError } from '../../providers/provider-errors.mjs';
+import { extractProviderResponseText, getProviderResponseFailure, isProviderResponseTokenLimitFinishReason } from '../../providers/provider-response-normalizer.mjs';
 
 const KNOWN_RECURSION_PROMPT_KEYS = Object.freeze([
   'recursion.guidance',
@@ -790,15 +792,32 @@ function postProcessWriterFailedResult(error) {
 }
 
 function normalizePostProcessRewrite(response) {
-  if (response?.ok === false) return postProcessWriterFailedResult(response.error || response);
-  const text = generationResponseText(response).trim();
+  // TextCompletionService also returns llama.cpp arrays; the host selects entry zero.
+  if (Array.isArray(response)) response = response[0];
+  if (response?.stopped_limit === true || isProviderResponseTokenLimitFinishReason(response?.done_reason)) {
+    return postProcessWriterFailedResult({
+      code: 'provider_token_limit',
+      message: 'Post-process writer stopped at its output token limit.'
+    });
+  }
+  if (response?.ok === false || response?.error) return postProcessWriterFailedResult(response.error || response);
+  // Only content-bearing response fields are prose; never stringify an envelope.
+  const prose = response && typeof response === 'object'
+    ? Object.fromEntries(Object.entries(response).filter(([key]) => [
+      'choices', 'candidates', 'outputs', 'output', 'responseContent', 'message', 'content', 'response', 'text'
+    ].includes(key))) : response;
+  const failure = getProviderResponseFailure(response, { providerTitle: 'Post-process writer' });
+  if (failure && ['provider_token_limit', 'provider_refusal', 'provider_content_filter'].includes(failure.code)) {
+    return postProcessWriterFailedResult(failure);
+  }
+  const text = extractProviderResponseText(prose).trim();
   if (!text) {
     return {
       ok: false,
       text: '',
       error: {
         code: 'RECURSION_POST_PROCESS_WRITER_EMPTY',
-        message: 'SillyTavern native Post-process writer returned empty text.'
+        message: 'Post-process writer returned empty text.'
       }
     };
   }
@@ -1371,7 +1390,11 @@ export function createSillyTavernHost({
         }))
       };
     },
+    async resolvePostProcessWriter(writer) {
+      return resolvePostProcessWriter(currentContext(contextFactory), writer);
+    },
     async rewriteWithPostProcess({
+      writer,
       guidancePacket,
       writerDirective,
       signal,
@@ -1382,7 +1405,11 @@ export function createSillyTavernHost({
       });
       if (signal?.aborted) return postProcessWriterFailedResult(aborted());
       const context = currentContext(contextFactory);
-      if (typeof context.generate !== 'function') {
+      if (writer?.mode && !['native', 'profile'].includes(writer.mode)) {
+        return postProcessWriterFailedResult(profileError('RECURSION_POST_PROCESS_WRITER_UNAVAILABLE', 'Select a supported Post-process writer.'));
+      }
+      const profileWriter = writer?.mode === 'profile';
+      if (!profileWriter && typeof context.generate !== 'function') {
         return postProcessWriterUnavailableResult();
       }
 
@@ -1404,10 +1431,15 @@ export function createSillyTavernHost({
             }));
           }, duration);
         });
-        postProcessPromptOwner = owner;
-        installTransientSystemPrompt(context, POST_PROCESS_PROMPT_KEY, String(guidancePacket || ''));
+        if (!profileWriter) {
+          postProcessPromptOwner = owner;
+          installTransientSystemPrompt(context, POST_PROCESS_PROMPT_KEY, String(guidancePacket || ''));
+        }
         const running = Promise.resolve().then(() => {
           if (signal?.aborted || controller.signal.aborted) throw aborted();
+          if (profileWriter) return sendPostProcessProfileWriter(context, {
+            writer, guidancePacket, writerDirective, signal: controller.signal
+          }, secretMetadataFactory);
           return context.generate('quiet', {
             automatic_trigger: true,
             quiet_prompt: String(writerDirective || ''),
@@ -1417,7 +1449,8 @@ export function createSillyTavernHost({
           });
         });
         const response = await Promise.race([running, interrupted]);
-        result = normalizePostProcessRewrite(response);
+        result = normalizePostProcessRewrite(profileWriter ? response.response : response);
+        if (profileWriter) result.writer = response.writer;
       } catch (error) {
         result = postProcessWriterFailedResult(error);
       } finally {
@@ -1844,6 +1877,97 @@ export function createSillyTavernHost({
     return pending;
   }
 
+  async function findPostProcessRestore(input = {}) {
+    const context = currentContext(contextFactory);
+    const expected = asObject(input.expectedSourceIdentity);
+    const source = asObject(input.originalSnapshot);
+    const found = findRawAssistantMessage(context, expected.messageId);
+    const marker = asObject(found?.raw?.__recursionPostProcessRestore);
+    if (!input.operationId || !input.revisionId || marker.operationId !== input.operationId
+        || marker.revisionId !== input.revisionId || marker.expectedHash !== hashJson(expected)
+        || marker.sourceHash !== source.sourceHash) return null;
+    const validation = await validatePostProcessCommitSource(context, {expectedSourceIdentity:marker.identity});
+    if (!validation.ok) return null;
+    return {identity:cloneJsonSafe(validation.current)};
+  }
+
+  function restorePostProcessOriginal(input = {}) {
+    const operation = async () => {
+      const context = currentContext(contextFactory);
+      const source = asObject(input.originalSnapshot);
+      const expected = asObject(input.expectedSourceIdentity);
+      const stale = () => ({ ok: false, error: {
+        code: 'RECURSION_POST_PROCESS_SOURCE_STALE',
+        message: 'This revision no longer owns the selected response.'
+      } });
+      if (input.signal?.aborted) return canceledPostProcessCommit();
+      if (!input.operationId || !input.revisionId || !['as-swipe', 'replace'].includes(input.mode)
+          || typeof source.originalDraft !== 'string' || hashJson(source.originalDraft) !== source.sourceHash) return stale();
+      const found = findRawAssistantMessage(context, expected.messageId);
+      if (!found || (source.sourceMessageId !== undefined && Number(source.sourceMessageId) !== Number(expected.messageId))) return stale();
+      // A later visible message starts a different turn, even if the latest assistant is unchanged.
+      if (rawChatMessages(context).some((raw, index) => index > found.index && normalizeMessage(raw, index).visible !== false)) return stale();
+      const stillLatest = () => findRawAssistantMessage(context, expected.messageId)?.raw === found.raw
+        && !rawChatMessages(context).some((raw, index) => index > found.index && normalizeMessage(raw, index).visible !== false);
+      const expectedHash = hashJson(expected);
+      const previous = asObject(found.raw.__recursionPostProcessRestore);
+      const restoredIdentity = asObject(previous.identity);
+      if (previous.operationId === input.operationId && previous.revisionId === input.revisionId
+          && previous.expectedHash === expectedHash && previous.sourceHash === source.sourceHash) {
+        const validation = await validatePostProcessCommitSource(context, { ...input, expectedSourceIdentity: restoredIdentity });
+        if (!validation.ok) return validation;
+        const handoff = validatePostProcessMutationHandoff(context, { ...input, expectedSourceIdentity: restoredIdentity }, validation);
+        if (!stillLatest()) return stale();
+        return handoff.ok ? { ok: true, restored: false, reason: 'already-restored', identity: validation.current } : handoff;
+      }
+      const validation = await validatePostProcessCommitSource(context, input);
+      if (!validation.ok) return validation;
+      const originalIndex = finiteNonNegativeInteger(source.sourceSwipeId);
+      if (input.mode === 'as-swipe' && (originalIndex === null || !Array.isArray(found.raw.swipes)
+          || typeof found.raw.swipes[originalIndex] !== 'string'
+          || hashJson(found.raw.swipes[originalIndex]) !== source.sourceHash)) return stale();
+      const handoff = validatePostProcessMutationHandoff(context, input, validation);
+      if (!handoff.ok) return handoff;
+      if (!stillLatest()) return stale();
+      const original = cloneJsonSafe(found.raw);
+      if (input.mode === 'as-swipe') {
+        found.raw.swipe_id = originalIndex;
+        setRawAssistantText(found.raw, found.raw.swipes[originalIndex]);
+        alignRootExtraToSwipe(found.raw, originalIndex);
+      } else {
+        setRawAssistantText(found.raw, source.originalDraft);
+        // Candidate markers cannot claim ownership of restored original text.
+        delete found.raw.__recursionPostProcess;
+        const index = finiteNonNegativeInteger(found.raw.swipe_id) ?? 0;
+        if (Array.isArray(found.raw.__recursionPostProcessSwipes)) delete found.raw.__recursionPostProcessSwipes[index];
+        if (found.raw.extra?.recursion) delete found.raw.extra.recursion.postProcess;
+        if (found.raw.swipe_info?.[index]?.extra?.recursion) delete found.raw.swipe_info[index].extra.recursion.postProcess;
+      }
+      delete found.raw.__recursionHeldText;
+      delete found.raw.__recursionHeldSwipeId;
+      const identity = {
+        chatIdentityHash: validation.current.chatIdentityHash,
+        messageId: found.normalized.mesid,
+        swipeId: finiteNonNegativeInteger(found.raw.swipe_id) ?? 0,
+        originalHash: source.sourceHash,
+        activeCharacterHash: validation.current.activeCharacterHash,
+        activeGroupHash: validation.current.activeGroupHash
+      };
+      found.raw.__recursionPostProcessRestore = {
+        operationId: input.operationId, revisionId: input.revisionId, expectedHash,
+        sourceHash: source.sourceHash, identity
+      };
+      const saved = await persistAssistantMutation(context, found.raw, original, { ...input, markerNamespace: 'postProcess' });
+      if (!saved.ok) return saved;
+      updateMessageBlockBestEffort(context, found.index, found.raw);
+      refreshSwipeControlsBestEffort(context);
+      return { ok: true, restored: true, reason: 'restored', identity };
+    };
+    const pending = postProcessCommitTail.then(operation, operation);
+    postProcessCommitTail = pending.catch(() => {});
+    return pending;
+  }
+
   async function persistAssistantMutation(context, target, original, options = {}) {
     const saved = await saveChatRequired(context);
     if (!saved.ok) {
@@ -1869,6 +1993,8 @@ export function createSillyTavernHost({
   }
 
   const messagesApi = {
+    restorePostProcessOriginal,
+    findPostProcessRestore,
     activeAssistantMessageIdentity() {
       const context = currentContext(contextFactory);
       return assistantMessageIdentity(context, {

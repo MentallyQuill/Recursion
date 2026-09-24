@@ -11,6 +11,7 @@ import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert
 
 function createLegacyEnhancementSettingsStore() {
   const settingsStore = createSettingsStore({ root: {} });
+  settingsStore.update({ minCards: 1, maxCards: 1 });
   let enhancements = { mode: 'off', target: 'off', applyMode: 'as-swipe', contextMessages: 13 };
   const canonicalGet = settingsStore.get.bind(settingsStore);
   const canonicalUpdate = settingsStore.update.bind(settingsStore);
@@ -932,6 +933,7 @@ function createRedirectHarness({
     }
   };
   settingsStore = createLegacyEnhancementSettingsStore();
+  settingsStore.update({ minCards: 0, maxCards: 0 });
   const reasonerProfileId = 'reasoner-profile';
   if (reasonerCapability !== 'unconfigured') {
     settingsStore.updateProviderConfig('reasoner', { connectionProfileId: reasonerProfileId });

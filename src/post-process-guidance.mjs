@@ -1,3 +1,4 @@
+import { buildPostProcessEditingInstructions } from './post-process-editing.mjs';
 import {
   normalizeReasoningLevel,
   reasoningRequestMetadata
@@ -112,6 +113,7 @@ export function buildPostProcessGuidanceRequest(input = {}) {
       'Do not rewrite the story response.',
       'Preserve unsupported material and user agency.',
       'Return concise revision guidance for the host writer, never revised story prose.',
+      buildPostProcessEditingInstructions(input),
       renderFrozenEvidence(input),
       renderOrderedCards(input.categories),
       renderWritableDraft(input.draft)

@@ -64,6 +64,12 @@ Missing, corrupt, orphaned, or provenance-incompatible artifacts are never treat
 
 Running and paused operations protect every referenced resume artifact. Completed Pre-process operations protect only artifacts needed for exact same-turn swipe reuse. Completed Post-process operations keep the accepted final artifact and idempotent host-commit receipt; intermediate drafts are disposable. Stale, abandoned, and superseded operations protect no artifact bodies.
 
+## Post-process Comparisons
+
+Comparison records are separate from execution manifests and normal diagnostics. They bind the immutable original, candidate text/hash, current writable target, writer/scope metadata, review state, and receipt. At most ten completed comparisons are retained per chat; pending review is protected. Stale or rejected records discard retry-only inputs. Missing or corrupt comparison data is unavailable, never reconstructed from another swipe.
+
+Comparison persistence must precede automatic application so Replace cannot destroy the only retained original. Reset Turn Cache and chat cleanup remove the corresponding comparison bodies without changing host messages. Retained original/final prose is for the comparison viewer, not diagnostic exports.
+
 ## Last Brief Isolation
 
 Last Brief storage exposes only UI-oriented load/save/clear operations. The runtime may hydrate it for inspection after reload, but Pre-process planning, card selection, packet construction, and reuse never read from it.

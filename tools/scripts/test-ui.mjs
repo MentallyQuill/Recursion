@@ -2328,6 +2328,12 @@ try {
   assert(root.querySelector('[data-recursion-post-process-apply-replace]'), 'Post-process panel exposes Replace');
   assert(root.querySelector('[data-recursion-post-process-flow-unified]'), 'Post-process panel exposes Unified');
   assert(root.querySelector('[data-recursion-post-process-flow-progressive]'), 'Post-process panel exposes Progressive');
+  assert(root.querySelector('[data-recursion-post-process-writer-mode]'), 'Post-process exposes writer selection');
+  assert(root.querySelector('[data-recursion-post-process-editing-scope]'), 'Post-process exposes editing scope');
+  assert(root.querySelector('[data-recursion-post-process-review-before-applying]'), 'Post-process exposes review before applying');
+  assert(root.querySelector('[data-recursion-post-process-style-brief]').getAttribute('readonly') !== null, 'starter style is read only');
+  assert(root.querySelector('[data-recursion-post-process-style-copy]'), 'starter offers copy to customize style');
+
   assertEqual(root.querySelector('[data-recursion-post-process-apply-as-swipe]').getAttribute('title'), 'Add the rewritten response as a new swipe while preserving the current response.', 'As Swipe exposes the approved tooltip');
   assertEqual(root.querySelector('[data-recursion-post-process-apply-replace]').getAttribute('title'), 'Replace the current response with the rewritten result.', 'Replace exposes the approved tooltip');
   assertEqual(root.querySelector('[data-recursion-post-process-flow-unified]').getAttribute('title'), 'Rewrite once using all enabled Post-process cards together.', 'Unified exposes the approved tooltip');
@@ -2767,6 +2773,38 @@ try {
   assert(!postProcessDeckPatch.preProcessDecks, 'Post-process deck actions do not mutate the Pre-process deck store');
   const customPostProcessDeckId = postProcessDeckPatch.postProcessDecks.activeDeckId;
   ui.update();
+  const writerMode = root.querySelector('[data-recursion-post-process-writer-mode]');
+  writerMode.value = 'profile'; writerMode.dispatchEvent({ type: 'change' });
+  assertEqual(settingsUpdates.at(-1).postProcess.writer.mode, 'profile', 'writer mode persists through actual handler');
+  assert(settingsUpdates.at(-1).postProcess.writer.connectionProfileId, 'profile writer mode atomically saves a selected profile');
+  ui.update();
+  const writerLimit = root.querySelector('[data-recursion-post-process-writer-limit]');
+  writerLimit.value = '4096'; writerLimit.dispatchEvent({ type: 'change' });
+  assertEqual(settingsUpdates.at(-1).postProcess.writer.maxOutputTokens, 4096, 'writer output override persists');
+  ui.update();
+  const invalidLimit = root.querySelector('[data-recursion-post-process-writer-limit]');
+  const changesBeforeInvalidLimit = settingsUpdates.length;
+  invalidLimit.value = '255'; invalidLimit.dispatchEvent({ type: 'change' });
+  assertEqual(settingsUpdates.length, changesBeforeInvalidLimit, 'invalid output limit does not silently persist inheritance');
+  const scopeControl = root.querySelector('[data-recursion-post-process-editing-scope]');
+  scopeControl.value = 'revise'; scopeControl.dispatchEvent({ type: 'change' });
+  assertEqual(settingsUpdates.at(-1).postProcess.editingScope, 'revise', 'editing scope persists through handler');
+  ui.update();
+  const reviewControl = root.querySelector('[data-recursion-post-process-review-before-applying]');
+  reviewControl.checked = true; reviewControl.dispatchEvent({ type: 'change' });
+  assertEqual(settingsUpdates.at(-1).postProcess.reviewBeforeApplying, true, 'review preference persists through handler');
+  ui.update();
+  const styleBrief = root.querySelector('[data-recursion-post-process-style-brief]');
+  assertEqual(styleBrief.getAttribute('readonly'), null, 'copied deck style is editable');
+  styleBrief.value = 'Short sentences, deliberate fragments.';
+  root.querySelector('[data-recursion-post-process-style-sample]').value = 'Rain. Then silence.';
+  root.querySelector('[data-recursion-post-process-style-save]').click();
+  assertEqual(settingsUpdates.at(-1).postProcessDecks.customDecks[customPostProcessDeckId].styleBrief, 'Short sentences, deliberate fragments.', 'custom deck style persists through Save handler');
+  const styleChangesBeforeOversize = settingsUpdates.length;
+  root.querySelector('[data-recursion-post-process-style-brief]').value = 'x'.repeat(2001);
+  root.querySelector('[data-recursion-post-process-style-save]').click();
+  assertEqual(settingsUpdates.length, styleChangesBeforeOversize, 'oversized style rejects without truncating or saving');
+
   assert(root.querySelectorAll('[data-recursion-post-process-category-drag-handle]').length >= 2, 'editable duplicate exposes category drag handles');
   assert(root.querySelectorAll('[data-recursion-post-process-card-drag-handle]').length >= 6, 'editable duplicate exposes card drag handles');
   assert(root.querySelector('[data-recursion-post-process-category-drag-handle]').className.includes('recursion-card-drag-region-category'), 'editable Post-process category uses the shared category handle visual');
@@ -4074,6 +4112,9 @@ try {
       enabled: true,
       applyMode: 'replace',
       rewriteFlow: 'progressive',
+      writer: { mode: 'profile', connectionProfileId: 'quiet-profile-a', maxOutputTokens: 4096, samplerMode: 'profile', samplerOverrides: { temperature: 0.7, topP: 1 } },
+      editingScope: 'revise',
+      reviewBeforeApplying: true,
       contextMessages: 21
     },
     diagnostics: {

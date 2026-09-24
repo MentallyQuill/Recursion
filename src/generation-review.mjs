@@ -4,7 +4,6 @@ import { BANNED_AI_SLOP_LIST, dialogueSpans } from './prose-enhancement.mjs';
 export const GENERATION_REVIEW_SCHEMA = 'recursion.generationReview.v1';
 export const ANTI_SLOP_PROFILE_VERSION = 'v1';
 
-const MAX_SOURCE_TEXT = 12000;
 const MAX_CONTEXT_TEXT = 12000;
 const PATCH_DOMAINS = new Set(['dialogue', 'narrative-execution', 'anti-slop', 'card-fidelity']);
 const CARD_OUTCOME_STATUSES = new Set([
@@ -176,7 +175,7 @@ function publicLastBrief(value = {}) {
     reason: safeText(brief.reason || '', 120),
     packetId: safeText(brief.packetId || '', 180),
     handId: safeText(brief.handId || '', 180),
-    userTurn: safeText(brief.userTurn || brief.userMessage || '', 2400)
+    userTurn: String(brief.userTurn || brief.userMessage || '').replace(SECRET_PATTERN, '[redacted]')
   };
 }
 
@@ -204,8 +203,9 @@ function publicContext(value = {}) {
   let remaining = 6000;
   for (let index = sourceMessages.length - 1; index >= 0 && messages.length < 16; index -= 1) {
     const message = sourceMessages[index] || {};
-    const text = safeText(message.text ?? message.mes ?? message.content ?? '', Math.min(1800, remaining));
+    const text = String(message.text ?? message.mes ?? message.content ?? '').replace(SECRET_PATTERN, '[redacted]');
     if (!text) continue;
+    if (text.length > remaining) break;
     remaining -= text.length;
     messages.push({
       id: safeText(message.id ?? '', 80),
@@ -230,6 +230,7 @@ export function publicGenerationReviewSnapshot(snapshot = {}) {
     return generated ? { ...card, promptText: generated.promptText } : card;
   });
   return {
+    analysisContractVersion: 2,
     deck: {
       id: safeText(source?.deck?.id || '', 160),
       name: safeText(source?.deck?.name || '', 160),
@@ -269,7 +270,7 @@ export function buildGenerationReviewRequest({
   reasoningCategory = 'generation-review',
   reasoningIntent = 'minimal'
 } = {}) {
-  const source = truncate(String(sourceText ?? '').replace(SECRET_PATTERN, '[redacted]'), MAX_SOURCE_TEXT);
+  const source = String(sourceText ?? '').replace(SECRET_PATTERN, '[redacted]');
   const snapshot = publicGenerationReviewSnapshot(reviewSnapshot);
   const targetList = eligibleGenerationReviewTargets(targets).map(({ id, domain, before }) => ({ id, domain, before })).slice(0, 120);
   const retryTargetIds = Array.isArray(retry?.targetIds) ? retry.targetIds.map(String).filter(Boolean).slice(0, 120) : [];

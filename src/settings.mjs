@@ -1,3 +1,5 @@
+import { normalizePostProcessWriter, normalizePostProcessEditingScope, validatePostProcessWriter } from './post-process-editing.mjs';
+export { normalizePostProcessWriter, normalizePostProcessEditingScope } from './post-process-editing.mjs';
 import { cloneJson } from './core.mjs';
 import { providerConfigHash } from './provider-capability.mjs';
 import { PRE_PROCESS_DECK_SETTINGS_VERSION, DEFAULT_PRE_PROCESS_DECK_ID, normalizeCardDeckSettings } from './pre-process-decks.mjs';
@@ -69,7 +71,10 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
     enabled: false,
     applyMode: 'as-swipe',
     rewriteFlow: 'unified',
-    contextMessages: 13
+    contextMessages: 13,
+    writer: normalizePostProcessWriter(),
+    editingScope: 'polish',
+    reviewBeforeApplying: false
   },
   postProcessDecks: {
     version: POST_PROCESS_DECK_SETTINGS_VERSION,
@@ -210,6 +215,9 @@ export function normalizePostProcessSettings(value = {}) {
   const source = value && typeof value === 'object' ? value : {};
   return {
     enabled: source.enabled === true,
+    writer: normalizePostProcessWriter(source.writer),
+    editingScope: normalizePostProcessEditingScope(source.editingScope),
+    reviewBeforeApplying: source.reviewBeforeApplying === true,
     applyMode: enumValue(source.applyMode, POST_PROCESS_APPLY_MODES, DEFAULT_RECURSION_SETTINGS.postProcess.applyMode),
     rewriteFlow: enumValue(source.rewriteFlow, POST_PROCESS_REWRITE_FLOWS, DEFAULT_RECURSION_SETTINGS.postProcess.rewriteFlow),
     contextMessages: Math.round(numberInRange(
@@ -239,6 +247,9 @@ function mergePlainObjects(base, patch) {
 function mergeSettingsPatch(base, patch) {
   const result = mergePlainObjects(base, patch);
   if (!isPlainObject(patch)) return result;
+  if (isPlainObject(patch.postProcess) && Object.hasOwn(patch.postProcess, 'writer')) {
+    result.postProcess.writer = validatePostProcessWriter(result.postProcess.writer);
+  }
   if (Object.prototype.hasOwnProperty.call(patch, 'preProcessDecks')) {
     result.preProcessDecks = normalizeCardDeckSettings(patch.preProcessDecks);
   }

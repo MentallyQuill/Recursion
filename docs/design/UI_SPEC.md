@@ -186,6 +186,12 @@ The Pre-process dropdown header title is `Pre-Process Cards`. The Post-process h
 
 `As Swipe` keeps the original output, adds the rewritten output as a sibling swipe, and selects it. `Replace` replaces the active output with the rewritten text. `Unified` applies the active cards in one rewrite pass. `Progressive` applies them sequentially. Bulk actions are disabled only when no runnable card exists or the requested state is already satisfied.
 
+The existing Post-process panel also contains compact Writer, Editing scope, and Review before applying controls. Writer defaults to Current SillyTavern model; selecting Connection Profile reveals its selector and Advanced writer settings. Advanced contains output-limit inheritance and profile/override sampling. Explain the profile's bounded editing context in concise helper text, without implying full native prompt equivalence.
+
+Deck Style exposes a brief and optional example with visible 2000/6000-character limits and errors. Bundled fields are read-only with Copy to edit; custom fields preserve text through save, duplication, and JSON import/export. These controls belong to the existing graphite panel, with no extra toolbar or dashboard.
+
+Revision comparison belongs to the corresponding source message and the Post-process panel. It shows original/revised text, writer, scope, state, and clean/highlighted views. Render prose as text, use bounded diff work with a coarse large-input fallback, and keep keyboard focus and chat scroll stable. Actions are Keep original, Use revision, Edit revision, and Try another revision. Disable actions when source eligibility or retained original data is unavailable; show the reason. Retry must begin from the immutable original and return for review. Waiting for review must release generation controls and must not look like a running model call.
+
 Every Apply and Flow segment uses the compact graphite hover and keyboard-focus highlight so both selected and unselected choices visibly respond before activation.
 
 Apply, Flow, and global On/Off changes acknowledge immediately in the main current-step status and mobile status drawer with concise copy: `As Swipe Set - Preserves original response`, `Replace Set - Replaces original response`, `Unified Mode Set - One combined pass`, `Progressive Mode Set - Each step carried over`, `Post-process On - Rewrites completed responses`, or `Post-process Off - Leaves responses unchanged`. These acknowledgements temporarily take precedence over active progress text without creating a progress row.
@@ -307,7 +313,12 @@ After a bundle settles, each unresolved family follows its individual repair sta
 
 Selected authored Pre-process cards appear by their saved names as child rows under `Selecting turn hand`. These rows read `included`, carry no provider mark or action, and come only from the current execution's completed or reused hand checkpoint. A new pending hand must not display the previous hand's cards. Authored rows do not add Hero Pixel Array blocks or pretend to be model calls.
 
-Post-processing uses a top-level `Post-processing response` row. Unified owns child rows for guidance synthesis, SillyTavern host rewrite, and final As Swipe/Replace application. Progressive owns one category row per runnable category, each with guidance and host-rewrite children, followed by final application. Low and Medium synthesize guidance through Utility; High and Ultra use Reasoner. Host prose always comes from SillyTavern's native quiet generation path, never from the sidecar lane.
+Fused card-family outcomes remain visible from the saved bundle summary after reload or when a run becomes stale, even without its in-memory execution graph. Accepted and unresolved families retain distinct outcomes; cached bundle results must not appear as pending cards. Outcome rows never own independent actions.
+
+The completed `Selecting turn hand` row shows a compact delivery summary, for example `10 cards included · 3 authored · 7 generated`. A shortfall stays amber and explains how many cards are below target and whether eligibility or generation caused it. This summary comes from the saved hand checkpoint, not provider-call counts or the number of visible tree rows.
+
+Post-processing uses a top-level `Post-processing response` row. Unified owns child rows for guidance synthesis, SillyTavern host rewrite, and final As Swipe/Replace application. Progressive owns one category row per runnable category, each with guidance and host-rewrite children, followed by final application. Low and Medium synthesize guidance through Utility; High and Ultra use Reasoner. Prose comes from the selected native or Connection Profile writer; Utility/Reasoner guidance remains a separate structured call.
+
 
 The original response remains visible until a complete rewritten result is ready. A Unified failure keeps the original selected and writes nothing. A failed Progressive category is red while later categories may continue from the last valid draft; a committed partial result is amber and always uses As Swipe even when Replace was configured. Stop, chat change, edit, delete, swipe, or character/group change invalidates stale work and prevents late commits.
 
@@ -1221,13 +1232,13 @@ Play is the default tab. It contains one open `Behavior` disclosure for controls
 - Focus: Balanced, Character, Constraints, Scene, Plot.
 - Prompt Footprint: Compact, Normal, Rich.
 
-The backend meaning of these controls is defined by [Behavior Settings Policy Spec](BEHAVIOR_SETTINGS_POLICY_SPEC.md). In short: Strength controls intervention pressure, Min/Max Cards control Reasoning Level card-count bounds, Max Cards also caps Manual selected families, Focus controls soft family priority, and Prompt Footprint controls final packet size/detail. They should be visible as high-level controls, not exposed as per-card weights or prompt-fragment editors.
+The backend meaning of these controls is defined by [Behavior Settings Policy Spec](BEHAVIOR_SETTINGS_POLICY_SPEC.md). Strength controls intervention pressure, Min/Max Cards determine the total hand target through Reasoning Level, Max Cards also caps Manual selected families, Focus controls soft family priority, and Prompt Footprint controls final packet size/detail. They should be visible as high-level controls, not exposed as per-card weights or prompt-fragment editors.
 
 Pipeline, Mode, and Reasoning Level belong to the compact bar controls and must not be duplicated in Settings. Pipeline is selected from its bar dropdown only; Settings may persist the value but must not render a separate Segmented/Fused toggle. Reasoning Level is the user-facing provider-bias control. The compact bar uses the four-node chain visual:
 
-- Low: Utility-only bias with card pressure capped at Min Cards.
-- Medium: Utility Arbiter and Utility cards, then Reasoner guidance composition; card pressure capped at Normal Cards.
-- High: Reasoner Arbiter, Reasoner for high-priority card families, Utility for other card families, and Reasoner guidance composition; card pressure capped at Normal Cards.
+- Low: Utility-only bias with a total hand target of Min Cards.
+- Medium: Utility Arbiter and Utility cards, then Reasoner guidance composition; total hand target of Normal Cards.
+- High: Reasoner Arbiter, Reasoner for high-priority card families, Utility for other card families, and Reasoner guidance composition; total hand target of Normal Cards.
 - Ultra: Reasoner-heavy Arbiter, card generation, and guidance composition with card pressure raised/capped at Max Cards.
 
 `reasoningLevel` is persisted as `low | medium | high | ultra`, default `medium`. It is the authoritative user-facing provider-bias setting. Low keeps ordinary work on Utility. Medium, High, and Ultra use Reasoner for policy-selected work when its configured capability is `segmented-ready`, `fused-ready`, or `uncertified`; an uncertified lane is shown as a caution, not a blocker. Unconfigured or unhealthy Reasoner routes ordinary Pre-process work to Utility without changing the selected level. Post-process guidance is lane-sticky: Low and Medium use Utility, High and Ultra require Reasoner, and failed same-lane attempts fail soft without crossing lanes.
@@ -1268,7 +1279,7 @@ Advanced contains low-frequency controls grouped into collapsible sections:
 - Injection: placement, role, and depth controls for the composed prompt packet.
 - Execution: `Attempts per step` (one through five, default two), `Request time limit (seconds)` (30–600, default 180), and `Operation time limit (seconds)` (60–1800, default 300). A request limit starts at dispatch; operation active time includes queues and recovery, but excludes time while paused. Resume retains elapsed time and recovery spending; an explicit Retry or Reprocess opens a new recovery window.
 - UI: Tooltips, Sub-tier Rows, and Progress Rows. Tooltips are enabled by default on first install so new users can discover icon-only controls and compact status surfaces. Turning Tooltips off auto-saves immediately and removes Recursion tooltip and hover-help titles across the compact bar, popovers, card rows, settings, and diagnostics; normal buttons and click-open panels continue to work.
-- Context Windows: Post-process Evidence Messages, Source Freshness Messages, Source Freshness Text Budget, and Provider Analysis Messages. These controls bound Recursion-owned evidence and analysis windows; they do not replace or limit SillyTavern writer context.
+- Context Windows: Post-process Evidence Messages, Source Freshness Messages, Source Freshness Text Budget, and Provider Analysis Messages. These controls bound Recursion-owned evidence and analysis windows; they do not limit native SillyTavern writer context. A profile writer uses the bounded editing evidence and complete draft instead of the full native prompt.
 - Storage Retention: Journal Entries only. Generated turn work is scoped to the active turn and prior-turn artifacts are pruned automatically; this control never deletes SillyTavern chat.
 - Diagnostics: safe excerpts, Reset Turn Cache, Export Diagnostics, and Clear Run Journal.
 - Reset Defaults: a confirmed action at the bottom of Advanced that restores Play and Advanced controls to `DEFAULT_RECURSION_SETTINGS`. It preserves provider settings, custom card decks and scope, compact-bar settings, and viewer visibility.

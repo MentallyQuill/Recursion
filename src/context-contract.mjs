@@ -3,7 +3,6 @@ import { normalizeRetentionSettings } from './retention-policy.mjs';
 const ENHANCEMENT_MESSAGE_MIN = 0;
 const ENHANCEMENT_MESSAGE_MAX = 35;
 const ENHANCEMENT_CONTEXT_CHARACTERS = 9000;
-const MESSAGE_TEXT_LIMIT = 1200;
 
 function boundedInteger(value, fallback, min, max) {
   const number = Number(value);
@@ -49,7 +48,7 @@ export function boundEnhancementMessages(messages = [], maxMessages = 13, maxCha
   const limit = boundedInteger(maxMessages, 13, ENHANCEMENT_MESSAGE_MIN, ENHANCEMENT_MESSAGE_MAX);
   const budget = Math.max(0, Math.round(Number(maxCharacters) || ENHANCEMENT_CONTEXT_CHARACTERS));
   for (const message of [...(Array.isArray(messages) ? messages : [])].reverse()) {
-    const text = String(message?.text || '').slice(0, MESSAGE_TEXT_LIMIT);
+    const text = String(message?.text || '');
     if (selected.length >= limit || characters + text.length > budget) break;
     selected.unshift({ ...message, text });
     characters += text.length;

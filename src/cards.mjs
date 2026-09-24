@@ -580,7 +580,7 @@ function cardPromptSafetyInstruction(catalog) {
   return 'Do not include first-person internal monologue, secret thoughts as truth, or instructions to reveal inner thoughts. Keep motives behavior-facing and observable or explicitly inferred.';
 }
 
-export const SCENE_INTERPRETATION_CONTRACT = "An unanswered question is not an instruction to keep it unanswered. A warning before an explanation can invite attention, concern, or clarification; do not invent delay, earned-reveal requirements, or resistance. Preserve player control without prescribing the player's next action. Ground emotion and suspicion in established evidence; incomplete answers alone do not establish malice. Check current positions and actions already completed before suggesting another action.";
+export const SCENE_INTERPRETATION_CONTRACT = "An unanswered question is not an instruction to keep it unanswered. A warning before an explanation can invite attention, concern, or clarification; do not invent delay, earned-reveal requirements, or resistance. Preserve player control without prescribing the player's next action. Ground emotion and suspicion in established evidence; incomplete answers alone do not establish malice. Preserve completed actions and discoveries, including results at the end of a message; do not reset them to pending. Update character reactions when new information, decisions, or precautions change the stakes. Distinguish a mitigated risk from an unresolved cause: uncertainty about one does not erase progress on the other. Prior fear or resistance is context, not a requirement to sustain or escalate it. Allow supported emotional change without forcing calm, agreement, trust, or reassurance.";
 
 function cardInstructionContractLine() {
   return [
@@ -750,7 +750,7 @@ function optionalEnum(value, allowed) {
 function stringifyForPrompt(value) {
   try {
     const scrubbed = scrubProviderPromptStructured(value ?? {});
-    return scrubProviderPromptSecrets(JSON.stringify(redact(scrubbed, { maxString: TEXT_LIMIT }), null, 2));
+    return scrubProviderPromptSecrets(JSON.stringify(redact(scrubbed, { maxString: Infinity }), null, 2));
   } catch {
     return JSON.stringify({ unavailable: true });
   }
@@ -837,9 +837,7 @@ function effectiveMaxCardsForPolicy(maxCards, policy) {
   const base = numberInRange(maxCards, 6, 0, 64);
   if (!policy) return base;
   const ceiling = numberInRange(policy.cardBudget?.maxCards, base, 0, 64);
-  let next = Math.min(base, ceiling);
-  if (policy.strength?.selectionPressure === 'lean' && next > 0) next = Math.max(1, next - 1);
-  return next;
+  return Math.min(base, ceiling);
 }
 
 function plannedCardForJob(job) {
@@ -1472,7 +1470,6 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
           selectedFamilies: selected.map((card) => card.family),
           planShaping: [
             policy.focus?.level && policy.focus.level !== 'balanced' ? 'focus-family-ordering' : '',
-            policy.strength?.selectionPressure === 'lean' ? 'light-selection-pressure' : '',
             policy.cardBudget?.maxCards && policy.cardBudget.maxCards < requestedCardLimit ? 'card-budget-ceiling' : ''
           ]
         }),
@@ -1491,6 +1488,15 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
       maxTokens: tokenLimit,
       ...(selectionDiagnostics ? { selection: {
         ...selectionDiagnostics,
+        selectedCount: selected.length,
+        authoredCount: selected.filter((card) => card.origin === 'authored').length,
+        generatedCount: selected.filter((card) => card.origin !== 'authored').length,
+        shortfallCount: Math.max(0, Number(selectionDiagnostics.targetCount || 0) - selected.length),
+        shortfallReasons: [
+          ...(selectionDiagnostics.shortfallReason ? [selectionDiagnostics.shortfallReason] : []),
+          ...((selectionDiagnostics.retained || []).some((job) => !selected.some((card) => card.family === job.family))
+            ? ['card-generation-failed'] : [])
+        ],
         selected: selected.map((card) => ({
           id: card.id, family: card.family,
           source: card.origin || 'cache',

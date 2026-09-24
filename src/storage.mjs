@@ -1,3 +1,4 @@
+import { createPostProcessComparisonStore, POST_PROCESS_COMPARISONS_PATTERN, postProcessComparisonsKey } from './post-process-comparison.mjs';
 import { cloneJson, makeId, nowIso, redact, safeId } from './core.mjs';
 import { failureFrom } from './failures.mjs';
 import { UNKNOWN_STORY_FORM, normalizeStoryForm } from './story-form.mjs';
@@ -39,7 +40,8 @@ const INDEX_KINDS = new Set([
   'pipelineRun',
   'pipelineArtifact',
   'queuedReprocess',
-  'lastBrief'
+  'lastBrief',
+  'postProcessComparisons'
 ]);
 const DEFAULT_JOURNAL_EVENT = 'activity.stage_changed';
 const UNSAFE_JOURNAL_TEXT_PATTERN = /\b(raw[-_\s]*prompt|rawPrompt|raw[-_\s]*response|rawResponse|provider[-_\s]*prompt|providerPrompt|provider[-_\s]*response|providerResponse|hidden[-_\s]*reasoning|hiddenReasoning|reasoning[-_\s]*(?:content|details)|reasoningContent|reasoningDetails|private[-_\s]*story[-_\s]*plan|privateStoryPlan|private[-_\s]*plan|privatePlan|session[-_\s]*id|sessionId|session[-_\s]*key\s*[:=]|sessionKey\s*[:=]|session[-_\s]*token|credentials?|password\s*[:=]|token\s*[:=]|api[-_\s]*key\s*[:=]|apiKey\s*[:=]|authorization\s*[:=]|set-cookie\s*[:=]|cookie\s*[:=]|bearer\s+[A-Za-z0-9._-]+|sk-[A-Za-z0-9_-]+)/i;
@@ -550,6 +552,7 @@ function normalizeIndexKey(kind, value) {
   if (kind === 'pipelineArtifact') return PIPELINE_ARTIFACT_KEY_PATTERN.test(value) ? value : null;
   if (kind === 'queuedReprocess') return QUEUED_REPROCESS_KEY_PATTERN.test(value) ? value : null;
   if (kind === 'lastBrief') return LAST_BRIEF_KEY_PATTERN.test(value) ? value : null;
+  if (kind === 'postProcessComparisons') return POST_PROCESS_COMPARISONS_PATTERN.test(value) ? value : null;
   return null;
 }
 
@@ -559,6 +562,7 @@ function indexKindForKey(key) {
   if (PIPELINE_ARTIFACT_KEY_PATTERN.test(key)) return 'pipelineArtifact';
   if (QUEUED_REPROCESS_KEY_PATTERN.test(key)) return 'queuedReprocess';
   if (LAST_BRIEF_KEY_PATTERN.test(key)) return 'lastBrief';
+  if (POST_PROCESS_COMPARISONS_PATTERN.test(key)) return 'postProcessComparisons';
   return null;
 }
 
@@ -635,6 +639,10 @@ function indexRecordFromStoredRecord(key, value) {
       chatKey,
       updatedAt: timestampValue(value.updatedAt)
     };
+  }
+  if (kind === 'postProcessComparisons') {
+    if (value.recordType !== 'recursion.postProcessComparisons' || !Array.isArray(value.records) || !safeIdentifier(value.chatKey, '')) return null;
+    return { key, kind, chatKey: safeIdentifier(value.chatKey, ''), updatedAt: timestampValue(value.updatedAt) };
   }
   if (kind === 'lastBrief') {
     if (
@@ -854,6 +862,10 @@ export function createStorageRepository({
   getRetentionSettings = null
 } = {}) {
   const fallbackJournalEntryLimit = normalizeMaxEntries(maxJournalEntries);
+  const comparisonStore = createPostProcessComparisonStore({
+    storage, onWrite: (key, chatKey) => writeIndexEntry(key, 'postProcessComparisons', chatKey),
+    onDelete: (key) => removeIndexEntry(key)
+  });
 
   function currentRetention() {
     if (typeof getRetentionSettings === 'function') {
@@ -902,7 +914,17 @@ export function createStorageRepository({
 
   async function readRepairRecord(key) {
     try {
-      return { ok: true, value: await storage.readJson(key) };
+      const value = await storage.readJson(key);
+      if (value && POST_PROCESS_COMPARISONS_PATTERN.test(key)) {
+        if (value.recordType !== 'recursion.postProcessComparisons' || value.schemaVersion !== 1
+          || !Array.isArray(value.records) || key !== postProcessComparisonsKey(value.chatKey)) {
+          const result = await storage.deleteJson(key);
+          if (result?.ok === false) return { ok: false };
+          return { ok: true, value: null };
+        }
+        return { ok: true, value: await comparisonStore.repairPostProcessComparisons(value.chatKey) };
+      }
+      return { ok: true, value };
     } catch {
       return { ok: false };
     }
@@ -1326,8 +1348,10 @@ export function createStorageRepository({
     const artifacts = await clearPipelineArtifacts(chatKey);
     const manifest = await clearPipelineRun(chatKey);
     const queued = await clearQueuedReprocess(chatKey);
+    const comparisons = await comparisonStore.clearPostProcessComparisons(chatKey);
     return {
-      ok: artifacts.ok && manifest.ok && queued.ok,
+      ok: artifacts.ok && manifest.ok && queued.ok && comparisons.ok,
+      comparisons,
       artifacts,
       manifest,
       queued
@@ -1524,6 +1548,7 @@ export function createStorageRepository({
   }
 
   return {
+    ...comparisonStore,
     loadRunJournal,
     async clearRunJournal(chatKey) {
       const key = runJournalKey(chatKey);

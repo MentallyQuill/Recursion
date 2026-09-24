@@ -1,6 +1,6 @@
 # Provider And Generation Spec
 
-This document is the normative architecture for Recursion model calls. It applies to Utility, Reasoner, provider certification, Segmented card generation, Fused card generation, and model-backed Enhancement stages.
+This document is the normative architecture for Recursion model calls. It applies to Utility, Reasoner, provider certification, Segmented card generation, Fused card generation, and Post-process guidance and prose writing.
 
 Related documents:
 
@@ -25,6 +25,12 @@ Recursion does not own:
 SillyTavern owns those concerns. Recursion stores only a selected Connection Profile id and generation policy for each lane.
 
 A model stage cannot run unless its lane references a Connection Profile that SillyTavern exposes through the supported Connection Manager API. Missing or unsupported profile access is a configuration failure, not a retryable model failure.
+
+## Post-process Prose Writer
+
+Post-process writer selection is independent of Utility and Reasoner. The default current-model route uses native SillyTavern quiet generation. A selected Connection Profile uses request-local Connection Manager transport, profile sampling and required completion formatting. It returns prose with no JSON schema, JSON repair, or Utility/Reasoner certification requirement, and does not change the main connection. Missing or changed profiles fail visibly instead of switching writers.
+
+Profile output limits inherit the selected saved preset when available; otherwise an explicit integer from 256 to 65536 is required. Optional temperature (0..2) and top-p (0..1) overrides apply only to the writer request. The profile receives the complete writable draft, editing instructions, cards, guidance, and bounded supporting evidence; this does not promise native World Info or Author's Note equivalence. See [Post-process runtime](POST_PROCESS_CARDS_RUNTIME.md).
 
 ## Provider Lanes
 

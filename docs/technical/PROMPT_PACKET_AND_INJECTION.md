@@ -46,6 +46,12 @@ The composer receives:
 
 Cards are normalized before composition. Unsafe evidence refs, unsupported families, secret-looking ids, prose-shaped card paragraphs, hidden-thought wording, and invalid omission reasons are cleaned or rejected. Full selected-card prompt text is preserved in the Card Evidence section; packet budgeting is applied to guidance and guardrails, not by locally summarizing selected cards into a smaller semantic brief.
 
+Source messages are preserved in full through runtime normalization, pending-user capture, provider snapshots, Segmented/Fused card serialization, and guidance composition. Redaction remains active; character limits apply to metadata and generated output fields, not individual story messages. Retention settings still select a bounded window of whole messages. The guidance composer receives the last four eligible messages in full. Revision context budgets likewise select whole messages rather than message prefixes, and revision requests retain the entire target draft.
+
+The shared scene interpretation contract requires cards and composers to preserve completed actions and discoveries, including results at message endings, and update reactions when information, decisions, or precautions change the stakes. A mitigated risk and an unresolved cause are distinct. Prior fear is evidence of a previous reaction, not authority to freeze or escalate it; neither calm nor agreement is mandatory. Compact narrator guardrails reinforce this distinction. Runtime cache contract 4 and guidance contract 3 invalidate prepared work from the earlier truncated-input contract.
+
+Public revision snapshots carry `analysisContractVersion: 2`, invalidating cached Generation Review and Editorial results even when a long target draft has only short supporting context.
+
 ## Utility Composition
 
 Utility guidance composition is the default path. It calls `guidanceComposer` with the selected raw cards, omitted candidates, behavior policy, and current source metadata. The provider writes guidance about how native generation should use the evidence; runtime validates schema, source ids, hidden-reasoning language, and length before trusting it.

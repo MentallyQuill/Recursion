@@ -49,7 +49,7 @@ If a provider bills a model at 2x, Recursion does not know that natively. Operat
 | `providerVisibleMessages` | `12` | Recent visible messages sent to Recursion provider calls. |
 | `sourceWindowMessages` | `20` | Recent visible messages considered for source freshness and evidence windows. |
 | `sourceWindowCharacters` | `12000` | Character cap for the source freshness window. |
-| `postProcess.enabled` / `postProcess.flow` / `postProcess.applyMode` | `false` / `unified` / `as-swipe` | Adds one structured Post-process guidance stage and one native host quiet rewrite after generation. Progressive may repeat the guidance/rewrite pair per enabled category. |
+| `postProcess.enabled` / `postProcess.rewriteFlow` / `postProcess.applyMode` | `false` / `unified` / `as-swipe` | Adds one structured Post-process guidance stage and one selected-writer rewrite after generation. Progressive may repeat the guidance/rewrite pair per enabled category. |
 | Utility output ceiling | `8192` | Default production output allowance and hard ceiling; actual generated usage may be lower. |
 | Reasoner output ceiling | `8192` | Default production output allowance and hard ceiling; actual generated usage may be lower. |
 
@@ -65,7 +65,7 @@ Segmented is the reference foreground path and the default. It favors smaller or
 | Card generation | 0 to selected budget | Utility at Low/Medium; mixed or eligible Reasoner-heavy at High/Ultra. |
 | Guidance Composer | Usually 1 when composing a packet | Utility. |
 | Reasoner Composer | 0 or 1 | An eligible Reasoner when Medium+ policy selects it. |
-| Post-process | 0 or 1 Unified guidance stage plus native host rewrite; Progressive repeats by category | Guidance stays on Utility or the selected eligible Reasoner lane; native host quiet generation writes the response. |
+| Post-process | 0 or 1 Unified guidance stage plus selected-writer rewrite; Progressive repeats by category | Guidance stays on Utility or the selected eligible Reasoner lane; the selected native/profile writer writes the revision. |
 
 Accepted checkpoints and exact-turn unchanged-swipe reuse can reduce or remove downstream calls. A stopped or failed operation resumes from its earliest incomplete stage rather than paying again for every accepted upstream stage.
 
@@ -80,7 +80,7 @@ Fused keeps the normal foreground lifecycle, but replaces many card calls with o
 | Fused repair | 0 to missing/invalid family count | Segmented card calls for damaged siblings only. |
 | Guidance Composer | Usually 1 when composing a packet | Utility. |
 | Reasoner Composer | 0 or 1 | An eligible Reasoner when Medium+ policy selects it. |
-| Post-process | 0 or 1 Unified guidance call plus native host rewrite; Progressive repeats by category | Guidance stays on Utility or the selected eligible Reasoner lane; native host quiet generation writes the response. |
+| Post-process | 0 or 1 Unified guidance call plus selected-writer rewrite; Progressive repeats by category | Guidance stays on Utility or the selected eligible Reasoner lane; the selected native/profile writer writes the revision. |
 
 Fused is usually cheaper than Segmented when the model returns trustworthy multi-card JSON because it collapses card setup overhead into one larger structured request. If any useful bundle item survives, only damaged siblings are repaired. A bundle with zero useful cards falls back to the Segmented card path, so an unreliable Fused model can cost more than selecting Segmented initially.
 
@@ -175,7 +175,7 @@ Use these controls first when tuning cost:
 | Lower `maxCards` and `minCards` | Reduces card generation and selected evidence. |
 | Use Compact Prompt Footprint | Reduces final host prompt injection size. |
 | Lower provider-visible and source-window limits | Reduces provider input tokens for long chats. |
-| Keep Post-process Cards off | Avoids post-generation guidance and native quiet-rewrite calls. |
+| Keep Post-process Cards off | Avoids post-generation guidance and selected-writer rewrite calls. |
 | Prefer cache reuse for stable scenes | Lets the Arbiter skip new card generation when safe. |
 
 ## Caveats

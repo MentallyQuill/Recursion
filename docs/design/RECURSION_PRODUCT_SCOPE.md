@@ -81,7 +81,7 @@ V1 must not become a general memory or continuity platform. Specifically, it sho
 - Hidden chain-of-thought storage or private story plans.
 - Prompt bloat that competes with the active chat, Memory Books, Summaryception, VectFox, or World Info.
 
-Pre-alpha status means Recursion can update internal structures in place. It does not need legacy compatibility layers for early experiments when a better V1 shape is clear.
+The beta retains the V1 policy of updating internal structures in place. It does not need legacy compatibility layers for early experiments when a better V1 shape is clear.
 
 ## Complementing Other Extensions
 

@@ -10,7 +10,7 @@ const manifestJson = JSON.parse(readFileSync(new URL('../../manifest.json', impo
 const storageSource = readFileSync(new URL('../../src/storage.mjs', import.meta.url), 'utf8');
 const documentationIndex = readFileSync(new URL('../../docs/DOCUMENTATION_INDEX.md', import.meta.url), 'utf8');
 const releaseIndex = readFileSync(new URL('../../docs/release/README.md', import.meta.url), 'utf8');
-const releaseNoteUrl = new URL('../../docs/release/0.2.0-alpha.3.md', import.meta.url);
+const releaseNoteUrl = new URL('../../docs/release/0.3.0-beta.1.md', import.meta.url);
 const currentDocPaths = [
   '../../README.md',
   '../../DESIGN.md',
@@ -93,12 +93,12 @@ assert(
   /"pipelineMode"\s*:\s*"segmented"[\s\S]{0,120}"modelAttemptsPerStep"\s*:\s*2/.test(currentDocs),
   'current documentation includes the canonical pipeline and attempt settings example'
 );
-assertEqual(packageJson.version, '0.2.0-alpha.3', 'package version is alpha.3');
-assertEqual(manifestJson.version, '0.2.0-alpha.3', 'manifest version is alpha.3');
-assert(/RECURSION_VERSION\s*=\s*['"]0\.2\.0-alpha\.3['"]/.test(storageSource), 'storage records alpha.3 runtime version');
-assert(existsSync(releaseNoteUrl), 'alpha.3 release note exists');
-assert(releaseIndex.includes('[0.2.0-alpha.3](0.2.0-alpha.3.md)'), 'release index names alpha.3');
-assert(documentationIndex.includes('release/0.2.0-alpha.3.md'), 'documentation index names alpha.3');
+assertEqual(packageJson.version, '0.3.0-beta.1', 'package version is beta.1');
+assertEqual(manifestJson.version, '0.3.0-beta.1', 'manifest version is beta.1');
+assert(/RECURSION_VERSION\s*=\s*['"]0\.3\.0-beta\.1['"]/.test(storageSource), 'storage records beta.1 runtime version');
+assert(existsSync(releaseNoteUrl), 'beta.1 release note exists');
+assert(releaseIndex.includes('[0.3.0-beta.1](0.3.0-beta.1.md)'), 'release index names beta.1');
+assert(documentationIndex.includes('release/0.3.0-beta.1.md'), 'documentation index names beta.1');
 assert(!currentDocs.includes('OpenAI-compatible direct keys'), 'normative docs do not prescribe direct API keys');
 assert(/test-\.\*\\\.mjs/.test(testRunnerSource), 'offline runner discovers registered regression scripts');
 assert(providerParserTest.includes('Claude tool input'), 'Claude tool-input regression coverage is registered');

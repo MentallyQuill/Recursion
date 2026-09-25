@@ -210,7 +210,7 @@ Soft invalidation marks the deck stale for Arbiter review when manual scene refr
 
 Durable execution checkpoints may reference accepted scene-card artifacts for an exact source revision. Those artifacts are not a memory layer: they are reusable only while source, settings, provider, catalog, pipeline, and prompt contracts remain compatible. Manifests store hashes and references rather than artifact bodies.
 
-Pre-alpha storage can invalidate old experimental records instead of carrying compatibility layers.
+The current storage contract can invalidate old experimental records instead of carrying compatibility layers.
 
 ## Character Motivation Safety
 

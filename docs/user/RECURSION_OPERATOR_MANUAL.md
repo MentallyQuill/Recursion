@@ -1,6 +1,26 @@
 # Recursion Operator Manual
 
-Recursion is an alpha SillyTavern extension that compiles current-scene prompt guidance for the next roleplay generation. It observes the active chat, maintains a short-lived scene deck, selects a turn hand, and installs an inspectable prompt packet when Auto or Manual mode is active. Segmented generates requested card families through a series of narrow model stages; Fused asks a stronger model for one multi-card bundle and uses Segmented repair or fallback when validation requires it.
+## Beta 0.3.0-beta.1: new controls and recovery
+
+For the complete September update roundup, see the [release notes](../release/0.3.0-beta.1.md).
+
+### Refinement and Realism
+
+Use the card state control to mark a card for Refinement when its scene application deserves explicit review before narration. Refinement is mandatory in Auto and Manual, even beyond the ordinary hand cap. It adds review work, so begin with a few important cards. The review may accept the card unchanged or request one revision and verification; unresolved findings block preparation. Saved authored instructions remain intact. Inspect the final scene-specific assessment in the Viewer; review commentary is not injected into narration. Refinement rounds describe review work, not additional cards in the hand.
+
+Realism analysis is optional. Its purpose includes distinguishing an extraordinary claim from demonstrated evidence, considering plausible familiar explanations, and identifying questions or checks a character could actually make. Apply it according to the fictional setting and character knowledge.
+
+### Selection and planned coverage
+
+In Settings → Play, Selection variety changes at most the final optional Auto slot. Card cooldown excludes recently used optional source cards for the selected number of completed response turns. Defaults are Low variety and 0 cooldown. Mandatory Priority and Refinement cards are exempt, and Manual ignores both controls. A cooldown shortage may produce a smaller hand; a missing card from the finalized plan is a preparation failure. Last Brief and the Viewer show what actually reached the hand.
+
+### Waiting for provider capacity
+
+A provider rate limit automatically waits and retries up to eight times per stage, separately from Attempts per step. Calls on the same profile share the cooldown. Delay starts at two seconds and increases to sixty seconds, or longer when the provider requests it. Stop cancels waiting immediately. Resume retains the remaining wait and completed work; Retry opens another allowance but does not bypass an inherited cooldown. If recovery is exhausted, inspect the reported provider error and use Retry when appropriate. Recursion does not retry the main SillyTavern story generation automatically.
+
+Successful internal recovery does not need a persistent warning. If required cards, Refinement, or Guidance cannot be completed, preparation blocks narration and exposes the failure for recovery.
+
+Recursion is a beta SillyTavern extension that compiles current-scene prompt guidance for the next roleplay generation. It observes the active chat, maintains a short-lived scene deck, selects a turn hand, and installs an inspectable prompt packet when Auto or Manual mode is active. Segmented generates requested card families through a series of narrow model stages; Fused asks a stronger model for one multi-card bundle and uses Segmented repair or fallback when validation requires it.
 
 Recursion is not a memory manager, lore database, summary engine, vector recall layer, campaign save system, character database, or card-editing product. It does not own durable canon. It improves the next response by preserving selected scene evidence and adding provider-authored direction for the scene in front of the user.
 

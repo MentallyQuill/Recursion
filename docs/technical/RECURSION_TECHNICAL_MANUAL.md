@@ -6,7 +6,7 @@ Recursion is a SillyTavern extension that compiles compact, current-turn reasoni
 
 Recursion owns the current-scene prompt compiler. It does not own continuity-extension duties, durable memory, World Info, Memory Books, Summaryception, VectFox, transcript archives, vector recall, campaign saves, branching, character databases, or user-authored card catalogs.
 
-The V1 contract is one coherent pre-alpha shape. When a source contract changes, docs, schemas, tests, and examples should move together instead of preserving old internal data shapes.
+The V1 contract is one coherent beta shape. When a source contract changes, docs, schemas, tests, and examples should move together instead of preserving old internal data shapes.
 
 ## Runtime Pipeline
 

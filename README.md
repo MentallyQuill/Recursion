@@ -10,6 +10,12 @@ It reads a bounded band of the active chat, reasons over the current turn, build
 
 Recursion is a scene reasoning layer for the reply in front of you.
 
+## New in 0.3.0-beta.1
+
+This beta brings mandatory Priority coverage, reviewed Refinement cards, configurable Auto selection variety and cooldown, optional Realism analysis, and a dedicated Post-process writer with revision review. Fused and Segmented now share the same card plan, with stronger recovery and checks that stop generation when required preparation is incomplete.
+
+Read the [release notes](docs/release/0.3.0-beta.1.md) for the September 17–24 update roundup, or the [release announcement](docs/release/0.3.0-beta.1-announcement.md) for the highlights.
+
 ## How It Works
 
 Recursion builds a turn-bound deck, selects a compact hand, and injects only the guidance and evidence that matter for the reply. The selection step keeps the prompt focused without turning generated work into durable memory.
@@ -25,7 +31,7 @@ Before SillyTavern generates, Recursion's Pre-process Cards prepare the focused 
 - Builds scene cards for motivations, social subtext, consequences, knowledge, environment, items, and open threads.
 - Gives you an independent Pre-process Cards deck for scene evidence and an independent Post-process Cards deck for response revision.
 - Lets you use bundled starter decks or build custom decks with categories, authored cards, ordering, and card Assist where supported.
-- Gives every editable card `off`, `active`, and `priority` states so you can control focus without rewriting the scene.
+- Gives every editable card `off`, `active`, `priority`, and `refinement` states so you can control focus without rewriting the scene.
 - Lets you duplicate the bundled Default Deck, create categories and authored cards, drag to reorder, and use Card Assist before committing edits.
 - Selects a focused turn hand so the prompt gets what matters now, not every possible note.
 - Uses separate Utility and optional Reasoner lanes, so fast planning and deeper synthesis can be tuned independently.
@@ -188,7 +194,7 @@ For a guided first session, start with [First Run Workflow](docs/user/FIRST_RUN_
 
 - [Documentation Index](docs/DOCUMENTATION_INDEX.md) - Canonical map for user, technical, design, testing, release, and planning docs.
 - [Post-process Cards Runtime](docs/architecture/POST_PROCESS_CARDS_RUNTIME.md) - Current operation boundary, writer ownership, flows, retries, persistence, and privacy.
-- [Release Notes](docs/release/README.md) - Current alpha checkpoints, verification, and known constraints.
+- [Release Notes](docs/release/README.md) - Current beta and historical alpha checkpoints, verification, and known constraints.
 - [First Run Workflow](docs/user/FIRST_RUN_WORKFLOW.md) - First-session path from installation through Manual, Auto, inspection, and cleanup.
 - [Operator Manual](docs/user/RECURSION_OPERATOR_MANUAL.md) - Complete guide for UI surfaces, modes, settings, operation, diagnostics, storage, mobile behavior, and smoke checks.
 - [Provider Setup](docs/user/PROVIDER_SETUP.md) - Utility and Reasoner setup, provider tests, fallback behavior, and safe verification.

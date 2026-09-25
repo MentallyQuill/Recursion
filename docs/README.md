@@ -10,7 +10,7 @@ Render status is tracked in [Documentation Render Tracking](testing/DOCUMENTATIO
 
 | Path | Purpose |
 | --- | --- |
-| `release/` | Release notes and alpha signoff records. |
+| `release/` | Release notes, announcements, and historical signoff records. |
 | `user/` | Operator-facing setup, normal-use, provider, privacy, and safety manuals. |
 | `technical/` | Release-facing technical manuals for runtime, cards, prompt packets, providers, storage, diagnostics, and host integration. |
 | `design/` | Product, card-system, source-backed behavior settings policy, UI, and historical seed design documents. |
@@ -22,6 +22,9 @@ Render status is tracked in [Documentation Render Tracking](testing/DOCUMENTATIO
 Promoted documentation images live outside this tree in [Documentation Assets](../assets/documentation/README.md).
 
 ## Current Entry Points
+
+- [0.3.0-beta.1 release notes](release/0.3.0-beta.1.md)
+- [0.3.0-beta.1 announcement](release/0.3.0-beta.1-announcement.md)
 
 - [Documentation Index](DOCUMENTATION_INDEX.md)
 - [Release Notes](release/README.md)

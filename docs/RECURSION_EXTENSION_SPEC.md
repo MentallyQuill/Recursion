@@ -172,4 +172,4 @@ When current documents conflict, prefer:
 3. current implementation and executable contract tests;
 4. historical notes only for context.
 
-Recursion is pre-alpha. Update contracts in place; do not add compatibility shims for retired generated-state models.
+Recursion is beta and retains the V1 in-place contract policy. Update contracts in place; do not add compatibility shims for retired generated-state models.

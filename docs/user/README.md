@@ -1,8 +1,10 @@
 # User Guides
 
-These guides cover the current Recursion V1 alpha operator surface. Recursion is a current-scene prompt compiler for SillyTavern, not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing product.
+These guides cover the current Recursion V1 beta operator surface. Recursion is a current-scene prompt compiler for SillyTavern, not a memory manager, lore database, summary engine, vector recall layer, campaign save system, or card-editing product.
 
 ## Start Here
+
+- [What changed in 0.3.0-beta.1](../release/0.3.0-beta.1.md) - Selection, Refinement, Realism, Post-process writing, and recovery updates.
 
 - [First Run Workflow](FIRST_RUN_WORKFLOW.md) - Short first-session path from install and provider setup through Segmented Auto, Tense & PoV Auto, Manual, Fused trial, checkpoint recovery, inspection, and cleanup.
 - [Recursion Operator Manual](RECURSION_OPERATOR_MANUAL.md) - Complete practical manual for normal operation, Pre-process and Post-process Cards, Segmented/Fused pipelines, stage controls, modes, Tense & PoV, settings, diagnostics, storage actions, mobile behavior, and smoke checks.

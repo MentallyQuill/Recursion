@@ -269,6 +269,44 @@ function createIds() {
   const repository = createRepository();
   let time = Date.now();
   const now = () => new Date(time).toISOString();
+  const calls = { bundle: 0, accepted: 0, repair: 0 };
+  let sleeping = false;
+  const repairId = 'preprocess.cards.segmented.realism';
+  const graph = createExecutionGraph({ stages: [
+    stage('preprocess.cards.fused', [], async () => { calls.bundle++; return { cards: ['Scene Frame'] }; }),
+    stage('preprocess.cards.segmented.knowledge', ['preprocess.cards.fused'], async () => {
+      calls.accepted++; return { card: 'Knowledge' };
+    }),
+    stage(repairId, ['preprocess.cards.segmented.knowledge'], async () => {
+      if (++calls.repair === 1) throw { code: 'RECURSION_PROVIDER_RATE_LIMIT', retryAfterMs: 120000 };
+      return { card: 'Realism' };
+    })
+  ] });
+  const scheduler = createExecutionScheduler({ repository, now, retrySleep: (_ms, signal) => new Promise((_, reject) => {
+    sleeping = true;
+    signal.addEventListener('abort', () => reject(Object.assign(new Error('Stopped'), { name: 'AbortError' })), { once: true });
+  }) });
+  const running = scheduler.start({ manifest: manifest({ operationId: 'deadline-retry' }), graph });
+  await waitUntil(() => sleeping, 'repair must enter provider cooldown');
+  time += 300000;
+  const paused = await scheduler.pause({ operationId: 'deadline-retry', reason: 'operation-deadline' });
+  await running;
+  assertEqual(paused.stageRecords[repairId].state, 'pending', 'deadline leaves interrupted repair pending');
+  const checkpoints = ['preprocess.cards.fused', 'preprocess.cards.segmented.knowledge']
+    .map(id => paused.stageRecords[id].checkpoint);
+  const reloaded = createExecutionScheduler({ repository, now });
+  const retried = await reloaded.retry({ operationId: 'deadline-retry', stageId: repairId, graph, provenance });
+  assertEqual(retried.state, 'completed', 'Retry after deadline must complete the unfinished repair');
+  assertDeepEqual(calls, { bundle: 1, accepted: 1, repair: 2 }, 'Retry preserves accepted cards and repeats only unfinished work');
+  assertDeepEqual(['preprocess.cards.fused', 'preprocess.cards.segmented.knowledge']
+    .map(id => retried.stageRecords[id].checkpoint), checkpoints, 'accepted checkpoint identity survives Retry');
+  assertEqual(retried.recoveryBudget.elapsedActiveMs, 0, 'explicit deadline Retry opens a fresh clock');
+}
+
+{
+  const repository = createRepository();
+  let time = Date.now();
+  const now = () => new Date(time).toISOString();
   let calls = 0;
   let sleeping = false;
   const graph = createExecutionGraph({ stages: [stage('preprocess.cards.fused', [], async () => {

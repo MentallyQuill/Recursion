@@ -1175,20 +1175,22 @@ export function createExecutionScheduler({
       }
       const stage = (graph || runtime.graph).getStage(stageId);
       const record = loaded.stageRecords?.[stageId];
+      const deadlineRetry = loaded.pauseReason === 'operation-deadline'
+        && record?.state === 'pending';
       if (
         !stage
-        || stage.failurePolicy === 'continue'
+        || (stage.failurePolicy === 'continue' && !deadlineRetry)
         || loaded.state !== 'paused'
-        || record?.state !== 'failed'
+        || (record?.state !== 'failed' && !deadlineRetry)
       ) {
-        throw new Error('Retry is valid only for the blocking failed stage.');
+        throw new Error('Retry requires a blocking failed stage or unfinished work paused at the operation time limit.');
       }
       runtime.manifest = normalizePipelineRun(loaded);
       runtime.graph = graph || runtime.graph;
       runtime.context = context;
       runtime.provenance = expectedProvenance;
-      const retryFromStageId = stage.retryFromStageId || stageId;
-      runtime.forcedStageIds = new Set([retryFromStageId]);
+      const retryFromStageId = deadlineRetry ? stageId : stage.retryFromStageId || stageId;
+      runtime.forcedStageIds = new Set(deadlineRetry ? [] : [retryFromStageId]);
       runtime.queuedStageIds = new Set();
       await queueMutation(runtime, (draft) => {
         draft.recoveryBudget = ['preprocess', 'postprocess'].includes(draft.phase) ? normalizeOperationBudget({ providerCooldowns: draft.recoveryBudget?.providerCooldowns }, {
@@ -1199,7 +1201,10 @@ export function createExecutionScheduler({
         draft.state = 'running';
         draft.pauseReason = '';
         draft.staleChangedFields = [];
-        for (const descendantId of [retryFromStageId, ...runtime.graph.descendantIds(retryFromStageId)]) {
+        const resetStageIds = deadlineRetry
+          ? Object.entries(draft.stageRecords).filter(([, record]) => record.state === 'pending').map(([id]) => id)
+          : [retryFromStageId, ...runtime.graph.descendantIds(retryFromStageId)];
+        for (const descendantId of resetStageIds) {
           const descendant = draft.stageRecords[descendantId];
           if (!descendant) continue;
           draft.stageRecords[descendantId] = {

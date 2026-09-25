@@ -149,6 +149,8 @@ This file follows the [google-labs-code DESIGN.md format](https://github.com/goo
 
 Progress retains provider capacity failures as provider failures. Fused children show a bundle rejection only when a recorded validation rejection exists; missing rejection details never imply `invalid-card`. Cooldown recovery uses existing progress rows and Stop/Resume controls.
 
+Paused repairs use amber `paused` rows, retaining the current provider cause instead of claiming active repair. An operation time limit offers Retry for unfinished work with a fresh time window; accepted cards remain saved. Ordinary Stop/Resume preserves the existing time budget.
+
 Execution details stay in the existing Progress footer and Last Brief: show the actual pipeline and selected lane, and an explicit requested-to-effective transition when Fused qualification is missing. Provider settings show requested and effective concurrency; time limits remain under Advanced → Execution. These use existing compact control rows and helper text without additional bar badges or notifications.
 
 Recursion is a SillyTavern extension, so its interface should feel native to SillyTavern before it feels branded. The visual identity is compact, graphite-dark, technical, and restrained. It should sit close to the chat surface as quiet operational chrome: useful when inspected, mostly invisible during normal play.

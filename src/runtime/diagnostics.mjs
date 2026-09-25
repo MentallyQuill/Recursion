@@ -10,6 +10,7 @@ const RESUME_BODY_KEY_PATTERN = /(arbiter|card|reference|packet|hand|guidance|dr
 const EXECUTION_DIAGNOSTIC_CODE_SET = new Set([
   'operation-paused-user-stop',
   'operation-paused:chat-changed',
+  'operation-paused:operation-deadline',
   'operation-stale:source-changed',
   'stage-attempt-exhausted',
   'provider-rate-limit-retry',
@@ -96,6 +97,9 @@ function executionDiagnosticCodes(manifest, stages) {
   }
   if (source.state === 'paused' && pauseReason === 'chat-changed') {
     codes.push('operation-paused:chat-changed');
+  }
+  if (source.state === 'paused' && pauseReason === 'operation-deadline') {
+    codes.push('operation-paused:operation-deadline');
   }
   const staleFields = asArray(source.staleFields || source.staleChangedFields);
   if (

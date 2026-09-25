@@ -2,6 +2,13 @@ import {
   buildDiagnosticsPayload,
   summarizeExecutionForDiagnostics
 } from '../../src/runtime/diagnostics.mjs';
+
+{
+  const exported = summarizeExecutionForDiagnostics({ operationId: 'deadline', state: 'paused',
+    pauseReason: 'operation-deadline', stageRecords: {} });
+  assert(exported.diagnosticCodes.includes('operation-paused:operation-deadline'),
+    'deadline pause exports its explicit cause without exposing raw pause text');
+}
 import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
 import { classifyModelFailure } from '../../src/execution/attempt-policy.mjs';
 import { normalizeStageRecord } from '../../src/execution/checkpoints.mjs';

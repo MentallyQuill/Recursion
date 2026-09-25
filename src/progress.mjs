@@ -300,7 +300,7 @@ export function actionForProgressStage({
     && operationSource.resumable !== false
     && frontier[0] === stageId
   ) {
-    return actionDescriptor('resume', operationSource, stageSource);
+    return actionDescriptor(operationSource.pauseReason === 'operation-deadline' ? 'retry' : 'resume', operationSource, stageSource);
   }
   if (operationState === 'stale') {
     return stageSource.reprocessOwner === true
@@ -416,6 +416,7 @@ function aggregateFailureCode(children = []) {
 }
 
 function metaForState(state, source = '', reason = '', retryCount = 0, recoveryState = '') {
+  if (recoveryState === 'paused' && state === 'warning') return 'paused';
   if (recoveryState === 'recovered' && ['done', 'cached'].includes(state)) return state;
   if (recoveryState === 'repairing' && ['running', 'pending'].includes(state)) return 'repairing';
   const normalizedSource = normalizeChildSource(source);
@@ -987,7 +988,7 @@ function normalizeChildStep(input, index = 0) {
       : normalizeProviderLane(source.providerLane, roleId === 'reasonerComposer' ? 'reasoner' : 'utility'),
     state,
     meta: refinementOutcomeMeta(source, state) || metaForState(state, childSource, reason, retryCount, source.recoveryState),
-    ...(['recovered', 'repairing'].includes(source.recoveryState) ? { recoveryState: source.recoveryState } : {}),
+    ...(['recovered', 'repairing', 'paused'].includes(source.recoveryState) ? { recoveryState: source.recoveryState } : {}),
     source: childSource || null,
     sourcePhase: cleanText(source.sourcePhase || source.phase) || null,
     sourceRoleId: roleId || null,
@@ -1037,7 +1038,7 @@ function normalizeStep(input, index = 0) {
       ? null : normalizeProviderLane(source.providerLane, definition.providerLane || 'utility'),
     state,
     meta: refinementOutcomeMeta(source, state) || metaForState(state, source.source || source.sourceType, reason, retryCount, source.recoveryState),
-    ...(['recovered', 'repairing'].includes(source.recoveryState) ? { recoveryState: source.recoveryState } : {}),
+    ...(['recovered', 'repairing', 'paused'].includes(source.recoveryState) ? { recoveryState: source.recoveryState } : {}),
     sourcePhase: cleanText(source.sourcePhase || source.phase) || null,
     sourceRoleId: safeDisplayText(source.sourceRoleId || source.roleId, '', 80) || null,
     retryCount,
@@ -1458,6 +1459,8 @@ function operationForProgress(execution, stages) {
 
 function progressStateForExecutionStage(stage, operation) {
   const state = cleanText(asObject(stage).state, 'pending').toLowerCase();
+  if (operation.state === 'paused' && ['pending', 'running'].includes(state)
+      && operation.frontierStageIds.includes(executionStageId(stage))) return 'warning';
   if (state === 'completed') {
     if (stage.summary?.status === 'fallback-raw-only') return 'warning';
     return operation.state === 'completed' ? 'done' : 'cached';
@@ -1469,13 +1472,23 @@ function progressStateForExecutionStage(stage, operation) {
   return 'pending';
 }
 
+function pausedExecutionReason(operation, stage) {
+  const cause = stage?.failure ? safeReasonText(stage.failure.message || stage.failure.code) : '';
+  const pause = operation.pauseReason === 'operation-deadline'
+    ? 'Operation time limit reached. Retry to continue; completed work is saved.'
+    : 'Operation paused. Completed work is saved.';
+  return [cause, pause].filter(Boolean).join(' ');
+}
+
 function executionProgressStep(stage, operation, queuedReprocess, overrides = {}) {
   const source = { ...asObject(stage), ...asObject(overrides) };
   const refinement = executionStageId(source).startsWith('preprocess.refinement.');
   const refinementNoop = refinement && source.summary?.status === 'not-needed';
   const state = progressStateForExecutionStage(source, operation);
+  const paused = operation.state === 'paused' && state === 'warning'
+    && ['pending', 'running'].includes(source.state);
   const retryCount = normalizeRetryCount(source.attempts?.total);
-  const reason = source.failure
+  const reason = paused ? pausedExecutionReason(operation, source) : source.failure
     ? safeReasonText(source.failure.message || source.failure.code)
     : (source.summary?.status === 'fallback-raw-only'
         ? 'Guidance unavailable. Using raw card evidence.'
@@ -1490,6 +1503,7 @@ function executionProgressStep(stage, operation, queuedReprocess, overrides = {}
       ? (refinementNoop || executionStageId(source).endsWith('.hand') ? null : 'reasoner')
       : source.providerLane || 'utility',
     state,
+    ...(paused ? { recoveryState: 'paused' } : {}),
     source: state === 'cached' ? 'cache' : null,
     retryCount: retryCount > 1 ? retryCount - 1 : 0,
     reason: reason || null,
@@ -1580,10 +1594,14 @@ function fusedOutcomeSteps(stage, operation, stages) {
     const recovered = !acceptedOutcome && ['completed', 'cached'].includes(repair?.state);
     const awaitingRepair = !repair && stage.summary?.fallback === 'segmented'
       && ['running', 'paused'].includes(operation.state);
-    const repairing = !acceptedOutcome && (awaitingRepair || ['pending', 'running'].includes(repair?.state));
+    const unresolved = !acceptedOutcome && (awaitingRepair || ['pending', 'running'].includes(repair?.state));
+    const repairing = unresolved && operation.state === 'running';
+    const paused = unresolved && operation.state === 'paused';
     const code = normalizeFusedRejections(stage.summary?.rejections).find((entry) => entry.family === family)?.code;
     const reason = !acceptedOutcome && !recovered && settled
-      ? stage.failure ? safeReasonText(stage.failure.message || stage.failure.code)
+      ? paused ? pausedExecutionReason(operation, repair)
+        : repair?.failure ? safeReasonText(repair.failure.message || repair.failure.code)
+        : stage.failure ? safeReasonText(stage.failure.message || stage.failure.code)
         : code ? `${repairing ? 'Repairing this card. Original rejection' : 'Bundle rejection'} [${code}]: ${fusedRejectionReason(code)}`
           : 'The bundle did not produce this card.'
       : null;
@@ -1593,8 +1611,8 @@ function fusedOutcomeSteps(stage, operation, stages) {
       label: family,
       providerLane: stage.providerLane || 'utility',
       state: !settled ? 'pending' : acceptedOutcome ? (stage.state === 'cached' ? 'cached' : 'done')
-        : recovered ? (repair.state === 'cached' ? 'cached' : 'done') : repairing ? repair?.state || 'pending' : 'failed',
-      ...(settled && (recovered || repairing) ? { recoveryState: recovered ? 'recovered' : 'repairing' } : {}),
+        : recovered ? (repair.state === 'cached' ? 'cached' : 'done') : paused ? 'warning' : repairing ? repair?.state || 'pending' : 'failed',
+      ...(settled && (recovered || repairing || paused) ? { recoveryState: recovered ? 'recovered' : paused ? 'paused' : 'repairing' } : {}),
       reason,
       executable: false,
       action: null,
@@ -1649,6 +1667,10 @@ export function progressFromExecution(execution, queuedReprocess = null) {
         parent.reason = null;
       } else if (children.some((child) => child.state === 'failed')) {
         parent.state = 'failed';
+        parent.reason = aggregateReason(children);
+      } else if (children.some((child) => child.recoveryState === 'paused')) {
+        parent.state = 'warning';
+        parent.recoveryState = 'paused';
         parent.reason = aggregateReason(children);
       } else if (children.some((child) => child.recoveryState === 'repairing')) {
         parent.state = childAggregateState(children);
@@ -1715,13 +1737,14 @@ export function progressFromExecution(execution, queuedReprocess = null) {
       label: 'Segmented cards',
       ...(children.every((child) => child.recoveryState === 'recovered') ? {
         recoveryState: 'recovered'
-      } : {}),
+      } : children.some((child) => child.recoveryState === 'paused') ? { recoveryState: 'paused' } : {}),
       partialResult: continued,
       providerLane: 'utility',
       state,
       reason: failed.length ? (continued
         ? 'Continued without failed cards: ' + failedNames + '.'
-        : 'Card generation failed: ' + failedNames + '. See the card rejection below.') : null,
+        : 'Card generation failed: ' + failedNames + '. See the card rejection below.')
+        : children.find((child) => child.recoveryState === 'paused')?.reason || null,
       source: state === 'cached' ? 'cache' : null,
       action: null,
       children,

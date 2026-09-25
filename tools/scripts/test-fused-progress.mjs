@@ -66,6 +66,30 @@ for (const graph of [true, false]) for (const repairState of ['pending', 'runnin
 }
 console.log('[pass] Fused repair in progress');
 
+{
+  const execution = recoveredFusedExecution('pending');
+  execution.state = 'paused';
+  execution.pauseReason = 'operation-deadline';
+  execution.frontierStageIds = ['preprocess.cards.segmented.character-motivation'];
+  execution.stageRecords.repair.failure = { code: 'RECURSION_PROVIDER_RATE_LIMIT',
+    message: 'The selected profile is rate limited.' };
+  const progress = createProgressRunModel({ execution });
+  const bundle = progress.steps.find(step => step.id === 'preprocess.cards.fused');
+  const group = progress.steps.find(step => step.id === 'preprocess.cards.segmented');
+  const repair = group.children[0];
+  assert.equal(bundle.meta, 'paused', 'deadline must not claim repairs are still running');
+  assert.equal(bundle.children.find(step => step.label === 'Scene Frame').state, 'done');
+  assert.equal(group.meta, 'paused');
+  assert.match(group.reason, /rate limited/i, 'paused group must show the actual cause, not an invented internal error');
+  assert.equal(repair.meta, 'paused');
+  assert.match(repair.reason, /time limit/i);
+  assert.match(repair.reason, /rate limited/i, 'current provider cause supersedes historical validation rejection');
+  assert.equal(repair.action.kind, 'retry', 'an exhausted operation needs a new recovery window');
+  assert.ok(!JSON.stringify(progress).includes('Repairing this card'));
+  assert.equal(progress.activeCount, 0);
+}
+console.log('[pass] deadline-paused Fused repairs show cause and Retry');
+
 const awaitingRepair = recoveredFusedExecution('pending');
 delete awaitingRepair.stageRecords.repair;
 assert.equal(progressFromExecution(awaitingRepair).steps[0].meta, 'repairing', 'the wave transition must not flash a terminal failure');

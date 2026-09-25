@@ -1,3 +1,4 @@
+import { sanitizeGuidanceValidationDetails } from '../instruction-safety.mjs';
 import {
   compareRunProvenance,
   normalizeExecutionProvenance
@@ -319,6 +320,7 @@ export function normalizeStageRecord(value) {
           code: cleanText(value.failure.code),
           failureClass: cleanText(value.failure.failureClass),
           retryable: value.failure.retryable === true,
+          ...(sanitizeGuidanceValidationDetails(value.failure?.validationDetails).length ? { validationDetails: sanitizeGuidanceValidationDetails(value.failure?.validationDetails) } : {}),
           ...(Number.isFinite(value.failure.retryAfterMs)
             ? { retryAfterMs: Math.min(2147483647, Math.max(0, Math.trunc(value.failure.retryAfterMs))) } : {}),
           ...(Number.isFinite(value.failure.retryNotBefore) ? { retryNotBefore: value.failure.retryNotBefore } : {}),

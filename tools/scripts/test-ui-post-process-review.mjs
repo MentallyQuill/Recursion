@@ -25,3 +25,13 @@ assert.equal(patches.length, 0, 'profile mode never persists without a selected 
 assert.equal(mode.value, 'native');
 assert.match(messages[0], /Create a Connection Profile/);
 console.log('Post-process empty-profile UI guard: PASS');
+
+for (const [status, expected] of [['writing','Writing revision'],['awaiting-review','Ready for review'],['applied','Revision applied'],['no-change','No changes needed'],['canceled','Canceled'],['failed','time limit']]) {
+  controls.length=0;
+  renderPostProcessWritingControls({el:element,deck:{readonly:true},settings:{},status:{status,failure:{message:'Post-process exceeded its time limit. Original response preserved.'}}});
+  const outcome=controls.find(control=>control.dataset?.recursionPostProcessStatus===status);
+  assert.ok(outcome,`renders retained ${status} outcome`);
+  assert.match(outcome.text,new RegExp(expected,'i'));
+  assert.equal(outcome.attrs.role,'status');
+}
+console.log('Post-process retained outcome UI: PASS');

@@ -17,8 +17,8 @@ assert.equal(existsSync(liveProofPath), true, 'strict live Post-process As Swipe
 const liveProofSource = readFileSync(liveProofPath, 'utf8');
 assert(liveProofSource.includes("argv.includes('--live')"), 'live Post-process proof requires explicit mutation opt-in');
 assert(liveProofSource.includes('validateSoakUserHandle'), 'live Post-process proof rejects default-user');
-assert(liveProofSource.includes("applyMode: 'as-swipe'"), 'live Post-process proof forces As Swipe');
-assert(liveProofSource.includes('postProcessSourceSwipeCount + 1'), 'live Post-process proof requires exactly one swipe after its completed native source');
+assert(/applyMode:\s*'as-swipe'/.test(liveProofSource), 'live Post-process proof forces As Swipe');
+assert(liveProofSource.includes('caseOutcome'), 'live Post-process proof uses the behavior-tested fresh source and exact swipe-count oracle');
 assert(liveProofSource.includes('recursion.postProcessMarker.v1'), 'live Post-process proof requires the persisted V1 marker');
 assert(liveProofSource.includes('swipeInfo.length'), 'live Post-process proof requires aligned swipe metadata');
 assert(liveProofSource.includes('openCharacterChat'), 'live Post-process proof reloads the persisted chat before passing');

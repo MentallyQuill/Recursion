@@ -39,7 +39,7 @@ export function buildRevisionDiff(original, revised) {
   return result;
 }
 
-export function renderPostProcessWritingControls({ el, settings = {}, deck, profiles = [], onSettings, onStyle, onCopy, onReview, onImport, onExport, onError }) {
+export function renderPostProcessWritingControls({ el, settings = {}, status = null, deck, profiles = [], onSettings, onStyle, onCopy, onReview, onImport, onExport, onError }) {
   const writer = normalizePostProcessWriter(settings.writer);
   const field = (tag, key, label, value, attrs = {}) => {
     const node = el(tag, { className: 'recursion-input', attrs: { 'aria-label': label, ...attrs }, dataset: { [key]: '' } });
@@ -78,6 +78,18 @@ export function renderPostProcessWritingControls({ el, settings = {}, deck, prof
   review.checked = settings.reviewBeforeApplying === true;
   review.addEventListener('change', () => onSettings({ reviewBeforeApplying: review.checked }));
   const shell = el('section', { className: 'recursion-post-process-writing', attrs: { 'aria-label': 'Post-process writing' } }, [row('Writer', mode)]);
+  const outcomeText = {
+    running: 'Preparing revision...', writing: 'Writing revision...',
+    'awaiting-review': 'Ready for review. Open Compare / Review revisions to use the revision.',
+    applied: 'Revision applied.', 'no-change': 'No changes needed. Original kept.',
+    canceled: 'Canceled. Original kept.',
+    failed: status?.failure?.message || 'Post-process failed. Original kept. Open Progress to retry the failed step.'
+  }[status?.status];
+  if (outcomeText) shell.appendChild(el('p', {
+    className: 'recursion-post-process-help recursion-post-process-outcome',
+    text: outcomeText, attrs: { role: 'status' },
+    dataset: { recursionPostProcessStatus: status.status }
+  }));
   if (writer.mode === 'profile') {
     const entries = profiles.map(profile => [profile.id, profile.label || profile.name || 'Connection Profile']);
     if (writer.connectionProfileId && !entries.some(([id]) => id === writer.connectionProfileId)) entries.push([writer.connectionProfileId, 'Unavailable saved profile']);
@@ -186,6 +198,9 @@ export function createPostProcessReviewDialog({ runtime, document = globalThis.d
       }
       body.appendChild(columns);
       if (diff?.coarse) body.appendChild(node('p', 'Large revision: changes are highlighted in blocks.', 'recursion-post-process-help'));
+      body.appendChild(node('p', record.applyMode === 'replace'
+        ? 'Use revision replaces the selected response.'
+        : 'Use revision adds and selects a new swipe. The original stays available.', 'recursion-post-process-help'));
       const disabled = busy || !eligible;
       footer.appendChild(button('Keep original', 'keep', disabled || editing || record.state === 'rejected'));
       footer.appendChild(button(editing ? 'Save and use revision' : 'Use revision', 'apply', disabled || (record.state === 'applied' && !editing) || record.state === 'rejected'));

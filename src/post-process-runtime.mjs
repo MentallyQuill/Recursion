@@ -711,9 +711,20 @@ function diagnosticsFor(operation, {
   status = 'skipped',
   reason = '',
   partial = false,
-  committedApplyMode = ''
+  committedApplyMode = '',
+  failure = null,
+  finishedAt = ['running', 'writing'].includes(status) ? null : new Date().toISOString()
 } = {}) {
+  const startedAt = operation?.startedAt || finishedAt;
   return deepFreeze({
+    chatKey: operation?.snapshot?.chatKey || '',
+    startedAt,
+    finishedAt,
+    elapsedMs: startedAt ? Math.max(0, (finishedAt ? Date.parse(finishedAt) : Date.now()) - Date.parse(startedAt)) : 0,
+    writer: { mode: operation?.writer?.mode || 'native',
+      connectionProfileId: cleanText(operation?.writer?.connectionProfileId),
+      model: cleanText(operation?.writer?.model) },
+    ...(failure ? { failure } : {}),
     operationId: operation?.operationId || '',
     deckId: operation?.deckId || '',
     snapshotHash: operation?.snapshotHash || '',
@@ -1082,7 +1093,8 @@ export function createPostProcessRuntime({
   deckProvider = (settings) => getActivePostProcessDeck(settings?.postProcessDecks),
   sourceGuard = async () => true,
   commitResult = (input) => defaultCommitResult(host, input),
-  durableExecution = null
+  durableExecution = null,
+  onDiagnostic = null
 } = {}) {
   let active = null;
   let pendingTrigger = null;
@@ -1177,7 +1189,35 @@ export function createPostProcessRuntime({
     }
   }
 
+  async function retainDiagnostic(record, summary) {
+    lastDiagnostics = summary;
+    if (record?.diagnosticPublished) return;
+    if (record) record.diagnosticPublished = true;
+    try { await onDiagnostic?.(cloneValue(summary)); } catch { /* Diagnostics cannot undo an outcome. */ }
+  }
+
+  function outcomeFailure(stageId, source = {}) {
+    const code = safeCode(source.code, 'RECURSION_POST_PROCESS_FAILED');
+    // Provider bodies can include prose or credentials. Publish authored explanations only.
+    const message = /commit/.test(stageId)
+      ? 'Post-process could not confirm the revision. Check the current response before retrying in Progress.'
+      : /TIMEOUT|DEADLINE|BUDGET_EXHAUSTED/.test(code)
+      ? 'Post-process exceeded its time limit. Original response preserved.'
+      : /TOKEN_LIMIT|OUTPUT_LIMIT/.test(code)
+        ? 'The writer reached its output limit. Original response preserved.'
+        : /SOURCE_STALE|PROVENANCE|CHANGED/.test(code)
+          ? 'The source or writer settings changed. Start a new revision.'
+          : /PROFILE|AUTH|CONFIGURATION|UNAVAILABLE/.test(code)
+            ? 'Check the selected writer and its SillyTavern connection settings. Original response preserved.'
+            : 'Post-process could not complete. Original response preserved. Open Progress to retry the failed step.';
+    return { stageId: cleanText(stageId), code, message,
+      failureClass: safeId(source.failureClass || source.category || source.kind, 'post-process'),
+      retryable: source.retryable === true };
+  }
+
   function startActivity(record, operation) {
+    operation.startedAt = new Date().toISOString();
+    lastDiagnostics = diagnosticsFor(operation, { status: 'running' });
     record.activityStarted = true;
     publish('start', {
       runId: operation.operationId,
@@ -1199,6 +1239,9 @@ export function createPostProcessRuntime({
   }
 
   function stageCategory(operation, category, state, details = {}) {
+    if (details.activeStage === 'host-rewrite' && !operation.signal?.aborted) {
+      lastDiagnostics = diagnosticsFor(operation, { status: 'writing' });
+    }
     const failureStage = cleanText(details.failureStage);
     const failed = state === 'failed';
     const retried = Number(details.guidanceAttempts || 0) > 1 || Number(details.hostAttempts || 0) > 1;
@@ -1270,23 +1313,26 @@ export function createPostProcessRuntime({
     });
   }
 
-  function finishWithoutCommit(operation, reason, outcomes = [], extra = {}, record = active) {
-    lastDiagnostics = diagnosticsFor(operation, {
-      outcomes,
-      status: reason === 'canceled' ? 'canceled' : 'skipped',
-      reason,
-      partial: extra.partial === true
-    });
-    const canceled = reason === 'canceled';
+  async function finishWithoutCommit(operation, reason, outcomes = [], extra = {}, record = active) {
     const failed = ['all-stages-failed', 'runtime-failed', 'commit-failed'].includes(reason);
+    const categoryFailure = outcomes.find(outcome => outcome.failureCode);
+    const failure = failed ? outcomeFailure(reason === 'commit-failed' ? 'postprocess.host-commit' : categoryFailure?.failureStage || 'postprocess', extra.failure || { code: categoryFailure?.failureCode }) : null;
+    await retainDiagnostic(record, diagnosticsFor(operation, {
+      outcomes,
+      status: reason === 'canceled' ? 'canceled' : failed ? 'failed' : reason === 'no-op-candidate' ? 'no-change' : 'skipped',
+      reason, failure,
+      partial: extra.partial === true
+    }));
+    const canceled = reason === 'canceled';
     settleActivity(record, operation, {
       outcome: canceled ? 'canceled' : (failed ? 'error' : 'skipped'),
       label: canceled
         ? 'Post-processing canceled. Original kept.'
-        : (failed ? 'Post-processing failed. Original kept.' : 'Post-processing skipped. Original kept.'),
+        : (failed ? failure.message : 'Post-processing skipped. Original kept.'),
       detail: {
         reason: safeId(reason, 'skipped'),
         partial: extra.partial === true,
+        ...(failure ? { failure } : {}),
         categories: diagnosticCategories(outcomes)
       }
     });
@@ -1460,6 +1506,7 @@ export function createPostProcessRuntime({
       rewrite(request, { signal }) {
         signal = combinedAbortSignal(signal, operation.signal);
         if (signal?.aborted) throw Object.assign(new Error('Stopped.'), { name: 'AbortError' });
+        lastDiagnostics = diagnosticsFor(operation, { status: 'writing' });
         if (typeof host?.generation?.rewriteWithPostProcess !== 'function') {
           throw Object.assign(new Error('Post-process rewrite is unavailable.'), {
             code: 'RECURSION_POST_PROCESS_WRITER_UNAVAILABLE',
@@ -1590,9 +1637,19 @@ export function createPostProcessRuntime({
 
   async function finalizeDurableOperation(record, operation, manifest) {
     if (manifest?.state !== 'completed') {
-      lastDiagnostics = diagnosticsFor(operation, {
-        status: manifest?.stale ? 'stale' : 'paused',
+      const failedStage = Object.entries(manifest?.stageRecords || {}).find(([, stage]) => stage.state === 'failed' && stage.failure);
+      const canceled = record.controller.signal.aborted || /stopped|canceled|^user$/.test(manifest?.pauseReason || '');
+      const failure = canceled ? null : outcomeFailure(failedStage?.[0] || 'postprocess', failedStage?.[1]?.failure || {
+        code: manifest?.stale ? 'RECURSION_POST_PROCESS_PROVENANCE_CHANGED' : 'RECURSION_POST_PROCESS_FAILED'
+      });
+      await retainDiagnostic(record, diagnosticsFor(operation, {
+        status: canceled ? 'canceled' : 'failed', failure,
         reason: manifest?.stale ? 'provenance-changed' : (manifest?.pauseReason || 'paused')
+      }));
+      settleActivity(record, operation, {
+        outcome: canceled ? 'canceled' : 'error',
+        label: canceled ? 'Post-processing canceled. Original kept.' : failure.message,
+        detail: { reason: lastDiagnostics.reason, ...(failure ? { failure } : {}) }
       });
       return {
         ok: false,
@@ -1628,11 +1685,11 @@ export function createPostProcessRuntime({
         )
       };
     });
-    lastDiagnostics = diagnosticsFor(operation, {
+    await retainDiagnostic(record, diagnosticsFor(operation, {
       outcomes,
-      status: noChange ? 'no-change' : awaitingReview ? 'awaiting-review' : 'committed',
-      committedApplyMode: noChange ? null : operation.applyMode
-    });
+      status: noChange ? 'no-change' : awaitingReview ? 'awaiting-review' : 'applied',
+      committedApplyMode: noChange || awaitingReview ? null : operation.applyMode
+    }));
     settleActivity(record, operation, {
       outcome: 'success',
       label: noChange ? 'Post-processing complete. No changes needed.' : awaitingReview ? 'Revision ready for review.' : 'Post-processing complete.',
@@ -1828,7 +1885,7 @@ export function createPostProcessRuntime({
       startActivity(record, operation);
 
       if (durableEnabled) {
-        return startDurableOperation(record, operation, currentSettings);
+        return await startDurableOperation(record, operation, currentSettings);
       }
 
       const runResult = operation.rewriteFlow === 'progressive'
@@ -1936,12 +1993,12 @@ export function createPostProcessRuntime({
         }, record);
       }
 
-      lastDiagnostics = diagnosticsFor(operation, {
+      await retainDiagnostic(record, diagnosticsFor(operation, {
         outcomes,
-        status: 'committed',
+        status: 'applied',
         partial,
         committedApplyMode
-      });
+      }));
       publish('stage', {
         runId: operation.operationId,
         operationId: operation.operationId,
@@ -1997,7 +2054,7 @@ export function createPostProcessRuntime({
         operation,
         canceled ? 'canceled' : 'runtime-failed',
         [],
-        {},
+        { failure: error },
         record
       );
     }
@@ -2334,10 +2391,25 @@ export function createPostProcessRuntime({
     async invalidatePostProcessComparisons(options) { return review?.invalidate?.(options); },
     async postProcessComparisons() { return review ? review.list() : []; },
     async reviewPostProcess(input) {
-      return review ? review.act(input) : {ok:false,reason:'review-unavailable'};
+      const result = review ? await review.act(input) : {ok:false,reason:'review-unavailable'};
+      if (result?.ok && result.comparison && ['apply', 'keep'].includes(input?.action)
+          && !['already-applied', 'already-kept-original'].includes(result.reason)) {
+        const comparison = result.comparison;
+        await retainDiagnostic(null, diagnosticsFor({
+          operationId: comparison.operationId, snapshot: comparison.originalSnapshot,
+          sourceHash: comparison.originalSnapshot?.sourceHash,
+          snapshotHash: comparison.originalSnapshot?.snapshotHash,
+          writer: comparison.writer, applyMode: comparison.applyMode,
+          startedAt: comparison.createdAt
+        }, { status: input.action === 'apply' ? 'applied' : 'canceled',
+          reason: result.reason, committedApplyMode: input.action === 'apply' ? comparison.applyMode : '' }));
+      }
+      return result;
     },
     postProcessDiagnostics() {
-      return cloneValue(lastDiagnostics);
+      return cloneValue(['running', 'writing'].includes(lastDiagnostics.status)
+        ? { ...lastDiagnostics, elapsedMs: Math.max(0, Date.now() - Date.parse(lastDiagnostics.startedAt)) }
+        : lastDiagnostics);
     }
   };
 }

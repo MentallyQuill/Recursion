@@ -1,3 +1,4 @@
+import { normalizePostProcessOutcomes, summarizePostProcessOutcome } from './post-process-diagnostics.mjs';
 import { createPostProcessComparisonStore, POST_PROCESS_COMPARISONS_PATTERN, postProcessComparisonsKey } from './post-process-comparison.mjs';
 import { cloneJson, makeId, nowIso, redact, safeId } from './core.mjs';
 import { failureFrom } from './failures.mjs';
@@ -83,6 +84,7 @@ const SECRET_STORAGE_KEY_PARTS = [
   'authheader'
 ];
 const JOURNAL_EVENTS = new Set([
+  'postprocess.outcome',
   'runtime.started',
   'runtime.stopped',
   DEFAULT_JOURNAL_EVENT,
@@ -435,6 +437,7 @@ function normalizeHandSelectedDetails(details) {
 function normalizeJournalDetails(event, details) {
   if (details === undefined) return undefined;
   if (event === 'hand.selected') return normalizeHandSelectedDetails(details);
+  if (event === 'postprocess.outcome') return summarizePostProcessOutcome(details);
   return sanitizedJsonValue(details, undefined);
 }
 
@@ -496,6 +499,7 @@ function normalizeJournal(chatKey, value = {}, maxEntries = 100) {
     chatKey: safeId(chatKey, 'chat'),
     maxEntries: limit,
     nextIndex: Math.max(normalizeNextIndex(source.nextIndex, entries.length), entries.length),
+    postProcessOutcomes: normalizePostProcessOutcomes(source.postProcessOutcomes, chatKey),
     entries
   });
 }
@@ -862,6 +866,14 @@ export function createStorageRepository({
   getRetentionSettings = null
 } = {}) {
   const fallbackJournalEntryLimit = normalizeMaxEntries(maxJournalEntries);
+  const journalWrites = new Map();
+  function serializeJournal(chatKey, run) {
+    const key = runJournalKey(chatKey);
+    const result = (journalWrites.get(key) || Promise.resolve()).catch(() => {}).then(run);
+    journalWrites.set(key, result);
+    result.finally(() => { if (journalWrites.get(key) === result) journalWrites.delete(key); }).catch(() => {});
+    return result;
+  }
   const comparisonStore = createPostProcessComparisonStore({
     storage, onWrite: (key, chatKey) => writeIndexEntry(key, 'postProcessComparisons', chatKey),
     onDelete: (key) => removeIndexEntry(key)
@@ -1064,17 +1076,25 @@ export function createStorageRepository({
     return normalizeJournal(chatKey, await storage.readJson(key), currentRetention().runJournalEntries);
   }
 
-  async function appendJournal(chatKey, entry) {
-    const key = runJournalKey(chatKey);
-    const journal = await loadRunJournal(chatKey);
-    const clean = normalizeJournalEntry(entry);
-    journal.entries.push(clean);
-    journal.entries = journal.entries.slice(-journal.maxEntries);
-    journal.nextIndex += 1;
-    journal.updatedAt = nowIso();
-    await storage.writeJson(key, journal);
-    await writeIndexEntry(key, 'runJournal', safeId(chatKey, 'chat'));
-    return clean;
+  function appendJournal(chatKey, entry) {
+    return serializeJournal(chatKey, async () => {
+      const key = runJournalKey(chatKey);
+      const journal = await loadRunJournal(chatKey);
+      const clean = normalizeJournalEntry(entry);
+      if (clean.event === 'postprocess.outcome') {
+        const outcome = summarizePostProcessOutcome(entry.details, chatKey);
+        if (!outcome) throw new TypeError('Post-process outcome belongs to another chat or is invalid.');
+        journal.postProcessOutcomes = normalizePostProcessOutcomes([...journal.postProcessOutcomes, outcome], chatKey);
+      }
+      journal.entries.push(clean);
+      journal.entries = journal.entries.slice(-journal.maxEntries);
+      journal.nextIndex += 1;
+      journal.updatedAt = nowIso();
+      const result = await storage.writeJson(key, journal);
+      if (result?.ok === false || result?.persisted === false || result?.fallback) throw new Error('Could not persist the run journal.');
+      await writeIndexEntry(key, 'runJournal', safeId(chatKey, 'chat'));
+      return clean;
+    });
   }
 
   async function loadLastBrief(chatKey) {
@@ -1550,11 +1570,13 @@ export function createStorageRepository({
   return {
     ...comparisonStore,
     loadRunJournal,
-    async clearRunJournal(chatKey) {
-      const key = runJournalKey(chatKey);
-      const deleted = await storage.deleteJson(key);
-      await removeIndexEntry(key);
-      return { ok: deleted?.ok !== false, key, deleted: deleted?.ok !== false };
+    clearRunJournal(chatKey) {
+      return serializeJournal(chatKey, async () => {
+        const key = runJournalKey(chatKey);
+        const deleted = await storage.deleteJson(key);
+        if (deleted?.ok !== false) await removeIndexEntry(key);
+        return { ok: deleted?.ok !== false, key, deleted: deleted?.ok !== false };
+      });
     },
     appendJournal,
     loadLastBrief,

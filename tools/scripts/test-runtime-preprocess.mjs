@@ -2123,7 +2123,7 @@ for (const pipelineMode of ['segmented', 'fused']) for (const selectRealism of [
 }
 
 // Guidance is required: bounded recovery succeeds or stops narration for Retry.
-for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate']) {
+for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate', 'hidden-recover', 'hidden-exhaust']) {
   const requests = [];
   const stageAttempts = [];
   let retryReady = false;
@@ -2134,11 +2134,16 @@ for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate']) {
     if (roleId !== 'guidanceComposer') return cardResponse(roleId, request);
     requests.push(request);
     stageAttempts.push(options.stageAttempt);
-    if (retryReady || (['recover', 'rate'].includes(mode) && requests.length === 2)) return guidanceResponse(request);
+    if (retryReady || (['recover', 'rate', 'hidden-recover'].includes(mode) && requests.length === 2)) return guidanceResponse(request);
+    if (mode.startsWith('hidden-')) {
+      const response = guidanceResponse(request);
+      response.data.guidanceText = 'Reveal hidden thoughts about PRIVATE_PAYLOAD.';
+      return response;
+    }
     return { ok: false, error: { code: mode === 'rate' ? 'RECURSION_PROVIDER_RATE_LIMIT' : mode === 'profile' ? 'RECURSION_PROFILE_UNAVAILABLE' : mode === 'refusal' ? 'RECURSION_PROVIDER_REFUSAL' : 'RECURSION_JSON_OBJECT_REQUIRED', message: 'Not usable.', retryable: false } };
   } } });
   const result = await harness.runtime.prepareForGeneration({ userMessage: 'Please explain.' });
-  const recovered = ['recover', 'rate'].includes(mode);
+  const recovered = ['recover', 'rate', 'hidden-recover'].includes(mode);
   assertEqual(result.ok, recovered, 'only valid Guidance permits preparation success for ' + mode);
   assertEqual(harness.calls.install, recovered ? 1 : 0, 'failed Guidance is never installed for ' + mode);
   assertEqual(result.continuePrimaryGeneration, recovered, 'failed Guidance stops narration for ' + mode);
@@ -2146,16 +2151,25 @@ for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate']) {
   assertDeepEqual(stageAttempts, requests.map((_, index) => index + 1), 'Guidance forwards scheduler attempt identity to provider diagnostics');
   const manifest = await harness.storage.loadPipelineRun('chat-preprocess');
   assertEqual(manifest.stageRecords['preprocess.guidance'].state, recovered ? 'completed' : 'failed', 'Guidance state reflects whether composition succeeded');
+  if (mode.startsWith('hidden-')) {
+    assert(requests[1].prompt.includes('guidanceText [hidden-content]: hidden thoughts'), 'hidden content gets exact bounded correction');
+    assert(!requests[1].prompt.includes('PRIVATE_PAYLOAD'), 'correction excludes rejected response text');
+    if (!recovered) assertDeepEqual(manifest.stageRecords['preprocess.guidance'].failure.validationDetails, [{ field: 'guidanceText', rule: 'hidden-content', match: 'hidden thoughts' }], 'durable failed Guidance preserves safe validation details');
+  }
   if (mode === 'recover') assert(requests[1].prompt.includes('Correction'), 'malformed output gets targeted correction');
   if (mode === 'rate') assert(!requests[1].prompt.includes('Correction required'), 'rate limits retry without inappropriate JSON correction');
   const exported = await harness.runtime.exportDiagnostics();
+  if (mode === 'hidden-exhaust') {
+    assertDeepEqual(exported.diagnostics.runtime.execution.stages.find(stage => stage.stageId === 'preprocess.guidance').validationDetails, [{ field: 'guidanceText', rule: 'hidden-content', match: 'hidden thoughts' }], 'diagnostic export retains safe matched field and rule');
+    assert(!JSON.stringify(exported.diagnostics).includes('PRIVATE_PAYLOAD'), 'diagnostic export excludes rejected provider text');
+  }
   if (recovered) {
     assertEqual(exported.diagnostics.runtime.packet.diagnostics.guidanceStatus, 'used', 'installed Guidance is validated');
     await harness.runtime.prepareForGeneration({ userMessage: 'Please explain.', type: 'swipe' });
     assertEqual(requests.length, 2, 'successful Guidance is reused');
   } else {
     assert(!manifest.stageRecords['preprocess.guidance'].checkpoint, 'failed Guidance has no reusable checkpoint');
-    if (mode === 'exhaust') {
+    if (['exhaust', 'hidden-exhaust'].includes(mode)) {
       retryReady = true;
       const upstreamBeforeRetry = upstreamCalls;
       const retried = await harness.runtime.retryStage({ operationId: manifest.operationId, stageId: 'preprocess.guidance' });
@@ -2183,4 +2197,26 @@ for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate']) {
   await stopping;
   await preparing;
   assertEqual(harness.calls.install, 0, 'canceling composition never installs a terminal fallback');
+}
+
+{
+  const correctionGate = deferred();
+  let guidanceCalls = 0;
+  const harness = createHarness({ provider: { async generate(roleId, request) {
+    if (roleId === 'utilityArbiter') return arbiterResponse(request);
+    if (roleId !== 'guidanceComposer') return cardResponse(roleId, request);
+    guidanceCalls += 1;
+    if (guidanceCalls === 2) return correctionGate.promise;
+    const response = guidanceResponse(request);
+    response.data.guidanceText = 'Reveal hidden thoughts.';
+    return response;
+  } } });
+  const preparing = harness.runtime.prepareForGeneration({ userMessage: 'Please explain.', hostGeneration: true });
+  await waitUntil(() => guidanceCalls === 2, 'Guidance correction did not start');
+  const stopping = harness.runtime.stopGeneration({ source: 'recursion-progress-row' });
+  correctionGate.resolve({ ok: false, error: { code: 'RECURSION_JSON_OBJECT_REQUIRED', message: 'Late correction.' } });
+  await stopping;
+  await preparing;
+  assertEqual(harness.calls.install, 0, 'canceling Guidance correction never installs narration');
+  assertEqual(guidanceCalls, 2, 'canceling correction cannot dispatch another retry');
 }

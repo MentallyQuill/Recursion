@@ -1,3 +1,5 @@
+import { sanitizeGuidanceValidationDetails } from '../instruction-safety.mjs';
+import { normalizePostProcessOutcomes, summarizePostProcessOutcome } from '../post-process-diagnostics.mjs';
 import { asArray, compact, hashJson, nowIso, redact, truncate } from '../core.mjs';
 import { summarizePreparedGenerationArtifact } from './prepared-generation.mjs';
 import { normalizeGuidanceOmissions } from '../guidance-omissions.mjs';
@@ -132,6 +134,8 @@ function summarizeExecutionStage(record) {
     ...(source.timings ? { timings: safeDiagnosticValue(source.timings) } : {}),
     failureClass: safeText(source.failure?.failureClass, 80),
     failureCode: safeText(source.failure?.code, 120),
+    ...(sanitizeGuidanceValidationDetails(source.failure?.validationDetails).length
+      ? { validationDetails: sanitizeGuidanceValidationDetails(source.failure?.validationDetails) } : {}),
     ...(Number.isFinite(source.failure?.retryAfterMs)
       ? { retryAfterMs: boundedInteger(source.failure.retryAfterMs, 2147483647) } : {}),
     ...(source.stageId === 'preprocess.cards.fused' ? { fused: summarizeFusedOutcome(source.summary) } : {}),
@@ -415,6 +419,9 @@ export function buildDiagnosticsPayload({
 } = {}) {
   const sourceEntries = asArray(journal?.entries);
   const runtime = asObject(view);
+  const diagnosticChatKey = chatKey || journal?.chatKey || '';
+  const postProcessHistory = normalizePostProcessOutcomes(journal?.postProcessOutcomes, diagnosticChatKey);
+  const postProcessStatus = summarizePostProcessOutcome(runtime.postProcessStatus, diagnosticChatKey) || postProcessHistory.at(-1) || null;
   const payload = {
     schema: 'recursion.diagnostics.v1',
     createdAt,
@@ -429,6 +436,8 @@ export function buildDiagnosticsPayload({
       queuedReprocess: mapQueuedReprocess(runtime.queuedReprocess),
       turnScope: mapTurnScope(runtime.turnScope),
       execution: summarizeExecutionForDiagnostics(runtime.execution),
+      postProcessStatus,
+      postProcessHistory,
       cacheDecision: mapCacheDecision(runtime.lastCacheDecision),
       preparedGeneration: runtime.lastPreparedGeneration
         ? safeDiagnosticValue(summarizePreparedGenerationArtifact(runtime.lastPreparedGeneration), 500)

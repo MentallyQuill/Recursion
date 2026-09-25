@@ -1,3 +1,4 @@
+import { sanitizeGuidanceValidationDetails } from '../instruction-safety.mjs';
 import { failureFrom } from '../failures.mjs';
 import { normalizeProviderError } from '../providers/provider-errors.mjs';
 import { minimumOutputBudgetForRole, outputBudgetForRequest } from '../providers/stage-output-budgets.mjs';
@@ -48,6 +49,7 @@ export function classifyModelFailure(error, { kind = 'transport', signal = null 
       category: failure.category,
       message: failure.message,
       retryable: failure.retryable,
+      ...(sanitizeGuidanceValidationDetails(error?.validationDetails).length ? { validationDetails: sanitizeGuidanceValidationDetails(error?.validationDetails) } : {}),
       ...(failure.suggestedAction ? { suggestedAction: failure.suggestedAction } : {})
     });
   }

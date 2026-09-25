@@ -2876,7 +2876,7 @@ function renderPostProcessPanel(panel, view, {
     actionsClassName: 'recursion-post-process-deck-actions',
     dataset: { recursionPostProcessDeckBar: '' }
   }));
-  panel.appendChild(renderPostProcessWritingControls({ el, settings: view.settings?.postProcess, deck, ...writingControls }));
+  panel.appendChild(renderPostProcessWritingControls({ el, settings: view.settings?.postProcess, status: view.postProcessStatus, deck, ...writingControls }));
   if (!deck.readonly) {
     panel.appendChild(el('div', { className: 'recursion-card-deck-tools' }, [
       cardSystemIconButton('plus', 'Create a new Category', { recursionPostProcessCategoryCreate: '', recursionPostProcessDeckToolAdd: '' }, { className: 'recursion-card-deck-tool-add' }),
@@ -4844,7 +4844,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const phase = cleanText(activity.phase);
     const postProcessActivity = /^postProcess/.test(phase) || cleanText(activity.runId).startsWith('post-process-');
     const partial = postProcessActivity && asObject(activity.detail).partial === true;
-    const failed = postProcessActivity && normalizeSeverity(activity.severity) === 'error';
+    const failed = view.postProcessStatus?.status === 'failed'
+      || (postProcessActivity && normalizeSeverity(activity.severity) === 'error');
     postProcessButton?.classList?.toggle?.('is-off', !enabled);
     postProcessButton?.classList?.toggle?.('is-on', enabled);
     postProcessButton?.classList?.toggle?.('is-partial', partial);
@@ -4971,6 +4972,10 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const settings = asObject(view?.settings);
     return stableStringify({
       postProcess: settings.postProcess,
+      postProcessStatus: view.postProcessStatus ? {
+        status: view.postProcessStatus.status,
+        failureMessage: view.postProcessStatus.failure?.message
+      } : null,
       connectionProfiles: runtimeConnectionProfiles(view, runtime),
       postProcessDecks: normalizePostProcessDeckSettings(settings.postProcessDecks),
       tooltipsEnabled: settings.ui?.tooltipsEnabled !== false,

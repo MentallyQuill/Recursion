@@ -2782,6 +2782,21 @@ try {
   writerLimit.value = '4096'; writerLimit.dispatchEvent({ type: 'change' });
   assertEqual(settingsUpdates.at(-1).postProcess.writer.maxOutputTokens, 4096, 'writer output override persists');
   ui.update();
+  const statusBeforeWriterTicks = view.postProcessStatus;
+  view = { ...view, postProcessStatus: { operationId: 'active-writer', status: 'writing', elapsedMs: 100 } };
+  ui.update();
+  const draftWriterLimit = root.querySelector('[data-recursion-post-process-writer-limit]');
+  draftWriterLimit.focus(); draftWriterLimit.value = '8192';
+  const postProcessTick = timers.find(timer => timer.kind === 'interval' && timer.delay === 500 && timer.active);
+  for (const elapsedMs of [600, 1100, 1600]) {
+    view = { ...view, postProcessStatus: { ...view.postProcessStatus, elapsedMs } };
+    postProcessTick.callback();
+    assert(root.querySelector('[data-recursion-post-process-writer-limit]') === draftWriterLimit, 'elapsed writer time does not replace the editing control');
+    assertEqual(draftWriterLimit.value, '8192', 'writer tick preserves an uncommitted output limit');
+    assert(fakeDocument.activeElement === draftWriterLimit, 'writer tick preserves input focus');
+  }
+  view = { ...view, postProcessStatus: statusBeforeWriterTicks };
+  ui.update();
   const invalidLimit = root.querySelector('[data-recursion-post-process-writer-limit]');
   const changesBeforeInvalidLimit = settingsUpdates.length;
   invalidLimit.value = '255'; invalidLimit.dispatchEvent({ type: 'change' });

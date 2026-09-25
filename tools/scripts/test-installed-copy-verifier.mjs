@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { throws } from 'node:assert/strict';
 import {
   cpSync,
   mkdtempSync,
@@ -190,6 +191,22 @@ try {
     );
   }
 
+  {
+    const roots = makeCopies('account-only');
+    rmSync(roots.publicRoot, {recursive:true, force:true});
+    const report = verifyInstalledCopies({repositoryRoot: roots.repositoryRoot, installedRoot: roots.installedRoot, accountOnly: true});
+    assertEqual(report.ok, true, 'account-only installs do not require a shared public tree');
+    const result = spawnSync(process.execPath, [verifierPath, '--repo-root', roots.repositoryRoot, '--installed-root', roots.installedRoot, '--account-only'], {encoding:'utf8'});
+    assertEqual(result.status, 0, 'explicit account-only CLI accepts no public tree');
+  }
+  {
+    const roots = makeCopies('invalid-utf8');
+    const invalid = Buffer.from([0x2f, 0x2f, 0x85]);
+    write(roots.repositoryRoot, 'src/runtime.mjs', invalid);
+    write(roots.installedRoot, 'src/runtime.mjs', invalid);
+    write(roots.publicRoot, 'src/runtime.mjs', invalid);
+    throws(() => verifyInstalledCopies(roots), /invalid UTF-8: src\/runtime\.mjs/, 'identical invalid source bytes must fail before browser decoding changes the executed source');
+  }
   console.log('[pass] installed copy verifier');
 } finally {
   rmSync(fixtureRoot, { recursive: true, force: true });

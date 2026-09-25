@@ -1,4 +1,4 @@
-import { unsafeInstructionMatch } from './instruction-safety.mjs';
+import { unsafeInstructionMatch, GUIDANCE_FORBIDDEN_PATTERNS as DYNAMIC_FORBIDDEN_PATTERNS, sanitizeGuidanceValidationDetails } from './instruction-safety.mjs';
 import { SCENE_INTERPRETATION_CONTRACT } from './cards.mjs';
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { normalizeInjectionSettings } from './settings.mjs';
@@ -64,17 +64,6 @@ const INJECTION_TEMPLATE = Object.freeze([
   Object.freeze({ id: 'guidance', promptKey: 'recursion.guidance', title: 'Recursion Guidance', placement: 'in_prompt', depth: 1, role: 'system' }),
   Object.freeze({ id: 'cardEvidence', promptKey: 'recursion.cardEvidence', title: 'Recursion Card Evidence', placement: 'in_prompt', depth: 1, role: 'system' }),
   Object.freeze({ id: 'guardrails', promptKey: 'recursion.guardrails', title: 'Recursion Guardrails', placement: 'in_prompt', depth: 1, role: 'system' })
-]);
-
-const DYNAMIC_FORBIDDEN_PATTERNS = Object.freeze([
-  /\bhidden\s+chain[-\s]of[-\s]thought\b/i,
-  /\bchain[-\s]of[-\s]thought\b/i,
-  /\b(hidden|private|secret|undisclosed)\s+(internal\s+)?thoughts?\b/i,
-  /\b(private|hidden|secret|undisclosed)\s+(character\s+)?motives?\b/i,
-  /\b(secret|hidden|private|undisclosed)\s+future[-\s]+(plans?|plot|story)\b/i,
-  /\breveal\s+future\s+plans?\b/i,
-  /\b(hidden|private|secret|undisclosed)\s+spoilers?\b/i,
-  /\breveal\s+spoilers?\b/i
 ]);
 
 function cleanText(value, limit) {
@@ -426,7 +415,8 @@ function validateGuidanceResult(result, allowedIds, expectedSnapshotHash) {
   if (typeof result.data?.guidanceText !== 'string') return { ok: false, reason: 'text-invalid' };
   const text = safeText(result.data?.guidanceText, MAX_GUIDANCE_TEXT);
   if (!text) return { ok: false, reason: fallbackReasonFromGuidanceResult(result, expectedSnapshotHash) };
-  if (hiddenReasoningDetected(text)) return { ok: false, reason: fallbackReasonFromGuidanceResult(result, expectedSnapshotHash) };
+  const hiddenMatch = unsafeInstructionMatch(text, DYNAMIC_FORBIDDEN_PATTERNS);
+  if (hiddenMatch) return { ok: false, reason: 'hidden-reasoning', validationDetails: [{ field: 'guidanceText', rule: 'hidden-content', match: hiddenMatch }] };
   const sourceIds = filterGuidanceIds(result.data?.sourceCardIds, allowedIds);
   const guardrailIds = filterGuidanceIds(result.data?.guardrailCardIds, allowedIds);
   const omitted = filterGuidanceOmissions(result.data?.omittedCardIds, allowedIds);
@@ -538,6 +528,8 @@ export function validateGuidanceStageResult(result, {
     ? 'wrong schema'
     : reason.replace(/[-_]+/g, ' ');
   const responseShape = guidanceResponseShape(result);
+  const validationDetails = sanitizeGuidanceValidationDetails(validated.validationDetails);
+  const detailMessage = validationDetails.map(detail => `${detail.field} [${detail.rule}]: ${detail.match}`).join('; ');
   return {
     ok: false,
     error: {
@@ -546,7 +538,8 @@ export function validateGuidanceStageResult(result, {
       retryable: true,
       reason,
       responseShape,
-      message: `Guidance response is invalid: ${readableReason}.${responseShape.length ? ` Returned field types: ${responseShape.join(', ')}.` : ''}`
+      ...(validationDetails.length ? { validationDetails } : {}),
+      message: `Guidance response is invalid: ${readableReason}.${detailMessage ? ` ${detailMessage}.` : ''}${responseShape.length ? ` Returned field types: ${responseShape.join(', ')}.` : ''}`
     }
   };
 }
@@ -576,6 +569,7 @@ export function buildGuidanceCorrectionRequest({
     failure?.message || failure?.reason || failure?.code || 'invalid structured guidance',
     MAX_DIAGNOSTIC_TEXT
   );
+  const validationDetails = sanitizeGuidanceValidationDetails(failure.validationDetails);
   return {
     ...source,
     prompt: [
@@ -584,6 +578,8 @@ export function buildGuidanceCorrectionRequest({
       `The previous response was rejected after attempt ${Math.max(1, Number(attempt) || 1)}: ${reason}`,
       ...(Array.isArray(failure.responseShape) && failure.responseShape.length
         ? [`Returned field types: ${guidanceResponseShape({ error: failure }).join(', ')}.`] : []),
+      ...validationDetails.map(detail => `Rejected field: ${detail.field} [${detail.rule}]: ${detail.match}.`),
+      ...(validationDetails.length ? ['Rewrite guidanceText without claims about or requests to expose hidden mental content. Use observable actions and established source facts. Express knowledge boundaries as: \"Preserve established knowledge boundaries.\" Do not repeat the rejected wording.'] : []),
       'guidanceText must be a nonempty string containing the actual response guidance, not an object or a schema definition.',
       `Return one corrected JSON object only using schema "${GUIDANCE_SCHEMA}".`
     ].filter(Boolean).join('\n\n')

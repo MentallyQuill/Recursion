@@ -3917,3 +3917,7 @@
   .recursion-review-columns { grid-template-columns: minmax(0, 1fr); }
   .recursion-review-prose { max-height: 29dvh; }
 }
+
+/* Retained outcome uses the existing compact Post-process writing panel. */
+.recursion-post-process-outcome[data-recursion-post-process-status="failed"] { color: var(--recursion-state-error, #ff8a8a); opacity: 1; }
+.recursion-post-process-outcome[data-recursion-post-process-status="awaiting-review"] { color: var(--recursion-state-warning, #ffd479); opacity: 1; }

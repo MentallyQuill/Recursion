@@ -19,7 +19,7 @@ Fused execution summaries and diagnostics retain original per-family rejection c
 | `recursion-settings.v1.json` | Normalized extension settings without session-only keys. | Durable. |
 | `recursion-system-index.v1.json` | Bounded index of known journals, operations, and artifacts. | Durable but rebuildable. |
 | `recursion-last-brief-{chatKey}.v1.json` | Display-only packet and hand summary for the UI. | Historical; never read for generation. |
-| `recursion-run-journal-{chatKey}.v1.json` | Sanitized lifecycle events. | Bounded by `runJournalEntries`. |
+| `recursion-run-journal-{chatKey}.v1.json` | Sanitized lifecycle events and retained Post-process outcomes. | Events bounded by `runJournalEntries`; latest 12 terminal outcomes retained independently. |
 | `recursion-pipeline-run-{chatKey}.v2.json` | One active or latest V2 operation manifest for a chat. | Turn-scoped. |
 | `recursion-pipeline-artifact-{chatKey}-{operationId}-{artifactId}.v2.json` | Isolated stage output required for Resume or validated same-turn reuse. | Protected only while referenced and authoritative. |
 | `recursion-queued-reprocess-{chatKey}.v2.json` | One-shot Pre-process or Post-process next-swipe intent. | Consumed once, canceled, or revoked with the turn. |
@@ -141,3 +141,9 @@ Prompt-clear failure does not roll back a settings change or Stop request, but i
 ## Required Tests
 
 Tests cover record normalization, artifact integrity, write-before-checkpoint ordering, orphan pruning, Last Brief isolation, queued-intent binding, retired-record deletion, journal bounds, diagnostics redaction, memory fallback, and Reset Turn Cache ownership.
+
+## Retained Post-process Outcomes
+
+Each terminal Post-process outcome is appended as `postprocess.outcome` and retained in the same chat journal's `postProcessOutcomes` list (maximum 12), independently of ordinary event eviction. A subsequent Pre-process manifest cannot overwrite this history. Append and clear operations serialize per chat to prevent concurrent lost writes. Clearing the journal removes both events and retained outcomes.
+
+`runtime.postProcessStatus` exposes the current chat's active or last terminal outcome; `runtime.postProcessHistory` in exported diagnostics restores the retained history after reload. Export resolves the host's current chat, and chat changes reload only that chat's outcomes. Records contain operation/chat identity, status, timestamps and elapsed time, writer mode/profile/model, apply mode, hashes, bounded category counts/codes, and a bounded failure stage/code/message/class/retryability. They exclude drafts, candidates, request/response bodies, endpoints and credentials even when excerpts are enabled. Writer failures use authored safe descriptions rather than provider response text.

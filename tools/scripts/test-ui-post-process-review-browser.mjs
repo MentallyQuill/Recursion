@@ -108,6 +108,7 @@ try {
   const chatScroll = await page.locator('#chat').evaluate(el => el.scrollTop);
   await page.locator('#source').click();
   const dialog = page.locator('.recursion-review-dialog');
+  await page.getByText('Use revision adds and selects a new swipe. The original stays available.').waitFor({timeout:1000});
   await dialog.waitFor();
   assert.equal(await dialog.locator('img,script').count(), 0, 'prose is inert DOM text');
   assert((await dialog.textContent()).includes('<img src=x onerror=alert(1)>'));

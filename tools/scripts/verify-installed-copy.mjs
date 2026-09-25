@@ -129,18 +129,27 @@ export function productionFilePaths(repositoryRoot) {
       throw new Error(`Repository production file is missing: ${required}`);
     }
   }
+  for (const path of inventory.files) {
+    if (!/\.(?:m?js|json|css|svg)$/i.test(path)) continue;
+    try {
+      new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(join(root, ...path.split('/'))));
+    } catch {
+      throw new Error(`Repository production file contains invalid UTF-8: ${path}`);
+    }
+  }
   return inventory.files;
 }
 
 export function verifyInstalledCopies({
   repositoryRoot,
   installedRoot,
-  publicRoot
+  publicRoot,
+  accountOnly = false
 } = {}) {
   const roots = {
     repositoryRoot: ensureRoot(repositoryRoot, 'Repository root'),
     installedRoot: ensureRoot(installedRoot, 'Installed extension root'),
-    publicRoot: ensureRoot(publicRoot, 'Public extension root')
+    publicRoot: accountOnly ? null : ensureRoot(publicRoot, 'Public extension root')
   };
   const expectedFiles = productionFilePaths(roots.repositoryRoot);
   const differences = [
@@ -150,12 +159,12 @@ export function verifyInstalledCopies({
       copyRoot: roots.installedRoot,
       copy: 'installed'
     }),
-    ...compareCopy({
+    ...(accountOnly ? [] : compareCopy({
       repositoryRoot: roots.repositoryRoot,
       expectedFiles,
       copyRoot: roots.publicRoot,
       copy: 'public'
-    })
+    }))
   ].sort(compareDifference);
   return {
     ok: differences.length === 0,
@@ -170,6 +179,7 @@ function parseArguments(argv) {
     const argument = argv[index];
     if (!argument.startsWith('--')) throw new Error(`Unexpected argument: ${argument}`);
     const key = argument.slice(2);
+    if (key === 'account-only') { values[key] = true; continue; }
     if (![
       'user',
       'repo-root',
@@ -196,13 +206,14 @@ function rootsFromArguments(argv, cwd = process.cwd(), environment = process.env
   const repositoryRoot = resolve(args['repo-root'] || cwd);
   const hasExplicitCopyRoot = Boolean(args['installed-root'] || args['public-root']);
   if (hasExplicitCopyRoot) {
-    if (!args['installed-root'] || !args['public-root']) {
+    if (!args['installed-root'] || (!args['account-only'] && !args['public-root'])) {
       throw new Error('--installed-root and --public-root must be provided together.');
     }
     return {
       repositoryRoot,
       installedRoot: resolve(args['installed-root']),
-      publicRoot: resolve(args['public-root'])
+      publicRoot: args['public-root'] ? resolve(args['public-root']) : null,
+      accountOnly: args['account-only'] === true
     };
   }
 
@@ -217,7 +228,8 @@ function rootsFromArguments(argv, cwd = process.cwd(), environment = process.env
   return {
     repositoryRoot,
     installedRoot: join(sillyTavernRoot, 'data', args.user, 'extensions', 'Recursion'),
-    publicRoot: join(sillyTavernRoot, 'public', 'scripts', 'extensions', 'third-party', 'Recursion')
+    publicRoot: join(sillyTavernRoot, 'public', 'scripts', 'extensions', 'third-party', 'Recursion'),
+    accountOnly: args['account-only'] === true
   };
 }
 

@@ -425,4 +425,24 @@ await assertRejects(
   'composition rejects unsafe card text'
 );
 
+
+{
+  const snapshot = baseSnapshot();
+  const invalid = validateGuidanceStageResult({ ok: true, data: {
+    schema: 'recursion.guidanceComposer.v1', snapshotHash: hashJson(snapshot),
+    guidanceText: 'Reveal hidden thoughts about PRIVATE_PAYLOAD.',
+    sourceCardIds: [], guardrailCardIds: [], omittedCardIds: [], diagnostics: []
+  } }, { snapshot });
+  assertEqual(invalid.ok, false, 'unsafe guidance remains rejected');
+  assertDeepEqual(invalid.error.validationDetails, [{ field: 'guidanceText', rule: 'hidden-content', match: 'hidden thoughts' }], 'guidance failure identifies only safe field, rule, matched wording');
+  assert(!JSON.stringify(invalid.error).includes('PRIVATE_PAYLOAD'), 'validation failure excludes surrounding provider text');
+  const corrected = buildGuidanceCorrectionRequest({ request: { prompt: 'Original request.' }, failure: invalid.error });
+  assert(corrected.prompt.includes('guidanceText [hidden-content]: hidden thoughts'), 'correction identifies exact rejected rule and field');
+  assert(corrected.prompt.includes('Use observable actions'), 'hidden-content correction directs an evidence-grounded rewrite');
+  const poisoned = buildGuidanceCorrectionRequest({ request: { prompt: 'Original request.' }, failure: {
+    reason: 'hidden-reasoning', validationDetails: [{ field: 'guidanceText', rule: 'hidden-content', match: 'hidden thoughts PRIVATE_PAYLOAD' }]
+  } });
+  assert(!poisoned.prompt.includes('PRIVATE_PAYLOAD'), 'correction rejects arbitrary text disguised as a matched rule');
+}
+
 console.log('[pass] prompt');

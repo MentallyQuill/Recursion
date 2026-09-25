@@ -15,7 +15,7 @@ The first executable slice has these files:
 | `tools/scripts/check-sillytavern-soak-users.mjs` | Dedicated-user safety and storage preflight. It rejects unsafe users before mutation, logs into dedicated users, writes/reads/verifies/deletes Recursion-owned probe files, and checks cross-user isolation when two or more users are configured. |
 | `tools/scripts/smoke-sillytavern-live.mjs` | Focused live smoke. It validates the dedicated user and base URL gate, authenticates, compares served Recursion files, verifies the Recursion Bar, Hero Pixel Array progress menu, options/settings menu, provider controls, Last Brief dropdown, Full Viewer access, and bridge hooks with Playwright, and writes screenshots/trace for no-generation UI runs when artifacts are enabled. With generation flags, it drives visible send controls when available, records the trigger source, proves host generation continued for UI sends, suppresses binary artifacts, and proves Recursion-owned prompt keys can install and clear without storing raw prompt text. |
 | `tools/scripts/prove-post-process-cards-ui.mjs` | Dedicated-user Post-process Cards UI contract: independent deck persistence, card/category ordering, binary card state, Unified/Progressive and As Swipe/Replace controls, editor behavior, and privacy-safe evidence. |
-| `tools/scripts/prove-live-post-process-as-swipe.mjs` | Strict dedicated-user native generation proof: forces As Swipe, requires the native swipe plus exactly one selected Post-process swipe, validates aligned marker metadata, and reloads the chat before passing. |
+| `tools/scripts/prove-live-post-process-as-swipe.mjs` | Strict dedicated-user four-case proof: verifies loaded modules and all served production bytes, checks provider readiness, exercises new generation/native swipe with automatic apply or review, and verifies two reloads. |
 | `tools/scripts/test-live-harness.mjs` | Deterministic contract tests for the guardrail behavior. |
 
 The harness should be a library, not a second runtime. Runtime behavior stays in `src/`; the harness drives the public host/UI surface and reads documented diagnostics.
@@ -127,16 +127,40 @@ node tools\scripts\verify-installed-copy.mjs --user recursion-soak-a
 ```
 
 The verifier compares SHA-256 hashes for the repository production allowlist,
-the selected user's installed extension, and the served public extension. A
+the selected user's installed extension, and the optional shared public extension. A
 missing, extra, content-mismatched, or symlinked production file fails the gate.
 The report must identify only safe relative paths and hashes; it must not inspect
 chat files, settings, or secrets. Dedicated `recursion-soak-*` users remain the
 required target for automated live proof. Run the same verifier with
 `--user default-user` only before an explicitly approved default-user proof.
 
-The browser harness does not replace this identity check with DOM version text
-or a partial served-file comparison.
+Use `--account-only` when the host serves extensions from the user's data directory and no shared public tree exists. Without that flag, the existing two-copy verification remains required. Invalid UTF-8 in production scripts, JSON, CSS, or SVG fails without replacement decoding. A local disk comparison does not establish what the account actually loaded.
+
+The Post-process proof observes Chromium's parsed script URLs before navigation, requires the current Recursion entrypoint and runtime, and rejects any loaded alternate Recursion directory (including Recursion-refactor). It compares observed response bodies and authenticated HTTP responses for the complete production allowlist against the checkout containing the script. DOM labels, manually importing current helpers, and a matching but disabled installation are insufficient.
 12. Write `report.json` and `summary.md`.
+
+## Strict Post-process Live Matrix
+
+Run against an already configured dedicated account with a reloadable character chat. The harness never copies credentials, changes provider selections, installs extensions, or fulfills intercepted routes. Configure the account before proof; missing selected profiles, model, presets, credential metadata, or a disconnected native provider fail before chat mutation. Normal native auto-connect gets a bounded 15-second read-only readiness window. Credential metadata availability is a prerequisite, not proof that a remote credential is valid. Unsupported credential modes fail closed.
+
+```powershell
+$env:SILLYTAVERN_BASE_URL = 'http://127.0.0.1:8000'
+$env:SILLYTAVERN_ROOT = 'F:/SillyTavern/SillyTavern'
+$env:RECURSION_SILLYTAVERN_USER = 'recursion-soak-a'
+$env:RECURSION_LIVE_CHARACTER = 'Assistant'
+$env:RECURSION_LIVE_CHAT_FILE = '<dedicated chat filename without .jsonl>'
+$env:RECURSION_LIVE_CASES = 'generation-auto,swipe-auto,generation-review,swipe-review'
+$env:RECURSION_LIVE_TIMEOUT_MS = '240000'
+node tools/scripts/prove-live-post-process-as-swipe.mjs --live
+```
+
+The case list defaults to all four cases; a comma-separated subset is supported and the report names exactly which cases ran. The per-case timeout is bounded to 10–900 seconds. `RECURSION_LIVE_PROMPT` optionally supplies the new-generation message; otherwise a short generic continuation is used. This sends real provider requests and persists real messages and proof settings in the dedicated account.
+
+Each case forces Post-process enabled, unified rewrite, As Swipe, and its review setting. A normal generation must create a fresh assistant message with exactly two swipes. A native swipe must add exactly two swipes to the previous count: its new source and one Post-process revision. Existing marked swipes never count as new proof. Review cases require a pending comparison with the native source still selected, then click the message's Review revision control and the actual Use revision button. Both modes validate native Stop visibility, selected text, aligned swipe metadata, source/candidate hashes, and two chat save/reload cycles.
+
+Paused/failed preprocessing, Post-process skips, no-change outcomes, missing review, and deadline expiry all exit nonzero. On failure after initiating generation, the harness requests Stop on its own operation, waits at most ten seconds for settlement, records whether cancellation settled, and closes Chromium. It does not cancel an account already busy at entry.
+
+Every exit writes `artifacts/live-post-process-proof/report.json` (override with `RECURSION_LIVE_REPORT`). Reports keep at most 32 state observations and 64 HTTP status observations, and include the failing stage, stage error codes, profile/model/configuration readiness summaries, counts, hashes, and cleanup outcome. They omit chat text, prompts, provider bodies, credential values/IDs, preset contents, screenshots, and traces. Unexpected exception messages are omitted because they can contain request bodies. A passing subset is evidence only for that subset; an unavailable/failed case is never certified.
 
 ## Live Preflight Flow
 

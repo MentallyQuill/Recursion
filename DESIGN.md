@@ -273,3 +273,6 @@ Each completed Refinement target keeps its outcome and revision count in the exi
 - Don't let compact button text, chip text, row labels, or prompt packet text overflow their containers on mobile.
 
 Export Diagnostics downloads a timestamped `recursion-diagnostics-*.json` file on desktop and mobile. It exports the runtime-sanitized payload without clipboard access or operating-system-specific behavior. The browser controls where the file is saved.
+
+
+Post-process retains its latest source-bound outcome in the existing writing panel even after Pre-process activity begins. Distinguish preparing, writing, awaiting review, applied, no change, canceled, and failed. A failed outcome preserves a concise safe reason and directs the user to Progress for retry; it does not leave running activity behind or expose provider bodies. Awaiting review points to Compare / Review revisions. In the comparison dialog, explain that Use revision adds and selects a new swipe while the original remains available, or replaces the selected response when Replace is selected. Keep these as compact helper lines, with error red and awaiting-review amber; add no dashboard or permanent notification.

@@ -158,7 +158,7 @@ export function createPostProcessReview({
         let record = await repository.loadPostProcessComparison(await getChatKey(),id);
         if (!record) return {ok:false,reason:'comparison-unavailable'};
         record = await reconcileRecord(record);
-        if (action === 'keep' && record.state === 'rejected') return {ok:true,reason:'kept-original',comparison:record};
+        if (action === 'keep' && record.state === 'rejected') return {ok:true,reason:'already-kept-original',comparison:record};
         if (action === 'apply') return apply(record,signal);
         const current = await eligible(record);
         if (!current && !(action === 'keep' && !['stale','rejected'].includes(record.state)

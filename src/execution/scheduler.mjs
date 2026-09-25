@@ -1,3 +1,4 @@
+import { sanitizeGuidanceValidationDetails } from '../instruction-safety.mjs';
 import { makeId } from '../core.mjs';
 import {
   createCheckpoint,
@@ -67,6 +68,7 @@ function failureRecord(failure, fallbackCode = 'RECURSION_STAGE_FAILED') {
     code: String(source.code || fallbackCode).slice(0, 120),
     failureClass: String(source.category || source.kind || 'internal').slice(0, 80),
     retryable: source.retryable === true,
+    ...(sanitizeGuidanceValidationDetails(source?.validationDetails).length ? { validationDetails: sanitizeGuidanceValidationDetails(source?.validationDetails) } : {}),
     ...(Number.isFinite(source.retryAfterMs) ? { retryAfterMs: Math.max(0, source.retryAfterMs) } : {}),
     ...(Number.isFinite(source.retryNotBefore) ? { retryNotBefore: source.retryNotBefore } : {}),
     ...(Number.isInteger(source.rateLimitFailures) ? { rateLimitFailures: source.rateLimitFailures } : {}),

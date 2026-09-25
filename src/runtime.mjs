@@ -1,5 +1,6 @@
 import { normalizeCardSelectionSettings, cooldownExclusions, selectCardCandidates, missingPlannedCards } from './card-selection.mjs';
 import { createActivityReporter } from './activity.mjs';
+import { summarizePostProcessOutcome, normalizePostProcessOutcomes } from './post-process-diagnostics.mjs';
 import { summarizeRefinementMetadata } from './card-refinement.mjs';
 import { createCardRefinementStages, hasCardRefinement, REFINED_HAND_STAGE_ID } from './runtime/card-refinement-stages.mjs';
 import { failureFromError } from './failures.mjs';
@@ -35,7 +36,7 @@ import {
   getActiveCardDeck,
   normalizeCardDeckSettings
 } from './pre-process-decks.mjs';
-import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
+import { compact, hashJson, makeId, nowIso, redact, truncate, safeId } from './core.mjs';
 import { boundEnhancementMessages, buildContextContract, contextMessageIdentity } from './context-contract.mjs';
 import { enhancementContextFromSnapshot } from './enhancement-context.mjs';
 import { ENHANCEMENT_EDIT_RATIO_MINIMUM, roundedEnhancementEditRatio } from './enhancement-metrics.mjs';
@@ -2519,6 +2520,23 @@ export function createRecursionRuntime({
   let reviewActionEpoch = 0;
   let reviewMutationIdentity = null;
   let comparisonChatKey = '';
+  const retainedPostProcessStatuses = new Map();
+  function retainPostProcessStatus(chatKey, value) {
+    const key = safeId(chatKey, 'chat');
+    retainedPostProcessStatuses.delete(key);
+    retainedPostProcessStatuses.set(key, { value });
+    while (retainedPostProcessStatuses.size > 12) retainedPostProcessStatuses.delete(retainedPostProcessStatuses.keys().next().value);
+  }
+  async function restorePostProcessStatus(chatKey) {
+    const key = safeId(chatKey, 'chat');
+    const previous = retainedPostProcessStatuses.get(key);
+    try {
+      const journal = await storage.loadRunJournal?.(chatKey);
+      if (retainedPostProcessStatuses.get(key) === previous) {
+        retainPostProcessStatus(chatKey, normalizePostProcessOutcomes(journal?.postProcessOutcomes, chatKey).at(-1) || null);
+      }
+    } catch { /* Keep any newer in-memory outcome if journal loading fails. */ }
+  }
   function publishReviewChanged() {
     for (const subscriber of reviewSubscribers) {
       try { subscriber(); } catch { /* UI observers never own settlement. */ }
@@ -2662,11 +2680,22 @@ export function createRecursionRuntime({
     generationRouter,
     settingsStore,
     activity,
-    snapshotProvider: async () => ({
-      ...(await host.snapshot()),
-      preProcessPromptPacket: lastBriefPacket,
-      storyForm: lastBriefPacket?.storyForm ?? null
-    }),
+    snapshotProvider: async () => {
+      const snapshot = await host.snapshot();
+      comparisonChatKey = safeText(snapshot?.chatKey || snapshot?.chatId || comparisonChatKey, 180);
+      return { ...snapshot, preProcessPromptPacket: lastBriefPacket, storyForm: lastBriefPacket?.storyForm ?? null };
+    },
+    onDiagnostic: async (value) => {
+      const summary = summarizePostProcessOutcome(value);
+      if (!summary) return;
+      retainPostProcessStatus(summary.chatKey, summary);
+      await appendJournalSafe(summary.operationId, summary.chatKey, {
+        event: 'postprocess.outcome', runId: summary.operationId,
+        severity: summary.status === 'failed' ? 'error' : 'info',
+        summary: `Post-process ${summary.status}.`, details: summary
+      });
+      publishReviewChanged();
+    },
     sourceGuard: postProcessSourceStillCurrent,
     durableExecution: {
       scheduler: executionScheduler,
@@ -3560,6 +3589,7 @@ export function createRecursionRuntime({
             stageRecords: redact(executionView.stageRecords || {})
           }
         : null,
+      postProcessStatus: currentPostProcessStatus(),
       queuedReprocess: queuedReprocessView ? redact(queuedReprocessView) : null,
       activity: safeCurrentActivity(activity),
       activityHistory: safeActivityHistory(activity),
@@ -3571,13 +3601,23 @@ export function createRecursionRuntime({
     };
   }
 
+  function currentPostProcessStatus(chatKey = currentDiagnosticsChatKey()) {
+    const live = summarizePostProcessOutcome(postProcessRuntime.postProcessDiagnostics?.(), chatKey);
+    return live && ['running', 'guidance', 'writing'].includes(live.status)
+      ? live : summarizePostProcessOutcome(retainedPostProcessStatuses.get(safeId(chatKey, 'chat'))?.value, chatKey);
+  }
+
   function currentDiagnosticsChatKey() {
     const snapshot = viewSnapshot(lastSnapshot);
-    return safeText(snapshot?.chatKey || snapshot?.chatId || DEFAULT_CHAT_ID, 160) || DEFAULT_CHAT_ID;
+    return safeText(snapshot?.chatKey || snapshot?.chatId || comparisonChatKey || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;
   }
 
   async function exportDiagnostics() {
-    const chatKey = currentDiagnosticsChatKey();
+    let chatKey = currentDiagnosticsChatKey();
+    try {
+      const snapshot = await host.snapshot?.();
+      chatKey = safeText(snapshot?.chatKey || snapshot?.chatId || chatKey, 180);
+    } catch { /* Last known chat remains available if the host is unavailable. */ }
     let index = null;
     let journal = null;
     try {
@@ -3591,8 +3631,11 @@ export function createRecursionRuntime({
       journal = null;
     }
     const settings = settingsStore.get();
+    const cachedView = safeRuntimeView();
+    const sameChat = safeId(chatKey, 'chat') === safeId(currentDiagnosticsChatKey(), 'chat');
+    const diagnosticView = sameChat ? cachedView : { settings: cachedView.settings, providerProfiles: cachedView.providerProfiles };
     const payload = buildDiagnosticsPayload({
-      view: safeRuntimeView(),
+      view: { ...diagnosticView, postProcessStatus: currentPostProcessStatus(chatKey) },
       settings,
       cacheContracts: cacheContractVersions(settings),
       journal,
@@ -3631,6 +3674,7 @@ export function createRecursionRuntime({
         });
         return { ok: false, chatKey, result: redact(result) };
       }
+      retainPostProcessStatus(chatKey, null);
       settleRuntimeActivity({
         runId,
         outcome: 'success',
@@ -3859,13 +3903,21 @@ export function createRecursionRuntime({
   async function handleChatChanged() {
     await invalidatePostProcessComparisons({ chatKey: lastSnapshot?.chatKey || activeExecutionChatKey || comparisonChatKey, reason: 'chat-changed' });
     turnTiming.mark(turnTiming.snapshot()?.attemptId, 'invalidate', { reason: 'chat-changed' });
-    return clearForHostEvent({
+    const result = await clearForHostEvent({
       idPrefix: 'chat-change',
       reason: 'chat-changed',
       startLabel: 'Clearing Recursion prompt after chat change...',
       successLabel: 'Chat changed. Recursion prompt cleared.',
       chips: ['Chat', 'Prompt']
     });
+    await postProcessRuntime.waitForPostProcessSettlement();
+    comparisonChatKey = '';
+    try {
+      const snapshot = await readSnapshot();
+      comparisonChatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180);
+      await restorePostProcessStatus(comparisonChatKey);
+    } catch { /* Chat events must still settle if the snapshot is unavailable. */ }
+    return result;
   }
 
   async function handleSourceChanged() {
@@ -7323,7 +7375,7 @@ export function createRecursionRuntime({
     const handStageId = hasCardRefinement(context.settings) ? REFINED_HAND_STAGE_ID : 'preprocess.hand';
     return {
       id: 'preprocess.guidance',
-      version: 4,
+      version: 5,
       kind: 'model',
       executable: true,
       dependencies: ['preprocess.snapshot', 'preprocess.arbiter', handStageId],
@@ -8871,8 +8923,12 @@ export function createRecursionRuntime({
     lastSnapshot = snapshot;
     const chatKey = safeText(snapshot.chatKey || snapshot.chatId || DEFAULT_CHAT_ID, 180) || DEFAULT_CHAT_ID;
     activeExecutionChatKey = chatKey;
+    await restorePostProcessStatus(chatKey);
+    if (safeId(currentDiagnosticsChatKey(), 'chat') !== safeId(chatKey, 'chat')) return null;
     let manifest = await storage.loadPipelineRun(chatKey);
-    queuedReprocessView = await storage.loadQueuedReprocess(chatKey, manifest?.phase || 'preprocess');
+    const restoredQueue = await storage.loadQueuedReprocess(chatKey, manifest?.phase || 'preprocess');
+    if (safeId(currentDiagnosticsChatKey(), 'chat') !== safeId(chatKey, 'chat')) return null;
+    queuedReprocessView = restoredQueue;
     if (!manifest) {
       executionView = null;
       return null;
@@ -9417,6 +9473,7 @@ export function createRecursionRuntime({
       await pauseOperation({ reason: 'runtime-disposed' });
       supersedeActiveRun();
       cancelPostProcess('runtime-disposed');
+      await postProcessRuntime.waitForPostProcessSettlement();
       clearPendingFreshNextGeneration();
       await waitForExternalMutations();
       clearPreparedGeneration();

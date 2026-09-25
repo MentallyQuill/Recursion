@@ -10,6 +10,7 @@ assert.equal(helper.checkLoadedIdentity([`${prefix}src/runtime.mjs`], baseUrl).o
 const before = { messageId: 1, swipeCount: 2, diagnosticOperationId: 'old', executionOperationId: 'old' };
 const after = { messageId: 1, swipeCount: 4, swipeId: 3, swipeInfoLength: 4, markerValid: true, diagnostics: { operationId: 'new', status: 'applied' }, execution: { operationId: 'new', state: 'completed' } };
 assert.equal(helper.caseOutcome({before, after, scenario: 'swipe-auto'}).status, 'pass');
+assert.equal(helper.caseOutcome({before, after:{...after,pendingComparisons:[{id:'still-pending'}]}, scenario:'swipe-review'}).status,'wait','an appended marker does not prove review persistence settled');
 assert.equal(helper.caseOutcome({before, after: {...after, diagnostics: {operationId: 'old', status: 'applied'}}, scenario: 'swipe-auto'}).status, 'wait', 'old successful swipe is never fresh proof');
 assert.equal(helper.caseOutcome({before, after: {...after, diagnostics: {}, execution: {operationId: 'new', state: 'paused', phase: 'preprocess'}}, scenario: 'swipe-auto'}).reason, 'preprocess-paused');
 assert.equal(helper.caseOutcome({before, after: {...after, swipeCount: 3, diagnostics: {operationId: 'new', status: 'awaiting-review'}, pendingComparisons: [{id:'new-review'}]}, scenario: 'swipe-review'}).status, 'review');

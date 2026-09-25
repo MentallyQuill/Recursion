@@ -231,10 +231,7 @@ async function runCase(page, scenario, target, timeoutMs) {
       checkpoint();
       console.log(JSON.stringify({event:'case-progress',scenario,elapsedMs:Date.now()-started,outcome:after.diagnostics.status,phase:after.execution.phase,executionState:after.execution.state}));
     }
-    let outcome = caseOutcome({before:baseline,after,scenario});
-    if (acceptedReview && after.markerValid && after.swipeCount === result.expectedSwipeCount) {
-      outcome=caseOutcome({before:baseline,after:{...after,diagnostics:{...after.diagnostics,status:'applied'}},scenario});
-    }
+    const outcome = caseOutcome({before:baseline,after,scenario});
     if (outcome.status === 'review') {
       if (acceptedReview) {await wait(250);continue;}
       const sourceCount = scenario.startsWith('swipe-') ? before.swipeCount + 1 : 1;

@@ -27,6 +27,7 @@ export function caseOutcome({ before, after, scenario }) {
   if (diagnostic.status === 'awaiting-review' && scenario.endsWith('-review') && after.pendingComparisons?.length === 1) return {status:'review'};
   if (['failed','skipped','canceled','paused','stale','no-change'].includes(diagnostic.status)) return {status:'fail',reason:`post-process-${diagnostic.status}`};
   if (diagnostic.status !== 'applied') return {status:'wait'};
+  if (scenario.endsWith('-review') && after.pendingComparisons?.length) return {status:'wait'};
   const expectedCount = scenario.startsWith('swipe-') ? before.swipeCount + 2 : 2;
   const freshMessage = scenario.startsWith('swipe-') ? after.messageId === before.messageId : after.messageId > before.messageId;
   return freshMessage && after.swipeCount === expectedCount && after.swipeId === expectedCount - 1 && after.swipeInfoLength === expectedCount && after.markerValid

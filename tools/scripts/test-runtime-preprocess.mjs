@@ -2123,7 +2123,7 @@ for (const pipelineMode of ['segmented', 'fused']) for (const selectRealism of [
 }
 
 // Guidance is required: bounded recovery succeeds or stops narration for Retry.
-for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate', 'hidden-recover', 'hidden-exhaust']) {
+for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate', 'content-recover', 'content-exhaust']) {
   const requests = [];
   const stageAttempts = [];
   let retryReady = false;
@@ -2134,16 +2134,18 @@ for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate', 'hidden-
     if (roleId !== 'guidanceComposer') return cardResponse(roleId, request);
     requests.push(request);
     stageAttempts.push(options.stageAttempt);
-    if (retryReady || (['recover', 'rate', 'hidden-recover'].includes(mode) && requests.length === 2)) return guidanceResponse(request);
-    if (mode.startsWith('hidden-')) {
+    if (retryReady || (['recover', 'rate', 'content-recover'].includes(mode) && requests.length === 2)) {
       const response = guidanceResponse(request);
-      response.data.guidanceText = 'Reveal hidden thoughts about PRIVATE_PAYLOAD.';
+      if (mode.startsWith('content-')) response.data.guidanceText = 'Do not invent hidden motives for Mara.\nRespond to her stated concern.';
       return response;
     }
+    if (mode.startsWith('content-')) return { ...guidanceResponse(request), data: {
+      ...guidanceResponse(request).data, guidanceText: 'Reveal hidden\nthoughts. REJECTED_PROSE_CANARY'
+    } };
     return { ok: false, error: { code: mode === 'rate' ? 'RECURSION_PROVIDER_RATE_LIMIT' : mode === 'profile' ? 'RECURSION_PROFILE_UNAVAILABLE' : mode === 'refusal' ? 'RECURSION_PROVIDER_REFUSAL' : 'RECURSION_JSON_OBJECT_REQUIRED', message: 'Not usable.', retryable: false } };
   } } });
   const result = await harness.runtime.prepareForGeneration({ userMessage: 'Please explain.' });
-  const recovered = ['recover', 'rate', 'hidden-recover'].includes(mode);
+  const recovered = ['recover', 'rate', 'content-recover'].includes(mode);
   assertEqual(result.ok, recovered, 'only valid Guidance permits preparation success for ' + mode);
   assertEqual(harness.calls.install, recovered ? 1 : 0, 'failed Guidance is never installed for ' + mode);
   assertEqual(result.continuePrimaryGeneration, recovered, 'failed Guidance stops narration for ' + mode);
@@ -2151,17 +2153,17 @@ for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate', 'hidden-
   assertDeepEqual(stageAttempts, requests.map((_, index) => index + 1), 'Guidance forwards scheduler attempt identity to provider diagnostics');
   const manifest = await harness.storage.loadPipelineRun('chat-preprocess');
   assertEqual(manifest.stageRecords['preprocess.guidance'].state, recovered ? 'completed' : 'failed', 'Guidance state reflects whether composition succeeded');
-  if (mode.startsWith('hidden-')) {
-    assert(requests[1].prompt.includes('guidanceText [hidden-content]: hidden thoughts'), 'hidden content gets exact bounded correction');
-    assert(!requests[1].prompt.includes('PRIVATE_PAYLOAD'), 'correction excludes rejected response text');
-    if (!recovered) assertDeepEqual(manifest.stageRecords['preprocess.guidance'].failure.validationDetails, [{ field: 'guidanceText', rule: 'hidden-content', match: 'hidden thoughts' }], 'durable failed Guidance preserves safe validation details');
-  }
   if (mode === 'recover') assert(requests[1].prompt.includes('Correction'), 'malformed output gets targeted correction');
   if (mode === 'rate') assert(!requests[1].prompt.includes('Correction required'), 'rate limits retry without inappropriate JSON correction');
   const exported = await harness.runtime.exportDiagnostics();
-  if (mode === 'hidden-exhaust') {
-    assertDeepEqual(exported.diagnostics.runtime.execution.stages.find(stage => stage.stageId === 'preprocess.guidance').validationDetails, [{ field: 'guidanceText', rule: 'hidden-content', match: 'hidden thoughts' }], 'diagnostic export retains safe matched field and rule');
-    assert(!JSON.stringify(exported.diagnostics).includes('PRIVATE_PAYLOAD'), 'diagnostic export excludes rejected provider text');
+  if (mode.startsWith('content-')) {
+    assert(requests[1].prompt.includes('observable behavior'), 'scheduler sends content-specific correction');
+    assert(!JSON.stringify(exported).includes('REJECTED_PROSE_CANARY'), 'runtime diagnostics exclude rejected Guidance');
+    if (!recovered) {
+      assertEqual(manifest.stageRecords['preprocess.guidance'].failure.validationRule, 'character-interiority', 'durable failure retains the allowlisted content rule');
+      const stage = exported.diagnostics.runtime.execution.stages.find(stage => stage.stageId === 'preprocess.guidance');
+      assertEqual(stage.validationRule, 'character-interiority', 'export identifies the precise content rule');
+    }
   }
   if (recovered) {
     assertEqual(exported.diagnostics.runtime.packet.diagnostics.guidanceStatus, 'used', 'installed Guidance is validated');
@@ -2169,7 +2171,7 @@ for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate', 'hidden-
     assertEqual(requests.length, 2, 'successful Guidance is reused');
   } else {
     assert(!manifest.stageRecords['preprocess.guidance'].checkpoint, 'failed Guidance has no reusable checkpoint');
-    if (['exhaust', 'hidden-exhaust'].includes(mode)) {
+    if (mode === 'exhaust' || mode === 'content-exhaust') {
       retryReady = true;
       const upstreamBeforeRetry = upstreamCalls;
       const retried = await harness.runtime.retryStage({ operationId: manifest.operationId, stageId: 'preprocess.guidance' });

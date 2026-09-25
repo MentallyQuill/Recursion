@@ -1,7 +1,18 @@
 // Only complete, narrowly specified protective clauses are exempt. Do not
 // exempt arbitrary text merely because its prefix is a prohibition.
-const SUBJECT = String.raw`(?:(?:all|any|the|their|his|her)\s+)?(?:(?:hidden|private|secret|undisclosed)\s+)?(?:(?:internal|character)\s+)?(?:unrevealed\s+facts?|out-of-character\s+analysis|thoughts?|motives?|motivations?|intentions?|(?:future[-\s]+)?(?:plans?|plot|story)|spoilers?|chain[-\s]of[-\s]thought)`;
-const OBJECTS = SUBJECT + String.raw`(?:\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)` + SUBJECT + ')*';
+const VALIDATION_RULES = new Set(['model-reasoning', 'character-interiority', 'unrevealed-story']);
+
+export function normalizeInstructionValidationRule(value) {
+  return VALIDATION_RULES.has(value) ? value : '';
+}
+
+const SUBJECT = String.raw`(?:(?:all|any|the|their|his|her)\s+)?(?:(?:hidden|private|secret|undisclosed)\s+)?(?:(?:internal|character)\s+)?(?:thoughts?|motives?|motivations?|intentions?|(?:future[-\s]+)?(?:plans?|plot|story)|spoilers?|chain[-\s]of[-\s]thought|unrevealed\s+facts?|out-of-character\s+analysis)`;
+// Character references are bounded noun phrases, never arbitrary trailing prose.
+const NAME_WORD = String.raw`(?!(?:and|or|but|then|unless|except|instead|until|when|whenever|if|once|after|before|without|save|provided|providing|assuming|should|as|only|reveal|expose|disclose|invent|assert|confirm|print|show|describe)\b)[a-z][a-z'-]*`;
+const CHARACTER = String.raw`(?:for|of)\s+` + NAME_WORD + String.raw`(?:\s+` + NAME_WORD + '){0,3}';
+const UNESTABLISHED = String.raw`(?:that|which)\s+(?:has|have)\s+not\s+been\s+established(?:\s+in\s+the\s+scene)?`;
+const OBJECT = SUBJECT + '(?:\\s+' + CHARACTER + ')?(?:\\s+' + UNESTABLISHED + ')?';
+const OBJECTS = OBJECT + String.raw`(?:\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)` + OBJECT + ')*';
 const PROTECTIVE = [
   new RegExp(String.raw`^(?:do not|don't|never)\s+(?:reveal|expose|disclose|invent|assert|confirm|print|show|describe)\s+` + OBJECTS + String.raw`(?:\s+(?:to\s+(?:the\s+)?(?:reader|player)|in\s+(?:the\s+)?(?:narration|story|response)))?$`, 'i'),
   new RegExp(String.raw`^avoid\s+(?:revealing|exposing|disclosing|inventing|asserting|confirming|printing|showing|describing)\s+` + OBJECTS + String.raw`(?:\s+(?:to\s+(?:the\s+)?(?:reader|player)|in\s+(?:the\s+)?(?:narration|story|response)))?$`, 'i'),
@@ -15,35 +26,21 @@ function protectiveClause(clause) {
 
 export function unsafeInstructionMatch(text, patterns) {
   const clauses = String(text || '')
-    .replace(/^\s*[-*]\s*\[[^\]\n]+\]\s*/gm, '')
-    .split(/[.!?;\n]+/);
-  for (let clause of clauses) {
-    clause = clause.trim().replace(/^[-*]\s*/, '');
-    if (protectiveClause(clause)) continue;
-    for (const pattern of patterns) {
-      const match = clause.match(pattern);
-      if (match) return match[0].slice(0, 80);
-    }
+    .replace(/^[ \t]*[-*][ \t]*\[[^\]\n]+\][ \t]*(?:[-*+][ \t]*)?/gm, '- ')
+    .replace(/^[ \t]*(?:[-*+\u2022][ \t]*|\d+[.)][ \t]+)/gm, '\u0000')
+    // A new instruction starts a clause. Other line breaks remain whitespace,
+    // so wrapping "hidden\nthoughts" cannot bypass the forbidden patterns and
+    // a following "unless asked" cannot weaken a protective instruction.
+    .split(/([.!?;]+|\r?\n(?=\u0000(?!(?:and|or|but|then|unless|except|instead|until|when|whenever|if|once|after|before|without|save|provided|providing|assuming|should|as|only|for|of|that|which)\b)|[ \t]*(?:do not|don't|never|avoid|withhold|keep|respond|answer|use|preserve|follow|treat|allow|respect|maintain|ground|let|focus|address|acknowledge|distinguish|recognize|leave|limit|reveal|expose|disclose|invent|assert|confirm|print|show|describe)\b))/i);
+  // Retain separators when removing complete protective clauses. Checking the
+  // remaining text together also catches forbidden phrases split across bullets.
+  const unprotected = clauses.map((part) => {
+    const clause = part.replace(/\u0000/g, '');
+    return protectiveClause(clause.trim()) ? '' : clause;
+  }).join('');
+  for (const pattern of patterns) {
+    const match = unprotected.match(pattern);
+    if (match) return match[0].slice(0, 80);
   }
   return '';
-}
-
-export const GUIDANCE_FORBIDDEN_PATTERNS = Object.freeze([
-  /\bhidden\s+chain[-\s]of[-\s]thought\b/i,
-  /\bchain[-\s]of[-\s]thought\b/i,
-  /\b(hidden|private|secret|undisclosed)\s+(internal\s+)?thoughts?\b/i,
-  /\b(private|hidden|secret|undisclosed)\s+(character\s+)?motives?\b/i,
-  /\b(secret|hidden|private|undisclosed)\s+future[-\s]+(plans?|plot|story)\b/i,
-  /\breveal\s+future\s+plans?\b/i,
-  /\b(hidden|private|secret|undisclosed)\s+spoilers?\b/i,
-  /\breveal\s+spoilers?\b/i
-]);
-
-// Export only known matcher vocabulary, never a rejected response or arbitrary field.
-export function sanitizeGuidanceValidationDetails(details) {
-  if (!Array.isArray(details)) return [];
-  const entry = details.find(entry => entry?.field === 'guidanceText' && entry?.rule === 'hidden-content'
-    && typeof entry.match === 'string' && entry.match.length <= 80
-    && unsafeInstructionMatch(entry.match, GUIDANCE_FORBIDDEN_PATTERNS) === entry.match);
-  return entry ? [{ field: 'guidanceText', rule: 'hidden-content', match: entry.match.toLowerCase().replace(/\s+/g, ' ') }] : [];
 }

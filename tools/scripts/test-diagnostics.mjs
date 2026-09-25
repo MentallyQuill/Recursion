@@ -3,6 +3,22 @@ import {
   summarizeExecutionForDiagnostics
 } from '../../src/runtime/diagnostics.mjs';
 import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
+import { classifyModelFailure } from '../../src/execution/attempt-policy.mjs';
+import { normalizeStageRecord } from '../../src/execution/checkpoints.mjs';
+
+for (const validationRule of ['model-reasoning', 'character-interiority', 'unrevealed-story', 'CANARY_PRIVATE_PROSE', { text: 'CANARY_PRIVATE_PROSE' }]) {
+  const error = { code: 'RECURSION_GUIDANCE_INVALID', category: 'validation', message: 'Guidance is invalid.', validationRule };
+  const expected = typeof validationRule === 'string' && !validationRule.startsWith('CANARY') ? validationRule : undefined;
+  const classified = classifyModelFailure(error, { kind: 'validation' });
+  assertEqual(classified.validationRule, expected, 'attempt classification retains only known rule identifiers');
+  const record = normalizeStageRecord({ stageId: 'preprocess.guidance', state: 'failed', failure: error });
+  assertEqual(record.failure.validationRule, expected, 'persisted stage validation drops arbitrary rule text');
+  const exported = summarizeExecutionForDiagnostics({ operationId: 'rules', stageRecords: {
+    guidance: { stageId: 'preprocess.guidance', state: 'failed', failure: error }
+  } });
+  assertEqual(exported.stages[0].validationRule, expected, 'diagnostic export retains only known rule identifiers');
+  assert(!JSON.stringify(exported).includes('CANARY'), 'rule metadata cannot leak arbitrary provider text');
+}
 
 const payload = buildDiagnosticsPayload({
   createdAt: '2026-07-04T00:00:00.000Z',

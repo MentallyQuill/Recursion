@@ -1,9 +1,9 @@
-import { sanitizeGuidanceValidationDetails } from '../instruction-safety.mjs';
 import { normalizePostProcessOutcomes, summarizePostProcessOutcome } from '../post-process-diagnostics.mjs';
 import { asArray, compact, hashJson, nowIso, redact, truncate } from '../core.mjs';
 import { summarizePreparedGenerationArtifact } from './prepared-generation.mjs';
 import { normalizeGuidanceOmissions } from '../guidance-omissions.mjs';
 import { summarizeFusedOutcome } from '../fused-recovery.mjs';
+import { normalizeInstructionValidationRule } from '../instruction-safety.mjs';
 
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 const RESUME_BODY_KEY_PATTERN = /(arbiter|card|reference|packet|hand|guidance|draft|prose|prompt|response|artifact).*(body|text|payload|content)|^(body|text|payload|content)$/i;
@@ -134,8 +134,8 @@ function summarizeExecutionStage(record) {
     ...(source.timings ? { timings: safeDiagnosticValue(source.timings) } : {}),
     failureClass: safeText(source.failure?.failureClass, 80),
     failureCode: safeText(source.failure?.code, 120),
-    ...(sanitizeGuidanceValidationDetails(source.failure?.validationDetails).length
-      ? { validationDetails: sanitizeGuidanceValidationDetails(source.failure?.validationDetails) } : {}),
+    ...(normalizeInstructionValidationRule(source.failure?.validationRule)
+      ? { validationRule: normalizeInstructionValidationRule(source.failure.validationRule) } : {}),
     ...(Number.isFinite(source.failure?.retryAfterMs)
       ? { retryAfterMs: boundedInteger(source.failure.retryAfterMs, 2147483647) } : {}),
     ...(source.stageId === 'preprocess.cards.fused' ? { fused: summarizeFusedOutcome(source.summary) } : {}),

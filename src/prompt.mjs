@@ -1,4 +1,4 @@
-import { unsafeInstructionMatch, GUIDANCE_FORBIDDEN_PATTERNS as DYNAMIC_FORBIDDEN_PATTERNS, sanitizeGuidanceValidationDetails } from './instruction-safety.mjs';
+import { unsafeInstructionMatch } from './instruction-safety.mjs';
 import { SCENE_INTERPRETATION_CONTRACT } from './cards.mjs';
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { normalizeInjectionSettings } from './settings.mjs';
@@ -64,6 +64,26 @@ const INJECTION_TEMPLATE = Object.freeze([
   Object.freeze({ id: 'guidance', promptKey: 'recursion.guidance', title: 'Recursion Guidance', placement: 'in_prompt', depth: 1, role: 'system' }),
   Object.freeze({ id: 'cardEvidence', promptKey: 'recursion.cardEvidence', title: 'Recursion Card Evidence', placement: 'in_prompt', depth: 1, role: 'system' }),
   Object.freeze({ id: 'guardrails', promptKey: 'recursion.guardrails', title: 'Recursion Guardrails', placement: 'in_prompt', depth: 1, role: 'system' })
+]);
+
+const DYNAMIC_FORBIDDEN_PATTERNS = Object.freeze([
+  /\bhidden\s+chain[-\s]of[-\s]thought\b/i,
+  /\bchain[-\s]of[-\s]thought\b/i,
+  /\b(hidden|private|secret|undisclosed)\s+(internal\s+)?thoughts?\b/i,
+  /\b(private|hidden|secret|undisclosed)\s+(character\s+)?motives?\b/i,
+  /\b(secret|hidden|private|undisclosed)\s+future[-\s]+(plans?|plot|story)\b/i,
+  /\breveal\s+future\s+plans?\b/i,
+  /\b(hidden|private|secret|undisclosed)\s+spoilers?\b/i,
+  /\breveal\s+spoilers?\b/i
+]);
+
+const GUIDANCE_CONTENT_RULES = Object.freeze([
+  { id: 'model-reasoning', patterns: DYNAMIC_FORBIDDEN_PATTERNS.slice(0, 2), message: 'Guidance includes disallowed model reasoning wording.',
+    correction: 'Return actionable response directions without requesting or quoting a model reasoning transcript. Example: "Answer the immediate question using established facts."' },
+  { id: 'character-interiority', patterns: DYNAMIC_FORBIDDEN_PATTERNS.slice(2, 4), message: 'Guidance includes unsupported character thoughts or motives.',
+    correction: 'Ground directions in observable behavior, stated intentions, and established character knowledge. Preserve uncertainty about unstated motives. Example: "Respond to what Harry said; leave his unstated intentions uncertain." Protective instructions are allowed; do not append disclosure requests to them.' },
+  { id: 'unrevealed-story', patterns: DYNAMIC_FORBIDDEN_PATTERNS.slice(4), message: 'Guidance includes unrevealed story information.',
+    correction: 'Use established story facts and preserve uncertainty about future events. Do not direct the narrator to disclose unrevealed plans or spoilers. Example: "Keep the outcome unresolved until the story establishes it."' }
 ]);
 
 function cleanText(value, limit) {
@@ -358,7 +378,7 @@ function filterGuidanceOmissions(value, allowedIds) {
 
 function normalizePrecomposedGuidance(value, allowedIds) {
   const source = asObject(value);
-  const text = safeText(source.text ?? source.guidanceText, MAX_GUIDANCE_TEXT);
+  const text = safeCardPromptText(source.text ?? source.guidanceText, MAX_GUIDANCE_TEXT);
   if (!text || hiddenReasoningDetected(text)) {
     return guidanceFallback('fallback-raw-only', 'precomposed-guidance-invalid');
   }
@@ -396,27 +416,18 @@ function guidanceFallback(status, reason) {
   };
 }
 
-function fallbackReasonFromGuidanceResult(result, expectedSnapshotHash = '') {
-  if (!result) return 'no-result';
-  if (result.ok === false) return safeText(result.error?.code || result.error?.message || 'provider-failed', MAX_DIAGNOSTIC_TEXT);
-  if (result.data?.schema !== GUIDANCE_SCHEMA) return 'schema-mismatch';
-  if (expectedSnapshotHash && String(result.data?.snapshotHash || '') !== expectedSnapshotHash) return 'snapshot-mismatch';
-  if (!safeText(result.data?.guidanceText, MAX_GUIDANCE_TEXT)) return 'text-missing';
-  if (hiddenReasoningDetected(result.data?.guidanceText)) return 'hidden-reasoning';
-  return 'invalid';
-}
-
 function validateGuidanceResult(result, allowedIds, expectedSnapshotHash) {
-  if (!result?.ok) return { ok: false, reason: fallbackReasonFromGuidanceResult(result, expectedSnapshotHash) };
-  if (result.data?.schema !== GUIDANCE_SCHEMA) return { ok: false, reason: fallbackReasonFromGuidanceResult(result, expectedSnapshotHash) };
+  if (!result?.ok) return { ok: false, reason: result
+    ? safeText(result.error?.code || 'provider-failed', MAX_DIAGNOSTIC_TEXT) : 'no-result' };
+  if (result.data?.schema !== GUIDANCE_SCHEMA) return { ok: false, reason: 'schema-mismatch' };
   if (expectedSnapshotHash && String(result.data?.snapshotHash || '') !== expectedSnapshotHash) {
-    return { ok: false, reason: fallbackReasonFromGuidanceResult(result, expectedSnapshotHash) };
+    return { ok: false, reason: 'snapshot-mismatch' };
   }
   if (typeof result.data?.guidanceText !== 'string') return { ok: false, reason: 'text-invalid' };
-  const text = safeText(result.data?.guidanceText, MAX_GUIDANCE_TEXT);
-  if (!text) return { ok: false, reason: fallbackReasonFromGuidanceResult(result, expectedSnapshotHash) };
-  const hiddenMatch = unsafeInstructionMatch(text, DYNAMIC_FORBIDDEN_PATTERNS);
-  if (hiddenMatch) return { ok: false, reason: 'hidden-reasoning', validationDetails: [{ field: 'guidanceText', rule: 'hidden-content', match: hiddenMatch }] };
+  const text = safeCardPromptText(result.data?.guidanceText, MAX_GUIDANCE_TEXT);
+  if (!text) return { ok: false, reason: 'text-missing' };
+  const rule = GUIDANCE_CONTENT_RULES.find(({ patterns }) => unsafeInstructionMatch(text, patterns));
+  if (rule) return { ok: false, reason: rule.id, validationRule: rule.id, message: rule.message };
   const sourceIds = filterGuidanceIds(result.data?.sourceCardIds, allowedIds);
   const guardrailIds = filterGuidanceIds(result.data?.guardrailCardIds, allowedIds);
   const omitted = filterGuidanceOmissions(result.data?.omittedCardIds, allowedIds);
@@ -528,8 +539,6 @@ export function validateGuidanceStageResult(result, {
     ? 'wrong schema'
     : reason.replace(/[-_]+/g, ' ');
   const responseShape = guidanceResponseShape(result);
-  const validationDetails = sanitizeGuidanceValidationDetails(validated.validationDetails);
-  const detailMessage = validationDetails.map(detail => `${detail.field} [${detail.rule}]: ${detail.match}`).join('; ');
   return {
     ok: false,
     error: {
@@ -537,9 +546,9 @@ export function validateGuidanceStageResult(result, {
       category: 'validation',
       retryable: true,
       reason,
+      ...(validated.validationRule ? { validationRule: validated.validationRule } : {}),
       responseShape,
-      ...(validationDetails.length ? { validationDetails } : {}),
-      message: `Guidance response is invalid: ${readableReason}.${detailMessage ? ` ${detailMessage}.` : ''}${responseShape.length ? ` Returned field types: ${responseShape.join(', ')}.` : ''}`
+      message: validated.message || `Guidance response is invalid: ${readableReason}.${responseShape.length ? ` Returned field types: ${responseShape.join(', ')}.` : ''}`
     }
   };
 }
@@ -565,11 +574,11 @@ export function buildGuidanceCorrectionRequest({
   attempt = 1
 } = {}) {
   const source = asObject(request);
+  const contentRule = GUIDANCE_CONTENT_RULES.find((rule) => rule.id === failure.validationRule);
   const reason = safeText(
     failure?.message || failure?.reason || failure?.code || 'invalid structured guidance',
     MAX_DIAGNOSTIC_TEXT
   );
-  const validationDetails = sanitizeGuidanceValidationDetails(failure.validationDetails);
   return {
     ...source,
     prompt: [
@@ -578,9 +587,11 @@ export function buildGuidanceCorrectionRequest({
       `The previous response was rejected after attempt ${Math.max(1, Number(attempt) || 1)}: ${reason}`,
       ...(Array.isArray(failure.responseShape) && failure.responseShape.length
         ? [`Returned field types: ${guidanceResponseShape({ error: failure }).join(', ')}.`] : []),
-      ...validationDetails.map(detail => `Rejected field: ${detail.field} [${detail.rule}]: ${detail.match}.`),
-      ...(validationDetails.length ? ['Rewrite guidanceText without claims about or requests to expose hidden mental content. Use observable actions and established source facts. Express knowledge boundaries as: \"Preserve established knowledge boundaries.\" Do not repeat the rejected wording.'] : []),
-      'guidanceText must be a nonempty string containing the actual response guidance, not an object or a schema definition.',
+      contentRule?.correction || (failure.reason === 'source-ids-invalid'
+        ? `Use only supplied card identifiers in sourceCardIds, guardrailCardIds, and omittedCardIds: ${JSON.stringify(source.guidanceCardIds || [])}. Leave unused lists empty.`
+        : failure.reason === 'snapshot-mismatch'
+          ? `Copy the request snapshotHash exactly: ${source.snapshotHash}.`
+          : 'guidanceText must be a nonempty string containing the actual response guidance, not an object or a schema definition.'),
       `Return one corrected JSON object only using schema "${GUIDANCE_SCHEMA}".`
     ].filter(Boolean).join('\n\n')
   };
@@ -788,7 +799,7 @@ async function applyReasonerGuidance({
       });
     }
     const reasonerLine = `Reasoner synthesis: ${validated.instructionPatch}`;
-    const guidanceText = safeText(`${packet.guidance.text}\n${reasonerLine}`, MAX_GUIDANCE_TEXT);
+    const guidanceText = safeCardPromptText(`${packet.guidance.text}\n${reasonerLine}`, MAX_GUIDANCE_TEXT);
     const sections = {
       ...packet.sections,
       guidance: buildGuidanceSection({ ...packet.guidance, text: guidanceText }, storyForm)
@@ -831,7 +842,7 @@ async function applyReasonerGuidance({
 }
 
 function buildGuidanceSection(guidance, storyForm = UNKNOWN_STORY_FORM) {
-  const text = safeText(guidance?.text, MAX_GUIDANCE_TEXT);
+  const text = safeCardPromptText(guidance?.text, MAX_GUIDANCE_TEXT);
   return [
     'Private Recursion guidance for the next assistant message.',
     storyFormInstruction(storyForm),

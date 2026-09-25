@@ -1,9 +1,9 @@
-import { sanitizeGuidanceValidationDetails } from '../instruction-safety.mjs';
 import {
   compareRunProvenance,
   normalizeExecutionProvenance
 } from './provenance.mjs';
 import { normalizeOperationBudget } from './operation-budget.mjs';
+import { normalizeInstructionValidationRule } from '../instruction-safety.mjs';
 import { normalizePipelineDecision } from '../runtime/pipeline-policy.mjs';
 
 export const PIPELINE_RUN_SCHEMA = 'recursion.pipelineRun.v2';
@@ -320,7 +320,8 @@ export function normalizeStageRecord(value) {
           code: cleanText(value.failure.code),
           failureClass: cleanText(value.failure.failureClass),
           retryable: value.failure.retryable === true,
-          ...(sanitizeGuidanceValidationDetails(value.failure?.validationDetails).length ? { validationDetails: sanitizeGuidanceValidationDetails(value.failure?.validationDetails) } : {}),
+          ...(normalizeInstructionValidationRule(value.failure.validationRule)
+            ? { validationRule: normalizeInstructionValidationRule(value.failure.validationRule) } : {}),
           ...(Number.isFinite(value.failure.retryAfterMs)
             ? { retryAfterMs: Math.min(2147483647, Math.max(0, Math.trunc(value.failure.retryAfterMs))) } : {}),
           ...(Number.isFinite(value.failure.retryNotBefore) ? { retryNotBefore: value.failure.retryNotBefore } : {}),

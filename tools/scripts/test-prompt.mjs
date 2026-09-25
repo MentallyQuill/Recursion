@@ -434,13 +434,13 @@ await assertRejects(
     sourceCardIds: [], guardrailCardIds: [], omittedCardIds: [], diagnostics: []
   } }, { snapshot });
   assertEqual(invalid.ok, false, 'unsafe guidance remains rejected');
-  assertDeepEqual(invalid.error.validationDetails, [{ field: 'guidanceText', rule: 'hidden-content', match: 'hidden thoughts' }], 'guidance failure identifies only safe field, rule, matched wording');
+  assertEqual(invalid.error.validationRule, 'character-interiority', 'guidance failure identifies the allowlisted semantic category');
   assert(!JSON.stringify(invalid.error).includes('PRIVATE_PAYLOAD'), 'validation failure excludes surrounding provider text');
   const corrected = buildGuidanceCorrectionRequest({ request: { prompt: 'Original request.' }, failure: invalid.error });
-  assert(corrected.prompt.includes('guidanceText [hidden-content]: hidden thoughts'), 'correction identifies exact rejected rule and field');
-  assert(corrected.prompt.includes('Use observable actions'), 'hidden-content correction directs an evidence-grounded rewrite');
+  assert(corrected.prompt.includes('unsupported character thoughts or motives'), 'correction explains the rejected category');
+  assert(corrected.prompt.includes('observable behavior'), 'hidden-content correction directs an evidence-grounded rewrite');
   const poisoned = buildGuidanceCorrectionRequest({ request: { prompt: 'Original request.' }, failure: {
-    reason: 'hidden-reasoning', validationDetails: [{ field: 'guidanceText', rule: 'hidden-content', match: 'hidden thoughts PRIVATE_PAYLOAD' }]
+    reason: 'invalid-guidance', validationRule: 'character-interiority PRIVATE_PAYLOAD'
   } });
   assert(!poisoned.prompt.includes('PRIVATE_PAYLOAD'), 'correction rejects arbitrary text disguised as a matched rule');
 }

@@ -1,5 +1,5 @@
-import { sanitizeGuidanceValidationDetails } from '../instruction-safety.mjs';
 import { makeId } from '../core.mjs';
+import { normalizeInstructionValidationRule } from '../instruction-safety.mjs';
 import {
   createCheckpoint,
   createStageRecord,
@@ -62,13 +62,14 @@ function asValidationResult(result, artifact) {
 
 function failureRecord(failure, fallbackCode = 'RECURSION_STAGE_FAILED') {
   const source = isObject(failure) ? failure : {};
+  const validationRule = normalizeInstructionValidationRule(source.validationRule);
   const message = String(source.message || '').trim().slice(0, 300);
   const suggestedAction = String(source.suggestedAction || '').trim().slice(0, 180);
   return {
     code: String(source.code || fallbackCode).slice(0, 120),
     failureClass: String(source.category || source.kind || 'internal').slice(0, 80),
     retryable: source.retryable === true,
-    ...(sanitizeGuidanceValidationDetails(source?.validationDetails).length ? { validationDetails: sanitizeGuidanceValidationDetails(source?.validationDetails) } : {}),
+    ...(validationRule ? { validationRule } : {}),
     ...(Number.isFinite(source.retryAfterMs) ? { retryAfterMs: Math.max(0, source.retryAfterMs) } : {}),
     ...(Number.isFinite(source.retryNotBefore) ? { retryNotBefore: source.retryNotBefore } : {}),
     ...(Number.isInteger(source.rateLimitFailures) ? { rateLimitFailures: source.rateLimitFailures } : {}),

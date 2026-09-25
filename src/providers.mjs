@@ -81,7 +81,7 @@ export const UTILITY_ROLE_IDS = Object.freeze([
   'providerTest'
 ]);
 export const REASONER_ROLE_IDS = Object.freeze(['reasonerComposer', 'postProcessGuidanceReasoner', 'cardRefinementDraft', 'cardRefinementReview']);
-export const PROVIDER_CONTRACT_VERSION = 12;
+export const PROVIDER_CONTRACT_VERSION = 13;
 const ROLE_RESPONSE_SCHEMAS = Object.freeze({
   utilityArbiter: 'recursion.utilityArbiter.v1',
   sceneFrameCard: 'recursion.cardPayload.v1',

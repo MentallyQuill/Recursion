@@ -106,7 +106,7 @@ This is the implemented sub-item catalog for `src/card-scope.mjs`. Facets are no
 | Realism | `familiarExplanations` | Add | Weigh unfamiliar claims against explanations known to each character. | Treating familiar explanations as proven or forcing disbelief. |
 | Realism | `claimsNeedCorroboration` | Add | Separate claims, observations, and corroboration; seek feasible distinguishing checks. | Treating sincerity or one confirmed detail as proof of the whole account; repetitive interrogation. |
 | Realism | `conversationalProportion` | Add | Fit reply length to this exchange, emotion, and voice. | Word quotas, forced curtness, or generic style coaching. |
-| Realism | `interpretingIntent` | Add | Ground interpretations in emotional and relationship evidence; clarify missing details. | Treating omission alone as malice, invented diagnoses, or mandatory friendliness. |
+| Realism | `interpretingIntent` | Add | Recognize stated objectives and their significance; distinguish understanding intent from believing in feasibility or success. Ground interpretations in emotional and relationship evidence. | Treating intentions as proven capabilities, omission alone as malice, invented diagnoses, or mandatory emotions. |
 | Scene Constraints | `hardLimits` | Keep | Treat as hard scene constraints and plausibility traps: injuries, locked routes, missing objects, stated choices, or visible limits. | Collecting facts merely because they are true. |
 | Scene Constraints | `spatialConstraints` | Keep | Preserve movement, reach, visibility, blocked route, distance, and access limits that affect the next beat. | General map summary better handled by Environment. |
 | Scene Constraints | `timelineOrder` | Keep | Track immediate cause/effect, sequence, reveal order, and what has not happened yet. | Long timeline management or durable canon arbitration. |
@@ -122,7 +122,7 @@ This is the implemented sub-item catalog for `src/card-scope.mjs`. Facets are no
 | Items | `heldCarriedItems` | Conditional, reframe | Track active objects only when possession, absence, concealment, or readiness matters now. | Inventory management for its own sake. |
 | Items | `itemLocationControl` | Keep, core | Clarify where the object is, who controls it, who can reach it, and who can withhold or use it. | Ownership lists without scene effect. |
 | Items | `itemAffordancesRisks` | Keep, core | Expand what an item enables, blocks, threatens, exposes, or risks in the current beat. | Generic item descriptions. |
-| Open Threads | `unresolvedQuestions` | Conditional, reframe | Keep questions only when they create visible next-turn pressure, uncertainty, or a decision point. | Backlog of every question raised. |
+| Open Threads | `unresolvedQuestions` | Conditional, reframe | Reassess questions when a new objective or revelation changes the premise; retain those affecting current decisions, risks, or actions. | Repeated demands for every prior answer, invented answers, or a backlog detached from current relevance. |
 | Open Threads | `pendingActions` | Keep | Preserve attempted, requested, promised, interrupted, or awaited actions that should influence the next response. | Task-list behavior detached from the scene. |
 | Open Threads | `nearTermPressures` | Keep | Capture immediate obligations, looming problems, choices, or hooks that shape the next beat. | Duplicating Consequences without added next-turn value. |
 

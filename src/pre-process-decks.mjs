@@ -21,7 +21,7 @@ export const DEFAULT_PRE_PROCESS_CARD_DESCRIPTIONS = Object.freeze({
   'realismCard:familiarExplanations': 'Weighs unfamiliar claims against plausible explanations from each character\'s world and experience.',
   'realismCard:claimsNeedCorroboration': 'Separates claims from evidence and seeks useful checks without demanding impossible certainty.',
   'realismCard:conversationalProportion': 'Matches reply length and directness to emotion, voice, and conversational need.',
-  'realismCard:interpretingIntent': 'Grounds interpretations in emotional context and relationships before attributing hostile intent.',
+  'realismCard:interpretingIntent': 'Recognizes stated intentions without assuming feasibility, success, or hostile intent.',
   'socialSubtextCard:humorIrony': 'Reads humor and irony as signals of intimacy, pressure, or deflection.',
   'socialSubtextCard:veiledPressure': 'Tracks implied threats, warnings, coercion, and consequences beneath polite language.',
   'socialSubtextCard:invitationBoundary': 'Tracks flirtation, permission, discomfort, refusal, and boundaries against further pressure.',
@@ -41,7 +41,7 @@ export const DEFAULT_PRE_PROCESS_CARD_DESCRIPTIONS = Object.freeze({
   'possessionsItemsCard:heldCarriedItems': 'Tracks important objects being held, worn, carried, hidden, missing, or controlled.',
   'possessionsItemsCard:itemLocationControl': 'Tracks where items are and who can access, use, move, or withhold them.',
   'possessionsItemsCard:itemAffordancesRisks': 'Tracks what items enable and the risks or limits they carry.',
-  'openThreadsCard:unresolvedQuestions': 'Tracks visible questions that remain unanswered and may affect the next response.',
+  'openThreadsCard:unresolvedQuestions': 'Reassesses open questions as the conversation changes without requiring every answer before progress.',
   'openThreadsCard:pendingActions': 'Tracks promised, attempted, interrupted, or requested actions still awaiting completion.',
   'openThreadsCard:nearTermPressures': 'Tracks immediate obligations, looming problems, and choices shaping the next beat.'
 });

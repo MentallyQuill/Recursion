@@ -12,7 +12,7 @@ import { reasoningRequestMetadata } from './reasoning-policy.mjs';
 import { asObject } from './safe-values.mjs';
 import { UNKNOWN_STORY_FORM, normalizeStoryForm, storyFormInstruction } from './story-form.mjs';
 
-export const PROMPT_PACKET_VERSION = 4;
+export const PROMPT_PACKET_VERSION = 5;
 export const GUIDANCE_SCHEMA = 'recursion.guidanceComposer.v1';
 
 const PACKET_VERSION = PROMPT_PACKET_VERSION;
@@ -57,7 +57,7 @@ const FOOTPRINT_BUDGETS = FOOTPRINT_SECTION_BUDGETS;
 const STATIC_GUARDRAILS = Object.freeze([
   'Output only the story reply, without planning, self-correction, or discussion of prompts. Keep Recursion analysis invisible.',
   'Explicit user instructions and established story facts outrank generated cards and guidance. Treat generated interpretations as tentative, not new constraints. Preserve player control and established knowledge boundaries.',
-  'Follow the established viewpoint and current positions. Preserve actions already completed and discoveries. Update reactions when information or precautions change stakes; prior fear need not persist. Unresolved causes do not erase mitigated risks. Allow answers and progress without forcing calm or agreement.'
+  'Follow the established viewpoint and current positions. Preserve actions already completed and discoveries. Update reactions when information or precautions change stakes; prior fear need not persist. Unresolved causes do not erase mitigated risks. Allow answers and progress without forcing calm or agreement. Recognize changed intentions and premises without assuming feasibility. Revisit earlier questions when relevant; leave room for the player to explain.'
 ]);
 
 const INJECTION_TEMPLATE = Object.freeze([

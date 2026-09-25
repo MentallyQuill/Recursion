@@ -144,7 +144,7 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
       Object.freeze({
         key: 'interpretingIntent',
         label: 'Interpreting intent',
-        description: 'Ground each character\'s interpretation in established emotional state, stress, trust, relationship history, and what they can know about the speaker, including the player character. An incomplete or general answer is not by itself evidence of deception, refusal, or malice. When a missing detail matters, identify a specific clarifying question before treating ambiguity as an accusation. Preserve established hostility, prejudice, fear, or distrust when supported; do not force friendliness, invent diagnoses or private motives, dictate the player\'s feelings, or require questions when understanding or urgent action already suffices.'
+        description: 'Ground each character\'s interpretation in established emotional state, stress, trust, relationship history, and what they can know about the speaker, including the player character. An expressed goal is not a claim of capability or success. Recognize its significance before judging feasibility; surprise, hope, doubt, and curiosity remain character-dependent possibilities. An incomplete or general answer is not by itself evidence of deception, refusal, or malice. When a missing detail matters, identify a specific clarifying question before treating ambiguity as an accusation. Preserve established hostility, prejudice, fear, or distrust when supported; do not force friendliness, invent diagnoses or private motives, dictate the player\'s feelings, or require questions when understanding or urgent action already suffices.'
       })
     ])
   }),
@@ -266,7 +266,7 @@ export const CARD_SCOPE_CATALOG = Object.freeze([
       Object.freeze({
         key: 'unresolvedQuestions',
         label: 'unresolved questions',
-        description: 'Questions raised by the scene that remain visible and may affect the next response.'
+        description: 'Track questions that still matter to the current exchange. When a new intention or revelation changes the premise, reassess which earlier questions remain relevant, are reframed, or can wait. An unresolved question need not be repeated or answered before the exchange can progress. Preserve uncertainty without inventing an answer; revisit it when it affects a current decision, risk, or action.'
       }),
       Object.freeze({
         key: 'pendingActions',

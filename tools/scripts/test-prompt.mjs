@@ -192,7 +192,7 @@ const packet = await composePromptPacket({
 });
 
 validatePromptPacket(packet);
-assertEqual(packet.packetVersion, 4, 'packet v4 is used');
+assertEqual(packet.packetVersion, 5, 'packet v5 is used');
 assertEqual(packet.diagnostics.guidanceStatus, 'used', 'valid provider guidance is recorded');
 assertEqual(packet.diagnostics.composerLane, 'guidance', 'guidance composer lane is recorded');
 assert(packet.sections.guidance.includes('GUIDANCE_MARKER'), 'provider guidance is injected');

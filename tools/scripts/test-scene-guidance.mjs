@@ -32,4 +32,34 @@ assert(!storyFormPromptBlock().includes('Write promptText in this same tense and
 const packet = await composePromptPacket({ snapshot, hand: { cards: [] }, settings: { reasonerUse: 'off' } });
 assert(!packet.sections.guardrails.includes('source of truth'), 'generated cards cannot outrank story evidence');
 assert(packet.sections.guardrails.includes('already completed'), 'physical continuity survives card selection');
+
+// A proposed return changes the premise of an earlier contact-verification question.
+// Verify the instructions delivered to models; this does not simulate model judgment.
+const premiseSnapshot = { ...snapshot, messages: [
+  { mesid: 148, role: 'assistant', visible: true, text: 'How would you tell real contact from a dream?' },
+  { mesid: 149, role: 'user', visible: true, text: 'I want to bring her back, even temporarily. I need to make a guide she can follow.' }
+] };
+const premisePlan = { cardJobs: [{ family: 'Realism' }, { family: 'Open Threads' }] };
+const premiseContext = { snapshot: premiseSnapshot, cardScope: { selectedSubItemsByFamily: {
+  Realism: ['interpretingIntent'], 'Open Threads': ['unresolvedQuestions']
+} } };
+const premiseRequests = [
+  ...buildCardRequests(premisePlan, premiseContext),
+  buildFusedCardBundleRequest(premisePlan, premiseContext),
+  buildGuidanceStageRequest({ snapshot: premiseSnapshot, hand: { cards: [] } }).request
+];
+for (const r of premiseRequests) {
+  assert(r.prompt.includes('I want to bring her back'), 'changed objective reaches every analysis consumer');
+  assert(r.prompt.includes('Understanding an intention does not establish feasibility'), 'analysis separates understanding the objective from believing it will work');
+  assert(r.prompt.includes('Reassess earlier questions when the premise changes'), 'analysis reassesses old questions instead of enforcing conversational debt');
+  assert(r.prompt.includes('leave room for the player to explain'), 'analysis preserves a meaningful player response opportunity');
+}
+const segmentedIntent = premiseRequests[0];
+const segmentedThreads = premiseRequests[1];
+assert(segmentedIntent.prompt.includes('An expressed goal is not a claim of capability or success'), 'selected intent facet distinguishes an objective from a factual assertion');
+assert(segmentedThreads.prompt.includes('An unresolved question need not be repeated or answered before the exchange can progress'), 'selected open-question facet permits progress without inventing an answer');
+const premisePacket = await composePromptPacket({ snapshot: premiseSnapshot, hand: { cards: [] }, settings: { reasonerUse: 'off' } });
+assert(premisePacket.sections.guardrails.includes('Recognize changed intentions and premises'), 'narrator receives premise guidance even without the two selected families');
+console.log('[pass] conversation premise guidance at model boundaries');
+
 console.log('[pass] grounded scene guidance');

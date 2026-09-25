@@ -44,8 +44,20 @@ function chainCodes(chain) {
 
 function chainStatus(chain) {
   const statuses = [];
+  // SillyTavern's chat endpoint forwards only statusText and its request
+  // service wraps that in Error.cause, dropping numeric HTTP metadata.
+  const statusTexts = new Map([
+    ['bad request', 400], ['unauthorized', 401], ['payment required', 402],
+    ['forbidden', 403], ['not found', 404], ['request timeout', 408],
+    ['unprocessable entity', 422], ['unprocessable content', 422],
+    ['too many requests', 429], ['internal server error', 500],
+    ['bad gateway', 502], ['service unavailable', 503], ['gateway timeout', 504]
+  ]);
   for (const item of [...chain].reverse()) {
     const candidates = [item?.status, item?.statusCode, item?.response?.status];
+    if (!candidates.some((value) => Number(value) >= 400 && Number(value) < 600)) {
+      candidates.push(statusTexts.get(String(item?.message || '').trim().toLowerCase()));
+    }
     for (const candidate of candidates) {
       const value = Number(candidate || 0);
       if (Number.isInteger(value) && value >= 400 && value < 600) statuses.push(value);

@@ -183,6 +183,29 @@ function createClock() {
   return () => `2026-07-29T12:00:${String(tick++).padStart(2, '0')}.000Z`;
 }
 
+for (const recoveryLimit of [1, 3]) {
+  const repository = createRepository();
+  let savedCalls = 0;
+  let calls = 0;
+  let installCalls = 0;
+  const graph = createExecutionGraph({ stages: [
+    stage('saved', [], async () => { savedCalls += 1; return { value: 'saved' }; }),
+    { ...stage('recovering', ['saved'], async () => {
+      calls += 1;
+      if (calls <= 2) throw { code: 'ECONNRESET' };
+      return calls === 3 ? null : { value: 'corrected' };
+    }), buildCorrectionRequest: ({ request }) => request },
+    stage('install', ['recovering'], async () => { installCalls += 1; return {}; }, { kind: 'local' })
+  ] });
+  const scheduler = createExecutionScheduler({ repository, retrySleep: async () => {} });
+  const result = await scheduler.start({ manifest: { ...manifest(), recoveryBudget: { recoveryLimit } }, graph });
+  assertEqual(result.recoveryBudget.recoveryUsed, recoveryLimit, 'transport and correction share the durable recovery cap');
+  assertEqual(calls, recoveryLimit === 3 ? 4 : 2, 'budget exhaustion prevents additional transport dispatch');
+  assertEqual(installCalls, recoveryLimit === 3 ? 1 : 0, 'downstream work remains blocked until recovery succeeds');
+  assertEqual(result.stageRecords.saved.state, 'completed', 'accepted dependency survives transport failure');
+  assertEqual(savedCalls, 1, 'accepted work is never repeated during automatic recovery');
+}
+
 {
   const repository = createRepository();
   let calls = 0;
@@ -1099,7 +1122,7 @@ for (const insecureCrypto of [{}, undefined]) {
   const graph = createExecutionGraph({
     stages: [stage('root', [], async () => {
       calls += 1;
-      if (calls <= 2) {
+      if (calls <= 4) {
         throw Object.assign(new Error('retry me'), {
           code: 'ECONNRESET',
           retryable: true
@@ -1112,12 +1135,15 @@ for (const insecureCrypto of [{}, undefined]) {
     repository,
     now: createClock(),
     createId: createIds(),
-    attemptsPerStep: 2
+    attemptsPerStep: 2,
+    retrySleep: async () => {}
   });
-  await scheduler.start({ manifest: manifest({ operationId: 'retry-run' }), graph, context: {} });
+  await scheduler.start({ manifest: { ...manifest({ operationId: 'retry-run' }),
+    recoveryBudget: { recoveryLimit: 3 } }, graph, context: {} });
   let saved = await repository.loadPipelineRun('chat-a');
-  assertEqual(saved.stageRecords.root.attempts.used, 2, 'failed stage exhausts its first attempt window');
-  assertEqual(saved.stageRecords.root.attempts.total, 2, 'first attempt window records monotonic total');
+  assertEqual(saved.stageRecords.root.attempts.used, 4, 'failed stage exhausts its transport recovery window');
+  assertEqual(saved.stageRecords.root.attempts.total, 4, 'first attempt window records monotonic total');
+  assert(saved.stageRecords.root.diagnosticCodes.includes('provider-transient-exhausted'), 'transport exhaustion survives durable normalization');
   assert(saved.stageRecords.root.diagnosticCodes.includes('provider-transient-retry'), 'scheduler persists safe retry diagnostic code');
   assertEqual(saved.stageRecords.root.lastAttemptAction, 'stop', 'scheduler records the final bounded retry action');
   assert(saved.stageRecords.root.diagnosticCodes.includes('provider-transient-retry'), 'retry diagnostic persists without request data');
@@ -1133,7 +1159,7 @@ for (const insecureCrypto of [{}, undefined]) {
   assertEqual(saved.state, 'completed', 'manual Retry opens a fresh window that can complete');
   assertEqual(saved.stageRecords.root.attempts.window, 2, 'manual Retry increments attempt window');
   assertEqual(saved.stageRecords.root.attempts.used, 1, 'manual Retry resets used attempts for the new window');
-  assertEqual(saved.stageRecords.root.attempts.total, 3, 'manual Retry preserves monotonic total');
+  assertEqual(saved.stageRecords.root.attempts.total, 5, 'manual Retry preserves monotonic total');
   assert(
     saved.stageRecords.root.checkpoint.diagnosticCodes.includes('provider-transient-retry'),
     'completed checkpoint preserves allowlisted retry diagnostics'

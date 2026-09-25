@@ -308,7 +308,8 @@ for (const pipelineMode of ['fused', 'segmented']) {
   const failed = await initial.runtime.prepareForGeneration({ userMessage: { text: 'I ask what she remembers.', mesid: 2 }, hostGeneration: true });
   assertEqual(failed.ok, false, 'failed repair blocks incomplete preparation');
   const manifest = await initial.storage.loadPipelineRun('chat-preprocess');
-  assertEqual(manifest.stageRecords['preprocess.cards.segmented.social-subtext'].attempts.total, 2, 'ambiguous transport failure receives only the configured bounded attempts');
+  assertEqual(manifest.stageRecords['preprocess.cards.segmented.social-subtext'].attempts.total, 4, 'transport recovery stops at the shared operation allowance');
+  assertEqual(manifest.recoveryBudget.recoveryUsed, 3, 'Fused fallback and transport retries remain bounded by the shared allowance');
   const originalBundleHash = manifest.stageRecords['preprocess.cards.fused'].checkpoint.outputHash;
   failRepair = false;
   const restored = createHarness({ storage: initial.storage, settings, provider });
@@ -316,7 +317,7 @@ for (const pipelineMode of ['fused', 'segmented']) {
   assertEqual(restoredState.state, 'paused', 'restart restores the paused repair for the same source turn');
   const retried = await restored.runtime.retryStage({ operationId: manifest.operationId, stageId: 'preprocess.cards.segmented.social-subtext' });
   assertEqual(retried.execution.state, 'completed', 'restarted targeted Retry completes preparation');
-  assertDeepEqual(calls.filter(call => call.roleId === 'socialSubtextCard').map(call => call.lane), ['reasoner', 'reasoner', 'reasoner'], 'automatic retries and restored repairs use the bundle lane');
+  assertDeepEqual(calls.filter(call => call.roleId === 'socialSubtextCard').map(call => call.lane), ['reasoner', 'reasoner', 'reasoner', 'reasoner'], 'automatic retries and restored repairs use the bundle lane');
   assertEqual(calls.filter(call => call.roleId === 'fusedCardBundle').length, 1, 'Retry does not regenerate accepted bundle siblings');
   assertEqual(calls.filter(call => call.roleId === 'utilityArbiter').length, 1, 'Retry preserves the accepted plan');
   const completed = await initial.storage.loadPipelineRun('chat-preprocess');

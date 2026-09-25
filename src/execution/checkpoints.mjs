@@ -38,6 +38,7 @@ export const CHECKPOINT_DIAGNOSTIC_CODES = Object.freeze([
   'provider-rate-limit-retry',
   'provider-rate-limit-exhausted',
   'provider-transient-retry',
+  'provider-transient-exhausted',
   'provider-retry',
   'stage-reprocess-consumed',
   'profile-sampler-projection-failed',

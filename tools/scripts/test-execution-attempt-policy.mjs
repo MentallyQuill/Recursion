@@ -7,6 +7,27 @@ import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert
 
 {
   const delays = [];
+  let calls = 0;
+  let corrections = 0;
+  const result = await runModelStageAttempts({
+    attemptsPerStep: 2,
+    request: { prompt: 'original' },
+    async invoke() {
+      calls += 1;
+      if (calls <= 2) throw { code: 'ECONNRESET' };
+      return calls === 3 ? { text: 'invalid' } : { text: '{"ok":true}' };
+    },
+    validate: parseJsonResponse,
+    buildCorrectionRequest: ({ request }) => { corrections += 1; return request; },
+    sleep: async (ms) => delays.push(ms)
+  });
+  assertEqual(result.ok, true, 'temporary transport outages do not consume output correction attempts');
+  assertDeepEqual(delays, [2000, 4000], 'transport retries allow progressive recovery time');
+  assertEqual(corrections, 1, 'only a returned invalid response consumes correction');
+}
+
+{
+  const delays = [];
   const invocations = [];
   let corrections = 0;
   const recovered = await runModelStageAttempts({
@@ -28,6 +49,19 @@ import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert
   assertEqual(invocations[4].retryReason, 'RECURSION_MODEL_OUTPUT_INVALID', 'model correction retains its own accounting');
 }
 
+
+{
+  const controller = new AbortController();
+  let calls = 0;
+  const result = await runModelStageAttempts({
+    request: {}, signal: controller.signal,
+    async invoke() { calls += 1; throw { code: 'ECONNRESET' }; },
+    validate: parseJsonResponse,
+    async sleep() { controller.abort(); }
+  });
+  assertEqual(result.aborted, true, 'Stop during transport backoff aborts recovery');
+  assertEqual(calls, 1, 'no provider dispatch follows Stop');
+}
 
 const writerTimeout = classifyModelFailure({
   code: 'RECURSION_POST_PROCESS_WRITER_TIMEOUT',
@@ -108,7 +142,7 @@ assertDeepEqual(resolveModelRetryDirective({
   limit: 2
 }), {
   action: 'retry-same',
-  delayMs: 250,
+  delayMs: 2000,
   diagnosticCode: 'provider-transient-retry',
   nextRequest: { roleId: 'sceneFrameCard', responseLength: 900 }
 }, 'transient failure gets deterministic first retry delay');
@@ -194,12 +228,13 @@ const transportResult = await runModelStageAttempts({
   sleep: async () => {}
 });
 assertEqual(transportResult.ok, false, 'exhausted transport attempts return failure');
-assertEqual(transportCalls, 2, 'two-attempt window makes only two transport requests');
-assertEqual(transportResult.attempts.length, 2, 'transport failures are summarized per attempt');
+assertEqual(transportCalls, 4, 'transport recovery stops after three retries');
+assertEqual(transportResult.attempts.length, 4, 'transport failures are summarized per attempt');
 assertEqual(transportResult.attempts[0].outcome, 'failed', 'transport failure has failed outcome');
 assertEqual(transportResult.failure.kind, 'transport', 'transport failure is classified');
 assertEqual(transportResult.attempts[0].action, 'retry-same', 'transient transport failure records retry action');
-assertEqual(transportResult.attempts[0].delayMs, 250, 'first transient retry records deterministic delay');
+assertEqual(transportResult.attempts[0].delayMs, 2000, 'first transient retry records deterministic delay');
+assertEqual(transportResult.attempts[3].diagnosticCode, 'provider-transient-exhausted', 'exhaustion is explicit');
 
 
 let invalidResponseCalls = 0;
@@ -288,7 +323,7 @@ async function runManualWindow() {
 }
 await runManualWindow();
 await runManualWindow();
-assertEqual(manualWindowCalls, 4, 'separate manual invocation receives a fresh full attempt window');
+assertEqual(manualWindowCalls, 8, 'separate manual invocation receives a fresh bounded transport window');
 
 const classified = classifyModelFailure({
   code: 'RECURSION_PROVIDER_AUTH_FAILED',

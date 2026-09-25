@@ -54,6 +54,10 @@ assertEqual(normalizeProviderError({ status: 429, headers: { 'retry-after': '120
 assertEqual(JSON.stringify(sanitized).includes('SECRET_PROVIDER_TOKEN'), false, 'provider errors do not expose raw messages');
 
 for (const [name, error, code, retryable, status] of [
+  ['host status text retains permanent rejection', new Error('API request failed', { cause: new Error('Bad Request') }), 'RECURSION_PROVIDER_FAILED', false, 400],
+  ['host status text retains authentication', new Error('API request failed', { cause: new Error('Forbidden') }), 'RECURSION_PROVIDER_AUTH_FAILED', false, 403],
+  ['host status text retains gateway outage', new Error('API request failed', { cause: new Error('Bad Gateway') }), 'RECURSION_PROVIDER_TRANSIENT', true, 502],
+  ['host status text retains cooldown', new Error('API request failed', { cause: new Error('Too Many Requests') }), 'RECURSION_PROVIDER_RATE_LIMIT', true, 429],
   ['opaque Connection Manager failure', new Error('API request failed'), 'RECURSION_PROVIDER_TRANSIENT', true, undefined],
   ['request timeout', { status: 408 }, 'RECURSION_PROVIDER_TRANSIENT', true, 408],
   ['nested authentication overrides gateway status', { status: 500, cause: { response: { status: 401 } } }, 'RECURSION_PROVIDER_AUTH_FAILED', false, 401],

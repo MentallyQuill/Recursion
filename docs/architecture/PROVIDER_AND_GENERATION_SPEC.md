@@ -141,6 +141,10 @@ An unsupported native-schema response may downgrade to prompt JSON only when the
 
 ## Request Flow
 
+Card payloads require `promptText` as a string. At the provider boundary, a nonempty array consisting entirely of nonempty strings is joined with newlines, preserving every instruction in order. This applies to both Segmented and Fused cards and records `card-text-lines`. Mixed arrays, missing evidence, and unsafe instructions still fail their normal shape or semantic checks; normalization neither invents content nor changes evidence.
+
+Transient transport failures have up to three automatic retries with 2, 4, and 8 second backoff. They do not consume model-output correction attempts, but retries still consume the operation recovery allowance and remain subject to its deadline and Stop signal. Permanent rejections stop immediately. Exact HTTP status phrases preserved in SillyTavern's nested errors are classified before its generic `API request failed` wrapper, without exporting raw provider messages.
+
 ```text
 Utility/Reasoner stage
   -> selected Connection Profile
@@ -353,13 +357,14 @@ Each failed attempt receives one action.
 | Context limit | Reduce only the stage output budget. |
 | Invalid structured or semantic output | Send one bounded correction prompt when the role allows it. |
 | 429 / provider rate limit | Retry the same request with a separate capacity allowance and shared profile cooldown. |
-| Timeout or transient transport failure | Retry with bounded delay within the ordinary attempt allowance. |
+| Transient transport failure | Up to three retries with 2/4/8 second backoff, separate from output corrections and bounded by the operation recovery allowance. |
+| Writer timeout | Retry with bounded delay within the ordinary attempt allowance. |
 | Missing profile, unsupported host API, or configuration mismatch | Stop without retry. |
 | Abort | Stop immediately and do not start queued work. |
 
 One retry never combines schema downgrade, budget reduction, sampler changes, and prompt changes. The scheduler records only allowlisted action and diagnostic codes.
 
-HTTP 408 and the host's exact `API request failed` message, when no definite permanent cause is available, use the ordinary bounded transient retry allowance. Confirmed authentication and invalid-request failures remain terminal. A wrapper HTTP 500 must not hide an upstream 401 or 429. Failure diagnostics preserve numeric HTTP status, known transport codes, and the configured model/provider identity without retaining upstream prose, response bodies, or credentials.
+HTTP 408 and the host's exact `API request failed` message, when no definite permanent cause is available, use the bounded transport retry allowance. Confirmed authentication and invalid-request failures remain terminal. A wrapper HTTP 500 must not hide an upstream 401 or 429. Failure diagnostics preserve numeric HTTP status (including exact nested status phrases), known transport codes, and the configured model/provider identity without retaining upstream prose, response bodies, or credentials.
 
 Automatic attempts apply only to Recursion model stages. They do not retry SillyTavern's primary story generation.
 

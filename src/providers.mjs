@@ -1097,7 +1097,19 @@ function normalizeNestedCardEnvelope(roleId, data, request = {}) {
   };
 }
 
+function normalizeCardTextLines(data) {
+  if (!plainObject(data) || !Array.isArray(data.promptText) || !data.promptText.length
+      || !data.promptText.every((line) => typeof line === 'string' && line.trim())) return data;
+  // Preserve all authored text and ordering; evidence and semantic validation
+  // still run after this purely structural normalization.
+  return { ...data, promptText: data.promptText.join('\n') };
+}
+
 function normalizeRoleResponse(roleId, data, request = {}) {
+  if (SEGMENTED_CARD_ROLES.has(roleId)) {
+    const normalized = normalizeCardTextLines(data);
+    if (normalized !== data) return { data: normalized, diagnostics: { semanticNormalization: 'card-text-lines' } };
+  }
   if (roleId === 'guidanceComposer' && plainObject(data)
     && typeof data.guidanceText === 'string' && data.guidanceText.trim()
     && typeof request.snapshotHash === 'string' && request.snapshotHash
@@ -1112,11 +1124,13 @@ function normalizeRoleResponse(roleId, data, request = {}) {
     };
   }
   if (roleId === 'fusedCardBundle' && plainObject(data) && Array.isArray(data.items)) {
+    const normalizedItems = data.items.map(normalizeCardTextLines);
+    const normalizedText = normalizedItems.some((item, index) => item !== data.items[index]);
     const requested = new Set((request.requestedCards || []).map((card) => card.family));
     const counts = new Map();
     for (const item of data.items) counts.set(item?.family, (counts.get(item?.family) || 0) + 1);
     const rejections = [];
-    const items = data.items.filter((item) => {
+    const items = normalizedItems.filter((item) => {
       const reason = !validateCardBundlePayload({ items: [item] }) ? 'invalid-item-shape'
         : counts.get(item.family) > 1 ? 'duplicate-family'
         : requested.size && !requested.has(item.family) ? 'unrequested-family' : '';
@@ -1124,7 +1138,8 @@ function normalizeRoleResponse(roleId, data, request = {}) {
       if (rejections.length < 40) rejections.push({ family: String(item?.family || '').slice(0, 120), reason });
       return false;
     });
-    return { data: { ...data, items }, diagnostics: { bundleItemRejections: rejections } };
+    return { data: { ...data, items }, diagnostics: { bundleItemRejections: rejections,
+      ...(normalizedText ? { semanticNormalization: 'card-text-lines' } : {}) } };
   }
   const nestedCard = normalizeNestedCardEnvelope(roleId, data, request);
   if (nestedCard) return nestedCard;

@@ -6,6 +6,7 @@ import { RATE_LIMIT_RETRY_LIMIT, rateLimitDelay } from '../providers/rate-limit-
 
 const ATTEMPT_MIN = 1;
 const ATTEMPT_MAX = 5;
+const TRANSIENT_RETRY_LIMIT = 3;
 const MODEL_RETRY_ACTIONS = new Set([
   'stop',
   'downgrade-structured-output',
@@ -97,13 +98,21 @@ function stopDirective(diagnosticCode = '') {
   return retryDirective('stop', { diagnosticCode });
 }
 
-export function resolveModelRetryDirective({ failure, request, attempt, limit, rateLimitFailures = 1 }) {
+export function resolveModelRetryDirective({ failure, request, attempt, limit, rateLimitFailures = 1, transientFailures = 1 }) {
   if (failure?.kind === 'abort') return stopDirective();
   if (failure?.code === 'RECURSION_PROVIDER_RATE_LIMIT') {
     if (rateLimitFailures > RATE_LIMIT_RETRY_LIMIT) return stopDirective('provider-rate-limit-exhausted');
     return retryDirective('retry-same', {
       delayMs: rateLimitDelay(failure.retryAfterMs, rateLimitFailures),
       diagnosticCode: 'provider-rate-limit-retry',
+      nextRequest: request
+    });
+  }
+  if (failure?.code === 'RECURSION_PROVIDER_TRANSIENT' && failure?.retryable !== false) {
+    if (transientFailures > TRANSIENT_RETRY_LIMIT) return stopDirective('provider-transient-exhausted');
+    return retryDirective('retry-same', {
+      delayMs: Math.max(2000 * (2 ** Math.max(0, transientFailures - 1)), failure.retryAfterMs || 0),
+      diagnosticCode: 'provider-transient-retry',
       nextRequest: request
     });
   }
@@ -162,15 +171,11 @@ export function resolveModelRetryDirective({ failure, request, attempt, limit, r
     });
   }
 
-  if (failure?.code === 'RECURSION_PROVIDER_TRANSIENT'
-      || (failure?.kind === 'transport' && failure?.retryable === true)) {
+  if (failure?.kind === 'transport' && failure?.retryable === true) {
     const delayMs = failure?.retryAfterMs ?? (attempt === 1 ? 250 : 750);
-    const diagnosticCode = failure.code === 'RECURSION_PROVIDER_TRANSIENT'
-        ? 'provider-transient-retry'
-        : 'provider-retry';
     return retryDirective('retry-same', {
       delayMs,
-      diagnosticCode,
+      diagnosticCode: 'provider-retry',
       nextRequest: request
     });
   }
@@ -231,13 +236,14 @@ export async function runModelStageAttempts({
   let lastResponse;
   let modelAttempts = 0;
   let rateLimitFailures = Math.max(0, Math.trunc(capacityRecovery?.failure?.rateLimitFailures || 0));
+  let transientFailures = 0;
   let retryReason = lastFailure?.code || null;
 
   if (lastFailure && rateLimitFailures > RATE_LIMIT_RETRY_LIMIT) {
     return { ok: false, failure: lastFailure, attempts };
   }
 
-  for (let attempt = 1; attempt <= limit + RATE_LIMIT_RETRY_LIMIT; attempt += 1) {
+  for (let attempt = 1; attempt <= limit + RATE_LIMIT_RETRY_LIMIT + TRANSIENT_RETRY_LIMIT; attempt += 1) {
     if (signal?.aborted) {
       lastFailure = normalizeProviderError(Object.assign(new Error('Stopped.'), { name: 'AbortError' }));
       return { ok: false, aborted: true, failure: lastFailure, lastResponse, attempts };
@@ -275,13 +281,15 @@ export async function runModelStageAttempts({
     }
 
     if (lastFailure.code === 'RECURSION_PROVIDER_RATE_LIMIT') rateLimitFailures += 1;
+    else if (lastFailure.code === 'RECURSION_PROVIDER_TRANSIENT') transientFailures += 1;
     else modelAttempts += 1;
     const directive = resolveDirective({
       failure: lastFailure,
       request: currentRequest,
       attempt: modelAttempts,
       limit,
-      rateLimitFailures
+      rateLimitFailures,
+      transientFailures
     });
     await notifyAttempt(onAttemptSettled, attempts, {
       attempt,

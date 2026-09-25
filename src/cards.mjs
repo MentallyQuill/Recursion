@@ -1042,7 +1042,7 @@ export function buildCardRequests(plan = {}, context = {}) {
           '{"promptText":"Track the immediate objective and obstruction.","evidenceRefs":["message:12"]}',
           'Do not repeat schema names, role names, family names, or snapshot hashes.',
           'evidenceRefs must include at least one message:N reference.',
-          'promptText is the only prompt-facing card text.',
+          'promptText is the only prompt-facing card text. Return it as one string, not an array of lines.',
           cardInstructionContractLine(),
           cardPromptSafetyInstruction(catalog),
           sourceCards.length
@@ -1128,7 +1128,7 @@ export function buildFusedCardBundleRequest(plan = {}, context = {}) {
       '{"items":[{"family":"Scene Frame","promptText":"Track the immediate objective and obstruction.","evidenceRefs":["message:12"],"coveredSourceCardIds":[]}]}',
       'Return at most one item per requested family. Do not return unrequested families.',
       'Each item must contain family, promptText, evidenceRefs, and optional coveredSourceCardIds only.',
-      'promptText is the only prompt-facing card text.',
+      'promptText is the only prompt-facing card text. Return it as one string, not an array of lines.',
       cardInstructionContractLine(),
       storyFormPromptBlock(storyForm),
       requestBlocks.join('\n\n'),

@@ -1,4 +1,5 @@
 import { failureFrom } from '../failures.mjs';
+import { normalizeInstructionValidationRule } from '../instruction-safety.mjs';
 import { normalizeProviderError } from '../providers/provider-errors.mjs';
 import { minimumOutputBudgetForRole, outputBudgetForRequest } from '../providers/stage-output-budgets.mjs';
 import { RATE_LIMIT_RETRY_LIMIT, rateLimitDelay } from '../providers/rate-limit-policy.mjs';
@@ -35,6 +36,7 @@ export function classifyModelFailure(error, { kind = 'transport', signal = null 
     }));
   }
   if (kind === 'validation') {
+    const validationRule = normalizeInstructionValidationRule(error?.validationRule);
     const failure = failureFrom(error, {
       code: 'RECURSION_MODEL_OUTPUT_INVALID',
       stage: 'model-attempt',
@@ -48,6 +50,7 @@ export function classifyModelFailure(error, { kind = 'transport', signal = null 
       category: failure.category,
       message: failure.message,
       retryable: failure.retryable,
+      ...(validationRule ? { validationRule } : {}),
       ...(failure.suggestedAction ? { suggestedAction: failure.suggestedAction } : {})
     });
   }

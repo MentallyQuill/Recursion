@@ -565,12 +565,11 @@ function assertInstructionShapedCardText(promptText) {
 
 function assertCardPromptTextSafe(catalog, promptText) {
   assertInstructionShapedCardText(promptText);
-  // Content rules span lines even though the instruction-shape check uses them.
-  const safetyText = compact(promptText, CARD_TEXT_LIMIT);
-  const hiddenMatch = unsafeInstructionMatch(safetyText, CARD_FORBIDDEN_PATTERNS);
+  // The shared matcher preserves instruction boundaries and checks wrapped phrases.
+  const hiddenMatch = unsafeInstructionMatch(promptText, CARD_FORBIDDEN_PATTERNS);
   if (hiddenMatch) throw new Error('Card promptText contains unsafe hidden-reasoning wording [hidden-content]: "' + hiddenMatch + '".');
   if (catalog.family !== 'Character Motivation') return;
-  const motiveMatch = unsafeInstructionMatch(safetyText, CHARACTER_MOTIVATION_FORBIDDEN_PATTERNS);
+  const motiveMatch = unsafeInstructionMatch(promptText, CHARACTER_MOTIVATION_FORBIDDEN_PATTERNS);
   if (motiveMatch) throw new Error('Character Motivation promptText contains unsafe internal-thought wording [private-claim]: "' + motiveMatch + '".');
 }
 

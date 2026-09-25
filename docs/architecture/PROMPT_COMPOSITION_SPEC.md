@@ -70,6 +70,10 @@ Guidance must stay evidence-bound. It can synthesize selected cards, but it cann
 
 Missing schema/snapshot identifiers may be bound from the frozen request only when Guidance contains nonempty text and no supplied identifier conflicts. Correction prompts preserve bounded known field/type information and require actual `guidanceText` prose; they do not copy rejected provider prose. The existing bounded scheduler remains responsible for retries. Exhausted Guidance failure prevents installation and narration, while successful upstream checkpoints remain available for a Guidance-only retry.
 
+Content validation preserves instruction line boundaries through normalization, composition, and installation. The shared card/Guidance matcher accepts complete protective clauses with bounded character references, evidence qualifications, and coordinated objects, including `Do not invent hidden motives for Harry.` and `Avoid revealing private thoughts that have not been established.` A following disclosure instruction is checked independently; wrapping a forbidden phrase across lines does not evade validation, and a trailing exception such as `unless asked` is not exempted.
+
+Guidance content rejection returns one allowlisted `validationRule`: `model-reasoning`, `character-interiority`, or `unrevealed-story`. The displayed explanation and correction request use the same validation result. Content corrections ask for actionable directions grounded in observable behavior and established knowledge, or preservation of unresolved story information, according to that rule. Structural failures retain known field/type feedback; invalid source identifiers request only supplied card IDs. No correction copies rejected provider prose, adds a model call, or expands the attempt limit.
+
 ### Card Evidence
 
 Card Evidence contains the full raw `promptText` from selected cards. That `promptText` is instruction-shaped private evidence, not story prose. Card Evidence is grouped and labeled as evidence rather than rewritten into a local summary. It preserves:

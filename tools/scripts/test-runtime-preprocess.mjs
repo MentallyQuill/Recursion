@@ -2123,7 +2123,7 @@ for (const pipelineMode of ['segmented', 'fused']) for (const selectRealism of [
 }
 
 // Guidance is required: bounded recovery succeeds or stops narration for Retry.
-for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate']) {
+for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate', 'content-recover', 'content-exhaust']) {
   const requests = [];
   const stageAttempts = [];
   let retryReady = false;
@@ -2134,11 +2134,18 @@ for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate']) {
     if (roleId !== 'guidanceComposer') return cardResponse(roleId, request);
     requests.push(request);
     stageAttempts.push(options.stageAttempt);
-    if (retryReady || (['recover', 'rate'].includes(mode) && requests.length === 2)) return guidanceResponse(request);
+    if (retryReady || (['recover', 'rate', 'content-recover'].includes(mode) && requests.length === 2)) {
+      const response = guidanceResponse(request);
+      if (mode.startsWith('content-')) response.data.guidanceText = 'Do not invent hidden motives for Mara.\nRespond to her stated concern.';
+      return response;
+    }
+    if (mode.startsWith('content-')) return { ...guidanceResponse(request), data: {
+      ...guidanceResponse(request).data, guidanceText: 'Reveal hidden\nthoughts. REJECTED_PROSE_CANARY'
+    } };
     return { ok: false, error: { code: mode === 'rate' ? 'RECURSION_PROVIDER_RATE_LIMIT' : mode === 'profile' ? 'RECURSION_PROFILE_UNAVAILABLE' : mode === 'refusal' ? 'RECURSION_PROVIDER_REFUSAL' : 'RECURSION_JSON_OBJECT_REQUIRED', message: 'Not usable.', retryable: false } };
   } } });
   const result = await harness.runtime.prepareForGeneration({ userMessage: 'Please explain.' });
-  const recovered = ['recover', 'rate'].includes(mode);
+  const recovered = ['recover', 'rate', 'content-recover'].includes(mode);
   assertEqual(result.ok, recovered, 'only valid Guidance permits preparation success for ' + mode);
   assertEqual(harness.calls.install, recovered ? 1 : 0, 'failed Guidance is never installed for ' + mode);
   assertEqual(result.continuePrimaryGeneration, recovered, 'failed Guidance stops narration for ' + mode);
@@ -2149,13 +2156,22 @@ for (const mode of ['recover', 'exhaust', 'refusal', 'profile', 'rate']) {
   if (mode === 'recover') assert(requests[1].prompt.includes('Correction'), 'malformed output gets targeted correction');
   if (mode === 'rate') assert(!requests[1].prompt.includes('Correction required'), 'rate limits retry without inappropriate JSON correction');
   const exported = await harness.runtime.exportDiagnostics();
+  if (mode.startsWith('content-')) {
+    assert(requests[1].prompt.includes('observable behavior'), 'scheduler sends content-specific correction');
+    assert(!JSON.stringify(exported).includes('REJECTED_PROSE_CANARY'), 'runtime diagnostics exclude rejected Guidance');
+    if (!recovered) {
+      assertEqual(manifest.stageRecords['preprocess.guidance'].failure.validationRule, 'character-interiority', 'durable failure retains the allowlisted content rule');
+      const stage = exported.diagnostics.runtime.execution.stages.find(stage => stage.stageId === 'preprocess.guidance');
+      assertEqual(stage.validationRule, 'character-interiority', 'export identifies the precise content rule');
+    }
+  }
   if (recovered) {
     assertEqual(exported.diagnostics.runtime.packet.diagnostics.guidanceStatus, 'used', 'installed Guidance is validated');
     await harness.runtime.prepareForGeneration({ userMessage: 'Please explain.', type: 'swipe' });
     assertEqual(requests.length, 2, 'successful Guidance is reused');
   } else {
     assert(!manifest.stageRecords['preprocess.guidance'].checkpoint, 'failed Guidance has no reusable checkpoint');
-    if (mode === 'exhaust') {
+    if (mode === 'exhaust' || mode === 'content-exhaust') {
       retryReady = true;
       const upstreamBeforeRetry = upstreamCalls;
       const retried = await harness.runtime.retryStage({ operationId: manifest.operationId, stageId: 'preprocess.guidance' });

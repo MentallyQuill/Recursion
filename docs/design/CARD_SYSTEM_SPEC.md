@@ -309,7 +309,7 @@ The Card Deck header exposes two bulk state actions for all decks:
 
 Draft cards are unchanged by both actions. The bundled Default deck keeps a persisted operator-state overlay; its structure remains read-only.
 
-Card state icons use the supplied eye family: slashed eye for Inactive, open eye for Active, eye-plus for Priority, and an eye with a small four-point sparkle for Refinement. Check and X remain confirm/cancel/delete-confirm language and must not be used as card-state icons.
+Card state icons use distinct participation markers: slashed eye for Inactive, open eye for Active, eye-plus for Priority, and a 15px outlined faceted gem for Refinement. Check and X remain confirm/cancel/delete-confirm language and must not be used as card-state icons.
 
 Every runnable Priority card in Auto and every runnable Refinement card in both modes is mandatory, preceding ordinary cards in deck category/card order. Mandatory cards may exceed the effective turn card limit; the Arbiter fills only remaining slots with ordinary Active cards. Generated mandatory families must succeed before preparation completes. Multiple marked facets sharing a family consume one hand slot, but each Refinement facet requires its own verdict.
 

@@ -553,12 +553,15 @@ const CARD_STATE_ICON_PATHS = {
 function cardSystemIconSvg(kind) {
   const attrs = { width: '15', height: '15', viewBox: '0 0 16 16', 'aria-hidden': 'true', focusable: 'false' };
   const stroke = { fill: 'none', stroke: 'currentColor', 'stroke-width': '1.35', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
-  if (kind === 'eye-refinement') return el('svg', {
+  if (kind === 'gem-refinement') return el('svg', {
     attrs: { ...attrs, viewBox: '0 0 24 24' },
     dataset: { recursionCardStateIcon: kind }
   }, [
-    el('path', { attrs: { fill: 'currentColor', d: 'M12,7a4,4,0,1,0,4,4A4,4,0,0,0,12,7Zm0,6a2,2,0,1,1,2-2A2,2,0,0,1,12,13Zm9.938-2.345a.987.987,0,0,1,0,.69,13.339,13.339,0,0,1-1.08,2.264,1,1,0,1,1-1.715-1.028A11.3,11.3,0,0,0,19.928,11C18.451,7.343,15.373,5,12,5S5.549,7.343,4.072,11a9.315,9.315,0,0,0,6.167,5.787,1,1,0,1,1-.478,1.942,11.393,11.393,0,0,1-7.7-7.383.99.99,0,0,1,0-.691C3.773,6,7.674,3,12,3S20.227,6,21.938,10.655Z' } }),
-    el('path', { attrs: { fill: 'currentColor', d: 'M18 13l1.3 3.7L23 18l-3.7 1.3L18 23l-1.3-3.7L13 18l3.7-1.3Z' } })
+    el('path', { attrs: {
+      ...stroke,
+      'stroke-width': '2',
+      d: 'M6 3h12l4 6-10 13L2 9Z M2 9h20 M9 3 8 9l4 13 4-13-1-6'
+    } })
   ]);
   if (CARD_STATE_ICON_PATHS[kind]) return el('svg', {
     attrs: { ...attrs, viewBox: '0 0 24 24' },
@@ -2234,7 +2237,7 @@ function cardDeckCardStatePresentation(card, mode = 'auto') {
     return {
       state,
       className: 'is-refinement',
-      icon: 'eye-refinement',
+      icon: 'gem-refinement',
       title: "Always included. Reviews and improves this card's scene analysis before narration.",
       label: 'Refinement card',
       nextStatus: 'Card disabled.'

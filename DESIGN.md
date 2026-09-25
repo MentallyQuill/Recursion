@@ -236,7 +236,7 @@ The action is never hidden behind row expansion, a confirmation flap, or a secon
 
 Both card phases bind one shared pointer-drag engine for mouse, pen, and short-hold touch gestures. Do not add a phase-specific native HTML drag or touch controller.
 
-Refinement uses the existing 15px eye marker with a small four-point sparkle. Refinement shares Priority's bright-cyan title, icon, border, and inset highlight. Its short label is `Refinement`; tooltip: `Always included. Reviews and improves this card's scene analysis before narration.` Auto cycles Off, Active, Priority, Refinement; Manual cycles Off, Active, Refinement. Counts distinguish Priority and Refinement while both count as active. Bulk enable clears both to Active. No new provider or dashboard surface is added.
+Refinement uses a 15px outlined faceted gem, with a distinct silhouette from Priority's eye-plus. Refinement shares Priority's bright-cyan title, icon, border, and inset highlight. Its short label is `Refinement`; tooltip: `Always included. Reviews and improves this card's scene analysis before narration.` Auto cycles Off, Active, Priority, Refinement; Manual cycles Off, Active, Refinement. Counts distinguish Priority and Refinement while both count as active. Bulk enable clears both to Active. No new provider or dashboard surface is added.
 
 **Icon buttons:** Familiar controls should be icon-first, 24px square, with accessible labels and tooltips. Power, pipeline, mode, and idle Regenerate use muted foreground, not bright brand color. Active Stop generation may use a muted error tint, but it must stay compact and chrome-like rather than becoming a large alert.
 

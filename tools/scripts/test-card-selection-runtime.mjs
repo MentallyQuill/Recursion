@@ -72,7 +72,10 @@ for (const pipelineMode of ['segmented','fused']) {
     const catalog=CARD_CATALOG.find(c=>c.role===roleId);
     return {ok:true,data:{schema:'recursion.card.v1',snapshotHash:request.snapshotHash,role:roleId,family:catalog.family,items:[{promptText:'Current exchange guidance.',evidenceRefs:['message:0']}]}};
   }};
-  const runtime=createRecursionRuntime({host:{...realHost,providerProfiles:{list:()=>[{id:'u',completionMode:'chat'},{id:'r',completionMode:'chat'}]},prompt:{install:async()=>({ok:true,installed:true}),clear:async()=>({ok:true})}},settingsStore:store,storage:createStorageRepository(createMemoryStorageAdapter()),generationRouter:router});
+  const installedPackets = [];
+  const storage = createStorageRepository(createMemoryStorageAdapter());
+  const newRuntime = () => createRecursionRuntime({host:{...realHost,providerProfiles:{list:()=>[{id:'u',completionMode:'chat'},{id:'r',completionMode:'chat'}]},prompt:{install:async packet=>{ installedPackets.push(structuredClone(packet)); return {ok:true,installed:true}; },clear:async()=>({ok:true})}},settingsStore:store,storage,generationRouter:router});
+  let runtime = newRuntime();
   for(turn=0;turn<3;turn++){
     if(turn===2)store.update({minCards:2,maxCards:2});
     const prepared=await runtime.prepareForGeneration({hostGeneration:true,userMessage:chat.chat.at(-1).mes});
@@ -96,9 +99,22 @@ for (const pipelineMode of ['segmented','fused']) {
     if(turn<2)assert.equal(history.at(-1).cards[0].cardId,normalizedSources[turn].id);
     if(turn===0){
       const callCount=requests.length;
-      const swipe=await runtime.prepareForGeneration({hostGeneration:true,generationType:'swipe'});
-      assert.equal(swipe.ok,true,'same-turn swipe prepares');
-      assert.equal(requests.length,callCount,'same-turn swipe does not reroll or call arbiter');
+      const originalPacket = structuredClone(installedPackets.at(-1));
+      const originalOperation = (await storage.loadPipelineRun(chat.chatId)).operationId;
+      for (const response of ['Completed response 0', 'Long response. '.repeat(10000), '', 'Edited alternate response']) {
+        chat.chat.at(-1).mes = response;
+        await runtime.dispose();
+        runtime = newRuntime();
+        const restored = await runtime.restoreExecutionState();
+        assert.equal(restored.state, 'completed', 'reload after a response or empty swipe placeholder preserves cached preparation');
+        assert.equal(restored.operationId, originalOperation, 'restoration retains the original operation');
+        const installsBeforeSwipe = installedPackets.length;
+        const swipe=await runtime.prepareForGeneration({hostGeneration:true,generationType:'swipe'});
+        assert.equal(swipe.recursionPromptInstalled,true,'same-turn swipe reinstalls its packet');
+        assert.equal(installedPackets.length, installsBeforeSwipe + 1, 'swipe installs exactly once');
+        assert.deepEqual(installedPackets.at(-1), originalPacket, 'swipe injects the exact original packet');
+        assert.equal(requests.length,callCount,'restoration and swipe do not reroll or call any Recursion model');
+      }
       const message=chat.chat.at(-1);
       message.swipes=[message.mes,'Alternate completed response'];
       message.swipe_info=[{extra:structuredClone(message.extra)},{extra:{}}];
@@ -110,6 +126,11 @@ for (const pipelineMode of ['segmented','fused']) {
     }
     chat.chat.push({is_user:true,mes:`Next request ${turn}`});
   }
+  chat.chat.pop(); // Leave the completed assistant response as the latest row.
+  chat.chat[0].mes = 'Changed earlier source input';
+  const callsBeforeSourceEdit = requests.length;
+  assert.equal((await runtime.restoreExecutionState()).state, 'stale', 'restoration still rejects edits to preceding source messages');
+  assert.equal(requests.length, callsBeforeSourceEdit, 'source invalidation does not start model work');
 }
 console.log('[pass] successive real-host card selection');
 

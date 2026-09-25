@@ -9015,21 +9015,28 @@ export function createRecursionRuntime({
       return redact(manifest);
     }
     const restoreSettings = settingsStore.get();
-    const restoreUser = latestVisibleUserMessage(snapshot);
-    const restoreAssistant = latestVisibleAssistantEntry(snapshot);
+    const restoreAssistant = latestVisibleAssistantEntry(snapshot, { allowEmpty: true });
     const restoreSwipeMessageId = (
       restoreAssistant
-      && numberOr(restoreAssistant.message?.mesid, -1) > numberOr(restoreUser?.mesid, -1)
+      && numberOr(restoreAssistant.message?.mesid, -1) > numberOr(latestVisibleUserMessage(snapshot)?.mesid, -1)
     )
       ? finiteNumberOrNull(restoreAssistant.message?.mesid)
       : null;
+    // Use the same host-owned source as swipe preparation. Removing the output
+    // from an already bounded snapshot leaves its branch hash behind and cannot
+    // recover earlier messages displaced by a long assistant response.
+    const restoreSourceSnapshot = restoreSwipeMessageId === null
+      ? snapshot
+      : await readSwipeSourceSnapshot();
+    if (restoreSourceSnapshot.chatKey !== chatKey) return null;
+    const restoreUser = latestVisibleUserMessage(restoreSourceSnapshot);
     const restoreTurnIdentity = await createTurnIdentity({
-      snapshot,
+      snapshot: restoreSourceSnapshot,
       pendingUserMessage: restoreUser
         ? { text: restoreUser.text, mesid: restoreUser.mesid }
         : null,
       generationType: restoreSwipeMessageId === null ? 'normal' : 'swipe',
-      swipeMessageId: restoreSwipeMessageId,
+      swipeMessageId: null,
       retention: restoreSettings.retention,
       contracts: durableTurnContracts(restoreSettings)
     });
@@ -9039,9 +9046,6 @@ export function createRecursionRuntime({
         : 'same-turn-swipe',
       operationId: manifest.operationId
     });
-    const restoreSourceSnapshot = restoreSwipeMessageId === null
-      ? snapshot
-      : (snapshotWithoutLatestAssistant(snapshot, restoreAssistant) || snapshot);
     const observedProvenance = executionProvenance(
       restoreSourceSnapshot,
       restoreSettings,

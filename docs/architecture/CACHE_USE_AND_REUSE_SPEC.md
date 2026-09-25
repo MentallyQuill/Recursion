@@ -31,6 +31,8 @@ Every intercepted host generation is classified before provider work:
 
 The unchanged-swipe classifier binds SillyTavern's temporary empty assistant generation placeholder to the latest assistant message id, removes that output row before source-window message and character limits are applied, and validates the same pre-assistant source band before reuse. The length of an assistant response being rerolled therefore cannot evict older source messages or change the turn key. A fresh swipe uses the same pre-assistant snapshot for its final prompt-install freshness check. Empty rows are not treated as assistant identity for ordinary non-swipe host events.
 
+Execution restoration after reload or source events uses that same host-provided pre-assistant snapshot, including its card-selection branch hashes. A completed, edited, long, or temporarily empty latest assistant response does not invalidate the preparation that produced it. Changes to the preceding source messages still invalidate incompatible work.
+
 Historical Last Brief data is display-only. It has no generation-facing read API and cannot authorize prompt reuse.
 
 ## Durable Execution

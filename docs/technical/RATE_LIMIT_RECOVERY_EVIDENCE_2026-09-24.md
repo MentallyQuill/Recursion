@@ -28,4 +28,16 @@ The default-user Story chat continued to replay its original operation after the
 
 Preprocess graph contract 8 invalidates those checkpoints. The normal generation entry point also compares execution provenance before restoring saved artifacts or returning a completed packet, so Send can rebuild obsolete work even before startup restoration runs. The same-turn source identity remains bound to the saved source band; current-contract same-turn reuse still passes its existing tests.
 
-Regression coverage exercises paused and completed obsolete operations with an exhausted allowance, both with and without explicit reload restoration. Each rebuilds successfully with fresh planning and a new allowance, without an extra manual retry. All 106 offline scripts passed, and independent review found no actionable issues. Reopening the actual default-user Story branch with the updated runtime persisted `state: stale`, `pauseReason: provenance-changed`, and `staleChangedFields: [promptVersions]` for the old operation. Live provider generation requires separate verification; checkpoint invalidation alone is not evidence of a successful narration.
+Regression coverage exercises paused and completed obsolete operations with an exhausted allowance, both with and without explicit reload restoration. Each rebuilds successfully with fresh planning and a new allowance, without an extra manual retry. All 106 offline scripts passed, including from a clean archive of the committed tree, and independent review found no actionable issues. Reopening the actual default-user Story branch with the updated runtime persisted `state: stale`, `pauseReason: provenance-changed`, and `staleChangedFields: [promptVersions]` for the old operation.
+
+## Approved live Story verification
+
+With explicit approval to send Story context to the configured NanoGPT providers, a new message was sent through the normal SillyTavern interface on September 24 (September 25 UTC). The installed runtime was commit `89e2478f`.
+
+- A fresh operation replaced the obsolete checkpoint. Utility planning and Fused generation ran successfully.
+- Seven Fused cards passed validation. Realism was rejected with `hidden-content`, and one targeted Segmented request repaired it automatically. Recovery usage was 1 of 9; no provider rate limit occurred in this run.
+- All eight planned cards reached the hand, with no shortfall. Prompt installation completed and permitted native narration.
+- NanoGPT `z-ai/glm-5.3:thinking` produced a complete visible Story reply. Preparation took 46.3 seconds and the full turn took 70.5 seconds according to the persisted timing journal. The interface returned to Ready and removed Stop generation.
+- One user message and one assistant response were added. Prior message text remained unchanged. No manual retry or provider configuration change was needed.
+
+This verifies the reported chat's normal send path and automatic targeted repair with live providers. Rate-limit backoff remains covered by deterministic tests; this successful live run did not encounter an upstream rate limit.

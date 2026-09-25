@@ -6,17 +6,24 @@ export function normalizeInstructionValidationRule(value) {
   return VALIDATION_RULES.has(value) ? value : '';
 }
 
-const SUBJECT = String.raw`(?:(?:all|any|the|their|his|her)\s+)?(?:(?:hidden|private|secret|undisclosed)\s+)?(?:(?:internal|character)\s+)?(?:thoughts?|motives?|motivations?|intentions?|(?:future[-\s]+)?(?:plans?|plot|story)|spoilers?|chain[-\s]of[-\s]thought|unrevealed\s+facts?|out-of-character\s+analysis)`;
+const SUBJECT = String.raw`(?:(?:all|any|the|their|his|her)\s+)?(?:(?:hidden|private|secret|undisclosed)\s+)?(?:(?:internal|character)\s+)?(?:thoughts?|motives?|motivations?|intentions?|desires?|(?:future[-\s]+)?(?:plans?|plot|story)|spoilers?|chain[-\s]of[-\s]thought|unrevealed\s+facts?|out-of-character\s+analysis)`;
 // Character references are bounded noun phrases, never arbitrary trailing prose.
 const NAME_WORD = String.raw`(?!(?:and|or|but|then|unless|except|instead|until|when|whenever|if|once|after|before|without|save|provided|providing|assuming|should|as|only|reveal|expose|disclose|invent|assert|confirm|print|show|describe)\b)[a-z][a-z'-]*`;
 const CHARACTER = String.raw`(?:for|of)\s+` + NAME_WORD + String.raw`(?:\s+` + NAME_WORD + '){0,3}';
 const UNESTABLISHED = String.raw`(?:that|which)\s+(?:has|have)\s+not\s+been\s+established(?:\s+in\s+the\s+scene)?`;
 const OBJECT = SUBJECT + '(?:\\s+' + CHARACTER + ')?(?:\\s+' + UNESTABLISHED + ')?';
 const OBJECTS = OBJECT + String.raw`(?:\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)` + OBJECT + ')*';
+const FACT = String.raw`(?:(?:known|established|proven|certain|confirmed|settled|objective)\s+)?(?:facts?|truth)`;
+// Evidence guidance can distinguish an observation from an asserted private
+// state. Keep both sides bounded; arbitrary prose here could hide a disclosure.
+const OBSERVATION = String.raw`(?:subtext|interpretations?|inferences?|guidance)`;
+const GROUNDED = String.raw`(?:scene-observable|observable|evidence-grounded|explicitly\s+inferred|deniable\s+when\s+uncertain)`;
 const PROTECTIVE = [
   new RegExp(String.raw`^(?:do not|don't|never)\s+(?:reveal|expose|disclose|invent|assert|confirm|print|show|describe)\s+` + OBJECTS + String.raw`(?:\s+(?:to\s+(?:the\s+)?(?:reader|player)|in\s+(?:the\s+)?(?:narration|story|response)))?$`, 'i'),
   new RegExp(String.raw`^avoid\s+(?:revealing|exposing|disclosing|inventing|asserting|confirming|printing|showing|describing)\s+` + OBJECTS + String.raw`(?:\s+(?:to\s+(?:the\s+)?(?:reader|player)|in\s+(?:the\s+)?(?:narration|story|response)))?$`, 'i'),
   new RegExp(String.raw`^(?:do not|don't|never)\s+treat\s+` + OBJECTS + String.raw`\s+as\s+(?:known|established|proven|certain)(?:\s+facts?)?$`, 'i'),
+  new RegExp(String.raw`^(?:avoid\s+(?:presenting|portraying|stating|framing|treating|depicting)|(?:do not|don't|never)\s+(?:present|portray|state|frame|treat|depict))\s+` + OBJECTS + String.raw`\s+as\s+` + FACT + '$', 'i'),
+  new RegExp('^keep\\s+' + OBSERVATION + '\\s+' + GROUNDED + '(?:,\\s*' + GROUNDED + ')*' + String.raw`,?\s+and\s+separate\s+from\s+` + OBJECTS + String.raw`\s+as\s+` + FACT + '$', 'i'),
   new RegExp('^withhold\\s+' + OBJECTS + '$', 'i'),
   new RegExp('^keep\\s+' + OBJECTS + String.raw`\s+(?:private|hidden|unrevealed|uncertain|unknown|out\s+of\s+(?:the\s+)?(?:narration|story|response))$`, 'i')
 ];

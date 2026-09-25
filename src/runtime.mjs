@@ -7011,6 +7011,17 @@ export function createRecursionRuntime({
           ...request,
           prompt: `${request.prompt}\n\nRepair this family from the Fused bundle [${rejection.code}]: ${fusedRejectionReason(rejection.code)}\nReturn only this corrected card; accepted sibling cards are already preserved.`
         } : request;
+        // Repair the bundle on the connection selected for that bundle. Applying
+        // individual-card priority here silently moves low-priority repairs to
+        // Utility, even when Reasoner produced all their accepted siblings.
+        if (rejection) {
+          const lane = context.pipelineDecision.selectedLane;
+          return {
+            ...corrected,
+            lane,
+            ...reasoningRequestMetadata(lane === 'reasoner' ? context.settings : 'low', 'card')
+          };
+        }
         return applyReasoningLaneToCardRequest(corrected, context.settings, runtimeProviderCapability);
       });
     const requestByKey = new Map();

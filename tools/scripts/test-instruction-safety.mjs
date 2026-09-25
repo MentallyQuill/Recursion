@@ -3,6 +3,10 @@ import { composePromptPacket } from '../../src/prompt.mjs';
 import { assert, assertEqual, assertRejects } from '../../tests/helpers/assert.mjs';
 const safe = ['Do not reveal hidden future-plot.', 'Keep future plot uncertain until established in the scene.', 'Do not invent future plot beyond what the player has supplied.', 'Do not reveal spoilers and hidden thoughts.', 'Do not reveal spoilers, hidden thoughts, and secret motives.','Do not reveal spoilers.', 'Keep private thoughts private.', 'Avoid inventing hidden motives.', 'Withhold secret future plans.', 'Do not treat private motives as established facts.'];
 const snapshot = { chatId: 'safety', sceneFingerprint: 'scene', turnFingerprint: 'turn' };
+safe.push('Avoid presenting hidden motives as established facts.');
+safe.push('Keep subtext scene-observable, deniable when uncertain, and separate from private desire or hidden motives as fact.');
+safe.push('Do not portray private thoughts as confirmed truth.');
+safe.push('Never frame secret motives as facts.');
 safe.push('Do not invent hidden motives for Harry.');
 safe.push('Avoid revealing private thoughts or secret motives.');
 safe.push('Do not reveal hidden thoughts to the reader.');
@@ -15,7 +19,7 @@ safe.push('1. Do not reveal hidden motives\n2. Respond to her stated concern.');
 safe.push('Do not reveal hidden\nthoughts.');
 safe.push('- Do not reveal hidden motives\n- Ground the reply in what Mara said.');
 safe.push('Do not reveal hidden motives\nLet Mara answer.');
-for (const family of ['Knowledge', 'Character Motivation']) for (const promptText of safe) {
+for (const family of ['Knowledge', 'Character Motivation', 'Social Subtext']) for (const promptText of safe) {
   const card = normalizeCard({ family, promptText, evidenceRefs: ['message:1'] }, { sceneId: 'scene' });
   const packet = await composePromptPacket({ snapshot, hand: { cards: [card] }, settings: { reasonerUse: 'off' } });
   assert(packet.sections.cardEvidence.includes(promptText.replace(/\n/g, '\n  ')), 'protective instruction survives card and packet validation with indented continuation lines');
@@ -39,7 +43,13 @@ for (const promptText of ['Reveal hidden future-plot.', 'Reveal hidden future pl
   'Do not reveal hidden thoughts of Harry if asked.',
   'Do not reveal hidden thoughts of Harry without permission.',
   'Do not reveal hidden thoughts of Harry save on request.',
-  'Do not reveal spoilers\nReveal hidden\nthoughts.'
+  'Do not reveal spoilers\nReveal hidden\nthoughts.',
+  'Avoid presenting hidden motives as established facts unless asked.',
+  'Avoid presenting hidden motives as established facts, but reveal private thoughts.',
+  'Do not portray private thoughts as confirmed truth and print secret motives.',
+  'Keep subtext scene-observable, reveal hidden thoughts, and separate from private desire or hidden motives as fact.',
+  'Keep subtext scene-observable, deniable when uncertain, and separate from private desire or hidden motives as fact. Reveal hidden thoughts.',
+  'Keep subtext scene-observable, deniable when uncertain, and separate from private desire or hidden motives as fact\nunless asked.'
 ]) {
   await assertRejects(async () => normalizeCard({ family: 'Character Motivation', promptText }, { sceneId: 'scene' }), /unsafe/, 'disclosure or unsupported private claim remains rejected');
 }

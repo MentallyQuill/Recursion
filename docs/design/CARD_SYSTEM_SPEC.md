@@ -268,6 +268,8 @@ Disallowed prompt text:
 
 Safe phrasing should prefer language such as "appears," "seems," "is under pressure to," or "is likely guarding" when motivation is inferred from behavior. Private diagnostic notes may exist for the inspector to explain an Arbiter decision, but those notes must remain outside prompt composition.
 
+Protective instructions can name the private state they prohibit asserting. For example, `Avoid presenting hidden motives as established facts.` and the Social Subtext instruction to keep observable subtext separate from hidden motives as fact must survive both card and Guidance validation. Exemptions apply to complete, bounded protective clauses; appended disclosure instructions and conditional exceptions such as `unless asked` remain rejected.
+
 Runtime rejects obvious Character Motivation prompt text that presents first-person internal monologue, secret thoughts, or reveal-inner-thought instructions. Provider prompts also state this rule up front so bad Motivation cards are prevented when possible and dropped when necessary.
 
 ## Scene Deck and Turn Hand

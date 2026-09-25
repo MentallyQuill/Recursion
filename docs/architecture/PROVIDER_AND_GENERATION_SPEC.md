@@ -359,6 +359,8 @@ Each failed attempt receives one action.
 
 One retry never combines schema downgrade, budget reduction, sampler changes, and prompt changes. The scheduler records only allowlisted action and diagnostic codes.
 
+HTTP 408 and the host's exact `API request failed` message, when no definite permanent cause is available, use the ordinary bounded transient retry allowance. Confirmed authentication and invalid-request failures remain terminal. A wrapper HTTP 500 must not hide an upstream 401 or 429. Failure diagnostics preserve numeric HTTP status, known transport codes, and the configured model/provider identity without retaining upstream prose, response bodies, or credentials.
+
 Automatic attempts apply only to Recursion model stages. They do not retry SillyTavern's primary story generation.
 
 Capacity recovery permits eight automatic retries per stage, separate from model correction attempts and the operation's card-repair allowance. Backoff starts at two seconds and doubles to a sixty-second ceiling; a longer provider `Retry-After` always wins. The profile queue applies the cooldown to all queued calls on that connection and resets backoff after a successful transport. Other connections remain independent. The operation deadline bounds requests and waits, and Stop cancels waiting work immediately.
@@ -377,12 +379,15 @@ Fused request text includes the ID, name, selection state, and full sanitized in
 - Duplicate, unrequested, or invalid items are rejected independently.
 - Accepted families and unresolved families are explicit artifact fields.
 - When at least one item is useful, only unresolved families receive Segmented repair stages.
+- Fused repairs, including full fallback and subsequent correction attempts, retain the bundle's selected provider lane. Individual-card priority routing applies to an explicitly Segmented run, not to repairing a Reasoner bundle. Reload and Retry preserve this decision for an unchanged configuration.
 - Accepted Fused cards are not regenerated.
 - Fused artifacts and stage summaries retain bounded `{ family, code }` rejections. The first individual repair request includes the family's fixed rejection explanation, without the rejected response text. A repaired sibling does not mutate the original bundle's acceptance history.
 - When no useful item survives validation and model correction attempts are exhausted, the scheduler invokes the stage's explicit exhaustion settlement hook once and starts the full Segmented path.
 - Provider/transport failures do not create a successful fallback checkpoint or start Segmented card repair. They remain provider failures after bounded recovery, with preparation blocked until they are resolved.
 
 The exhaustion hook may settle an artifact but may not launch provider calls or mutate the graph directly.
+
+Retry reconciles the restored execution graph with persisted stage records before scheduling. Downstream stages not reached before a failure receive pending records; valid accepted checkpoints remain reusable.
 
 ## Reasoning-Level Routing
 

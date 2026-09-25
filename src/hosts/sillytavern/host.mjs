@@ -1104,10 +1104,15 @@ async function sendViaConnectionProfile(context, request = {}, readSecretMetadat
     overridePayload
     );
   } catch (error) {
-    error.providerDiagnostics = {...error.providerDiagnostics, timings: {
-      hostPreparationMs: transportStartedAt - preparationStartedAt,
-      transportMs: performance.now() - transportStartedAt
-    }};
+    error.providerDiagnostics = {
+      ...error.providerDiagnostics,
+      model,
+      providerSource: stringValue(apiMap.source || apiMap.type || profile.api).trim(),
+      timings: {
+        hostPreparationMs: transportStartedAt - preparationStartedAt,
+        transportMs: performance.now() - transportStartedAt
+      }
+    };
     throw error;
   }
   return {

@@ -1,3 +1,8 @@
+const TRANSIENT_TRANSPORT_CODES = new Set([
+  'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN',
+  'ENETDOWN', 'ENETRESET', 'ENETUNREACH'
+]);
+
 function providerFailureRecord(code, message, retryable, {
   kind = 'transport',
   category = 'provider'
@@ -38,21 +43,35 @@ function chainCodes(chain) {
 }
 
 function chainStatus(chain) {
-  for (const item of chain) {
+  const statuses = [];
+  for (const item of [...chain].reverse()) {
     const candidates = [item?.status, item?.statusCode, item?.response?.status];
     for (const candidate of candidates) {
       const value = Number(candidate || 0);
-      if (Number.isInteger(value) && value > 0) return value;
+      if (Number.isInteger(value) && value >= 400 && value < 600) statuses.push(value);
     }
   }
-  return 0;
+  // A gateway/wrapper failure must not hide a definitive upstream rejection.
+  return statuses.find((status) => status < 500 && status !== 408 && status !== 429)
+    || statuses.find((status) => status === 429)
+    || statuses.find((status) => status === 408)
+    || statuses[0] || 0;
 }
 
 export function normalizeProviderError(error) {
   const chain = errorChain(error);
+  const status = chainStatus(chain);
+  const transportCode = [...chainCodes(chain)].find((code) => TRANSIENT_TRANSPORT_CODES.has(code));
+  return Object.freeze({
+    ...classifyProviderError(error, chain, status),
+    ...(status ? { status } : {}),
+    ...(transportCode ? { transportCode } : {})
+  });
+}
+
+function classifyProviderError(error, chain, status) {
   const text = chainText(chain);
   const codes = chainCodes(chain);
-  const status = chainStatus(chain);
   const budgetCode = ['RECURSION_RECOVERY_BUDGET_EXHAUSTED', 'RECURSION_OPERATION_DEADLINE'].find((code) => codes.has(code));
   if (budgetCode) return providerFailureRecord(budgetCode,
     'The operation recovery or time allowance is exhausted.', false, { category: 'capacity' });
@@ -183,6 +202,27 @@ export function normalizeProviderError(error) {
     );
   }
 
+  if (codes.has('RECURSION_PROVIDER_AUTH_FAILED') || status === 401 || status === 403
+      || /\bunauthori[sz]ed\b|invalid api key|incorrect api key/.test(text)) {
+    return providerFailureRecord(
+      'RECURSION_PROVIDER_AUTH_FAILED',
+      'The selected profile could not authenticate.',
+      false,
+      { category: 'configuration' }
+    );
+  }
+
+  if ((status >= 400 && status < 500 && status !== 408 && status !== 429)
+      || codes.has('RECURSION_PROVIDER_REQUEST_INVALID')
+      || codes.has('invalid_request_error')) {
+    return providerFailureRecord(
+      'RECURSION_PROVIDER_FAILED',
+      status ? `The selected profile rejected the request (HTTP ${status}).` : 'The selected profile rejected the request.',
+      false,
+      { category: 'provider-request' }
+    );
+  }
+
   if (codes.has('RECURSION_PROVIDER_RATE_LIMIT')
       || codes.has('RECURSION_PROVIDER_RATE_LIMITED')
       || status === 429
@@ -203,24 +243,20 @@ export function normalizeProviderError(error) {
     ), retryAfterMs: Math.min(2147483647, Math.max(0, retryAfter ?? 1000)) });
   }
 
-  if (codes.has('RECURSION_PROVIDER_AUTH_FAILED') || status === 401 || status === 403
-      || /\bunauthori[sz]ed\b|invalid api key|incorrect api key/.test(text)) {
-    return providerFailureRecord(
-      'RECURSION_PROVIDER_AUTH_FAILED',
-      'The selected profile could not authenticate.',
-      false,
-      { category: 'configuration' }
-    );
+  if (chain.some((entry) => entry?.retryable === false)) {
+    return providerFailureRecord('RECURSION_PROVIDER_FAILED', 'The selected profile request failed.', false);
   }
 
   if (codes.has('RECURSION_PROVIDER_TRANSIENT')
       || codes.has('RECURSION_PROVIDER_TIMEOUT')
-      || ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE'].some((code) => codes.has(code))
+      || [...TRANSIENT_TRANSPORT_CODES].some((code) => codes.has(code))
+      || status === 408
       || status >= 500
+      || chain.some((entry) => /^api request failed$/i.test(String(entry?.message || '').trim()))
       || /econnreset|econnrefused|etimedout|timed? out|temporarily unavailable|socket hang up|fetch failed|network error/.test(text)) {
     return providerFailureRecord(
       'RECURSION_PROVIDER_TRANSIENT',
-      'The selected profile failed temporarily.',
+      status ? `The selected profile failed temporarily (HTTP ${status}).` : 'The selected profile failed temporarily.',
       true
     );
   }

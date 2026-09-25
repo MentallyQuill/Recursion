@@ -8,7 +8,7 @@ import {
   projectProfileSamplerPayload
 } from '../../src/hosts/sillytavern/profile-samplers.mjs';
 import { resolveGenerationPolicy } from '../../src/providers/generation-policy.mjs';
-import { createProviderClient } from '../../src/providers.mjs';
+import { createGenerationRouter, createProviderClient } from '../../src/providers.mjs';
 import { createSettingsStore } from '../../src/settings.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
@@ -217,5 +217,42 @@ assertEqual(Number.isFinite(providerResult.timings.hostPreparationMs), true, 'ho
 assertEqual(Number.isFinite(providerResult.timings.transportMs), true, 'transport time excludes queue and setup');
 assertEqual(JSON.parse(providerResult.text).ok, true, 'provider client uses the host profile transport');
 assertEqual(Object.hasOwn(client, 'fetchModels'), false, 'provider client exposes no direct model discovery');
+
+const failureJournal = [];
+const failingHost = createSillyTavernHost({
+  contextFactory: () => ({ ...context, ConnectionManagerRequestService: {
+    ...service,
+    async sendRequest() {
+      throw Object.assign(new Error('API request failed'), {
+        status: 500,
+        cause: Object.assign(new Error('Bearer PRIVATE_TOKEN http://private-endpoint PRIVATE_PROMPT PRIVATE_BODY'), {
+          response: { status: 401, body: 'PRIVATE_BODY' },
+          code: 'PRIVATE_UPSTREAM_CODE'
+        })
+      });
+    }
+  } }),
+  settingsRoot: {}, saveSettings() {}
+});
+const failureRouter = createGenerationRouter({
+  client: createProviderClient({ host: failingHost, settingsStore }),
+  journal: entry => failureJournal.push(entry)
+});
+const failureResult = await failureRouter.generate('providerTest', { prompt: 'PRIVATE_PROMPT' });
+assertEqual(failureResult.ok, false, 'failed host transport reaches router result');
+assertEqual(failureResult.error.status, 401, 'nested HTTP status survives router sanitization');
+assertEqual(failureResult.error.code, 'RECURSION_PROVIDER_AUTH_FAILED', 'nested authentication cause remains actionable');
+assertEqual(failureResult.error.retryable, false, 'confirmed authentication failure cannot retry');
+assertEqual(failureResult.diagnostics.model, 'qwen3-14b', 'failed transport retains configured model');
+assertEqual(failureResult.diagnostics.providerSource, 'koboldcpp', 'failed transport retains configured provider');
+const journalFailure = failureJournal.find(entry => entry.status === 'provider-failed');
+assertEqual(journalFailure.error.status, 401, 'journal retains safe HTTP status');
+assertEqual(journalFailure.model, 'qwen3-14b', 'journal retains configured model');
+assertEqual(journalFailure.providerSource, 'koboldcpp', 'journal retains configured provider');
+assert(Number.isFinite(journalFailure.timings.transportMs), 'failed transport retains duration');
+const serializedFailure = JSON.stringify({ failureResult, failureJournal });
+for (const secret of ['PRIVATE_TOKEN', 'private-endpoint', 'PRIVATE_PROMPT', 'PRIVATE_BODY', 'PRIVATE_UPSTREAM_CODE', 'must-not-leak', '127.0.0.1']) {
+  assertEqual(serializedFailure.includes(secret), false, `failed result and journal exclude ${secret}`);
+}
 
 console.log('[pass] profile transport v1');

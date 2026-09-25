@@ -45,16 +45,6 @@ const EDITORIAL_PATCH_DOMAINS = new Set([
   'anti-slop',
   'card-fidelity'
 ]);
-const TRANSIENT_CODES = new Set([
-  'ECONNRESET',
-  'ETIMEDOUT',
-  'EAI_AGAIN',
-  'ENETDOWN',
-  'ENETRESET',
-  'ENETUNREACH',
-  'EPIPE',
-  'RECURSION_PROVIDER_TIMEOUT'
-]);
 export const UTILITY_ROLE_IDS = Object.freeze([
   'utilityArbiter',
   'sceneFrameCard',
@@ -1740,25 +1730,6 @@ function errorChain(error, limit = 6) {
   return chain;
 }
 
-function retryability(error) {
-  const chain = errorChain(error);
-  for (const entry of chain) {
-    if (entry?.retryable === true) return true;
-    if (entry?.retryable === false) return false;
-    if (TRANSIENT_CODES.has(entry?.code)) return true;
-    const status = Number(entry?.status);
-    if (status === 429 || (status >= 500 && status < 600)) return true;
-    if (status >= 400 && status < 500) return false;
-  }
-  return chain.some((entry) => /^api request failed$/i.test(String(entry?.message || '').trim()))
-    ? true
-    : null;
-}
-
-function retryableError(error) {
-  return retryability(error) === true;
-}
-
 function actionableError(error) {
   const chain = errorChain(error);
   for (let index = chain.length - 1; index >= 0; index -= 1) {
@@ -1803,7 +1774,7 @@ function sanitizedError(error, request = {}) {
   const actionable = actionableError(error);
   const originalCode = String(actionable?.code || actionable?.name || 'RECURSION_PROVIDER_FAILED');
   const normalizedFailure = normalizeProviderError(error);
-  const rawCode = originalCode.startsWith('RECURSION_')
+  const rawCode = originalCode.startsWith('RECURSION_') && !normalizedFailure.status
     ? originalCode
     : normalizedFailure.code;
   const useNormalizedMessage = actionable?.external === true
@@ -1827,11 +1798,11 @@ function sanitizedError(error, request = {}) {
     : [];
   return sanitize({
     code: scrubKnownRequestText(rawCode, request),
+    ...(normalizedFailure.status ? { status: normalizedFailure.status } : {}),
+    ...(normalizedFailure.transportCode ? { transportCode: normalizedFailure.transportCode } : {}),
     ...(Number.isFinite(normalizedFailure.retryAfterMs) ? { retryAfterMs: normalizedFailure.retryAfterMs } : {}),
     message: truncate(compact(message), 300),
-    retryable: originalCode.startsWith('RECURSION_')
-      ? retryableError(error)
-      : normalizedFailure.retryable,
+    retryable: normalizedFailure.retryable,
     ...providerFailureDiagnostics(error),
     ...(roleId ? { roleId } : {}),
     ...(expectedSchema ? { expectedSchema: truncate(compact(expectedSchema), 120) } : {}),

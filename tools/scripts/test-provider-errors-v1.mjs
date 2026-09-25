@@ -53,4 +53,27 @@ assertEqual(normalizeProviderError({ status: 429, headers: { 'retry-after': '120
   120000, 'provider cooldown must not be shortened to one minute');
 assertEqual(JSON.stringify(sanitized).includes('SECRET_PROVIDER_TOKEN'), false, 'provider errors do not expose raw messages');
 
+for (const [name, error, code, retryable, status] of [
+  ['opaque Connection Manager failure', new Error('API request failed'), 'RECURSION_PROVIDER_TRANSIENT', true, undefined],
+  ['request timeout', { status: 408 }, 'RECURSION_PROVIDER_TRANSIENT', true, 408],
+  ['nested authentication overrides gateway status', { status: 500, cause: { response: { status: 401 } } }, 'RECURSION_PROVIDER_AUTH_FAILED', false, 401],
+  ['nested cooldown overrides gateway status', { status: 500, cause: { statusCode: 429 } }, 'RECURSION_PROVIDER_RATE_LIMIT', true, 429],
+  ['invalid request overrides generic failure', { message: 'API request failed', cause: { status: 400 } }, 'RECURSION_PROVIDER_FAILED', false, 400],
+  ['explicit permanent cause overrides generic failure', { message: 'API request failed', cause: { retryable: false } }, 'RECURSION_PROVIDER_FAILED', false, undefined],
+  ['invalid request code overrides generic failure', { message: 'API request failed', cause: { code: 'RECURSION_PROVIDER_REQUEST_INVALID' } }, 'RECURSION_PROVIDER_FAILED', false, undefined],
+  ['invalid request overrides transient wrapper', { code: 'RECURSION_PROVIDER_TRANSIENT', retryable: true, status: 500, cause: { status: 422 } }, 'RECURSION_PROVIDER_FAILED', false, 422],
+  ['auth status overrides rate-limit wording', { message: 'rate limit', status: 403 }, 'RECURSION_PROVIDER_AUTH_FAILED', false, 403],
+  ['temporary DNS resolution', { code: 'EAI_AGAIN' }, 'RECURSION_PROVIDER_TRANSIENT', true, undefined],
+  ['unknown error remains terminal', { message: 'private provider detail' }, 'RECURSION_PROVIDER_FAILED', false, undefined],
+  ['non-HTTP status is excluded', { status: 12345 }, 'RECURSION_PROVIDER_FAILED', false, undefined]
+]) {
+  const failure = normalizeProviderError(error);
+  assertEqual(failure.code, code, `${name}: code`);
+  assertEqual(failure.retryable, retryable, `${name}: retryability`);
+  assertEqual(failure.status, status, `${name}: safe HTTP status`);
+}
+assertEqual(normalizeProviderError({ code: 'ECONNRESET' }).transportCode, 'ECONNRESET', 'known transport code survives');
+assertEqual(normalizeProviderError({ code: 'PRIVATE_KEY', message: 'API request failed' }).transportCode,
+  undefined, 'arbitrary upstream codes do not become diagnostics');
+
 console.log('[pass] provider errors v1');

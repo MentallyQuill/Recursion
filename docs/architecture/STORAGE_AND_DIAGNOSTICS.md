@@ -134,6 +134,8 @@ Diagnostics export normalized settings, provider capability summaries, safe acti
 
 Actual failures expose a structured code, stage, category, readable message, retryability, attempted recovery, and suggested action. Host-stop warnings without an underlying error retain cancellation/unknown-cause metadata rather than an invented failure. Secret-bearing thrown errors are converted to fixed safe copy before reaching activity, journal, or caller surfaces.
 
+Provider failure records retain `status` only for numeric HTTP errors (400–599) and `transportCode` only for recognized transport failures. Failed connection-profile calls also retain the configured `model`, `providerSource`, and timing metadata. These fields identify the failing connection and response class without copying arbitrary upstream error codes, messages, URLs, or bodies.
+
 ## Failure Handling
 
 Host storage can fall back to memory when a write fails. The repository reports `persisted: false` and a sanitized warning; UI must not claim durable persistence. Manifest and artifact writes used for Resume remain integrity-checked even in memory.

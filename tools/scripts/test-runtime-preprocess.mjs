@@ -2,6 +2,7 @@ import { createActivityReporter } from '../../src/activity.mjs';
 import { createRecursionRuntime } from '../../src/runtime.mjs';
 import { createSettingsStore } from '../../src/settings.mjs';
 import { providerConfigHash } from '../../src/provider-capability.mjs';
+import { normalizeProviderError } from '../../src/providers/provider-errors.mjs';
 import {
   createMemoryStorageAdapter,
   createStorageRepository
@@ -273,6 +274,53 @@ for (const pipelineMode of ['fused', 'segmented']) {
     manifest.stageRecords['preprocess.hand'].checkpoint.artifactRef.artifactId);
   assertEqual(savedHand.cards[0].promptText, promptText, 'durable hand artifact retains instruction boundaries');
 
+}
+
+// A restarted Fused repair preserves the original lane and accepted siblings.
+{
+  const calls = [];
+  let failRepair = true;
+  const settings = {
+    pipelineMode: 'fused', reasoningLevel: 'high', reasonerUse: 'always', minCards: 2, maxCards: 2,
+    providers: { reasoner: { connectionProfileId: 'reasoner-profile' } }
+  };
+  const provider = { async generate(roleId, request) {
+    calls.push({ roleId, lane: request.lane });
+    if (roleId === 'utilityArbiter') return arbiterResponse(request, [
+      { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Keep the question in view.' },
+      { family: 'Social Subtext', role: 'socialSubtextCard', reason: 'Preserve the visible social pressure.' }
+    ]);
+    if (roleId === 'fusedCardBundle') return { ok: true, data: { items: [
+      { family: 'Scene Frame', promptText: 'Keep the question in view.', evidenceRefs: ['message:2'] },
+      { family: 'Social Subtext', promptText: 'Reveal hidden motives.', evidenceRefs: ['message:2'] }
+    ] } };
+    if (roleId === 'socialSubtextCard') {
+      if (failRepair) {
+        const error = normalizeProviderError(new Error('API request failed'));
+        return { ok: false, error, diagnostics: { failure: { category: error.category } } };
+      }
+      return cardResponse(roleId, request, { family: 'Social Subtext', promptText: 'Avoid presenting hidden motives as established facts.' });
+    }
+    if (roleId === 'guidanceComposer') return guidanceResponse(request);
+    throw new Error(`Unexpected role: ${roleId}`);
+  } };
+  const initial = createHarness({ settings, provider });
+  const failed = await initial.runtime.prepareForGeneration({ userMessage: { text: 'I ask what she remembers.', mesid: 2 }, hostGeneration: true });
+  assertEqual(failed.ok, false, 'failed repair blocks incomplete preparation');
+  const manifest = await initial.storage.loadPipelineRun('chat-preprocess');
+  assertEqual(manifest.stageRecords['preprocess.cards.segmented.social-subtext'].attempts.total, 2, 'ambiguous transport failure receives only the configured bounded attempts');
+  const originalBundleHash = manifest.stageRecords['preprocess.cards.fused'].checkpoint.outputHash;
+  failRepair = false;
+  const restored = createHarness({ storage: initial.storage, settings, provider });
+  const restoredState = await restored.runtime.restoreExecutionState();
+  assertEqual(restoredState.state, 'paused', 'restart restores the paused repair for the same source turn');
+  const retried = await restored.runtime.retryStage({ operationId: manifest.operationId, stageId: 'preprocess.cards.segmented.social-subtext' });
+  assertEqual(retried.execution.state, 'completed', 'restarted targeted Retry completes preparation');
+  assertDeepEqual(calls.filter(call => call.roleId === 'socialSubtextCard').map(call => call.lane), ['reasoner', 'reasoner', 'reasoner'], 'automatic retries and restored repairs use the bundle lane');
+  assertEqual(calls.filter(call => call.roleId === 'fusedCardBundle').length, 1, 'Retry does not regenerate accepted bundle siblings');
+  assertEqual(calls.filter(call => call.roleId === 'utilityArbiter').length, 1, 'Retry preserves the accepted plan');
+  const completed = await initial.storage.loadPipelineRun('chat-preprocess');
+  assertEqual(completed.stageRecords['preprocess.cards.fused'].checkpoint.outputHash, originalBundleHash, 'Retry preserves the original bundle checkpoint');
 }
 
 // Refinement is required analysis of the selected result before Guidance.
@@ -1534,8 +1582,9 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
   assert(!manifest.stageRecords['preprocess.install'], 'partial Segmented packet is never installed');
 }
 
-{
+for (const reasoningLevel of ['low', 'high']) {
   const providerCalls = [];
+  const cardLanes = [];
   const requestedCards = [
     { family: 'Scene Frame', role: 'sceneFrameCard', reason: 'Preserve current beat.' },
     { family: 'Scene Constraints', role: 'sceneConstraintsCard', reason: 'Preserve immediate constraints.' },
@@ -1573,6 +1622,7 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
         };
       }
       if (roleId === 'openThreadsCard') {
+        cardLanes.push(request.lane);
         assert(request.prompt.includes('missing-family'), 'first targeted repair explains the original bundle rejection');
         assert(request.prompt.includes('bundle did not return'), 'repair feedback includes an actionable description');
         return cardResponse(roleId, request, { family: 'Open Threads' });
@@ -1583,13 +1633,17 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
   };
   const { runtime, storage } = createHarness({
     provider,
-    settings: { pipelineMode: 'fused', minCards: 3, maxCards: 3 }
+    settings: {
+      pipelineMode: 'fused', minCards: 3, maxCards: 3, reasoningLevel,
+      reasonerUse: 'always', providers: { reasoner: { connectionProfileId: 'reasoner-profile' } }
+    }
   });
   const result = await runtime.prepareForGeneration({
     userMessage: 'I ask what she remembers.',
     hostGeneration: true
   });
   assertEqual(result.ok, true, 'partially useful Fused output completes after targeted repair');
+  assertDeepEqual(cardLanes, [reasoningLevel === 'high' ? 'reasoner' : 'utility'], 'targeted Fused repair keeps the bundle lane even for lower-priority families');
   assertEqual(
     providerCalls.filter((roleId) => roleId === 'fusedCardBundle').length,
     1,

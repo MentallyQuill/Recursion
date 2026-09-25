@@ -1187,6 +1187,11 @@ export function createExecutionScheduler({
       }
       runtime.manifest = normalizePipelineRun(loaded);
       runtime.graph = graph || runtime.graph;
+      // A restored graph can include downstream stages not reached before the
+      // failure. Reconcile them just as Resume does, retaining valid checkpoints.
+      runtime.manifest.stageRecords = graphStageRecords(
+        runtime.manifest, runtime.graph, attemptLimit(), now()
+      );
       runtime.context = context;
       runtime.provenance = expectedProvenance;
       const retryFromStageId = deadlineRetry ? stageId : stage.retryFromStageId || stageId;

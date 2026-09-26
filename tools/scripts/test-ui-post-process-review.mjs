@@ -10,6 +10,35 @@ assert.equal(large.coarse, true);
 assert(large.original.length <= 3 && large.revised.length <= 3);
 assert.equal(large.original.map(part => part.text).join(''), 'a '.repeat(100000));
 assert.equal(buildRevisionDiff('same', 'same').original.some(part => part.changed), false);
+// Ordinary chat replies must not mark unchanged prose between distant edits.
+const middle = 'The lamp stayed on while they waited beside the closed door. '.repeat(35);
+for (const separator of [' ', '\n\n']) {
+  const original = `Before.${separator}${middle}${separator}Finish.`;
+  const revised = `After.${separator}${middle}${separator}End.`;
+  const diff = buildRevisionDiff(original, revised);
+  assert.equal(diff.coarse, false, 'ordinary replies retain word-level comparison');
+  assert.equal(diff.original.filter(part => part.changed).map(part => part.text).join(''), 'Before.Finish.');
+  assert.equal(diff.revised.filter(part => part.changed).map(part => part.text).join(''), 'After.End.');
+  assert.equal(diff.original.map(part => part.text).join(''), original);
+  assert.equal(diff.revised.map(part => part.text).join(''), revised);
+}
+const longMiddle = 'An unchanged paragraph remains readable.\n'.repeat(1500);
+const longDiff = buildRevisionDiff(`Before.\n${longMiddle}Finish.`, `After.\n${longMiddle}End.`);
+assert.equal(longDiff.coarse, true);
+assert.equal(longDiff.original.filter(part => !part.changed).map(part => part.text).join(''), longMiddle,
+  'block fallback preserves matching paragraphs between edits');
+for (const [original, revised, removed, added] of [
+  ['', 'New text', '', 'New text'], ['Old text', '', 'Old text', ''],
+  ['A B C', 'A new B C', '', 'new '], ['A old B C', 'A B C', 'old ', ''],
+  ['雨 fell softly. 🕯️', '雨 fell quietly. 🕯️', 'softly.', 'quietly.'],
+  ['Line one.\r\n\r\nLine two.', 'Line one.\n\nLine two.', '\r\n\r\n', '\n\n']
+]) {
+  const diff = buildRevisionDiff(original, revised);
+  assert.equal(diff.original.map(part => part.text).join(''), original);
+  assert.equal(diff.revised.map(part => part.text).join(''), revised);
+  assert.equal(diff.original.filter(part => part.changed).map(part => part.text).join(''), removed);
+  assert.equal(diff.revised.filter(part => part.changed).map(part => part.text).join(''), added);
+}
 console.log('Post-process comparison UI diff: PASS');
 
 const controls = [];

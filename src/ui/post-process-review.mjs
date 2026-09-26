@@ -1,15 +1,58 @@
 import { normalizePostProcessWriter, normalizePostProcessStyle, validatePostProcessWriter } from '../post-process-editing.mjs';
 
+// Bounded Myers diff: sparse edits stay precise even in a long response.
+// The work budget bounds both token comparisons and retained search frontiers.
+function diffTokens(a, b) {
+  const trace = [];
+  let frontier = new Map([[1, 0]]), work = 0;
+  for (let depth = 0; depth <= a.length + b.length; depth++) {
+    trace.push(frontier);
+    const next = new Map();
+    for (let k = -depth; k <= depth; k += 2) {
+      if (++work > 160000) return null;
+      let x = k === -depth || (k !== depth && frontier.get(k - 1) < frontier.get(k + 1))
+        ? frontier.get(k + 1) : frontier.get(k - 1) + 1;
+      let y = x - k;
+      while (x < a.length && y < b.length && a[x] === b[y]) {
+        if (++work > 160000) return null;
+        x++; y++;
+      }
+      next.set(k, x);
+      if (x < a.length || y < b.length) continue;
+      const edits = [];
+      for (let d = depth; d >= 0; d--) {
+        const previous = trace[d], diagonal = x - y;
+        const previousK = diagonal === -d || (diagonal !== d && previous.get(diagonal - 1) < previous.get(diagonal + 1))
+          ? diagonal + 1 : diagonal - 1;
+        const previousX = previous.get(previousK), previousY = previousX - previousK;
+        while (x > previousX && y > previousY) {
+          edits.push({ type: 'equal', text: a[--x] }); y--;
+        }
+        if (d > 0) edits.push(x === previousX
+          ? { type: 'insert', text: b[--y] } : { type: 'delete', text: a[--x] });
+      }
+      return edits.reverse();
+    }
+    frontier = next;
+  }
+}
+
 // Return text segments only. Rendering always uses textContent, never generated HTML.
 export function buildRevisionDiff(original, revised) {
   const before = String(original ?? '');
   const after = String(revised ?? '');
   if (before === after) return { original: [{ text: before, changed: false }], revised: [{ text: after, changed: false }], coarse: false };
-  const coarse = before.length + after.length > 40000;
+  let coarse = before.length + after.length > 40000;
   const split = (text) => coarse ? text.split(/(?<=\n)/u) : (text.match(/\s+|[^\s]+/gu) || []);
-  const a = split(before), b = split(after);
-  // Bound both memory and comparisons; large texts use common paragraph edges.
-  if (coarse || a.length * b.length > 160000 || a.length + b.length > 3000) {
+  let a = split(before), b = split(after);
+  let edits = diffTokens(a, b);
+  if (!edits && !coarse) {
+    // Dense rewrites fall back to line blocks, retaining matching paragraphs.
+    coarse = true;
+    a = split(before); b = split(after);
+    edits = diffTokens(a, b);
+  }
+  if (!edits) {
     let start = 0, end = 0;
     while (start < Math.min(a.length, b.length) && a[start] === b[start]) start++;
     while (end < Math.min(a.length, b.length) - start && a[a.length - 1 - end] === b[b.length - 1 - end]) end++;
@@ -20,21 +63,15 @@ export function buildRevisionDiff(original, revised) {
     ].filter(part => part.text);
     return { original: parts(a), revised: parts(b), coarse: true };
   }
-  const rows = Array.from({ length: a.length + 1 }, () => new Uint16Array(b.length + 1));
-  for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) {
-    rows[i][j] = a[i] === b[j] ? rows[i + 1][j + 1] + 1 : Math.max(rows[i + 1][j], rows[i][j + 1]);
-  }
-  const result = { original: [], revised: [], coarse: false };
+  const result = { original: [], revised: [], coarse };
   const add = (side, text, changed) => {
     const last = result[side].at(-1);
     if (last?.changed === changed) last.text += text;
     else result[side].push({ text, changed });
   };
-  let i = 0, j = 0;
-  while (i < a.length || j < b.length) {
-    if (i < a.length && j < b.length && a[i] === b[j]) { add('original', a[i++], false); add('revised', b[j++], false); }
-    else if (i < a.length && (j === b.length || rows[i + 1][j] >= rows[i][j + 1])) add('original', a[i++], true);
-    else add('revised', b[j++], true);
+  for (const edit of edits) {
+    if (edit.type !== 'insert') add('original', edit.text, edit.type === 'delete');
+    if (edit.type !== 'delete') add('revised', edit.text, edit.type === 'insert');
   }
   return result;
 }

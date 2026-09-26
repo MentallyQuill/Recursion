@@ -114,6 +114,28 @@ try {
   assert((await dialog.textContent()).includes('<img src=x onerror=alert(1)>'));
   assert(await dialog.locator('del,ins').count() > 0);
   await page.screenshot({ path: resolve(output, 'comparison-desktop.png') });
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.evaluate(() => {
+    const record = window.records()[0];
+    window.shortComparison = structuredClone(record);
+    const middle = 'The lamp stayed on while they waited beside the closed door. '.repeat(35);
+    record.originalSnapshot.originalDraft = `Before.\n\n${middle}\n\nFinish.`;
+    record.candidateText = `After.\n\n${middle}\n\nEnd.`;
+    return window.ui.openPostProcessReview({ id: record.id });
+  });
+  assert.equal(await dialog.locator('del').allTextContents().then(parts => parts.join('')), 'Before.Finish.');
+  assert.equal(await dialog.locator('ins').allTextContents().then(parts => parts.join('')), 'After.End.');
+  assert.equal(await dialog.getByText('Large revision: changes are highlighted in blocks.', { exact: true }).count(), 0);
+  await page.screenshot({ path: resolve(output, 'comparison-long-desktop.png') });
+  await page.setViewportSize({ width: 390, height: 740 });
+  await page.screenshot({ path: resolve(output, 'comparison-long-mobile.png') });
+  assert(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth), 'long comparison fits mobile width');
+  await page.setViewportSize({ width: 1180, height: 850 });
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.evaluate(() => {
+    Object.assign(window.records()[0], window.shortComparison);
+    return window.ui.openPostProcessReview({ id: window.shortComparison.id });
+  });
   await dialog.getByRole('button', { name: 'Read clean text', exact: true }).click();
   assert.equal(await dialog.locator('del,ins').count(), 0);
   await page.evaluate(()=>window.deferRefresh());

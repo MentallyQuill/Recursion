@@ -1073,7 +1073,7 @@ async function sendViaConnectionProfile(context, request = {}, readSecretMetadat
       : openAiSource ? (/^gpt-5/.test(model) ? 'min' : 'low') : 'min';
   const reasoningEffort = reasoningIntent === 'none' ? offEffort : apiMap.source === 'nanogpt'
     ? { none: 'min', minimal: 'low', medium: 'high', high: 'max' }[reasoningIntent]
-    : { none: 'none', minimal: 'min', medium: 'medium', high: 'high' }[reasoningIntent];
+    : { none: 'none', minimal: source === 'openrouter' ? 'minimal' : 'min', medium: 'medium', high: 'high' }[reasoningIntent];
   const overridePayload = {
     ...samplerPayload,
     ...(completionMode === 'chat' && reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),

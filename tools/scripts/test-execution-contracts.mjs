@@ -170,6 +170,8 @@ assertDeepEqual(stageRecord, {
   checkpoint: null,
   summary: null,
   timings: null,
+  recoveryCounts: { parseFailures: 0, shapeFailures: 0, correctionRequests: 0, budgetAdjustments: 0,
+    rateLimitRetries: 0, transientRetries: 0, salvagedItems: 0, segmentedRepairCalls: 0, optionalOmissions: 0, requiredBlocks: 0 },
   failure: null,
   diagnosticCodes: [],
   lastAttemptAction: null,

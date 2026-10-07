@@ -3,10 +3,10 @@ import { createSettingsStore } from '../../src/settings.mjs';
 import { createDefaultCardDeck } from '../../src/pre-process-decks.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from '../../src/storage.mjs';
 
-export async function runCardBudgetFixture({ pipelineMode = 'segmented', reasoningLevel = 'medium',
-  minCards = 8, maxCards = 12, strength = 'balanced', authoredCount = 3,
+export async function runCardBudgetFixture({ pipelineMode = 'segmented', reasoningLevel = 'medium', mode = 'auto',
+  cardsPerTurn = 10, strength = 'balanced', promptFootprint = 'normal', authoredCount = 3,
   allowedFamilies = null, partial = false, failedFamily = '', priorityFamily = '',
-  proposed = ['Knowledge'], lifecycle = [], storage = null } = {}) {
+  proposed = ['Knowledge'], lifecycle = [], storage = null, configureDeck = null, providerOverride = null } = {}) {
   const deck = createDefaultCardDeck();
   deck.id = 'budget-fixture'; deck.readonly = false; deck.bundled = false;
   for (const card of Object.values(deck.cards)) {
@@ -20,8 +20,9 @@ export async function runCardBudgetFixture({ pipelineMode = 'segmented', reasoni
       promptText: `Preserve player agency and visible continuity (${index + 1}).`, selectionState: 'priority' };
     deck.cardOrderByCategory[categoryId].push(id);
   }
+  configureDeck?.(deck);
   const settingsStore = createSettingsStore({ root: {} });
-  settingsStore.update({ pipelineMode, reasoningLevel, minCards, maxCards, strength, reasonerUse: 'off',
+  settingsStore.update({ pipelineMode, reasoningLevel, mode, cardsPerTurn, strength, promptFootprint, reasonerUse: 'off',
     modelAttemptsPerStep: 2, providers: { utility: { connectionProfileId: 'fixture' } },
     preProcessDecks: { activeDeckId: deck.id, customDecks: { [deck.id]: deck } } });
   const calls = [];
@@ -40,6 +41,8 @@ export async function runCardBudgetFixture({ pipelineMode = 'segmented', reasoni
     },
     generationRouter: { async generate(roleId, request) {
       calls.push({ roleId, request });
+      const override = await providerOverride?.(roleId, request);
+      if (override !== undefined) return override;
       if (roleId === 'utilityArbiter') return { ok: true, data: {
         schema: 'recursion.utilityArbiter.v1', snapshotHash: request.snapshotHash,
         action: 'refresh-cards', sceneStatus: 'same-scene', promptFootprint: 'normal', lifecycle,
@@ -52,6 +55,16 @@ export async function runCardBudgetFixture({ pipelineMode = 'segmented', reasoni
         guidanceText: 'Keep Mara at the archive and answer the immediate question.',
         sourceCardIds: [], guardrailCardIds: [], omittedCardIds: [], diagnostics: []
       } };
+      if (roleId === 'cardRefinementDraft') return { ok: true, data: {
+        schema: request.responseSchema, snapshotHash: request.snapshotHash,
+        items: request.refinementCardIds.map(cardId => ({ cardId, promptText: 'Keep the archive exchange grounded in visible evidence.', evidenceRefs: ['message:2'] }))
+      } };
+      if (roleId === 'cardRefinementReview') return { ok: true, data: {
+        schema: request.responseSchema, snapshotHash: request.snapshotHash,
+        items: request.refinementTargetIds.map(targetId => ({ targetId, verdict: 'accept',
+          assessment: { status: 'satisfied', summary: 'The selected result preserves the visible archive exchange.',
+            evidenceRefs: ['message:2'], supportingCardIds: [request.targets.find(target => target.id === targetId).cardId] }, findings: [] }))
+      } };
       const item = family => ({ family, promptText: `Keep the current ${family.toLowerCase()} grounded in the archive exchange.`, evidenceRefs: ['message:2'] });
       if (roleId === 'fusedCardBundle') return { ok: true, data: { items:
         (partial ? request.requestedCards.slice(0, 1) : request.requestedCards)
@@ -63,5 +76,5 @@ export async function runCardBudgetFixture({ pipelineMode = 'segmented', reasoni
     } }
   });
   const result = await runtime.prepareForGeneration({ userMessage: { text: 'I ask what she remembers.', mesid: 2 } });
-  return { result, runtime, view: runtime.view(), calls, get installed() { return installed; }, recoverProvider() { failedFamily = ''; }, storage: repository };
+  return { result, runtime, settingsStore, view: runtime.view(), calls, get installed() { return installed; }, recoverProvider() { failedFamily = ''; }, storage: repository };
 }

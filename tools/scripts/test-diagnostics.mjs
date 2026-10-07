@@ -13,6 +13,19 @@ import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
 import { classifyModelFailure } from '../../src/execution/attempt-policy.mjs';
 import { normalizeStageRecord } from '../../src/execution/checkpoints.mjs';
 
+const issueRecord = normalizeStageRecord({ stageId: 'shape', state: 'failed', failure: {
+  code: 'RECURSION_PROVIDER_SCHEMA_MISMATCH', fieldIssues: [{ path: '$.promptText', rule: 'type', message: 'PRIVATE_CANARY' }]
+} });
+assertEqual(issueRecord.failure.fieldIssues?.[0]?.path, '$.promptText', 'safe field issues survive durable reload');
+assert(!JSON.stringify(issueRecord).includes('PRIVATE_CANARY'), 'durable field issues replace arbitrary prose with rule messages');
+const observedRecovery = summarizeExecutionForDiagnostics({ operationId: 'recovery-counts', stageRecords: {
+  first: { stageId: 'first', recoveryCounts: { parseFailures: 2, correctionRequests: 1, response: 'PRIVATE_CANARY' } },
+  second: { stageId: 'second', recoveryCounts: { parseFailures: 3, optionalOmissions: 1 } }
+} });
+assertEqual(observedRecovery.recoveryCounts?.parseFailures, 5, 'operation counters aggregate actual stage counters');
+assertEqual(observedRecovery.recoveryCounts?.optionalOmissions, 1, 'optional omissions remain observable');
+assert(!JSON.stringify(observedRecovery).includes('PRIVATE_CANARY'), 'counter export has a fixed data shape');
+
 for (const validationRule of ['model-reasoning', 'character-interiority', 'unrevealed-story', 'CANARY_PRIVATE_PROSE', { text: 'CANARY_PRIVATE_PROSE' }]) {
   const error = { code: 'RECURSION_GUIDANCE_INVALID', category: 'validation', message: 'Guidance is invalid.', validationRule };
   const expected = typeof validationRule === 'string' && !validationRule.startsWith('CANARY') ? validationRule : undefined;

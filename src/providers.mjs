@@ -15,10 +15,13 @@ import {
 } from './providers/provider-response-normalizer.mjs';
 import {
   STRUCTURED_OUTPUT_PARSE_ERROR_CODES,
+  STRUCTURED_OUTPUT_LIMITS,
+  extractJsonObjectsFromArrayProperty,
   parseStructuredJsonText
 } from './providers/structured-output-parser.mjs';
 import { createProfileRequestQueue } from './providers/profile-request-queue.mjs';
 import { normalizeProviderError } from './providers/provider-errors.mjs';
+import { normalizeOutputIssues, validateOutputShape } from './providers/output-contract.mjs';
 import { outputBudgetForRequest } from './providers/stage-output-budgets.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
 import {
@@ -953,7 +956,7 @@ export function jsonSchemaForRequest(request = {}) {
   };
 }
 
-function responseStructure(value) {
+function responseStructure(value, schema = {}) {
   if (!plainObject(value)) return [];
   return Object.keys(value)
     .filter((key) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(key))
@@ -964,7 +967,7 @@ function responseStructure(value) {
       if (Array.isArray(child)) return `${key}:array(${Math.min(child.length, 999)})`;
       if (plainObject(child)) {
         const fields = Object.keys(child)
-          .filter((field) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(field))
+          .filter((field) => Object.hasOwn(schema.properties?.[key]?.properties || {}, field))
           .sort()
           .slice(0, 12);
         return `${key}:object(${fields.join(',')})`;
@@ -974,8 +977,9 @@ function responseStructure(value) {
     });
 }
 
-function validateCardPayload(data) {
-  return plainObject(data)
+function validateCardPayload(data, request = {}) {
+  return validateOutputShape(data, jsonSchemaForRequest({ ...request, responseSchema: 'recursion.cardPayload.v1' }).schema).ok
+    && plainObject(data)
     && typeof data.promptText === 'string'
     && data.promptText.trim().length > 0
     && Array.isArray(data.evidenceRefs)
@@ -983,7 +987,8 @@ function validateCardPayload(data) {
     && data.evidenceRefs.every((ref) => typeof ref === 'string' && ref.trim().length > 0);
 }
 
-function validateCardBundlePayload(data) {
+function validateCardBundlePayload(data, request = {}) {
+  if (!validateOutputShape(data, jsonSchemaForRequest({ ...request, responseSchema: 'recursion.cardBundlePayload.v1' }).schema).ok) return false;
   if (!plainObject(data) || !Array.isArray(data.items)) return false;
   return data.items.every((item) => plainObject(item)
     && typeof item.family === 'string'
@@ -998,14 +1003,18 @@ function validateCardBundlePayload(data) {
         && item.coveredSourceCardIds.every((id) => typeof id === 'string'))));
 }
 
-function validateRoleResponseSchema(roleId, data) {
+function validateRoleResponseSchema(roleId, data, request = {}, wireData = data) {
   const expected = expectedResponseSchema(roleId);
   if (!expected) throw unsupportedRoleError(roleId);
+  const schema = jsonSchemaForRequest({ ...request, responseSchema: expected }).schema;
+  const wireValue = roleId === 'postProcessGuidanceUtility' || roleId === 'postProcessGuidanceReasoner'
+    ? { guidanceText: data.guidanceText } : wireData;
+  const checked = validateOutputShape(wireValue, schema);
   if (SEGMENTED_CARD_ROLES.has(roleId)) {
-    if (validateCardPayload(data)) return;
+    if (validateCardPayload(data, request)) return;
   } else if (roleId === 'fusedCardBundle') {
-    if (validateCardBundlePayload(data)) return;
-  } else if (String(data?.schema || '').trim() === expected) {
+    if (validateCardBundlePayload(data, request)) return;
+  } else if (checked.ok && String(data?.schema || '').trim() === expected) {
     return;
   }
   const actual = String(data?.schema || '').trim();
@@ -1016,11 +1025,12 @@ function validateRoleResponseSchema(roleId, data) {
   );
   error.roleId = roleId;
   error.expectedSchema = expected;
-  error.actualSchema = actual || '(missing)';
+  error.actualSchema = actual === expected ? expected : actual ? '(unexpected)' : '(missing)';
+  error.fieldIssues = checked.issues;
   error.responseFields = plainObject(data)
-    ? Object.keys(data).filter((key) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(key)).sort().slice(0, 24)
+    ? Object.keys(data).filter((key) => Object.hasOwn(schema.properties || {}, key)).sort().slice(0, 24)
     : [];
-  error.responseShape = responseStructure(data);
+  error.responseShape = responseStructure(Object.fromEntries(error.responseFields.map((key) => [key, data[key]])), schema);
   throw error;
 }
 
@@ -1106,6 +1116,14 @@ function normalizeCardTextLines(data) {
 }
 
 function normalizeRoleResponse(roleId, data, request = {}) {
+  if (roleId === 'postProcessGuidanceUtility' || roleId === 'postProcessGuidanceReasoner') {
+    const checked = validateOutputShape(data, POST_PROCESS_GUIDANCE_JSON_SCHEMA);
+    if (!checked.ok) {
+      const error = providerError('RECURSION_POST_PROCESS_GUIDANCE_INVALID', 'Post-process guidance output did not match the requested shape.');
+      error.fieldIssues = checked.issues;
+      throw error;
+    }
+  }
   if (SEGMENTED_CARD_ROLES.has(roleId)) {
     const normalized = normalizeCardTextLines(data);
     if (normalized !== data) return { data: normalized, diagnostics: { semanticNormalization: 'card-text-lines' } };
@@ -1119,7 +1137,8 @@ function normalizeRoleResponse(roleId, data, request = {}) {
     // fill omissions; conflicting identities must still fail validation.
     const recovered = !Object.hasOwn(data, 'schema') || !Object.hasOwn(data, 'snapshotHash');
     return {
-      data: { ...data, schema: expectedResponseSchema(roleId), snapshotHash: request.snapshotHash },
+      data: { sourceCardIds: [], guardrailCardIds: [], omittedCardIds: [], diagnostics: [],
+        ...data, schema: expectedResponseSchema(roleId), snapshotHash: request.snapshotHash },
       diagnostics: recovered ? { semanticNormalization: 'guidance-request-envelope' } : {}
     };
   }
@@ -1130,12 +1149,15 @@ function normalizeRoleResponse(roleId, data, request = {}) {
     const counts = new Map();
     for (const item of data.items) counts.set(item?.family, (counts.get(item?.family) || 0) + 1);
     const rejections = [];
-    const items = normalizedItems.filter((item) => {
-      const reason = !validateCardBundlePayload({ items: [item] }) ? 'invalid-item-shape'
+    const items = normalizedItems.filter((item, index) => {
+      const checked = validateOutputShape(item, jsonSchemaForRequest({ ...request,
+        responseSchema: 'recursion.cardBundlePayload.v1' }).schema.properties.items.items);
+      const reason = !checked.ok || !validateCardBundlePayload({ items: [item] }, request) ? 'invalid-item-shape'
         : counts.get(item.family) > 1 ? 'duplicate-family'
         : requested.size && !requested.has(item.family) ? 'unrequested-family' : '';
       if (!reason) return true;
-      if (rejections.length < 40) rejections.push({ family: String(item?.family || '').slice(0, 120), reason });
+      if (rejections.length < 40) rejections.push({ family: requested.has(item?.family) ? item.family : '', reason,
+        ...(checked.issues.length ? { fieldIssues: checked.issues.map((issue) => ({ ...issue, path: `items[${index}].${issue.path}`.slice(0, 160) })) } : {}) });
       return false;
     });
     return { data: { ...data, items }, diagnostics: { bundleItemRejections: rejections,
@@ -1143,8 +1165,23 @@ function normalizeRoleResponse(roleId, data, request = {}) {
   }
   const nestedCard = normalizeNestedCardEnvelope(roleId, data, request);
   if (nestedCard) return nestedCard;
+  const normalized = normalizeRoleResponseEnvelope(roleId, data, request);
+  let wireData = normalized;
+  if (roleId === 'editorialVerifier' && ['repair', 'redirect'].includes(request.mode) && plainObject(data)) {
+    // The wire contract is compact; the semantic envelope expands verified IDs
+    // into locally constructed outcomes and checks after this shape boundary.
+    wireData = { ...data };
+    for (const field of ['schema', 'mode', 'sourceHash', 'snapshotHash', 'diagnosisHash', 'candidateHash']) {
+      wireData[field] = normalized[field];
+    }
+    if (request.mode === 'repair') wireData.failedCardIds = normalizeRepairFailedCardIds(data.failedCardIds, request) ?? data.failedCardIds;
+  } else if (roleId === 'editorialDiagnostician' && normalized?.repairSignals) {
+    wireData = { ...normalized };
+    delete wireData.repairSignals;
+  }
   return {
-    data: normalizeRoleResponseEnvelope(roleId, data, request),
+    data: normalized,
+    wireData,
     diagnostics: {}
   };
 }
@@ -1492,13 +1529,13 @@ export function providerModelStatus(provider = {}, options = {}) {
 export function providerRouteSummary(settings = {}, host = {}) {
   const level = String(settings?.reasoningLevel || 'medium').toLowerCase();
   const normalizedLevel = ['low', 'medium', 'high', 'ultra'].includes(level) ? level : 'medium';
-  const capability = resolveProviderCapability({
+  const capability = host.reasonerCapability?.lane === 'reasoner' ? host.reasonerCapability : resolveProviderCapability({
     settings,
     lane: 'reasoner',
     operation: 'prompt-packet',
     host
   });
-  const reasonerHealthy = capability.ready;
+  const reasonerHealthy = capability.eligible === true;
   const reasonerLabel = reasonerHealthy ? 'Reasoner' : 'Utility fallback';
   const summary = normalizedLevel === 'low'
     ? { arbiter: 'Utility', cards: 'Utility', composer: 'Utility' }
@@ -1515,7 +1552,7 @@ export function providerRouteSummary(settings = {}, host = {}) {
   };
 }
 
-function providerResponseFailureError(error, enriched = {}) {
+function providerResponseFailureError(error, enriched = {}, visibleText = '') {
   const code = String(error?.code || '');
   const details = error?.details || {};
   const providerDiagnostics = sanitize({
@@ -1531,10 +1568,13 @@ function providerResponseFailureError(error, enriched = {}) {
     reasoningLength: details.reasoningLength
   }, 300);
   if (code === PROVIDER_RESPONSE_ERROR_CODES.TOKEN_LIMIT) {
-    throw providerError('RECURSION_PROVIDER_TOKEN_LIMIT', 'Provider response stopped at the token limit before returning complete visible JSON.', {
+    const failure = providerError('RECURSION_PROVIDER_TOKEN_LIMIT', 'Provider response stopped at the token limit before returning complete visible JSON.', {
       retryable: false,
       providerDiagnostics
     });
+    const text = String(visibleText || error?.recoverableText || '');
+    if (text.length <= STRUCTURED_OUTPUT_LIMITS.maxCharacters) failure.recoverableText = text;
+    throw failure;
   }
   if ([PROVIDER_RESPONSE_ERROR_CODES.REFUSAL, PROVIDER_RESPONSE_ERROR_CODES.CONTENT_FILTER].includes(code)) {
     throw providerError(code === PROVIDER_RESPONSE_ERROR_CODES.REFUSAL
@@ -1659,7 +1699,7 @@ function normalizeProviderResponse(response, enriched) {
     PROVIDER_RESPONSE_ERROR_CODES.CONTENT_FILTER].includes(failure?.code)
       || (!envelope.structured && !String(envelope.text || '').trim())) {
     if (failure) {
-      providerResponseFailureError({ code: failure.code, details: failure }, enriched);
+      providerResponseFailureError({ code: failure.code, details: failure }, enriched, envelope.text);
     }
     providerVisibleText(raw, enriched);
   }
@@ -1720,6 +1760,9 @@ function normalizeProviderSlotFailure(response = {}, enriched = {}, batchDiagnos
     providerId: enriched.providerSource,
     model: '',
     providerConfig: enriched.providerConfig,
+    ...(rawError.code === 'RECURSION_PROVIDER_TOKEN_LIMIT' && typeof rawError.recoverableText === 'string'
+      && rawError.recoverableText.length <= STRUCTURED_OUTPUT_LIMITS.maxCharacters
+      ? { recoverableText: rawError.recoverableText } : {}),
     slotError: sanitize({
       code: code.slice(0, 120),
       message: message.slice(0, 300),
@@ -1818,12 +1861,14 @@ function sanitizedError(error, request = {}) {
     ...(Number.isFinite(normalizedFailure.retryAfterMs) ? { retryAfterMs: normalizedFailure.retryAfterMs } : {}),
     message: truncate(compact(message), 300),
     retryable: normalizedFailure.retryable,
+    ...(normalizedFailure.attemptedStructuredOutputMethod ? { attemptedStructuredOutputMethod: normalizedFailure.attemptedStructuredOutputMethod } : {}),
     ...providerFailureDiagnostics(error),
     ...(roleId ? { roleId } : {}),
     ...(expectedSchema ? { expectedSchema: truncate(compact(expectedSchema), 120) } : {}),
     ...(actualSchema ? { actualSchema: truncate(compact(actualSchema), 120) } : {}),
     ...(responseFields.length ? { responseFields } : {}),
-    ...(responseShape.length ? { responseShape } : {})
+    ...(responseShape.length ? { responseShape } : {}),
+    ...(normalizeOutputIssues(actionable?.fieldIssues).length ? { fieldIssues: normalizeOutputIssues(actionable.fieldIssues) } : {})
   }, 300);
 }
 
@@ -1867,7 +1912,7 @@ function providerFailureDiagnostics(error) {
 }
 
 function statusForError(error) {
-  if (error?.code === 'RECURSION_JSON_PARSE_FAILED' || error?.code === 'RECURSION_JSON_OBJECT_REQUIRED') {
+  if (String(error?.code || '').startsWith('RECURSION_JSON_')) {
     return 'validation-failed';
   }
   if (error?.code === 'RECURSION_PROVIDER_TIMEOUT') return 'timeout';
@@ -2105,13 +2150,30 @@ export function roleLane(roleId) {
   return '';
 }
 
+function structuredParseFailureCode(diagnostic = {}) {
+  return ({
+    [STRUCTURED_OUTPUT_PARSE_ERROR_CODES.JSON_NOT_OBJECT]: 'RECURSION_JSON_OBJECT_REQUIRED',
+    [STRUCTURED_OUTPUT_PARSE_ERROR_CODES.JSON_AMBIGUOUS]: 'RECURSION_JSON_AMBIGUOUS',
+    [STRUCTURED_OUTPUT_PARSE_ERROR_CODES.JSON_SIZE_LIMIT]: 'RECURSION_JSON_SIZE_LIMIT',
+    [STRUCTURED_OUTPUT_PARSE_ERROR_CODES.JSON_DEPTH_LIMIT]: 'RECURSION_JSON_DEPTH_LIMIT',
+    [STRUCTURED_OUTPUT_PARSE_ERROR_CODES.JSON_ITEM_LIMIT]: 'RECURSION_JSON_ITEM_LIMIT'
+  })[diagnostic.code] || 'RECURSION_JSON_PARSE_FAILED';
+}
+
+function recoverableProviderItems(roleId, raw, error, request = {}) {
+  if (roleId !== 'fusedCardBundle' || request.signal?.aborted) return [];
+  const failure = actionableError(error);
+  if (!['RECURSION_JSON_PARSE_FAILED', 'RECURSION_JSON_OBJECT_REQUIRED', 'RECURSION_JSON_AMBIGUOUS',
+    'RECURSION_PROVIDER_SCHEMA_MISMATCH', 'RECURSION_PROVIDER_TOKEN_LIMIT'].includes(failure?.code)) return [];
+  const items = extractJsonObjectsFromArrayProperty(String(raw?.text || failure?.recoverableText || ''));
+  return normalizeRoleResponse(roleId, { items }, request).data.items;
+}
+
 export function parseStructuredOutput(text) {
   const parsed = parseStructuredJsonText(text);
   if (!parsed.ok) {
     const error = new Error(parsed.error || 'Provider output was not a valid JSON object.');
-    error.code = parsed.diagnostic?.code === STRUCTURED_OUTPUT_PARSE_ERROR_CODES.JSON_NOT_OBJECT
-      ? 'RECURSION_JSON_OBJECT_REQUIRED'
-      : 'RECURSION_JSON_PARSE_FAILED';
+    error.code = structuredParseFailureCode(parsed.diagnostic);
     error.diagnostic = parsed.diagnostic;
     throw error;
   }
@@ -2120,6 +2182,12 @@ export function parseStructuredOutput(text) {
 
 function parseProviderStructuredOutput(envelope = {}) {
   if (envelope?.structured && typeof envelope.structured === 'object' && !Array.isArray(envelope.structured)) {
+    const checked = parseStructuredJsonText(JSON.stringify(envelope.structured));
+    if (!checked.ok) {
+      const error = providerError(structuredParseFailureCode(checked.diagnostic), 'Provider structured output exceeded the allowed JSON structure.');
+      error.diagnostic = checked.diagnostic;
+      throw error;
+    }
     return {
       data: envelope.structured,
       diagnostics: {
@@ -2132,9 +2200,7 @@ function parseProviderStructuredOutput(envelope = {}) {
   const text = String(envelope?.text || '');
   const parsed = parseStructuredJsonText(text);
   if (!parsed.ok) {
-    const code = parsed.diagnostic?.code === STRUCTURED_OUTPUT_PARSE_ERROR_CODES.JSON_NOT_OBJECT
-      ? 'RECURSION_JSON_OBJECT_REQUIRED'
-      : 'RECURSION_JSON_PARSE_FAILED';
+    const code = structuredParseFailureCode(parsed.diagnostic);
     const error = providerError(code, 'Provider output was not a valid JSON object.', { retryable: false });
     error.diagnostic = parsed.diagnostic;
     throw error;
@@ -2240,10 +2306,12 @@ export function createProviderClient({
         { retryable: false }
       );
     }
+    const liveProfile = () => listProviderConnectionProfiles({ host })
+      .find((profile) => profile.id === enriched.connectionProfileId);
     const concurrencyLimit = () =>
       enriched.certification === true && enriched.roleId === 'providerTest' && enriched.concurrencyProbe
         ? Math.min(3, Math.max(1, Number(enriched.concurrencyProbe.limit) || 1))
-        : effectiveProfileConcurrency(readSettings(settingsStore), enriched.connectionProfileId);
+        : effectiveProfileConcurrency(readSettings(settingsStore), enriched.connectionProfileId, liveProfile());
     requestQueue.setConcurrency?.(enriched.connectionProfileId, concurrencyLimit());
     let dispatchTiming = {};
     return requestQueue.run(
@@ -2280,7 +2348,7 @@ export function createProviderClient({
           throw error;
         } finally {
           if (enriched.concurrencyProbe) requestQueue.setConcurrency?.(enriched.connectionProfileId,
-            effectiveProfileConcurrency(readSettings(settingsStore), enriched.connectionProfileId));
+            effectiveProfileConcurrency(readSettings(settingsStore), enriched.connectionProfileId, liveProfile()));
         }
       },
       { signal: enriched.signal ?? null, concurrencyLimit, onDispatch: (timing) => {
@@ -2421,7 +2489,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
       const parsed = parseProviderStructuredOutput(raw);
       const normalized = normalizeRoleResponse(roleId, parsed.data, request);
       const data = normalized.data;
-      validateRoleResponseSchema(roleId, data);
+      validateRoleResponseSchema(roleId, data, request, normalized.wireData);
       const diagnostics = sanitize({
         ...lastDiagnostics,
         ...parsed.diagnostics,
@@ -2498,7 +2566,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         lane,
         error: safeError,
         diagnostics,
-        recoverableText: roleId === 'fusedCardBundle' ? truncate(String(raw?.text || ''), 12000) : ''
+        recoverableItems: recoverableProviderItems(roleId, raw, error, request)
       };
     } finally {
       composedExternalSignal.cleanup();
@@ -2547,7 +2615,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
       };
     }
 
-    async function failureResult(entry, error, retryCount = 0, extraDiagnostics = {}) {
+    async function failureResult(entry, error, retryCount = 0, extraDiagnostics = {}, raw = null) {
       const safeError = sanitizedError(error, entry.request);
       const failure = providerFailure(safeError, { stage: failureStageForRole(entry.roleId) });
       const diagnostics = sanitize({
@@ -2570,7 +2638,8 @@ export function createGenerationRouter({ client, activity = null, journal = null
         roleId: entry.roleId,
         lane: entry.lane,
         error: safeError,
-        diagnostics
+        diagnostics,
+        recoverableItems: recoverableProviderItems(entry.roleId, raw, error, entry.request)
       };
     }
 
@@ -2605,7 +2674,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
 
     function throwSlotFailure(raw) {
       if (raw?.slotError) {
-        throw providerError(
+        const error = providerError(
           raw.slotError.code || 'RECURSION_PROVIDER_BATCH_SLOT_FAILED',
           raw.slotError.message || 'Provider batch slot failed.',
           {
@@ -2613,6 +2682,8 @@ export function createGenerationRouter({ client, activity = null, journal = null
             status: raw.slotError.status
           }
         );
+        if (error.code === 'RECURSION_PROVIDER_TOKEN_LIMIT') error.recoverableText = raw.recoverableText;
+        throw error;
       }
     }
 
@@ -2621,7 +2692,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
       const parsed = parseProviderStructuredOutput(raw);
       const normalized = normalizeRoleResponse(entry.roleId, parsed.data, entry.request);
       const data = normalized.data;
-      validateRoleResponseSchema(entry.roleId, data);
+      validateRoleResponseSchema(entry.roleId, data, entry.request, normalized.wireData);
       const diagnostics = sanitize({
         ...entry.diagnostics,
         ...responseIdentityDiagnostics(raw),
@@ -2681,7 +2752,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
       const parsed = parseProviderStructuredOutput(raw);
       const normalized = normalizeRoleResponse(entry.roleId, parsed.data, entry.request);
       const data = normalized.data;
-      validateRoleResponseSchema(entry.roleId, data);
+      validateRoleResponseSchema(entry.roleId, data, entry.request, normalized.wireData);
       emitSlotActivity(entry, {
         severity: retryCount > 0 ? 'warning' : 'success',
         outcome: retryCount > 0 ? 'warning' : 'success',
@@ -2839,7 +2910,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         results[entry.index] = await failureResult(entry, error, 0, {
           ...batchDiagnosticsFromResponse(raw),
           ...responseIdentityDiagnostics(raw)
-        });
+        }, raw);
         emitSlotFailureActivity(entry, error, raw, 0, { force: true });
       }
     }

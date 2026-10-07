@@ -1,5 +1,7 @@
 import { createExecutionGraph } from '../execution/stage-registry.mjs';
 import { summarizeFusedOutcome } from '../fused-recovery.mjs';
+import { buildStructuredCorrectionRequest } from '../execution/correction-request.mjs';
+import { requiredGeneratedCard, canNarrowFusedFailure } from '../execution/recovery-policy.mjs';
 
 function selectedCardKey(card) {
   const source = card && typeof card === 'object' ? card : {};
@@ -67,7 +69,7 @@ export function createSegmentedCardStages({
       executable: true,
       dependencies: Object.freeze(['preprocess.arbiter']),
       checkpoint: 'durable',
-      failurePolicy: selectedCard?.forcedBy || selectedCardKey(selectedCard) === 'Scene Constraints' ? 'blocking' : 'continue',
+      failurePolicy: requiredGeneratedCard(selectedCard) ? 'blocking' : 'continue',
       selectedCard,
       buildInputFingerprint(context, dependencies) {
         return {
@@ -85,8 +87,9 @@ export function createSegmentedCardStages({
           selectedCard
         });
       },
-      buildCorrectionRequest({ request, error }) {
-        return { ...request, prompt: `${request.prompt || ''}\n\nCorrect the previous invalid ${selectedCardKey(selectedCard)} card. Preserve the requested JSON schema and supplied source evidence.\nValidation: ${String(error?.message || 'Card validation failed.').slice(0, 600)}\nReturn only the corrected card; do not include private reasoning or analysis.` };
+      buildCorrectionRequest({ request, originalRequest = request, failure }) {
+        return buildStructuredCorrectionRequest({ originalRequest, currentRequest: request, failure,
+          taskFeedback: `Return one grounded ${selectedCardKey(selectedCard)} card matching the requested schema. Preserve supplied source evidence and requested IDs.` });
       },
       async validate(artifact, validationContext) {
         return validationResult(
@@ -113,7 +116,7 @@ function fusedOutcomes(selectedCards) {
   })));
 }
 
-function fallbackArtifact(validated, selectedCards) {
+function fallbackArtifact(validated, selectedCards, failure = {}) {
   const value = validated?.value && typeof validated.value === 'object'
     ? validated.value
     : {};
@@ -126,7 +129,7 @@ function fallbackArtifact(validated, selectedCards) {
     ? value.outcomes
     : Object.fromEntries(selectedCards.map((card) => [
         selectedCardKey(card),
-        { state: 'failed', reason: 'invalid-card' }
+        { state: 'failed', reason: failure.code || 'invalid-card' }
       ]));
   return {
     ...value,
@@ -140,7 +143,9 @@ function fallbackArtifact(validated, selectedCards) {
         ? 'unresolved-fused-families'
         : 'zero-useful-fused-cards',
       families: unresolvedFamilies
-    }
+    },
+    ...(failure?.code === 'RECURSION_PROVIDER_CONTEXT_LIMIT' || failure?.code === 'RECURSION_PROVIDER_TOKEN_LIMIT'
+      ? { recoveryCause: failure.code } : {})
   };
 }
 
@@ -184,15 +189,14 @@ export function createFusedCardStages({
         selectedCards: cards
       });
     },
-    buildCorrectionRequest({ request, error }) {
+    buildCorrectionRequest({ request, originalRequest = request, failure }) {
       const feedback = [
         'Correct the previous invalid bundle. Return JSON only with shape:',
         '{"items":[{"family":"requested family","promptText":"grounded instruction","evidenceRefs":["message:0"],"coveredSourceCardIds":[]}]}',
         `Requested families: ${cards.map(selectedCardKey).join(', ')}.`,
-        `Validation: ${String(error?.message || 'No valid grounded cards were returned.').slice(0, 600)}`,
         'Use one item per requested family and only evidence references from the supplied snapshot.'
       ].join('\n');
-      return { ...request, prompt: `${request.prompt || ''}\n\n${feedback}` };
+      return buildStructuredCorrectionRequest({ originalRequest, currentRequest: request, failure, taskFeedback: feedback });
     },
     async validate(artifact, validationContext) {
       return validationResult(
@@ -210,9 +214,10 @@ export function createFusedCardStages({
       dependencies
     } = {}) {
       if (['RECURSION_PROVIDER_REFUSAL', 'RECURSION_PROVIDER_CONTENT_FILTER'].includes(failure?.code)
-          && !cards.some((card) => card?.forcedBy || selectedCardKey(card) === 'Scene Constraints')) {
+          && !cards.some(requiredGeneratedCard)) {
         return { ok: true, value: {
           cards: {}, acceptedFamilies: [], unresolvedFamilies: cards.map(selectedCardKey), fallback: null,
+          omissionCause: failure.code, optionalOmissionCount: cards.length,
           outcomes: Object.fromEntries(cards.map((card) => [selectedCardKey(card), { state: 'failed', reason: failure.code }])),
           diagnostics: [{ code: failure.code, message: 'Optional card work was omitted after a provider refusal.' }]
         } };
@@ -221,9 +226,7 @@ export function createFusedCardStages({
         'RECURSION_RECOVERY_BUDGET_EXHAUSTED', 'RECURSION_OPERATION_DEADLINE'].includes(failure?.code)) {
         return { ok: false, failure };
       }
-      // Narrower card prompts cannot repair an unavailable provider connection.
-      // Only rejected model output may settle into Segmented card repair.
-      if (failure?.kind === 'transport' || failure?.category !== 'validation') {
+      if (!canNarrowFusedFailure(failure)) {
         return { ok: false, failure };
       }
       const validated = validationResult(
@@ -237,7 +240,7 @@ export function createFusedCardStages({
       );
       return {
         ok: true,
-        value: fallbackArtifact(validated, cards)
+        value: fallbackArtifact(validated, cards, failure)
       };
     },
     summarize(artifact) {

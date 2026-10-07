@@ -82,7 +82,7 @@ Clicking the mode icon opens a compact mode selector menu. The selected mode cha
 Mode selector rows:
 
 - Divergent arrows icon, `Auto`: Recursion selects cards, composes the prompt packet, and injects it automatically when ready.
-- Parallel arrows icon, `Manual`: Recursion forces selected card families up to `Max Cards`; disabled families stay out of planning, selecting, composing, and injection.
+- Parallel arrows icon, `Manual`: Recursion includes enabled cards in deck order up to `Cards per turn`; Refinement is always included, and disabled cards stay out of planning, selecting, composing, and injection.
 
 Each mode row should show the icon, short name, and a hover/focus tip with the longer explanation. The menu should use native SillyTavern popup compactness and close on selection, outside click, or `Esc`.
 
@@ -111,11 +111,11 @@ Reference mode selector shape:
   </button>
   <button class="recursion-mode-choice"
           data-mode="manual"
-          title="Forces selected card families up to Max Cards.">...</button>
+          title="Includes enabled cards in deck order up to Cards per turn. Refinement is always included.">...</button>
 </div>
 ```
 
-Card scope is not a mode. The compact left-side stacked-cards icon opens a full-bar-width dropdown with the fixed V1 card families and their sub-item focus toggles. The compact bar control stays icon-only; the dropdown header summarizes whether all focus items are enabled or a partial count is active. Auto treats this scope as preference/focus. Manual treats selected families as forced cards, capped by `Max Cards`; sub-items only shape the selected family card and do not count against the cap. Category and sub-item clicks must visibly update the open dropdown in place without closing it or waiting for a host rerender. The UI must prevent disabling the final selected sub-item and show `Keep at least one card focus enabled.` when that guard is hit.
+Card scope is not a mode. The compact left-side stacked-cards icon opens the full-bar-width Pre-process deck surface. Saved card states determine which entries are enabled. Auto treats enabled source cards as candidates; Priority and Refinement entries are mandatory. Manual derives a pure per-turn projection: reserve Refinement first, then include ordinary enabled units in deck order up to Cards per turn. An authored card counts as one unit; enabled generated sources with the same family share one generator unit. Refinement may exceed the target, and target zero includes only Refinement. Changing the target or mode never disables saved deck entries. Entries beyond the target remain enabled and appear as omitted for this turn in existing inspection surfaces.
 
 Card scope family rows use the family description as hover/focus help. Sub-item rows use the canonical sub-item label and description from `src/card-scope.mjs`; they must explain what the focus asks Recursion to emphasize, not repeat the raw label.
 
@@ -1224,34 +1224,35 @@ The menu uses three tabs:
 - Providers.
 - Advanced.
 
-Play, Provider, and Advanced setting controls auto-save on committed changes. The compact settings menu must not render a broad `Save Settings` button, and provider lanes must not render a separate `Save Provider` button. Closing the menu should never discard changed Strength, card limits, Focus, Prompt Footprint, Connection Profile selection, provider policy, output ceiling, Injection, UI, Retention, or Diagnostics values.
+Play, Provider, and Advanced setting controls auto-save on committed changes. The compact settings menu must not render a broad `Save Settings` button, and provider lanes must not render a separate `Save Provider` button. Closing the menu should never discard changed Guidance strength, Cards per turn, Focus, Guidance detail, Connection Profile selection, provider policy, output ceiling, Injection, UI, Retention, or Diagnostics values. All tab controls remain mounted so an autosave preserves unrelated values. Lane, nested compatibility, and Advanced disclosure states survive autosave and tab rerenders within the UI session.
 
 Switching between settings tabs is internal panel navigation. A tab click must keep the settings menu open, even though the tab switch re-renders the floating panel content; outside-click closers must ignore that handled tab-switch event.
 
 Play is the default tab. It contains one open `Behavior` disclosure for controls users are expected to tune during normal play:
 
-- Strength: Light, Balanced, Strong.
-- Min Cards: numeric `0..20`, used by Low Reasoning Level.
-- Max Cards: numeric `0..20`, used as the Manual selected-family cap and the Ultra Reasoning Level card target; Medium and High use the floor average of Min and Max.
+- Guidance strength: Light, Balanced, Strong.
+- Cards per turn: integer `0..20`, default `6`, the same total authored/generated target in all reasoning levels and pipelines.
 - Selection variety: Off, Low, Medium, High; default Low.
 - Card cooldown (turns): integer `0..10`; default `0` (off).
 - Focus: Balanced, Character, Constraints, Scene, Plot.
-- Prompt Footprint: Compact, Normal, Rich.
+- Guidance detail: Compact, Normal, Rich.
 
-Selection variety and cooldown use compact rows adjacent to Min/Max Cards, with a subdued helper explaining that both apply only in Auto, Manual ignores them, Priority and Refinement cards are exempt, and cooldown shortages produce smaller hands. Variety preserves the strongest choices and changes at most one optional slot using relevant Arbiter alternatives: Low has a 25% chance from the next two, Medium 50% from the next four, and High 100% from all remaining alternatives. Off preserves rank order. No eligible alternative means no replacement. Cooldown excludes a used source card for the next N completed response turns; 0 disables it. These controls autosave together without changing provider temperature. The existing Full Viewer includes a Card selection section with mandatory Priority and Refinement source IDs, selected reasons, cooldown turns remaining, plain omission reasons and any variety replacement. It does not dump recent history. Add no permanent bar badge.
+Visible help explains that authored cards and generated families each count toward the target, mandatory cards can exceed it, and fewer eligible cards or omitted optional work can produce a smaller hand. A subdued computed summary repeats the current target, actual available routing, and mandatory overflow. It follows live settings and host availability without replacing edited controls. This help remains discoverable on touch and with tooltips disabled.
 
-The backend meaning of these controls is defined by [Behavior Settings Policy Spec](BEHAVIOR_SETTINGS_POLICY_SPEC.md). Strength controls intervention pressure, Min/Max Cards determine the total hand target through Reasoning Level, Max Cards also caps Manual selected families, Focus controls soft family priority, and Prompt Footprint controls final packet size/detail. They should be visible as high-level controls, not exposed as per-card weights or prompt-fragment editors.
+Selection variety and cooldown use compact rows adjacent to Cards per turn, with a subdued helper explaining that both apply only in Auto, Manual ignores them, Priority and Refinement cards are exempt, and cooldown shortages produce smaller hands. Variety preserves the strongest choices and changes at most one optional slot using relevant Arbiter alternatives: Low has a 25% chance from the next two, Medium 50% from the next four, and High 100% from all remaining alternatives. Off preserves rank order. No eligible alternative means no replacement. Cooldown excludes a used source card for the next N completed response turns; 0 disables it. These controls autosave together without changing provider temperature. The existing Full Viewer includes a Card selection section with mandatory Priority and Refinement source IDs, selected reasons, cooldown turns remaining, plain omission reasons and any variety replacement. It does not dump recent history. Add no permanent bar badge.
+
+The backend meaning of these controls is defined by [Behavior Settings Policy Spec](BEHAVIOR_SETTINGS_POLICY_SPEC.md). Guidance strength controls intervention pressure, Cards per turn determines the hand target, Focus controls soft family priority, and Guidance detail controls final packet size/detail. Strength and detail never change the count. Persist only `cardsPerTurn`; removed Min/Max fields are not compatibility aliases. They should be visible as high-level controls, not exposed as per-card weights or prompt-fragment editors.
 
 Pipeline, Mode, and Reasoning Level belong to the compact bar controls and must not be duplicated in Settings. Pipeline is selected from its bar dropdown only; Settings may persist the value but must not render a separate Segmented/Fused toggle. Reasoning Level is the user-facing provider-bias control. The compact bar uses the four-node chain visual:
 
-- Low: Utility-only bias with a total hand target of Min Cards.
-- Medium: Utility Arbiter and Utility cards, then Reasoner guidance composition; total hand target of Normal Cards.
-- High: Reasoner Arbiter, Reasoner for high-priority card families, Utility for other card families, and Reasoner guidance composition; total hand target of Normal Cards.
-- Ultra: Reasoner-heavy Arbiter, card generation, and guidance composition with card pressure raised/capped at Max Cards.
+- Low: Utility plans, generates cards, and composes guidance.
+- Medium: Utility Arbiter and Utility cards, then Reasoner guidance composition.
+- High: Reasoner Arbiter, Reasoner for high-priority card families, Utility for other card families, and Reasoner guidance composition.
+- Ultra: Reasoner plans, generates cards, and composes guidance.
 
 `reasoningLevel` is persisted as `low | medium | high | ultra`, default `medium`. It is the authoritative user-facing provider-bias setting. Low keeps ordinary work on Utility. Medium, High, and Ultra use Reasoner for policy-selected work when its configured capability is `segmented-ready`, `fused-ready`, or `uncertified`; an uncertified lane is shown as a caution, not a blocker. Unconfigured or unhealthy Reasoner routes ordinary Pre-process work to Utility without changing the selected level. Post-process guidance is lane-sticky: Low and Medium use Utility, High and Ultra require Reasoner, and failed same-lane attempts fail soft without crossing lanes.
 
-Providers contains the complete Connection Profile setup surface in collapsible lane sections:
+Providers contains the complete Connection Profile setup surface in collapsible lane sections. Within each lane, Connection Profile selection, Test Profile, and checks stay visible. The following policy fields are mounted under a default-collapsed `Compatibility and tuning` disclosure:
 
 - Utility Provider, required and open by default.
 - Reasoner Provider, optional and collapsed by default unless it is configured.
@@ -1262,9 +1263,12 @@ Providers contains the complete Connection Profile setup surface in collapsible 
 - Structured Output: Auto, Native Schema, or Prompt JSON.
 - Temperature and Top P controls shown only for Recursion Override.
 - Output Token Ceiling as the lane hard maximum; individual model stages use smaller budgets.
+- Configured concurrent requests, with effective concurrency shown in the check summary.
 - `Test Profile`, with lane-local `Testing...` busy feedback.
 - Compact capability state: `Configure`, `Untested`, `Ready`, or `Unhealthy`. `Segmented` and `Fused` remain separate capability details on a `Ready` provider; they are not compact state labels.
 - No provider enable switch, endpoint input, credential field, model selector, or model-fetch action.
+
+Plain check lines show separate Connection, Single cards, and Combined cards results as Passed, Failed, or Not checked. Stale certification shows Not checked. The summary shows effective Structured output and configured/effective Concurrent requests. Visible text explains that these checks establish capability and do not predict combined-card reliability for every turn. Missing saved profiles use an unavailable-profile label, never their raw ID.
 
 The operator rules are explicit:
 
@@ -1280,12 +1284,14 @@ Profile combobox typing filters the detected list locally. Persisted settings ch
 
 Every committed provider edit sends only the relevant allowlisted field plus the rendered `configRevision`. Stale revisions are rejected and refreshed instead of overwriting a newer edit. A material edit increments the revision and resets certification. User-opened lane disclosures remain open across autosave rerenders.
 
+While the panel is mounted, live host profile edits refresh derived state, check results, output method, effective concurrency, readiness metadata and the profile inventory in place. Same-ID model changes invalidate old passing checks. This refresh preserves input nodes, focus, unsaved profile search and tuning text, field revisions and disclosure state; it never autosaves the drafts or performs a second profile scan when the safe runtime view already contains the current inventory.
+
 `Test Profile` performs connectivity, single-card, and Fused checks. It is single-flight per lane. A duplicate same-lane request joins the in-flight test; a test requested while production work is using the same lane returns a compact busy result without canceling that work.
 
 Advanced contains low-frequency controls grouped into collapsible sections:
 
 - Injection: placement, role, and depth controls for the composed prompt packet.
-- Execution: `Attempts per step` (one through five, default two), `Request time limit (seconds)` (30–600, default 180), and `Operation time limit (seconds)` (60–1800, default 300). A request limit starts at dispatch; operation active time includes queues and recovery, but excludes time while paused. Resume retains elapsed time and recovery spending; an explicit Retry or Reprocess opens a new recovery window.
+- Execution: `Attempts per step` (one through five, default two), `Request time limit (seconds)` (30–600, default 180), and `Operation time limit (seconds)` (60–1800, default 300). Visible helper text states that the initial call counts toward Attempts per step, capacity retries are separately bounded, and the operation allowance can stop recovery earlier. A request limit starts at dispatch; operation active time includes queues and recovery, but excludes time while paused. Resume retains elapsed time and recovery spending; an explicit Retry or Reprocess opens a new recovery window while retaining accepted work.
 - UI: Tooltips, Sub-tier Rows, and Progress Rows. Tooltips are enabled by default on first install so new users can discover icon-only controls and compact status surfaces. Turning Tooltips off auto-saves immediately and removes Recursion tooltip and hover-help titles across the compact bar, popovers, card rows, settings, and diagnostics; normal buttons and click-open panels continue to work.
 - Context Windows: Post-process Evidence Messages, Source Freshness Messages, Source Freshness Text Budget, and Provider Analysis Messages. These controls bound Recursion-owned evidence and analysis windows; they do not limit native SillyTavern writer context. A profile writer uses the bounded editing evidence and complete draft instead of the full native prompt.
 - Storage Retention: Journal Entries only. Generated turn work is scoped to the active turn and prior-turn artifacts are pruned automatically; this control never deletes SillyTavern chat.
@@ -1329,7 +1335,7 @@ The header capability states and separate readiness details are:
 | Ready | Connectivity and the required profile checks passed. | `Segmented` after the single-card pass; `Fused` after the Fused-card pass. |
 | Unhealthy | Connectivity or profile compatibility failed. | none |
 
-The selected pipeline does not override capability. A Fused selection with an ineligible profile is represented honestly as an effective `Segmented` capability detail under the `Ready` state and one sanitized downgrade code.
+The selected pipeline and capability checks are distinct. Explicit Fused selection dispatches Fused regardless of combined-card test status; recovery responds to actual bundle failures. Ready retains the capability detail established by the current checks rather than inventing a downgrade from a missing check.
 
 Provider selector, status-class, and draft-reading helpers live in the provider-panel module. The draft shape is exactly `connectionProfileId`, `generationPolicy`, `samplerOverrides`, and `outputTokenCeiling`; normalization adds lane, revision, and certification.
 

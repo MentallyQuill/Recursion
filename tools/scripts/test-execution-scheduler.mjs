@@ -194,7 +194,7 @@ for (const recoveryLimit of [1, 3]) {
       calls += 1;
       if (calls <= 2) throw { code: 'ECONNRESET' };
       return calls === 3 ? null : { value: 'corrected' };
-    }), buildCorrectionRequest: ({ request }) => request },
+    }), buildCorrectionRequest: ({ request }) => ({ ...request, prompt: 'Return the corrected artifact.' }) },
     stage('install', ['recovering'], async () => { installCalls += 1; return {}; }, { kind: 'local' })
   ] });
   const scheduler = createExecutionScheduler({ repository, retrySleep: async () => {} });
@@ -214,14 +214,15 @@ for (const recoveryLimit of [1, 3]) {
     calls += 1;
     if (calls <= 3) throw { code: 'RECURSION_PROVIDER_RATE_LIMIT', retryAfterMs: 1000 };
     return calls === 4 ? null : { cards: ['Realism'] };
-  }), buildCorrectionRequest: ({ request }) => request };
+  }), buildCorrectionRequest: ({ request }) => ({ ...request, prompt: 'Return the corrected artifact.' }) };
   const graph = createExecutionGraph({ stages: [recovering] });
   const scheduler = createExecutionScheduler({ repository, retrySleep: async ms => delays.push(ms) });
   const result = await scheduler.start({ manifest: manifest({ operationId: 'capacity-recovery' }), graph });
   assertEqual(result.state, 'completed', 'rate limiting recovers automatically within the same operation');
   assertEqual(calls, 5, 'three capacity failures preserve the subsequent correction attempt');
   assertEqual(result.recoveryBudget.recoveryUsed, 1, 'only the model correction spends card recovery allowance');
-  assertDeepEqual(delays, [2000, 4000, 8000], 'scheduler uses bounded capacity backoff');
+  assertEqual(delays.length, 3, 'scheduler uses three bounded capacity waits');
+  assert(delays.every((delay, index) => delay >= 2000 * 2 ** index && delay <= 2200 * 2 ** index), 'capacity backoff retains bounded positive jitter');
   const reloaded = createExecutionScheduler({ repository });
   const resumed = await reloaded.resume({ operationId: 'capacity-recovery', graph, provenance });
   assertEqual(resumed.state, 'completed', 'reloaded successful checkpoint remains usable');
@@ -232,7 +233,7 @@ for (const recoveryLimit of [1, 3]) {
   const repository = createRepository();
   let calls = 0;
   const failing = (id) => ({ ...stage(id, [], async () => { calls += 1; return null; }),
-    buildCorrectionRequest: ({ request }) => request });
+    buildCorrectionRequest: ({ request, attempt }) => ({ ...request, prompt: `Return the corrected artifact after attempt ${attempt}.` }) });
   const graph = createExecutionGraph({ stages: [failing('a'), failing('b')] });
   const scheduler = createExecutionScheduler({ repository, attemptsPerStep: 5 });
   const result = await scheduler.start({ manifest: manifest({ operationId: 'shared-recovery' }), graph });
@@ -246,7 +247,7 @@ for (const recoveryLimit of [1, 3]) {
   const repository = createRepository();
   let calls = 0;
   const failing = (id) => ({ ...stage(id, [], async () => { calls += 1; return null; }),
-    buildCorrectionRequest: ({ request }) => request });
+    buildCorrectionRequest: ({ request, attempt }) => ({ ...request, prompt: `Return the corrected artifact after attempt ${attempt}.` }) });
   const graph = createExecutionGraph({ stages: [failing('post.a'), failing('post.b')] });
   const scheduler = createExecutionScheduler({ repository, attemptsPerStep: 5 });
   const result = await scheduler.start({ manifest: { ...manifest({ operationId: 'post-budget' }), phase: 'postprocess' }, graph });
@@ -305,7 +306,7 @@ function createIds() {
       return { card: 'Realism' };
     })
   ] });
-  const scheduler = createExecutionScheduler({ repository, now, retrySleep: (_ms, signal) => new Promise((_, reject) => {
+  const scheduler = createExecutionScheduler({ repository, now, retryRandom: () => 0, retrySleep: (_ms, signal) => new Promise((_, reject) => {
     sleeping = true;
     signal.addEventListener('abort', () => reject(Object.assign(new Error('Stopped'), { name: 'AbortError' })), { once: true });
   }) });
@@ -337,7 +338,7 @@ function createIds() {
     if (calls === 1) throw { code: 'RECURSION_PROVIDER_RATE_LIMIT', retryAfterMs: 120000 };
     return { cards: ['Realism'] };
   })] });
-  const scheduler = createExecutionScheduler({ repository, now, retrySleep: (_ms, signal) => new Promise((_, reject) => {
+  const scheduler = createExecutionScheduler({ repository, now, retryRandom: () => 0, retrySleep: (_ms, signal) => new Promise((_, reject) => {
     sleeping = true;
     signal.addEventListener('abort', () => reject(Object.assign(new Error('Stopped'), { name: 'AbortError' })), { once: true });
   }) });
@@ -405,7 +406,7 @@ function createIds() {
     if (available) return { cards: ['Realism'] };
     throw { code: 'RECURSION_PROVIDER_RATE_LIMIT', retryAfterMs: 120000 };
   })] });
-  const scheduler = createExecutionScheduler({ repository, now, retrySleep: async () => {} });
+  const scheduler = createExecutionScheduler({ repository, now, retryRandom: () => 0, retrySleep: async () => {} });
   const result = await scheduler.start({ manifest: manifest({ operationId: 'capacity-exhaustion' }), graph });
   assertEqual(result.state, 'paused', 'persistent capacity failure pauses instead of running forever');
   assertEqual(calls, 9, 'capacity requests have a separate finite retry bound');
@@ -1281,6 +1282,7 @@ for (const insecureCrypto of [{}, undefined]) {
       assertEqual(attempts.length, 2, 'settlement receives the exhausted attempt history');
       return { ok: true, value: { recovered: true } };
     },
+    buildCorrectionRequest({ request }) { return { ...request, prompt: 'Return valid recovered output.' }; },
     summarizeArtifact(artifact) {
       return { recovered: artifact?.recovered === true };
     }

@@ -31,7 +31,7 @@ import { activeCardDeckRuntimeScope, createDefaultCardDeck } from '../../src/pre
 import { packetToPromptBlocks } from '../../src/prompt.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
 import { hashJson } from '../../src/core.mjs';
-import { providerConfigHash } from '../../src/provider-capability.mjs';
+import { providerConfigHash, providerProfileIdentityHash } from '../../src/provider-capability.mjs';
 import { safeDiagnosticText, safeIdentifier, safeText, unsafeObjectString } from '../../src/safe-values.mjs';
 import { UNKNOWN_STORY_FORM } from '../../src/story-form.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
@@ -96,8 +96,7 @@ const preparedGenerationSettings = {
   mode: 'auto',
   pipelineMode: 'fused',
   strength: 'strong',
-  minCards: 2,
-  maxCards: 7,
+  cardsPerTurn: 4,
   reasoningLevel: 'high',
   promptFootprint: 'rich',
   focus: 'scene',
@@ -272,8 +271,7 @@ const preparedGenerationSnapshot = {
     ['mode', (settings) => { settings.mode = 'manual'; }],
     ['pipelineMode', (settings) => { settings.pipelineMode = 'segmented'; }],
     ['strength', (settings) => { settings.strength = 'light'; }],
-    ['minCards', (settings) => { settings.minCards = 1; }],
-    ['maxCards', (settings) => { settings.maxCards = 8; }],
+    ['cardsPerTurn', (settings) => { settings.cardsPerTurn = 8; }],
     ['reasoningLevel', (settings) => { settings.reasoningLevel = 'ultra'; }],
     ['promptFootprint', (settings) => { settings.promptFootprint = 'compact'; }],
     ['focus', (settings) => { settings.focus = 'plot'; }],
@@ -516,6 +514,7 @@ function providerCertificationSettings(settings = {}, lane = 'reasoner', status 
   const passed = status === 'pass';
   const certification = store.recordProviderCertification(lane, {
     status: passed ? 'pass' : 'fail',
+    profileIdentityHash: providerProfileIdentityHash({ id: provider.connectionProfileId, completionMode: 'chat' }),
     checkedAt: '2026-07-17T00:00:00.000Z',
     completionMode: 'chat',
     structuredOutput: 'prompt-json',
@@ -538,6 +537,11 @@ function fusedReadyReasonerSettings(settings = {}) {
 }
 
 function cardProviderResponse(roleId, request = {}) {
+  let evidenceMesId = 2;
+  try {
+    const source = JSON.parse(String(request.prompt || '').split('Snapshot:\n').at(-1));
+    evidenceMesId = source.messages?.at(-1)?.mesid ?? evidenceMesId;
+  } catch { /* Non-card test calls use their fixture's message 2. */ }
   if (roleId === 'guidanceComposer') return {
     ok: true,
     data: { schema: 'recursion.guidanceComposer.v1', snapshotHash: request.snapshotHash, guidanceText: 'Answer the immediate question using the selected cards.' }
@@ -553,7 +557,7 @@ function cardProviderResponse(roleId, request = {}) {
       snapshotHash: request.snapshotHash,
       items: [{
         promptText: `${catalog.family} card guidance for this turn.`,
-        evidenceRefs: ['message:2'],
+        evidenceRefs: [`message:${evidenceMesId}`],
         tokenEstimate: 12
       }]
     }
@@ -845,6 +849,7 @@ function createRuntimeHarness({
     if (!provider.connectionProfileId || provider.certification?.status !== 'not-run') continue;
     const certification = settingsStore.recordProviderCertification(lane, {
       status: 'pass',
+      profileIdentityHash: providerProfileIdentityHash({ id: provider.connectionProfileId, completionMode: 'chat' }),
       checkedAt: '2026-07-17T00:00:00.000Z',
       completionMode: 'chat',
       structuredOutput: 'prompt-json',
@@ -1095,8 +1100,7 @@ function createLivePostProcessRuntimeHarness({
   host.settingsStore.update({
     providers: { utility: { connectionProfileId: 'preprocess-test-profile' } },
     reasoningLevel: 'medium',
-    minCards: 0,
-    maxCards: 0,
+    cardsPerTurn: 0,
     postProcess: {
       enabled: true,
       applyMode,
@@ -1526,7 +1530,7 @@ for (const pipelineMode of ['segmented', 'fused']) for (const turnLimit of [2, 5
     };
   }
   const settings = {
-    mode: 'auto', pipelineMode, reasoningLevel: 'medium', minCards: turnLimit, maxCards: turnLimit, strength: 'balanced',
+    mode: 'auto', pipelineMode, reasoningLevel: 'medium', cardsPerTurn: turnLimit, strength: 'balanced',
     preProcessDecks: { activeDeckId: deck.id, customDecks: { [deck.id]: deck } }
   };
   const calls = [];
@@ -1587,13 +1591,13 @@ for (const mode of ['auto', 'manual']) {
   }]));
   const deck = { id: 'authored-only', name: 'Authored only', categoryOrder: ['realism'], categories: { realism: { id: 'realism', name: 'Realism' } }, cardOrderByCategory: { realism: Object.keys(cards) }, cards };
   const { runtime } = createRuntimeHarness({ settings: {
-    mode, reasoningLevel: 'medium', minCards: 2, maxCards: 2,
+    mode, reasoningLevel: 'medium', cardsPerTurn: 2,
     preProcessDecks: { activeDeckId: deck.id, customDecks: { [deck.id]: deck } }
   } });
   const result = await runtime.prepareForGeneration({ userMessage: 'Continue with authored guidance.' });
   assertEqual(result.ok, true, `${mode} authored-only deck succeeds without a generator family`);
-  assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), ['first', 'second', 'third'], `${mode} required authored cards all survive in deck order`);
-  assertEqual(runtime.view().lastHand.omitted.length, 0, `${mode} required authored cards have no budget omissions`);
+  assertDeepEqual(runtime.view().lastHand.cards.map((card) => card.id), mode === 'auto' ? ['first', 'second', 'third'] : ['first', 'second'], `${mode} reserves mandatory cards and fills ordinary authored slots in deck order`);
+  if (mode === 'manual') assert(runtime.view().lastPlan.selection.omitted.some(unit => unit.cardId === 'third' && unit.reason === 'cards-per-turn'), 'Manual explains the enabled authored unit omitted for this turn');
 }
 
 if (false) {
@@ -2581,7 +2585,7 @@ function immediateDurableCardRouter() {
   const roleCalls = [];
   const hostStartCalls = [];
   const harness = createRuntimeHarness({
-    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off', minCards: 1, maxCards: 1 },
+    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off', cardsPerTurn: 1 },
     hostGeneration: {
       async start(details = {}) {
         hostStartCalls.push(details);
@@ -2635,7 +2639,7 @@ function immediateDurableCardRouter() {
 {
   const roleCalls = [];
   const harness = createRuntimeHarness({
-    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off', minCards: 1, maxCards: 1 },
+    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off', cardsPerTurn: 1 },
     generationRouter: {
       async generate(roleId, request = {}) {
         roleCalls.push(roleId);
@@ -2803,7 +2807,7 @@ function immediateDurableCardRouter() {
       pipelineMode: 'fused',
       mode: 'auto',
       reasonerUse: 'off',
-      minCards: 1, maxCards: 1,
+      cardsPerTurn: 1,
       enhancements: { mode: 'recompose', applyMode: 'as-swipe', contextMessages: 13 }
     },
     snapshot: async () => {
@@ -2970,7 +2974,7 @@ function immediateDurableCardRouter() {
   });
   let activeSnapshot = snapshotFromMessages(initialMessages);
   const { runtime, installed } = createRuntimeHarness({
-    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off', minCards: 1, maxCards: 1 },
+    settings: { pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off', cardsPerTurn: 1 },
     snapshot: () => activeSnapshot,
     generationRouter: {
       async generate(roleId, request = {}) {
@@ -3065,7 +3069,7 @@ function immediateDurableCardRouter() {
   let utilityCallCount = 0;
   let releaseSecondArbiter;
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', reasonerUse: 'off', minCards: 1, maxCards: 1 },
+    settings: { mode: 'auto', reasonerUse: 'off', cardsPerTurn: 1 },
     generationRouter: {
       async generate(roleId, request = {}) {
         if (roleId === 'utilityArbiter') {
@@ -3444,19 +3448,19 @@ function immediateDurableCardRouter() {
 
 {
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'manual', maxCards: 5, reasonerUse: 'off' }
+    settings: { mode: 'manual', cardsPerTurn: 5, reasonerUse: 'off' }
   });
   const view = runtime.view();
-  assertEqual(view.settings.maxCards, 5, 'runtime view exposes current Max Cards for Manual cap UI');
+  assertEqual(view.settings.cardsPerTurn, 5, 'runtime view exposes Cards per turn');
   assert(view.settings.cardScopeSummary.counts.selectedFamilies >= 1, 'runtime view keeps at least one selected family');
 }
 
 {
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', maxCards: 2, cardScope: defaultCardScope(), reasonerUse: 'off' }
+    settings: { mode: 'auto', cardsPerTurn: 2, cardScope: defaultCardScope(), reasonerUse: 'off' }
   });
   const update = await runtime.updateSettings({ mode: 'manual' });
-  const expected = CARD_SCOPE_CATALOG.map((entry) => entry.family);
+  const expected = CARD_SCOPE_CATALOG.slice(0, 2).map((entry) => entry.family);
   assertDeepEqual(manualSelectedFamilies(activeCardDeckRuntimeScope(update.settings)), expected, 'Auto-to-Manual does not persist a legacy cardScope overlay');
   assertDeepEqual(manualSelectedFamilies(activeCardDeckRuntimeScope(runtime.view().settings)), expected, 'runtime view remains derived from the canonical Pre-process Deck');
 }
@@ -3467,14 +3471,14 @@ function immediateDurableCardRouter() {
   const firstSceneFacet = CARD_SCOPE_CATALOG.find((entry) => entry.family === 'Scene Frame').subItems[0].key;
   const focused = setSubItemEnabled(underCap, 'Scene Frame', firstSceneFacet, false).scope;
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'auto', maxCards: 5, cardScope: focused, reasonerUse: 'off' }
+    settings: { mode: 'auto', cardsPerTurn: 5, cardScope: focused, reasonerUse: 'off' }
   });
   const update = await runtime.updateSettings({ mode: 'manual' });
   const updatedScope = activeCardDeckRuntimeScope(update.settings);
   assertEqual(updatedScope.families['Scene Frame'].subItems[firstSceneFacet], true, 'legacy cardScope facets do not overlay the canonical Pre-process Deck');
   assertDeepEqual(
     manualSelectedFamilies(updatedScope),
-    CARD_SCOPE_CATALOG.map((entry) => entry.family),
+    CARD_SCOPE_CATALOG.slice(0, 5).map((entry) => entry.family),
     'legacy selected families are ignored rather than migrated during Auto-to-Manual'
   );
 }
@@ -3957,10 +3961,10 @@ function immediateDurableCardRouter() {
   const view = runtime.view();
   assertEqual(result.ok, true, 'router arbiter success still installs');
   assertDeepEqual((({family,reason}) => ({family,reason}))(view.lastPlan.cardJobs[0]), { family: 'Open Threads', reason: 'Need one open thread card.' }, 'router ranking is retained ahead of target completion');
-  assertEqual(view.lastPlan.budgets.maxCards, 3, 'Play target overrides the smaller router budget');
+  assertEqual(view.lastPlan.budgets.maxCards, 6, 'Play target overrides the smaller router budget');
   assertEqual(view.lastPlan.budgets.targetBriefTokens, 60, 'router token budget merged');
   assertEqual(view.lastPlan.reasonerDecision.mode, 'use', 'arbiter reasoner decision preserved in plan');
-  assertEqual(view.lastHand.cards.length, 3, 'runtime fills the configured Low target');
+  assertEqual(view.lastHand.cards.length, 6, 'runtime fills the configured target regardless of Low routing');
   assertEqual(view.lastPacket.diagnostics.reasonerStatus, 'skipped', 'low reasoning level skips reasoner routing');
   assert(!routerCalls.some((call) => call.roleId === 'reasonerComposer'), 'reasoner composer not called when reasoning level is low');
 }
@@ -4003,17 +4007,17 @@ function immediateDurableCardRouter() {
   const result = await runtime.prepareForGeneration({ userMessage: 'Keep this lean.' });
   const view = runtime.view();
   assertEqual(result.ok, true, 'low reasoning capped run installs');
-  assertEqual(view.lastPlan.budgets.maxCards, 3, 'low reasoning caps max selected cards to the most relevant few');
-  assertEqual(view.lastHand.cards.length, 3, 'low reasoning selects only the capped hand size');
+  assertEqual(view.lastPlan.budgets.maxCards, 6, 'Low routing preserves the configured target');
+  assertEqual(view.lastHand.cards.length, 6, 'Low routing fills the configured target');
   assert(routerCalls.every((call) => call.lane === 'utility'), 'low reasoning routes Arbiter, cards, and composer work through Utility only');
   assertEqual(routerCalls.find(call => call.roleId === 'utilityArbiter').reasoningIntent, 'minimal', 'utility planning explicitly limits reasoning');
 }
 
 for (const scenario of [
-  { level: 'low', expectedMaxCards: 4 },
+  { level: 'low', expectedMaxCards: 8 },
   { level: 'medium', expectedMaxCards: 8 },
   { level: 'high', expectedMaxCards: 8 },
-  { level: 'ultra', expectedMaxCards: 12 }
+  { level: 'ultra', expectedMaxCards: 8 }
 ]) {
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
@@ -4021,8 +4025,7 @@ for (const scenario of [
       mode: 'auto',
       promptFootprint: 'rich',
       reasoningLevel: scenario.level,
-      minCards: 4,
-      maxCards: 12
+      cardsPerTurn: 8
     }),
     generationRouter: {
       async generate(roleId, request = {}) {
@@ -4281,7 +4284,7 @@ for (const scenario of [
 {
   let arbiterPrompt = '';
   const { runtime } = createRuntimeHarness({
-    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
+    settings: { cardsPerTurn: 0, mode: 'auto', reasonerUse: 'off' },
     snapshot: {
       chatId: 'pending-chat',
       chatKey: 'pending-chat',
@@ -4319,7 +4322,7 @@ for (const scenario of [
 
 {
   const { runtime } = createRuntimeHarness({
-    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
+    settings: { cardsPerTurn: 0, mode: 'auto', reasonerUse: 'off' },
     snapshot: {
       chatId: 'pending-mesid-chat',
       chatKey: 'pending-mesid-chat',
@@ -4446,7 +4449,7 @@ for (const scenario of [
 
 {
   const { runtime } = createRuntimeHarness({
-    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
+    settings: { cardsPerTurn: 0, mode: 'auto', reasonerUse: 'off' },
     snapshot: {
       chatId: 'repeat-pending-chat',
       chatKey: 'repeat-pending-chat',
@@ -4483,7 +4486,7 @@ for (const scenario of [
 {
   const arbiterPrompts = [];
   const { runtime } = createRuntimeHarness({
-    settings: providerCertificationSettings({ minCards: 0, maxCards: 0,
+    settings: providerCertificationSettings({ cardsPerTurn: 0,
       mode: 'auto',
       strength: 'strong',
       focus: 'character',
@@ -4756,7 +4759,7 @@ for (const scenario of [
 
 {
   const { runtime, installed } = createRuntimeHarness({
-    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
+    settings: { cardsPerTurn: 0, mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
         if (roleId === 'guidanceComposer') return cardProviderResponse(roleId, request);
@@ -4824,7 +4827,7 @@ for (const scenario of [
 
 {
   const { runtime, installed } = createRuntimeHarness({
-    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
+    settings: { cardsPerTurn: 0, mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
         return {
@@ -4850,7 +4853,7 @@ for (const scenario of [
 
 {
   const { runtime, installed, calls } = createRuntimeHarness({
-    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
+    settings: { cardsPerTurn: 0, mode: 'auto', reasonerUse: 'off' },
     hostPrompt: { methods: { clear: undefined } },
     generationRouter: {
       async generate(roleId, request) {
@@ -4906,7 +4909,7 @@ for (const scenario of [
 {
   const roleCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { minCards: 2, maxCards: 2, pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },
+    settings: { cardsPerTurn: 2, pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request = {}) {
         roleCalls.push(roleId);
@@ -5010,7 +5013,7 @@ for (const scenario of [
   const roleCalls = [];
   let fusedRequest = null;
   const { runtime } = createRuntimeHarness({
-    settings: { minCards: 1, maxCards: 1, pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },
+    settings: { cardsPerTurn: 1, pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request = {}) {
         roleCalls.push(roleId);
@@ -5083,7 +5086,7 @@ for (const scenario of [
 {
   const roleCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { minCards: 2, maxCards: 2, pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },
+    settings: { cardsPerTurn: 2, pipelineMode: 'fused', mode: 'auto', reasoningLevel: 'low', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request = {}) {
         roleCalls.push(roleId);
@@ -5169,8 +5172,7 @@ for (const scenario of [
       reasoningLevel: 'medium',
       reasonerUse: 'off',
       promptFootprint: 'normal',
-      minCards: 6,
-      maxCards: 6
+      cardsPerTurn: 6
     },
     generationRouter: {
       async generate(roleId, request) {
@@ -5255,8 +5257,7 @@ for (const scenario of [
       strength: 'strong',
       promptFootprint: 'rich',
       cardSelection: { variety: 'off' },
-      minCards: 5,
-      maxCards: 12
+      cardsPerTurn: 8
     },
     generationRouter: {
       async generate(roleId, request) {
@@ -5408,7 +5409,7 @@ for (const scenario of [
   const manualForcedScope = scopeWithOnlyFamilies(['Scene Frame', 'Open Threads']);
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'manual', maxCards: 2, preProcessDecks: preProcessDecksForScope(manualForcedScope), reasonerUse: 'off' },
+    settings: { mode: 'manual', cardsPerTurn: 2, preProcessDecks: preProcessDecksForScope(manualForcedScope), reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
         routerCalls.push(roleId);
@@ -5461,7 +5462,7 @@ for (const scenario of [
 {
   const manualScope = scopeWithOnlyFamilies(['Scene Frame', 'Open Threads']);
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'manual', maxCards: 2, preProcessDecks: preProcessDecksForScope(manualScope), reasonerUse: 'off' },
+    settings: { mode: 'manual', cardsPerTurn: 2, preProcessDecks: preProcessDecksForScope(manualScope), reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request) {
         if (roleId === 'utilityArbiter') {
@@ -5755,7 +5756,7 @@ for (const scenario of [
     settings: {
       mode: 'auto',
       reasoningLevel: 'low',
-      minCards: 0, maxCards: 0,
+      cardsPerTurn: 0,
       retention: { providerVisibleMessages: 5 }
     },
     snapshot: {
@@ -5835,7 +5836,7 @@ for (const scenario of [
 
 {
   const { runtime } = createRuntimeHarness({
-    settings: { mode: 'manual', reasonerUse: 'off' },
+    settings: { mode: 'manual', reasonerUse: 'off', cardsPerTurn: 0 },
     snapshot: {
       messages: null
     }
@@ -5979,7 +5980,7 @@ for (const scenario of [
   let firstGenerateStarted = false;
   let firstAbortObserved = false;
   const { runtime } = createRuntimeHarness({
-    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
+    settings: { cardsPerTurn: 0, mode: 'auto', reasonerUse: 'off' },
     generationRouter: {
       async generate(roleId, request = {}) {
         assertEqual(roleId, 'utilityArbiter', 'provider supersession test only calls utility arbiter');
@@ -6349,7 +6350,7 @@ for (const scenario of [
   let snapshotCalls = 0;
   const sideEffects = [];
   const { runtime } = createRuntimeHarness({
-    settings: { minCards: 0, maxCards: 0, mode: 'auto', reasonerUse: 'off' },
+    settings: { cardsPerTurn: 0, mode: 'auto', reasonerUse: 'off' },
     snapshot: () => {
       snapshotCalls += 1;
       const snapshotRun = snapshotCalls === 1 ? 1 : 2;
@@ -6622,7 +6623,7 @@ for (const scenario of [
   let generationStarted = false;
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { minCards: 0, maxCards: 0 },
+    settings: { cardsPerTurn: 0 },
     generationRouter: {
       async generate(roleId, request) {
         routerCalls.push({ roleId, request });
@@ -6692,7 +6693,7 @@ for (const scenario of [
 for (const reasoningLevel of ['medium', 'high', 'ultra']) {
   const routerCalls = [];
   const { runtime } = createRuntimeHarness({
-    settings: { minCards: 0, maxCards: 0,
+    settings: { cardsPerTurn: 0,
       mode: 'auto',
       reasoningLevel,
       reasonerUse: 'auto',
@@ -6732,7 +6733,7 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
   const proseHost = createProseMessageHarness('Mara hesitated at the dialing console.');
   const routerCalls = [];
   const { runtime, storage } = createRuntimeHarness({
-    settings: { minCards: 0, maxCards: 0,
+    settings: { cardsPerTurn: 0,
       mode: 'auto',
       reasoningLevel: 'medium',
       reasonerUse: 'auto',
@@ -6792,7 +6793,7 @@ for (const reasoningLevel of ['medium', 'high', 'ultra']) {
     settings: {
       mode: 'auto',
       reasonerUse: 'off',
-      minCards: 0, maxCards: 0,
+      cardsPerTurn: 0,
       storyFormOverride: 'present-mixed'
     },
     snapshot: {

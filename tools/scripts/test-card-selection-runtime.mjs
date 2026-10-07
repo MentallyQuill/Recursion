@@ -10,7 +10,7 @@ let scenes=Object.values(deck.cards).filter(c=>c.builtinFamily==='Scene Frame');
 scenes[0].selectionState='priority'; scenes[1].selectionState='active'; scenes[2].selectionState='active';
 scenes[0].promptText='PRIORITY_SENTINEL'; scenes[1].promptText='COOLED_SENTINEL'; scenes[2].promptText='ELIGIBLE_SENTINEL';
 const environment=Object.values(deck.cards).find(c=>c.builtinFamily==='Environment'); environment.selectionState='active';
-const settings=normalizeSettings({mode:'auto',minCards:2,maxCards:2,cardSelection:{variety:'off',cooldownTurns:1},preProcessDecks:{activeDeckId:deck.id,customDecks:{[deck.id]:deck}}});
+const settings=normalizeSettings({mode:'auto',cardsPerTurn: 2,cardSelection:{variety:'off',cooldownTurns:1},preProcessDecks:{activeDeckId:deck.id,customDecks:{[deck.id]:deck}}});
 scenes=Object.values(getActiveCardDeck(settings).cards).filter(c=>c.builtinFamily==='Scene Frame');
 const history=[{deckId:deck.id,cards:scenes.slice(0,2).map(c=>({cardId:c.id}))}];
 const filtered=cardSelectionSettingsForTurn(settings,{cardSelectionHistory:history});
@@ -59,7 +59,7 @@ for (const pipelineMode of ['segmented','fused']) {
   sources[1].selectionState='active';sources[1].promptText='SECOND_ONLY_INSTRUCTIONS';
   localDeck.cards.authored={id:'authored',name:'Authored',categoryId:localDeck.categoryOrder[0],promptText:'Authored distinct guidance.',selectionState:'active',kind:'authored'};
   localDeck.cardOrderByCategory[localDeck.categoryOrder[0]].push('authored');
-  const store=createSettingsStore({root:{recursion:{mode:'auto',pipelineMode,reasoningLevel:'low',minCards:1,maxCards:2,cardSelection:{variety:'off',cooldownTurns:2},preProcessDecks:{activeDeckId:localDeck.id,customDecks:{[localDeck.id]:localDeck}},providers:{utility:{connectionProfileId:'u'},reasoner:{connectionProfileId:'r'}}}}});
+  const store=createSettingsStore({root:{recursion:{mode:'auto',pipelineMode,reasoningLevel:'low',cardsPerTurn: 1,cardSelection:{variety:'off',cooldownTurns:2},preProcessDecks:{activeDeckId:localDeck.id,customDecks:{[localDeck.id]:localDeck}},providers:{utility:{connectionProfileId:'u'},reasoner:{connectionProfileId:'r'}}}}});
   const normalizedSources=Object.values(getActiveCardDeck(store.get()).cards).filter(c=>c.builtinFamily==='Scene Frame');
   const chat={chatId:`selection-${pipelineMode}`,chat:[{is_user:true,mes:'What changed?'}],async saveChat(){}};
   const realHost=createSillyTavernHost({contextFactory:()=>chat,settingsRoot:{}});
@@ -77,7 +77,7 @@ for (const pipelineMode of ['segmented','fused']) {
   const newRuntime = () => createRecursionRuntime({host:{...realHost,providerProfiles:{list:()=>[{id:'u',completionMode:'chat'},{id:'r',completionMode:'chat'}]},prompt:{install:async packet=>{ installedPackets.push(structuredClone(packet)); return {ok:true,installed:true}; },clear:async()=>({ok:true})}},settingsStore:store,storage,generationRouter:router});
   let runtime = newRuntime();
   for(turn=0;turn<3;turn++){
-    if(turn===2)store.update({minCards:2,maxCards:2});
+    if(turn===2)store.update({cardsPerTurn: 2});
     const prepared=await runtime.prepareForGeneration({hostGeneration:true,userMessage:chat.chat.at(-1).mes});
     assert.equal(prepared.ok,true,`${pipelineMode} turn ${turn} prepares`);
     assert.equal(prepared.hand.cards.length,1,`${pipelineMode} exactly selected card, no fabricated fallback`);

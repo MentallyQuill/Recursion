@@ -1,3 +1,5 @@
+import { normalizeOutputIssues } from './output-contract.mjs';
+
 const TRANSIENT_TRANSPORT_CODES = new Set([
   'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN',
   'ENETDOWN', 'ENETRESET', 'ENETUNREACH'
@@ -74,10 +76,14 @@ export function normalizeProviderError(error) {
   const chain = errorChain(error);
   const status = chainStatus(chain);
   const transportCode = [...chainCodes(chain)].find((code) => TRANSIENT_TRANSPORT_CODES.has(code));
+  const attemptedMethod = chain.map(entry => entry.attemptedStructuredOutputMethod || entry.providerDiagnostics?.structuredOutputMethod)
+    .find(method => ['native-schema', 'prompt-json'].includes(method));
   return Object.freeze({
     ...classifyProviderError(error, chain, status),
     ...(status ? { status } : {}),
-    ...(transportCode ? { transportCode } : {})
+    ...(error?.fieldIssues?.length ? { fieldIssues: normalizeOutputIssues(error.fieldIssues) } : {}),
+    ...(transportCode ? { transportCode } : {}),
+    ...(attemptedMethod ? { attemptedStructuredOutputMethod: attemptedMethod } : {})
   });
 }
 
@@ -143,10 +149,11 @@ function classifyProviderError(error, chain, status) {
     );
   }
 
-  if (codes.has('RECURSION_JSON_PARSE_FAILED') || codes.has('RECURSION_JSON_OBJECT_REQUIRED')) {
-    const code = codes.has('RECURSION_JSON_OBJECT_REQUIRED')
-      ? 'RECURSION_JSON_OBJECT_REQUIRED'
-      : 'RECURSION_JSON_PARSE_FAILED';
+  const outputCode = ['RECURSION_JSON_PARSE_FAILED', 'RECURSION_JSON_OBJECT_REQUIRED',
+    'RECURSION_JSON_AMBIGUOUS', 'RECURSION_JSON_SIZE_LIMIT', 'RECURSION_JSON_DEPTH_LIMIT',
+    'RECURSION_JSON_ITEM_LIMIT', 'RECURSION_PROVIDER_SCHEMA_MISMATCH'].find((code) => codes.has(code));
+  if (outputCode) {
+    const code = outputCode;
     return providerFailureRecord(
       code,
       code === 'RECURSION_JSON_OBJECT_REQUIRED'
@@ -186,7 +193,7 @@ function classifyProviderError(error, chain, status) {
 
   if (codes.has('RECURSION_STRUCTURED_OUTPUT_UNSUPPORTED')
       || (/json_schema|response_format/.test(text)
-        && /not supported|unsupported|unknown|invalid/.test(text))) {
+        && /not supported|unsupported|(?:unrecognized|unknown) (?:request )?(?:parameter|argument)|unknown (?:response_format|json_schema)(?:\s+type)?/.test(text))) {
     return providerFailureRecord(
       'RECURSION_STRUCTURED_OUTPUT_UNSUPPORTED',
       'Native structured output is unsupported.',

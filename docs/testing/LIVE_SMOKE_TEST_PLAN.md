@@ -203,9 +203,7 @@ When providers are configured:
 
 Provider tests must not persist API keys, raw prompts, or raw responses. They use the lane's configured max-token ceiling, default `8192`, with a bounded timeout and strict structured health response.
 
-The Provider Test deadline is diagnostic-only. Production Pre-process and
-Post-process model stages have no Recursion default generation timeout. Smoke
-must verify a pending call is not duplicated merely because it is slow.
+Production request timeout defaults to 180 seconds and active operation budget to 300 seconds. Queue/cooldown waits consume the active operation budget. Smoke must verify deadline settlement, that a pending slow call is not duplicated, and that Stop prevents further dispatch. Model attempts default to two including the initial call, with separate bounds of eight rate-limit and three retryable transient retries; the operation allowance can stop recovery earlier.
 
 ### 5. Manual Pass
 
@@ -213,12 +211,14 @@ In Manual mode:
 
 - Capture a turn snapshot or current chat snapshot.
 - Verify the mode applies as `manual`.
-- Set `Max Cards` to a small value such as `2`, select two family rows, attempt a third, and verify the visible cap notice names Max Cards.
-- Run a Manual generation where the Arbiter omits one selected family; verify runtime covers the selected family through valid cache reuse or a synthesized card job.
+- Set Cards per turn to `2`, select three ordinary family rows, and verify the per-turn projection retains the first two in deck order while the third keeps its saved state/scope. No third-selection rejection should occur.
+- Add a Refinement unit and verify it reserves a slot before ordinary units. Set the target to zero and verify only Refinement remains. Multiple generated sources for one family share a slot; authored cards count individually. With target five and two Refinement units, verify three ordinary units remain.
+- Run a Manual generation where the Arbiter omits a projected selected family; verify runtime covers it through valid cache reuse or a synthesized job. Unresolved selected coverage must block installation.
+- Change Reasoning Level and pipeline without changing Cards per turn; verify the target stays the same while available provider routing changes independently.
 - Verify a prompt packet is installed through the Manual branch.
 - Verify the progress menu and Full Viewer show sanitized snapshot/card-plan metadata.
 
-Manual mode may record hashes, counts, ids, selected family keys, cap-block status, forced-family keys, omitted family keys, and bounded labels. It must not leak raw provider payloads, prompt text, full transcript text, or secrets.
+Manual mode may record hashes, counts, ids, projected family keys, forced-family keys, omitted unit/family keys, and bounded labels. It must not leak raw provider payloads, prompt text, full transcript text, or secrets.
 
 ### 6. Auto Utility Pass
 

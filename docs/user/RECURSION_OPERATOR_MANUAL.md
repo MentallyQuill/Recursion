@@ -12,13 +12,13 @@ Realism analysis is optional. Its purpose includes distinguishing an extraordina
 
 ### Selection and planned coverage
 
-In Settings → Play, Selection variety changes at most the final optional Auto slot. Card cooldown excludes recently used optional source cards for the selected number of completed response turns. Defaults are Low variety and 0 cooldown. Mandatory Priority and Refinement cards are exempt, and Manual ignores both controls. A cooldown shortage may produce a smaller hand; a missing card from the finalized plan is a preparation failure. Last Brief and the Viewer show what actually reached the hand.
+In Settings → Play, Cards per turn sets one target from 0 to 20, default 6, for every Reasoning Level and both pipelines. Selection variety changes at most the final optional Auto slot. Card cooldown excludes recently used optional source cards for the selected number of completed response turns. Defaults are Low variety and 0 cooldown. Mandatory Priority and Refinement cards are exempt, and Manual ignores both controls. A cooldown shortage or exhausted optional card recovery may produce a smaller hand. Missing mandatory coverage blocks preparation. Last Brief and the Viewer show what actually reached the hand and why optional work was omitted.
 
 ### Waiting for provider capacity
 
-A provider rate limit automatically waits and retries up to eight times per stage, separately from Attempts per step. Calls on the same profile share the cooldown. Delay starts at two seconds and increases to sixty seconds, or longer when the provider requests it. Stop cancels waiting immediately. Resume retains the remaining wait and completed work; Retry opens another allowance but does not bypass an inherited cooldown. If recovery is exhausted, inspect the reported provider error and use Retry when appropriate. Recursion does not retry the main SillyTavern story generation automatically.
+A provider rate limit automatically waits and retries up to eight times per stage, separately from Attempts per step. Retryable transient transport failures have a separate limit of three retries. Calls on the same profile share the cooldown. Delay starts at two seconds, honors the provider's Retry-After, and includes bounded jitter. The request timeout defaults to 180 seconds and the active operation budget to 300 seconds; shared recovery allowances or the deadline may stop recovery earlier. Stop cancels waiting immediately. Resume retains the current budget, remaining wait, and completed work; deliberate Retry opens a new recovery window without bypassing an inherited cooldown. Recursion does not retry the main SillyTavern story generation automatically.
 
-Successful internal recovery does not need a persistent warning. If required cards, Refinement, or Guidance cannot be completed, preparation blocks narration and exposes the failure for recovery.
+Successful internal recovery appears as normal completion. Exhausted optional generated families can leave an explained smaller hand with an amber omission. Selected Scene Constraints, generated Manual/Priority/Refinement coverage, selected authored instructions, and Refinement review remain mandatory; missing required work or Guidance blocks prompt installation and exposes Retry on its owner.
 
 Recursion is a beta SillyTavern extension that compiles current-scene prompt guidance for the next roleplay generation. It observes the active chat, maintains a short-lived scene deck, selects a turn hand, and installs an inspectable prompt packet when Auto or Manual mode is active. Segmented generates requested card families through a series of narrow model stages; Fused asks a stronger model for one multi-card bundle and uses Segmented repair or fallback when validation requires it.
 
@@ -42,7 +42,7 @@ Recursion is not a memory manager, lore database, summary engine, vector recall 
 
 ![Full Viewer sections for Now, Deck, Activity, Prompt Packet, Settings, Providers, and diagnostics](../../assets/documentation/renders/recursion-operator-full-viewer-sections.png)
 
-![Settings view with Play Behavior, Strength, Focus, Prompt Footprint, and injection controls](../../assets/documentation/renders/recursion-operator-settings.png)
+![Settings layout with Play behavior and injection controls](../../assets/documentation/renders/recursion-operator-settings.png)
 
 ![Provider controls with Utility fallback warning and Reasoner capability state](../../assets/documentation/renders/recursion-operator-provider-controls.png)
 
@@ -134,8 +134,8 @@ The ellipsis opens the integrated settings/options menu. It is configuration-fir
 
 Main controls:
 
-- Play: a Behavior section containing Strength, Min Cards, Max Cards, Selection variety, Card cooldown (turns), Prompt Footprint, and Focus.
-- Providers: collapsible Utility and Reasoner Connection Profile selection, policy controls, and Test Profile actions.
+- Play: a Behavior section containing Guidance strength, Cards per turn, Selection variety, Card cooldown (turns), Guidance detail, and Focus. The visible summary shows the target and actual available routing; mandatory coverage can exceed the target.
+- Providers: Utility and Reasoner Connection Profile selection, Test Profile actions, and check results. Each lane's Compatibility and tuning disclosure contains policy controls.
 - Advanced: collapsible Injection, Execution, UI, Context Windows, Storage Retention, and Diagnostics sections covering final prompt injection placement/role/depth, attempt windows, progress row limits, Recursion-owned evidence and analysis windows, Journal Entries, safe excerpts, Reset Turn Cache, Clear Run Journal, Export Diagnostics, and the Full Viewer entry point. Reset Defaults at the bottom restores Play and Advanced settings after confirmation while preserving Connection Profile selections and policies, custom decks and scope, compact-bar settings, and viewer visibility.
 
 The dropdown arrow opens Last Brief. The ellipsis opens options. The Hero Pixel Array or current-step status opens progress.
@@ -176,7 +176,7 @@ Editable cards use one eye-state cycle:
 - `priority`: selected ahead of normal active cards in Auto;
 - `refinement`: always included in both modes, with automatic scene-analysis review before narration.
 
-Auto cycles `off -> active -> priority -> refinement -> off`. Manual cycles `off -> active -> refinement -> off`, because selected Manual families are already forced. Refinement remains mandatory beyond the ordinary card cap. The deck header open eye sets all runnable cards active and clears Priority and Refinement; the slashed eye sets all runnable cards off. Draft cards are left unchanged. These state controls work on the Default Deck even though its content and organization are read-only.
+Auto cycles `off -> active -> priority -> refinement -> off`. Manual cycles `off -> active -> refinement -> off`; Active entries participate in the per-turn projection, and its retained sources are required. Refinement remains mandatory beyond the ordinary card target. The deck header open eye sets all runnable cards active and clears Priority and Refinement; the slashed eye sets all runnable cards off. Draft cards are left unchanged. These state controls work on the Default Deck even though its content and organization are read-only.
 
 ### Decks and authored cards
 
@@ -206,7 +206,7 @@ Editable Post-process decks use the same compact `Categories` plus row and the s
 
 ### Scope and caps
 
-Auto lets the Arbiter choose relevant cards from the active deck. Manual lets you select family rows directly and use sub-items as focus facets. `Min Cards` and `Max Cards` constrain the resulting hand; every runnable Priority or Refinement card survives in Auto, in deck order, even when that exceeds the effective maximum. Ordinary cards use the remaining capacity. Strict whitelist settings keep unselected families out of planning and reuse.
+Auto lets the Arbiter choose relevant cards from the active deck. Cards per turn supplies the same target at every Reasoning Level; mandatory Priority and Refinement coverage can exceed it. Manual first reserves Refinement entries, then takes eligible authored cards and generated family requests in deck order up to the remaining target. Each authored card counts separately; built-in sources sharing a family consume one generated family slot. Saved card states remain unchanged when the target is lowered. Entries beyond the per-turn selection remain enabled in the deck and are explained as omitted for this turn.
 
 ### Inspecting the result
 
@@ -256,9 +256,9 @@ Auto lets Recursion compile and install the next prompt packet. It should finish
 
 ### Manual
 
-Manual uses the Pre-process Cards selector as a force list. Selected family rows are mandatory cards up to `Max Cards`; disabled families stay out of planning, deck reuse, hand selection, composition, and injection. If the Arbiter omits a selected family, runtime either reuses a valid cached card for that family or generates the missing card.
+Manual derives a selection for this turn from the active deck. Refinement entries are reserved first, even beyond Cards per turn; eligible Active authored cards and generated family requests then fill the remaining slots in deck order. Existing Priority state behaves as Active in Manual. Every source selected by this projection is required. Disabled sources and entries beyond the target stay out of provider jobs, authored inclusion, hand selection, composition, and injection for this turn.
 
-Sub-items under a selected family are focus facets. They shape that one family card and do not count as extra cards. If `Max Cards` is `5`, Manual allows at most five selected family rows and shows `Max Cards is 5. Change it in Settings to select more.` when another family is blocked.
+Built-in sub-items are focus facets of one generated family card and share that family slot. Authored cards count individually. For a target of 5, two Refinement units leave room for three ordinary units; extra saved rows remain enabled. A target of 0 includes only mandatory Refinement. Scene Constraints is mandatory when selected; Manual does not inject it outside the selected whitelist.
 
 ## Pipelines
 
@@ -289,9 +289,11 @@ flowchart LR
 
 Fused is the large foreground card-call pipeline. It runs the same Arbiter, card-scope filtering, Manual forced-card reconciliation, scene deck, hand selection, guidance composition, prompt packet validation, and install flow as Segmented. The difference is the card-generation stage: all Arbiter-requested or manually forced card families are appended into one `fusedCardBundle` request and returned as one `recursion.cardBundle.v1` response.
 
-Fused accepts valid requested card items, rejects unrequested or duplicate items, records compact omissions, and repairs damaged or missing requested siblings through individual Segmented card stages when at least one item is useful. It runs the full Segmented card path only when no useful bundle item survives. It still obeys Reasoning Level: Low and Medium use Utility, while High and Ultra use Reasoner when the required lane is eligible. A physical Fused request does not require a profile test.
+Fused accepts valid requested card items and can retain complete items from a damaged JSON envelope or token-exhausted response. Every retained item must pass shape, requested-family, source-coverage, instruction, and evidence checks; duplicate or unrequested families are rejected. Accepted siblings checkpoint and are not regenerated while unresolved families use individual Segmented calls on the bundle's selected lane. If no complete item survives, bounded correction can precede individual-family fallback. Authentication, refusal, content filtering, cancellation, transport outages, stale source, storage failures, and exhausted operation budgets do not authorize salvage. Reasoning Level chooses the lane independently of Cards per turn. A physical Fused request does not require a profile test.
 
 Successful automatic retries and card repairs appear as normal completion in Progress. Recovery details and attempt counts remain available through Export Diagnostics. Recursion calls attention to unresolved failures, required action, or incomplete results rather than successful internal recovery.
+
+Corrections identify bounded field or evidence issues and rebuild from the original request, including a real correction message for message-based calls. They do not accumulate old feedback or copy rejected output. Evidence must cite messages in the supplied source window; Recursion never substitutes the latest message for a missing or invalid citation. If input still cannot fit after reducing an excessive output reservation, Fused may narrow to individual families. Single-family or planner requests stop with a source-window/output-limit explanation rather than silently dropping history or authored instructions.
 
 Fused is designed for stronger reasoning models such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar. Segmented is usually better for smaller or simpler models.
 
@@ -320,11 +322,11 @@ flowchart LR
 
 Operator settings should stay broad. Pipeline, Mode, and Reasoning Level live in the compact bar, not in Settings.
 
-- Play / Behavior: Strength `Light | Balanced | Strong`, Prompt Footprint `Compact | Normal | Rich`, and Focus `Balanced | Character | Constraints | Scene | Plot`.
+- Play / Behavior: Guidance strength `Light | Balanced | Strong`, Cards per turn `0..20` (default 6), Guidance detail `Compact | Normal | Rich`, and Focus `Balanced | Character | Constraints | Scene | Plot`.
 - Providers: collapsible Utility and Reasoner setup in the settings panel.
 - Advanced / Injection: final-prompt injection compatibility controls: Placement `In Prompt | In Chat`, Role `System | User | Assistant`, and Depth `0..10`.
 - Advanced / UI: progress row limits.
-- Advanced / Execution: Attempts per step, from one through five total model attempts per stage, default two. Recursion has no default generation timeout.
+- Advanced / Execution: Attempts per step, from one through five model attempts per stage including the initial call, default two; request timeout defaults to 180 seconds and active operation budget to 300 seconds. Rate-limit retries and retryable transient retries have separate bounds, while the operation allowance can stop recovery earlier.
 - Advanced / Context Windows: Post-process Evidence Messages, Source Freshness Messages, Source Freshness Text Budget, and Provider Analysis Messages. Post-process Evidence Messages defaults to `13` and ranges from `0..35`.
 - Advanced / Storage Retention: Journal Entries only. Prior-turn generated work is pruned automatically.
 - Advanced / Diagnostics: safe excerpts, Reset Turn Cache, Clear Run Journal, and Export Diagnostics.
@@ -337,11 +339,12 @@ Use Reprocess from here on the next swipe when one stage and its dependents need
 
 Only completed assistant responses advance usage history; preparation, failed or stopped generation, retries and same-response swipes do not add turns. Selection is saved with the active chat branch, and same-turn resumes reuse the chosen hand. These controls auto-save in Play Behavior and Reset Defaults restores Low/0. Open the Full Viewer and inspect Card selection to see selected reasons, cooldown exclusions with turns remaining, and any variety replacement.
 
-Behavior controls have distinct jobs. Prompt Footprint controls the size and detail of the final composed prompt packet. Min Cards controls Low's selected-card pressure, Max Cards controls Manual selected-family count and Ultra's selected-card pressure, and Medium/High use the Min/Max average. Max Cards also helps avoid unnecessary card model calls: if the Arbiter asks for more card jobs than the effective hand can use, Recursion trims those jobs before generation and records a compact diagnostic. Strength controls intervention pressure inside that budget. Focus changes soft card-family priority without becoming a hard whitelist. The backend contract is defined in [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md).
+Behavior controls have distinct jobs. Guidance detail controls the size and detail of the final composed prompt packet. Cards per turn sets the independent hand target at every Reasoning Level and trims discretionary jobs that cannot reach the hand before generation. Zero requests no discretionary cards; mandatory coverage can exceed the target. Guidance strength controls intervention pressure within that budget, without changing the target. Focus changes soft card-family priority without becoming a hard whitelist. The persisted V1 target is `cardsPerTurn`; old Min/Max values are ignored. The backend contract is defined in [Behavior Settings Policy Spec](../design/BEHAVIOR_SETTINGS_POLICY_SPEC.md).
 
 ```mermaid
 flowchart LR
-    Settings["Strength, Focus, Prompt Footprint"] --> Policy["Behavior policy"]
+    Settings["Guidance strength, Focus, Guidance detail"] --> Policy["Behavior policy"]
+    Target["Cards per turn"] --> Budgets
     Policy --> Arbiter["Compact Arbiter prompt lines"]
     Policy --> Budgets["Prompt and card budgets"]
     Policy --> Hand["Hand ordering pressure"]
@@ -375,6 +378,7 @@ Each lane exposes:
 - Structured Output: Auto, Native Schema, or Prompt JSON;
 - Temperature and Top P only when Recursion Override is selected;
 - Output Token Ceiling;
+- Concurrent requests, with configured and verified effective limits;
 - Test Profile;
 - capability state: Configure, Untested, Segmented, Fused, or Issue.
 
@@ -382,9 +386,11 @@ Recursion does not own endpoint, credential, or model-selection fields. Those re
 
 The recommended local-model policy is Isolated behavioral preset, Auto instruct formatting, Connection Profile samplers, and Auto structured output. This keeps text-completion framing and sampler tuning while excluding behavioral prompt content that can corrupt JSON.
 
-Test Profile reports connectivity, single-card, and Fused checks. These checks help diagnose a profile; they are not a prerequisite for selecting Fused. Actual bundle failures use the normal repair and fallback paths.
+Test Profile reports connectivity, single-card, combined-card, structured-output, and verified concurrency checks. A passing single-card check remains usable when the combined check fails. These bounded checks describe observed compatibility; they do not guarantee every larger bundle and are not a prerequisite for selecting Fused. Opening settings or reading status does not run hidden paid probes.
 
-Provider edits auto-save, increment the lane configuration revision, and invalidate old certification. Same-profile model requests run through a FIFO queue with concurrency one. Utility and Reasoner may overlap only when they select different profiles.
+Provider edits auto-save, increment the lane configuration revision, and invalidate old qualification. Checks also bind to the live profile's ID, model, API, completion mode, preset, and instruct identity. Editing a Connection Profile under the same ID makes it Untested, resets safe concurrency to one, and prevents Auto from using a stale native marker. Drift during Test Profile discards the result. Names, endpoints, and credentials are excluded from the fingerprint.
+
+Same-profile requests share a FIFO queue. Effective concurrency remains one until a current check verifies a higher configured limit (at most three), using the most conservative qualification when both lanes share a profile. Structured Output Auto can downgrade unsupported native output to Prompt JSON within budget. Explicit Native Schema stops with a compatibility explanation instead of silently downgrading.
 
 See [Provider Setup](PROVIDER_SETUP.md).
 
@@ -432,7 +438,7 @@ Expected behavior:
 - Fused partial bundle: keep accepted siblings and repair only damaged siblings through Segmented stages.
 - Fused bundle with no useful cards: use the full Segmented card path.
 - Full Rebuild: queue one fresh Pre-process pass without starting provider or host work; the next matching swipe consumes it once and bypasses reusable work for that turn.
-- Card failure: omit failed cards and keep valid siblings.
+- Card failure: keep validated siblings. Exhausted optional generated work produces a smaller hand with an amber explanation; unresolved selected Scene Constraints, Manual, Priority, or Refinement coverage blocks installation.
 - Reasoner unconfigured or Issue: compose ordinary Pre-process work with Utility when policy allows; fail High/Ultra Post-process guidance soft without crossing lanes. An Untested profile remains Segmented-routable with caution, while explicit Fused selection requires no Fused certification.
 - Recursion Stop: abort the current call, preserve accepted checkpoints, pause the operation, and expose Resume or Retry Stage.
 - Guidance failure: automatically retry correctable output within the attempt limit; if composition still fails, stop narration and show the failed Guidance stage. Retry reuses successful planning and cards. Raw cards cannot substitute for missing Guidance.

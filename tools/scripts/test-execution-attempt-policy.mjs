@@ -5,12 +5,44 @@ import {
 } from '../../src/execution/attempt-policy.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
+const jittered = resolveModelRetryDirective({ failure: { code: 'RECURSION_PROVIDER_RATE_LIMIT', retryAfterMs: 3000 }, request: {}, attempt: 1, limit: 2, random: () => 1 });
+assertEqual(jittered.delayMs, 3300, 'bounded jitter spreads retries after the provider minimum wait');
+assertEqual(classifyModelFailure({ code: 'RECURSION_JSON_AMBIGUOUS' }).kind, 'validation', 'ambiguous JSON is corrected as output, not retried as network failure');
+
+{
+  let calls = 0;
+  const result = await runModelStageAttempts({ request: { prompt: 'initial' },
+    invoke: async () => { calls += 1; return { text: 'invalid' }; },
+    validate: parseJsonResponse, buildCorrectionRequest: ({ request }) => request
+  });
+  assertEqual(calls, 1, 'an unchanged correction stops before another paid dispatch');
+  assertEqual(result.attempts[0].diagnosticCode, 'correction-request-unchanged', 'unchanged correction explains why recovery stopped');
+}
+{
+  let calls = 0;
+  const result = await runModelStageAttempts({ request: { messages: [{ role: 'user', content: 'original' }] },
+    invoke: async () => { calls += 1; return { text: 'invalid' }; }, validate: parseJsonResponse,
+    buildCorrectionRequest: ({ request }) => ({ ...request, prompt: 'ignored prompt', metadata: { attempt: 2 } })
+  });
+  assertEqual(calls, 1, 'ignored prompt and arbitrary metadata do not make a correction dispatchable');
+  assertEqual(result.attempts[0].diagnosticCode, 'correction-request-unchanged');
+}
+{
+  let calls = 0;
+  await runModelStageAttempts({ request: { prompt: 'original', responseLength: 9000, providerConfig: { outputTokenCeiling: 8192 } },
+    invoke: async () => { calls += 1; return { text: 'invalid' }; }, validate: parseJsonResponse,
+    buildCorrectionRequest: ({ request }) => ({ ...request, responseLength: 10000 })
+  });
+  assertEqual(calls, 1, 'a budget change above the effective ceiling does not repeat an identical dispatch');
+}
+
 {
   const delays = [];
   let calls = 0;
   let corrections = 0;
   const result = await runModelStageAttempts({
     attemptsPerStep: 2,
+    random: () => 0,
     request: { prompt: 'original' },
     async invoke() {
       calls += 1;
@@ -18,7 +50,7 @@ import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert
       return calls === 3 ? { text: 'invalid' } : { text: '{"ok":true}' };
     },
     validate: parseJsonResponse,
-    buildCorrectionRequest: ({ request }) => { corrections += 1; return request; },
+    buildCorrectionRequest: ({ request }) => { corrections += 1; return { ...request, prompt: 'corrected' }; },
     sleep: async (ms) => delays.push(ms)
   });
   assertEqual(result.ok, true, 'temporary transport outages do not consume output correction attempts');
@@ -32,6 +64,7 @@ import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert
   let corrections = 0;
   const recovered = await runModelStageAttempts({
     attemptsPerStep: 2,
+    random: () => 0,
     request: { prompt: 'original' },
     invoke: async (request, context) => {
       invocations.push({ request, ...context });
@@ -73,6 +106,19 @@ assertEqual(writerTimeout.category, 'provider-timeout', 'writer deadline remains
 assertEqual(writerTimeout.retryable, true, 'writer deadline remains retryable');
 
 const schemaRequest = { structuredOutputMethod: 'native-schema', responseLength: 900 };
+for (const request of [
+  { ...schemaRequest, providerConfig: { generationPolicy: 'native-schema' } },
+  { roleId: 'sceneFrameCard', request: { ...schemaRequest, providerConfig: { generationPolicy: 'native-schema' } } }
+]) {
+  assertEqual(resolveModelRetryDirective({ failure: { code: 'RECURSION_STRUCTURED_OUTPUT_UNSUPPORTED' }, request, attempt: 1, limit: 2 }).action,
+    'stop', 'an explicit native-schema policy never silently downgrades');
+}
+const wrappedAuto = { roleId: 'sceneFrameCard', request: { ...schemaRequest, providerConfig: { generationPolicy: 'auto' } } };
+assertEqual(resolveModelRetryDirective({ failure: { code: 'RECURSION_STRUCTURED_OUTPUT_UNSUPPORTED', attemptedStructuredOutputMethod: 'prompt-json' },
+  request: { providerConfig: { generationPolicy: { structuredOutputMode: 'auto' } } }, attempt: 1, limit: 2 }).action,
+  'stop', 'an unsupported prompt-json request is not repeated as a native downgrade');
+assertEqual(resolveModelRetryDirective({ failure: { code: 'RECURSION_STRUCTURED_OUTPUT_UNSUPPORTED' }, request: wrappedAuto, attempt: 1, limit: 2 }).nextRequest.request.structuredOutputMethod,
+  'prompt-json', 'Auto downgrades the wrapped request actually sent to the provider');
 assertDeepEqual(resolveModelRetryDirective({
   failure: { code: 'RECURSION_STRUCTURED_OUTPUT_UNSUPPORTED', retryable: false },
   request: schemaRequest,
@@ -137,6 +183,7 @@ assertEqual(resolveModelRetryDirective({
 
 assertDeepEqual(resolveModelRetryDirective({
   failure: { code: 'RECURSION_PROVIDER_TRANSIENT', retryable: true },
+  random: () => 0,
   request: { roleId: 'sceneFrameCard', responseLength: 900 },
   attempt: 1,
   limit: 2
@@ -216,6 +263,7 @@ assertEqual(actionableValidation.failure.suggestedAction, 'Retry Active Cast.', 
 let transportCalls = 0;
 const transportResult = await runModelStageAttempts({
   attemptsPerStep: 2,
+  random: () => 0,
   request: { prompt: 'transport' },
   async invoke() {
     transportCalls += 1;
@@ -248,7 +296,7 @@ const exhaustedWithResponse = await runModelStageAttempts({
   validate() {
     return { ok: false, error: { code: 'RECURSION_MODEL_OUTPUT_INVALID', category: 'validation', message: 'Invalid.', retryable: true } };
   },
-  buildCorrectionRequest: ({ request }) => request
+  buildCorrectionRequest: ({ request }) => ({ ...request, prompt: 'Correct the output.' })
 });
 assertEqual(exhaustedWithResponse.ok, false, 'invalid responses can exhaust the attempt window');
 assertEqual(exhaustedWithResponse.lastResponse.marker, 'response-2', 'exhausted result retains the last response');

@@ -7,19 +7,23 @@ import { chromium } from 'playwright';
 // Production settings UI served locally; no running SillyTavern host is contacted.
 const root = process.cwd();
 const output = resolve(root, 'artifacts/card-selection-settings');
-const fixture = `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/styles/recursion.css"><style>
+const fixture = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/styles/recursion.css"><style>
 :root { --mainFontFamily: Arial, sans-serif; --SmartThemeBodyColor: #d8d8d8; --SmartThemeBlurTintColor: #202020; --SmartThemeBorderColor: #555; }
 body { margin: 0; background: #181818; color: #d8d8d8; font-family: Arial, sans-serif; }
 main { max-width: 960px; margin: 40px auto; }
 </style></head><body><main id="mount"></main><script type="module">
 import { mountRecursionUi } from '/src/ui.mjs';
 import { createSettingsStore } from '/src/settings.mjs';
+import { resolveProviderCapability } from '/src/provider-capability.mjs';
 const saved = JSON.parse(localStorage.getItem('selection-proof') || '{}');
 const store = createSettingsStore({ root: saved, save() { localStorage.setItem('selection-proof', JSON.stringify(saved)); } });
 window.proofStore = store;
+const capability = (lane, operation = 'prompt-packet') => resolveProviderCapability({ settings: store.get(), lane, operation, host: { connectionProfiles: [] } });
 window.proofUi = mountRecursionUi({ mountPoint: document.querySelector('#mount'), runtime: {
-view: () => ({ settings: store.get(), activity: { phase: 'idle' } }),
+view: () => ({ settings: { ...store.get(), providerCapabilities: { utility: { promptPacket: capability('utility') }, reasoner: { promptPacket: capability('reasoner') } } }, activity: { phase: 'idle' } }),
+providerCapability: capability,
 updateSettings: patch => store.update(patch),
+updateProviderConfig: (lane, patch, options) => store.updateProviderConfig(lane, patch, options),
 listProviderConnectionProfiles: () => []
 } });
 window.proofReady = true;
@@ -54,6 +58,22 @@ try {
     await page.locator('[data-recursion-actions]').click();
     const variety = page.locator('[data-recursion-setting-selection-variety]');
     const cooldown = page.locator('[data-recursion-setting-card-cooldown]');
+    const target = page.locator('[data-recursion-setting-cards-per-turn]');
+    assert.equal(await target.inputValue(), '6');
+    assert.equal(await target.getAttribute('min'), '0');
+    assert.equal(await target.getAttribute('max'), '20');
+    assert.equal(await page.locator('[data-recursion-setting-min-cards], [data-recursion-setting-max-cards]').count(), 0);
+    await target.fill('0');
+    await target.press('Tab');
+    await page.waitForFunction(() => window.proofStore.get().cardsPerTurn === 0);
+    await target.fill('9');
+    await target.press('Tab');
+    await page.waitForFunction(() => window.proofStore.get().cardsPerTurn === 9);
+    await page.locator('[data-recursion-reasoning-level-ultra]').click();
+    if (!(await page.locator('[data-recursion-settings-panel]').isVisible())) await page.locator('[data-recursion-actions]').click();
+    assert.equal(await target.inputValue(), '9');
+    await page.waitForFunction(() => document.querySelector('[data-recursion-card-target-summary]').textContent.includes('Target: 9 cards per turn.'));
+    assert((await page.locator('[data-recursion-settings-play]').innerText()).includes('Mandatory cards can exceed the target'));
     assert.equal(await variety.inputValue(), 'low');
     assert.equal(await cooldown.inputValue(), '0');
     await variety.selectOption('medium');
@@ -66,9 +86,10 @@ try {
     await page.locator('[data-recursion-actions]').click();
     assert.equal(await variety.inputValue(), 'medium');
     assert.equal(await cooldown.inputValue(), '2');
+    assert.equal(await target.inputValue(), '9');
     const geometry = await page.evaluate(() => {
       const panel = document.querySelector('[data-recursion-settings-panel]');
-      const controls = [...panel.querySelectorAll('[data-recursion-setting-selection-variety], [data-recursion-setting-card-cooldown]')];
+      const controls = [...panel.querySelectorAll('[data-recursion-setting-cards-per-turn], [data-recursion-setting-selection-variety], [data-recursion-setting-card-cooldown]')];
       return { width: innerWidth, panel: panel.getBoundingClientRect().toJSON(), controls: controls.map(c => ({ label: c.getAttribute('aria-label'), rect: c.getBoundingClientRect().toJSON() })), overflow: document.documentElement.scrollWidth > innerWidth };
     });
     assert.equal(geometry.overflow, false, `${viewport.name}: page horizontal overflow`);
@@ -77,12 +98,44 @@ try {
       assert(control.rect.width >= 80 && control.rect.height >= 24, `${viewport.name}: usable input geometry`);
     }
     await page.screenshot({ path: resolve(output, `${viewport.name}.png`), fullPage: true });
+    await page.locator('[data-recursion-settings-tab-providers]').click();
+    const tuning = page.locator('[data-recursion-settings-section-body-compatibility-utility]');
+    assert.equal(await tuning.isVisible(), false);
+    assert((await page.locator('[data-recursion-provider-checks-utility]').innerText()).includes('Single cards: Not checked'));
+    assert((await page.locator('[data-recursion-provider-checks-utility]').innerText()).includes('Combined cards: Not checked'));
+    const tuningToggle = page.locator('[data-recursion-settings-section-toggle-compatibility-utility]');
+    await tuningToggle.focus();
+    await tuningToggle.press('Space');
+    assert.equal(await tuning.isVisible(), true);
+    await page.locator('[data-recursion-provider-output-token-ceiling-utility]').fill('4096');
+    await page.locator('[data-recursion-provider-output-token-ceiling-utility]').press('Tab');
+    await page.waitForFunction(() => window.proofStore.get().providers.utility.outputTokenCeiling === 4096);
+    assert.equal(await tuning.isVisible(), true);
+    await page.locator('[data-recursion-settings-tab-advanced]').click();
+    const injection = page.locator('[data-recursion-settings-section-body-injection]');
+    await page.locator('[data-recursion-settings-section-toggle-injection]').click();
+    assert.equal(await injection.isVisible(), false);
+    await page.locator('[data-recursion-settings-tab-play]').click();
+    await page.locator('[data-recursion-settings-tab-advanced]').click();
+    assert.equal(await injection.isVisible(), false);
+    if (!(await page.locator('[data-recursion-settings-section-body-execution]').isVisible())) await page.locator('[data-recursion-settings-section-toggle-execution]').click();
+    const executionText = await page.locator('[data-recursion-settings-section-execution]').innerText();
+    assert(executionText.includes('The first call counts toward Attempts per step.'));
+    assert(executionText.includes('Capacity retries are separately bounded'));
+    assert(executionText.includes('Resume keeps the current budget'));
+    await page.locator('[data-recursion-setting-tooltips-enabled]').uncheck();
+    await page.waitForFunction(() => window.proofStore.get().ui.tooltipsEnabled === false);
+    assert((await page.locator('[data-recursion-settings-section-execution]').innerText()).includes('Retry or Reprocess opens a new window'));
+    await page.screenshot({ path: resolve(output, `${viewport.name}-advanced.png`), fullPage: true });
+    await page.locator('[data-recursion-settings-tab-providers]').click();
+    assert.equal(await tuning.isVisible(), true);
+    await page.screenshot({ path: resolve(output, `${viewport.name}-providers.png`), fullPage: true });
     assert.deepEqual(errors, []);
-    reports.push({ viewport, geometry, persisted: { variety: 'medium', cooldownTurns: 2 } });
+    reports.push({ viewport, geometry, persisted: { cardsPerTurn: 9, variety: 'medium', cooldownTurns: 2 }, disclosures: 'keyboard, autosave and tab changes preserved', tooltipsOffHelp: true });
     await context.close();
   }
   await writeFile(resolve(output, 'report.json'), JSON.stringify({ classification: 'isolated-production-ui-fixture', reports }, null, 2));
-  console.log('[pass] card selection settings: desktop/narrow layout, interaction and reload persistence');
+  console.log('[pass] settings: desktop/narrow target persistence, routing, disclosures, keyboard and visible help');
 } finally {
   await browser.close();
   await new Promise(resolve => server.close(resolve));

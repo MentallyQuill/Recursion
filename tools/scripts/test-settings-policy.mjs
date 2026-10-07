@@ -20,7 +20,7 @@ const defaultPolicy = influencePolicyForSettings({});
 assertEqual(defaultPolicy.strength.level, 'balanced', 'default policy uses balanced strength');
 assertEqual(defaultPolicy.focus.level, 'balanced', 'default policy uses balanced focus');
 assertEqual(defaultPolicy.footprint.level, 'compact', 'default policy uses compact footprint');
-assertDeepEqual(defaultPolicy.cardBudget, { minCards: 3, normalCards: 6, maxCards: 10 }, 'default policy exposes derived card budget range');
+assertDeepEqual(defaultPolicy.cardBudget, { targetCards: 6 }, 'default policy exposes independent card target');
 assertDeepEqual(defaultPolicy.focus.boostedFamilies, [], 'balanced focus has no boosted families');
 assertDeepEqual(defaultPolicy.footprint.sectionBudgets, FOOTPRINT_SECTION_BUDGETS.compact, 'compact footprint exposes compact budgets');
 assertDeepEqual(
@@ -47,9 +47,9 @@ assertEqual(strongPolicy.reasoningLevel, 'low', 'strong does not change reasonin
 assertEqual(strongPolicy.injection.depth, 7, 'strong does not change injection depth');
 assert(strongPolicy.strength.arbiterLine.includes('Do not increase footprint size'), 'strong arbiter line preserves footprint ownership');
 assertDeepEqual(
-  influencePolicyForSettings({ minCards: 4, maxCards: 13 }).cardBudget,
-  { minCards: 4, normalCards: 8, maxCards: 13 },
-  'policy derives normal card budget from min/max average'
+  influencePolicyForSettings({ cardsPerTurn: 8 }).cardBudget,
+  { targetCards: 8 },
+  'policy preserves operator card target'
 );
 
 assertDeepEqual(
@@ -95,7 +95,7 @@ const compactStoredRichEffective = runPolicyForEffectivePlan({
 assertEqual(compactStoredRichEffective.footprint.level, 'compact', 'run policy preserves stored footprint');
 assertEqual(compactStoredRichEffective.footprint.effectiveLevel, 'rich', 'run policy records effective footprint');
 assertDeepEqual(compactStoredRichEffective.footprint.sectionBudgets, FOOTPRINT_SECTION_BUDGETS.rich, 'run policy uses effective rich section budgets');
-assertDeepEqual(compactStoredRichEffective.cardBudget, { minCards: 3, normalCards: 6, maxCards: 10 }, 'run policy keeps card budget separate from effective footprint');
+assertDeepEqual(compactStoredRichEffective.cardBudget, { targetCards: 6 }, 'run policy keeps card target separate from effective footprint');
 assert(compactStoredRichEffective.footprint.composerLine.includes('Rich'), 'run policy composer line uses effective rich footprint');
 assertEqual(compactStoredRichEffective.footprint.footprintOverrideReason, 'footprint-risk-override', 'run policy preserves footprint override reason');
 const effectiveDiagnostics = summarizeBehaviorPolicyForDiagnostics(compactStoredRichEffective, {

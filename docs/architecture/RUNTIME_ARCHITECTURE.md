@@ -70,7 +70,7 @@ Fused sends all requested families through one structured card-bundle call. Each
 
 ## Guidance And Prompt Installation
 
-Explicit user instructions and established story facts outrank generated card interpretations and composer guidance. The composer receives up to four recent visible user/assistant messages (3,000 characters each) to check selected cards against the current exchange. Malformed guidance uses the configured bounded correction attempts before a terminal raw-card fallback. Transport and refusal errors retain the existing retry policy; cancellation never installs fallback. Terminal fallback is checkpointed for reuse.
+Explicit user instructions and established story facts outrank generated card interpretations and composer guidance. The composer receives up to four recent eligible user/assistant messages in full to check selected cards against the current exchange. Malformed guidance uses the configured bounded corrections built from the original request and fixed field issues. If guidance still fails, preparation pauses for Retry and narration stops; raw cards cannot substitute for missing Guidance. Transport and refusal errors retain their own retry/stop policy, and cancellation never installs a packet.
 
 Prompt installation rechecks the current host source before and after mutation. A stale operation cannot commit its packet. The prepared artifact becomes active only after the host reports installation success. Install failure blocks native story generation, is recorded explicitly, and is never promoted to a reusable success. The interceptor calls SillyTavern's abort callback whenever required preparation fails or pauses.
 

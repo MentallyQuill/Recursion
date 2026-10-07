@@ -213,7 +213,8 @@ const summaryKeys = new Set([
   'nativeGenerationType',
   'diagnosticCodes',
   'stages',
-  'staleFields'
+  'staleFields',
+  'recoveryCounts'
 ]);
 assert(
   Object.keys(summary).every((key) => summaryKeys.has(key)),

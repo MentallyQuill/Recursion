@@ -12,12 +12,12 @@ This document describes the implementation of the profile-only provider boundary
 | `src/hosts/sillytavern/provider-profiles.mjs` | Supported Connection Manager capability check and safe profile listing. |
 | `src/hosts/sillytavern/profile-samplers.mjs` | Allowlisted sampler projection from a profile preset. |
 | `src/hosts/sillytavern/host.mjs` | One Connection Profile request path. |
-| `src/providers/profile-request-queue.mjs` | Abort-aware FIFO serialization keyed by profile id. |
+| `src/providers/profile-request-queue.mjs` | Abort-aware FIFO dispatch keyed by profile id, bounded by current verified concurrency. |
 | `src/providers/stage-output-budgets.mjs` | Role-specific output budgets and retry floors. |
 | `src/providers/provider-response-normalizer.mjs` | Canonical response envelope. |
 | `src/providers/structured-output-parser.mjs` | Bounded JSON extraction and recovery. |
 | `src/providers/provider-errors.mjs` | Safe provider error taxonomy. |
-| `src/providers/profile-certification.mjs` | Three-stage profile certification. |
+| `src/providers/profile-certification.mjs` | Bounded profile compatibility and concurrency checks bound to live identity. |
 | `src/execution/attempt-policy.mjs` | One-action retry directives. |
 | `src/execution/scheduler.mjs` | Attempts, checkpoints, queues, and exhaustion settlement. |
 | `src/runtime/pipeline-policy.mjs` | Requested/effective pipeline selection. |
@@ -128,7 +128,7 @@ Resolution rules:
 - Instruct `auto` sets `includeInstruct: true` only for text completion.
 - Request-level structured-output method, when present, takes precedence for a bounded retry.
 - Otherwise explicit provider policy wins.
-- Provider `auto` uses the certified method, defaulting conservatively to prompt JSON.
+- Provider `auto` uses the method certified for matching settings and live profile identity, defaulting conservatively to Prompt JSON. Only Auto may downgrade an unsupported native attempt within budget; explicit Native Schema stops with a compatibility explanation.
 
 ## Sampler Projection
 
@@ -153,26 +153,24 @@ Projection failure produces Recursion temperature/top-p values and `profile-samp
 
 For each key:
 
-- at most one operation is active;
+- effective concurrency remains one until current qualification verifies a higher configured limit, at most three;
 - queued operations preserve FIFO order;
 - abort before start rejects and removes that entry;
 - abort during execution propagates through the request signal;
 - settlement starts the next non-aborted entry;
 - an exception cannot deadlock the queue.
 
-Different profile ids have independent queues. This means the same local model route is protected even when Utility and Reasoner both select it.
+Different profile ids have independent queues. Utility and Reasoner selecting the same profile share its most conservative matching qualification. Stale or failed qualification restores one; queued calls do not launch hidden qualification probes.
 
 ## Stage Output Budgets
 
-`stageOutputBudget()` maps roles and workload size to bounded values. The lane ceiling remains the hard upper bound.
+`outputBudgetForRequest()` uses the lane output ceiling as the default production allowance and hard upper bound, default 8192. An explicit per-request allowance can be smaller. `minimumOutputBudgetForRole()` defines safe floors for context-limit reductions.
 
 Key properties:
 
 - provider connectivity uses a very small response budget;
-- one card is capped near one thousand tokens;
-- Arbiter and composer roles have distinct budgets;
-- Fused scales by requested family count but remains capped;
-- editorial stages use contract-specific budgets;
+- production card, Arbiter, composer, Fused, and editorial calls inherit the lane ceiling unless their request supplies a smaller allowance;
+- certification single-card and representative Fused checks request smaller bounded allowances;
 - retry floors prevent reduction to unusable values.
 
 `reduceOutputBudgetForContextLimit()` mutates only `responseLength`. It does not modify policy or profile settings.
@@ -186,6 +184,7 @@ Checks run in this order:
 1. `providerTest`, 128 tokens.
 2. `sceneFrameCard`, 900 tokens.
 3. `fusedCardBundle`, bounded representative budget.
+4. Observed concurrency when a higher configured limit is requested.
 
 With structured-output policy `auto`, a native-schema incompatibility on the single-card check can trigger one prompt-JSON check. Other failures do not silently change the method.
 
@@ -196,7 +195,7 @@ Results:
 - single-card pass plus Fused failure: `partial`;
 - all pass: `pass`.
 
-The settings store binds the result to both `configHash` and `configRevision`. Stale completion cannot certify newer settings.
+The result binds to Recursion `configHash` and live `profileIdentityHash`; saving also checks the frozen configuration revision. The profile hash uses only ID, model, API, completion mode, preset, and instruct identity, excluding names, endpoints, and secrets. Same-ID profile drift makes saved qualification untested and prevents stale Auto native/concurrency use. Drift during a test prevents saving its result.
 
 ## Compact Card Validation
 
@@ -237,17 +236,17 @@ It recognizes direct structured objects, chat/text fields, parsed message conten
 
 ## Parser Recovery
 
-The structured parser:
+The shared structured parser:
 
 1. accepts a direct object;
 2. parses tool/function arguments;
 3. parses visible text;
 4. unwraps a one-object array;
-5. scans balanced objects;
+5. scans strings, complete top-level objects, and duplicate keys before selecting a candidate;
 6. applies local repair to complete candidates;
 7. returns the candidate accepted by the expected role validator.
 
-A top-level array that is not directly usable does not prevent later object candidates from being examined. Invalid candidates are not copied into errors or diagnostics.
+Duplicate same-object keys, including escaped spellings, and competing top-level objects are rejected as ambiguous. Quoted braces and punctuation remain inside their strings. Parsing is bounded to 262,144 characters, depth 64, and 40 complete bundle items. It does not close an unfinished card or invent missing fields. Every candidate passes the canonical role schema and semantic validation. Field issues contain only fixed rules/messages and schema-owned paths, with at most eight issues and paths capped at 160 characters. Invalid candidates are not copied into errors or diagnostics.
 
 ## Failure Taxonomy
 
@@ -279,7 +278,11 @@ reduce-output-budget
 correct-output
 ```
 
-The scheduler applies one directive per attempt and checkpoints only the allowlisted action code. A corrected-output attempt receives a role-owned correction prompt. A delayed retry remains bounded by the stage's attempt window. Configuration and abort failures stop immediately.
+The scheduler applies one directive per attempt and checkpoints only the allowlisted action code. A corrected-output attempt rebuilds the original messages/prompts with bounded role-owned field feedback; rejected output and prior feedback are not accumulated. Model attempts default to two including the initial call. Rate-limit retries have a separate bound of eight and retryable transient retries a bound of three; the operation allowance can stop extra calls earlier. Request deadline defaults to 180 seconds and active operation deadline to 300 seconds, including queue/cooldown waits. Configuration and abort failures stop immediately. Resume preserves the active recovery budget; deliberate Retry/Reprocess opens a new window without bypassing inherited cooldown.
+
+## Independent Card Target
+
+Play persists one `cardsPerTurn` target, default 6, range 0..20. Low/Medium/High/Ultra and Fused/Segmented share that count; reasoning routes and Guidance strength/detail do not change it. Internal `plan.budgets.maxCards` remains a derived budget. Auto reserves Priority and Refinement before discretionary work. Manual reserves Refinement, then projects ordinary authored cards and generated family units in deck order into remaining slots without rewriting saved scope/states. Authored units count separately; sources sharing one generated family share its unit. Mandatory coverage may exceed the target.
 
 ## Pipeline Selection
 
@@ -310,7 +313,9 @@ type FusedArtifact = {
 };
 ```
 
-When some cards pass, runtime creates Segmented stages only for `unresolvedFamilies`. When none pass after attempts are exhausted, the scheduler invokes `settleExhausted()` exactly once and creates a full Segmented fallback artifact.
+Complete items from eligible JSON parse/object/ambiguity, payload shape, or completion-token failures may be salvaged transiently. They pass the same normalization, duplicate-family, requested-family, source-coverage, instruction, and evidence checks as successful items. Missing or out-of-window evidence is rejected rather than replaced with the latest message. Validated siblings checkpoint before Segmented stages for `unresolvedFamilies` and are not regenerated by that repair wave.
+
+If none survives bounded output recovery, the scheduler settles bundle exhaustion once and creates full Segmented fallback. Token/context capacity exhaustion may also narrow to individual families. Authentication, configuration, refusal/filter, cancellation, transient transport, stale-source, storage, and operation-budget failures do not authorize equivalent salvage/fallback calls. Required selected Scene Constraints, Manual, Priority, Refinement, and authored coverage blocks installation when unresolved; optional generated exhaustion can finish with amber omissions and a smaller validated hand.
 
 ## Diagnostics Contract
 
@@ -355,11 +360,11 @@ Offline fixtures cover:
 - transient transport failure;
 - abort;
 - partial Fused output;
-- same-profile serialization.
+- same-profile FIFO dispatch and effective verified concurrency.
 
 Live validation should use:
 
 1. A local text-completion profile with an instruct template and prompt JSON.
 2. A chat-completion profile without native schema support.
 3. A chat-completion profile with native schema support.
-4. The same profile selected for Utility and Reasoner to confirm FIFO serialization.
+4. The same profile selected for Utility and Reasoner to confirm FIFO dispatch and the most conservative current verified concurrency limit.

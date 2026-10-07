@@ -4,6 +4,8 @@ This is the implementation-facing V1 storage, retention, privacy, and diagnostic
 
 Fused execution summaries and diagnostics retain original per-family rejection codes, accepted/unresolved families, and whether individual repair was scheduled. The `stages[].fused` projection is normalized by `src/fused-recovery.mjs`; only catalog families, fixed codes, and bounded lists are exported. Repair stages remain separate durable checkpoints, so saved/reloaded progress can distinguish original rejection, active repair, recovered completion, and unresolved failure without retaining rejected model prose. Fused stage version 2 invalidates earlier checkpoints that omitted source instructions or rejection metadata.
 
+Complete items salvaged from eligible parsing/shape failures or completion-token exhaustion become durable cards only after the normal structural, requested-family, duplicate-family, source-coverage, instruction, and evidence checks. Transient `recoverableItems` are never persisted as unvalidated output. Original provider cause stays a fixed code rather than a fabricated item rejection. Optional generated exhaustion records a bounded omission; required coverage still blocks installation. Accepted siblings survive Stop/reload and unresolved-family repair only when all checkpoint identities remain current.
+
 ## Principles
 
 1. SillyTavern chat is authority for story state.
@@ -131,6 +133,10 @@ Entries may include hashes, counts, ids, attempt numbers, failure classes, and s
 ## Diagnostics
 
 Diagnostics export normalized settings, provider capability summaries, safe activity history, execution metadata, artifact counts and hashes, Last Brief summaries, and journal entries. Optional excerpts are bounded and sanitized. Default reports use hashes and counts only.
+
+Current normalized settings persist `cardsPerTurn` (0..20, default 6), with no Min/Max operator fields. Provider capability summaries compare the current settings hash and the live `profileIdentityHash`; stale saved checks are reported as untested, not current native/concurrency qualification. The fingerprint uses only profile ID, model, API, completion mode, preset, and instruct descriptors. Display names, raw endpoints, and secrets are excluded, and status reads launch no generation probes.
+
+Recovery summaries derive from actual durable stage attempts and outcomes, using only the fixed counter keys `parseFailures`, `shapeFailures`, `correctionRequests`, `budgetAdjustments`, `rateLimitRetries`, `transientRetries`, `salvagedItems`, `segmentedRepairCalls`, `optionalOmissions`, and `requiredBlocks`. Salvaged counts describe accepted validated items; optional omissions describe exhausted generated work, not composer omissions or narration quality. Counts and fixed causes survive diagnostics export without rejected output, correction prompts, private reasoning, or credentials. Unavailable timing/usage measurements remain explicit; offline fixtures do not establish live success rates or latency improvements.
 
 Actual failures expose a structured code, stage, category, readable message, retryability, attempted recovery, and suggested action. Host-stop warnings without an underlying error retain cancellation/unknown-cause metadata rather than an invented failure. Secret-bearing thrown errors are converted to fixed safe copy before reaching activity, journal, or caller surfaces.
 

@@ -5,7 +5,6 @@ import { downloadDiagnostics } from './ui/diagnostics-download.mjs';
 import { createPostProcessReviewDialog, renderPostProcessWritingControls } from './ui/post-process-review.mjs';
 import {
   defaultCardScope,
-  enforceManualSelectionCap,
   normalizeCardScope,
 } from './card-scope.mjs';
 import {
@@ -67,8 +66,7 @@ import {
   providerModelStatus,
   providerRouteSummary
 } from './providers.mjs';
-import { DEFAULT_RECURSION_SETTINGS } from './settings.mjs';
-import { FOCUS_BOOSTED_FAMILIES } from './settings-policy.mjs';
+import { DEFAULT_RECURSION_SETTINGS, normalizeCardBudgetSettings } from './settings.mjs';
 import { DEFAULT_RETENTION_SETTINGS, RETENTION_LIMITS } from './retention-policy.mjs';
 import {
   createUiActionStatus,
@@ -83,6 +81,7 @@ import {
 } from './ui/cards-panel.mjs';
 import {
   providerCapabilityDetail,
+  providerCheckLines,
   providerCapabilityLabel,
   providerSelector,
   providerStatusClass,
@@ -110,8 +109,8 @@ const MODE_MENU_OPTIONS = Object.freeze([
   {
     value: 'manual',
     label: 'Manual',
-    title: 'Forces selected card families up to Max Cards.',
-    tip: 'Forces selected card families up to Max Cards.'
+    title: 'Includes enabled cards in deck order up to Cards per turn. Refinement is always included.',
+    tip: 'Includes enabled cards in deck order up to Cards per turn. Refinement is always included.'
   }
 ]);
 const DEFAULT_FORCED_STORY_FORM = Object.freeze({
@@ -180,10 +179,10 @@ const REASONING_LEVEL_OPTIONS = Object.freeze([
   ['ultra', 'Ultra']
 ]);
 const REASONING_LEVEL_TIPS = Object.freeze({
-  low: 'Low: Utility-only, reduced cards.',
+  low: 'Low: Utility plans, generates cards, and composes guidance.',
   medium: 'Medium: Utility checks, Reasoner guidance.',
   high: 'High: Reasoner Arbiter, priority cards, and guidance.',
-  ultra: 'Ultra: Reasoner-heavy calls with a larger card bias.'
+  ultra: 'Ultra: Reasoner plans, generates cards, and composes guidance.'
 });
 const REASONING_LEVELS = Object.freeze(REASONING_LEVEL_OPTIONS.map(([value]) => value));
 const FOCUSABLE_SELECTORS = Object.freeze(['button', 'input', 'select', 'textarea', '[tabindex]']);
@@ -241,8 +240,7 @@ const SETTINGS_AUTOSAVE_DATASETS = Object.freeze([
   'recursionSettingRequestDeadlineSeconds',
   'recursionSettingOperationDeadlineSeconds',
   'recursionSettingStrength',
-  'recursionSettingMinCards',
-  'recursionSettingMaxCards',
+  'recursionSettingCardsPerTurn',
   'recursionSettingSelectionVariety',
   'recursionSettingCardCooldown',
   'recursionSettingFootprint',
@@ -274,8 +272,7 @@ const PROVIDER_AUTOSAVE_DATASETS = Object.freeze([
 const SETTINGS_TOOLTIPS = Object.freeze({
   behavior: 'Controls how strongly Recursion shapes the next prompt packet. These settings affect card pressure, focus, and prompt size without changing provider credentials.',
   strength: 'Bias strength for the composed prompt packet. Light stays subtle, Balanced is the normal default, and Strong gives Recursion more room to steer scene adhesion.',
-  minCards: 'Total hand target at Low. Medium and High use the average of Min and Max. Authored and generated cards both count; unavailable cards are reported in progress.',
-  maxCards: 'Total hand target at Ultra and upper Manual selection cap. Priority and Refinement cards are always included and may exceed the target. Fused and Segmented use the same selection.',
+  cardsPerTurn: 'Total authored and generated card target in every reasoning level and pipeline. Mandatory cards may exceed it; unavailable or omitted optional work can produce a smaller hand.',
   selectionVariety: 'Auto only. Keeps the strongest choices and may replace one optional slot with another relevant card. Off keeps rank order; Low uses 25% / next two alternatives, Medium 50% / next four, High 100% / all alternatives. Priority and Refinement cards are exempt. Provider temperature is unchanged.',
   cardCooldown: 'Auto only. Excludes recently used cards for the next 0 to 10 completed response turns. Zero disables cooldown. Priority and Refinement cards are exempt; a shortage produces a smaller hand.',
   focus: 'Temporary creative priority for card selection and composition. It nudges Recursion toward character, constraints, scene, or plot without becoming a hard whitelist.',
@@ -288,7 +285,7 @@ const SETTINGS_TOOLTIPS = Object.freeze({
   injectionRole: 'Role SillyTavern assigns to Recursion prompt blocks. System is safest for instruction-like scene guidance; User or Assistant exist for preset compatibility.',
   injectionDepth: 'Insertion depth for the composed packet. Lower values sit closer to generation; higher values sit farther back and usually feel less forceful.',
   ui: 'Display preferences for Recursion chrome. These affect local visibility and hover help only, not prompts or provider calls.',
-  modelAttemptsPerStep: 'Total automatic model attempts for each Recursion step. Slow calls are not retried unless they fail.',
+  modelAttemptsPerStep: 'The first call counts toward Attempts per step. Capacity retries are separately bounded; the operation allowance can stop recovery earlier. Resume keeps the current budget. Retry or Reprocess opens a new window while retaining accepted work.',
   tooltips: 'Show hover help across Recursion. Turn off once the controls are familiar; hidden text never affects model calls.',
   progressChildLimit: 'Maximum visible sub-rows under one progress step before that child list scrolls. Useful when many card calls run in one turn.',
   progressListLimit: 'Maximum combined progress rows before the whole progress menu scrolls. Keeps long model-call runs readable without growing over the chat.',
@@ -2289,16 +2286,6 @@ function localCardSuggestion(draft = {}) {
   };
 }
 
-function manualTrimPreferenceFamilies(view = {}) {
-  const settings = asObject(view.settings);
-  const fromLastHand = Array.isArray(view.lastHand?.cards)
-    ? view.lastHand.cards.map((card) => cleanText(card?.family)).filter(Boolean)
-    : [];
-  const focus = cleanText(settings.focus, 'balanced');
-  const focusFamilies = FOCUS_BOOSTED_FAMILIES[focus] || FOCUS_BOOSTED_FAMILIES.balanced || [];
-  return [...fromLastHand, ...focusFamilies];
-}
-
 function renderCardSuggestionPreview(editorState = {}) {
   const draft = asObject(editorState.draft);
   const suggestion = asObject(editorState.suggestion);
@@ -2999,19 +2986,24 @@ function settingsNumberRow(label, datasetName, value, { min = 0, max = 20, step 
   return controlRow(label, control);
 }
 
-function renderHighLevelSettings(panel, settings) {
+function cardTargetSummary(settings, route) {
+  return `Target: ${normalizeCardBudgetSettings(settings).targetCards} cards per turn. ${route.text}. Mandatory cards can exceed the target.`;
+}
+
+function renderHighLevelSettings(panel, settings, route) {
   const group = el('section', { className: 'recursion-settings-group' });
   const selection = normalizeCardSelectionSettings(settings.cardSelection);
   const tooltipsEnabled = asObject(settings.ui).tooltipsEnabled !== false;
   group.appendChild(settingsDisclosureSection('play-behavior', 'Behavior', [
-    settingsSelectRow('Strength', 'recursionSettingStrength', cleanText(settings.strength, 'balanced'), STRENGTH_OPTIONS, SETTINGS_TOOLTIPS.strength, tooltipsEnabled),
-    settingsNumberRow('Min Cards', 'recursionSettingMinCards', integerInRange(settings.minCards, DEFAULT_RECURSION_SETTINGS.minCards, 0, 20), { tooltip: SETTINGS_TOOLTIPS.minCards, tooltipsEnabled }),
-    settingsNumberRow('Max Cards', 'recursionSettingMaxCards', integerInRange(settings.maxCards, DEFAULT_RECURSION_SETTINGS.maxCards, 0, 20), { tooltip: SETTINGS_TOOLTIPS.maxCards, tooltipsEnabled }),
+    settingsSelectRow('Guidance strength', 'recursionSettingStrength', cleanText(settings.strength, 'balanced'), STRENGTH_OPTIONS, SETTINGS_TOOLTIPS.strength, tooltipsEnabled),
+    settingsNumberRow('Cards per turn', 'recursionSettingCardsPerTurn', normalizeCardBudgetSettings(settings).targetCards, { tooltip: SETTINGS_TOOLTIPS.cardsPerTurn, tooltipsEnabled }),
+    el('p', { className: 'recursion-help', text: 'Authored cards and generated families each count toward the target. Mandatory cards can exceed the target; fewer eligible cards or omitted optional work can produce a smaller hand.' }),
     settingsSelectRow('Selection variety', 'recursionSettingSelectionVariety', selection.variety, [['off', 'Off'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], SETTINGS_TOOLTIPS.selectionVariety, tooltipsEnabled),
     settingsNumberRow('Card cooldown (turns)', 'recursionSettingCardCooldown', selection.cooldownTurns, { min: 0, max: 10, tooltip: SETTINGS_TOOLTIPS.cardCooldown, tooltipsEnabled }),
     el('p', { className: 'recursion-help', text: 'Auto only; Manual ignores these settings. Priority and Refinement cards are exempt. 0 turns disables cooldown. Fewer eligible cards means a smaller hand.' }),
     settingsSelectRow('Focus', 'recursionSettingFocus', cleanText(settings.focus, 'balanced'), FOCUS_OPTIONS, SETTINGS_TOOLTIPS.focus, tooltipsEnabled),
-    settingsSelectRow('Prompt Footprint', 'recursionSettingFootprint', cleanText(settings.promptFootprint, 'normal'), FOOTPRINT_OPTIONS, SETTINGS_TOOLTIPS.footprint, tooltipsEnabled)
+    settingsSelectRow('Guidance detail', 'recursionSettingFootprint', cleanText(settings.promptFootprint, 'normal'), FOOTPRINT_OPTIONS, SETTINGS_TOOLTIPS.footprint, tooltipsEnabled),
+    el('p', { className: 'recursion-help', text: cardTargetSummary(settings, route), dataset: { recursionCardTargetSummary: '' } })
   ], { tooltip: SETTINGS_TOOLTIPS.behavior, tooltipsEnabled }));
   panel.appendChild(group);
 }
@@ -3055,11 +3047,8 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
       value: settings.operationDeadlineSeconds ?? 300, min: 60, max: 1800, step: 30,
       dataset: { recursionSettingOperationDeadlineSeconds: '' }, ariaLabel: 'Operation time limit in seconds'
     }), 'Maximum active time for Recursion preparation, including queueing and recovery. Paused time is excluded.'),
-    controlRow(
-      'Attempts per step',
-      modelAttemptsPerStepControl,
-      SETTINGS_TOOLTIPS.modelAttemptsPerStep
-    )
+    controlRow('Attempts per step', modelAttemptsPerStepControl),
+    el('p', { className: 'recursion-help', text: SETTINGS_TOOLTIPS.modelAttemptsPerStep, dataset: { recursionExecutionHelp: '' } })
   ], { tooltip: SETTINGS_TOOLTIPS.modelAttemptsPerStep, tooltipsEnabled }));
   const resetTurnCache = button('Reset Turn Cache', 'recursionResetTurnCache', 'Reset Turn Cache');
   if (asObject(capabilities).resetTurnCache !== true) {
@@ -3194,12 +3183,18 @@ function providerField(label, control, options = {}) {
   ]);
 }
 
+function safeConnectionProfileLabel(profile = {}) {
+  const id = cleanText(profile.id);
+  const candidates = [profile.label, profile.name].map(value => cleanText(value));
+  return candidates.find(value => value && value !== id && value !== `${id} (saved)`) || 'Connection Profile';
+}
+
 function listConnectionProfiles(profiles = []) {
   return (Array.isArray(profiles) ? profiles : []).map((profile) => ({
     id: cleanText(profile?.id),
-    name: cleanText(profile?.name || profile?.label || profile?.id),
+    name: safeConnectionProfileLabel(profile),
     model: cleanText(profile?.model),
-    label: cleanText(profile?.label || profile?.name || profile?.id),
+    label: safeConnectionProfileLabel(profile),
     completionMode: cleanText(profile?.completionMode, 'unknown'),
     presetName: cleanText(profile?.presetName),
     instructName: cleanText(profile?.instructName)
@@ -3218,18 +3213,29 @@ function runtimeConnectionProfiles(view = {}, runtime = null) {
   return Array.isArray(view?.providerProfiles) ? view.providerProfiles : [];
 }
 
+function providerRouteForView(view = {}, runtime = null, profiles = null) {
+  try {
+    if (typeof runtime?.providerCapability === 'function') {
+      return providerRouteSummary(view.settings, { reasonerCapability: runtime.providerCapability('reasoner', 'prompt-packet') });
+    }
+  } catch {
+    // Use the last safely listed profiles if the host capability cannot be read.
+  }
+  return providerRouteSummary(view.settings, Array.isArray(profiles) ? { connectionProfiles: profiles } : {});
+}
+
 function connectionProfileEntries(selectedId = '', profiles = null) {
   const selected = cleanText(selectedId);
   const entries = listConnectionProfiles(profiles);
   if (selected && !entries.some((profile) => profile.id === selected)) {
-    entries.push({ id: selected, name: selected, model: '', label: `${selected} (saved)`, completionMode: 'unknown', presetName: '', instructName: '' });
+    entries.push({ id: selected, name: 'Unavailable saved profile', model: '', label: 'Unavailable saved profile', completionMode: 'unknown', presetName: '', instructName: '' });
   }
   return entries;
 }
 
 function connectionProfileLabel(profileId = '', profiles = []) {
   const selected = cleanText(profileId);
-  return profiles.find((profile) => profile.id === selected)?.label || selected;
+  return profiles.find((profile) => profile.id === selected)?.label || (selected ? 'Unavailable saved profile' : '');
 }
 
 function profileMatchesQuery(profile, query = '') {
@@ -3239,8 +3245,10 @@ function profileMatchesQuery(profile, query = '') {
     .some((value) => cleanText(value).toLowerCase().includes(needle));
 }
 
-function renderConnectionProfileCombobox({ selectedId = '', profiles = [], lane, title, tooltipsEnabled = true, disabled = false, onCommit = null } = {}) {
-  const entries = Array.isArray(profiles) ? profiles : [];
+const providerComboboxControllers = new WeakMap();
+
+function renderConnectionProfileCombobox({ selectedId = '', profiles = [], lane, title, tooltipsEnabled = true, disabled = false, onCommit = null, onProfilesChanged = null } = {}) {
+  let entries = Array.isArray(profiles) ? profiles : [];
   const selected = cleanText(selectedId);
   const listId = `recursion-provider-profile-list-${lane}`;
   const hidden = inputControl({
@@ -3333,13 +3341,33 @@ function renderConnectionProfileCombobox({ selectedId = '', profiles = [], lane,
     }
   });
   renderMatches();
-  return el('div', { className: 'recursion-provider-profile-combobox' }, [hidden, input, list]);
+  const control = el('div', { className: 'recursion-provider-profile-combobox', dataset: providerDataset('ProfileCombobox', lane) }, [hidden, input, list]);
+  providerComboboxControllers.set(control, {
+    updateProfiles(nextProfiles) {
+      const oldCommittedLabel = connectionProfileLabel(hidden.value, entries);
+      const hasSearchDraft = cleanText(input.value) !== cleanText(oldCommittedLabel);
+      const wasExpanded = input.getAttribute('aria-expanded') === 'true';
+      entries = connectionProfileEntries(hidden.value, nextProfiles);
+      onProfilesChanged?.(nextProfiles);
+      if (!hasSearchDraft) input.value = connectionProfileLabel(hidden.value, entries);
+      disabled = entries.length === 0 && !hidden.value;
+      input.disabled = disabled;
+      if (disabled) input.setAttribute('disabled', 'disabled');
+      else removeAttribute(input, 'disabled');
+      input.setAttribute('placeholder', entries.length ? 'Select Profile' : 'No connection profiles found');
+      renderMatches();
+      setExpanded(wasExpanded);
+    }
+  });
+  return control;
 }
 
 function providerReadinessLabel(provider, options = {}) {
   const status = providerModelStatus(provider, options);
   if (!status.ready) return { ready: false, text: status.message || 'Select a Connection Profile.' };
-  const parts = [status.label || status.profileLabel || 'Connection Profile'];
+  const selected = asObject(options.profiles?.find(profile => profile.id === provider.connectionProfileId));
+  const parts = [safeConnectionProfileLabel(selected)];
+  if (status.model && !parts[0].includes(status.model)) parts.push(status.model);
   if (status.completionMode && status.completionMode !== 'unknown') parts.push(titleCase(status.completionMode));
   return { ready: true, text: parts.join(' - ') };
 }
@@ -3405,12 +3433,12 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
         text: statusText,
         dataset: providerDataset('Status', lane)
       }),
-      ...(statusView.detail ? [el('span', {
+      el('span', {
           className: 'recursion-provider-capability-detail',
           text: statusView.detail,
           attrs: { 'aria-label': `${statusView.detail} capability detail` },
           dataset: providerDataset('CapabilityDetail', lane)
-        })] : [])
+        })
     ])
   ]));
   const body = el('div', {
@@ -3432,9 +3460,10 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
     title,
     tooltipsEnabled,
     disabled: profileEntries.length === 0 && !source.connectionProfileId,
-    onCommit: () => syncProviderReadiness(body, lane, source, readinessOptions)
+    onCommit: () => syncProviderReadiness(body, lane, source, readinessOptions),
+    onProfilesChanged: profiles => { readinessOptions.profiles = profiles; }
   });
-  grid.appendChild(providerField('Connection Profile', profileControl));
+  body.appendChild(el('div', { className: 'recursion-provider-grid' }, [providerField('Connection Profile', profileControl)]));
 
   const policySelect = (name, value, optionList, ariaLabel, tooltip) => {
     const control = selectControl({ value, options: optionList, dataset: providerDataset(name, lane), ariaLabel });
@@ -3499,10 +3528,9 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
     dataset: providerDataset('MaxConcurrentRequests', lane), ariaLabel: `${title} concurrent requests`
   })));
   grid.appendChild(el('p', { className: 'recursion-help',
-    text: `Effective limit: ${capability.safeConcurrency || 1}. Test Profile verifies concurrency; shared profiles use the lower qualified limit.` }));
+    text: `Effective limit: ${capability.safeConcurrency || 1}. Test Profile verifies concurrency; shared profiles use the lower qualified limit.`, dataset: providerDataset('EffectiveLimit', lane) }));
   presetControl.addEventListener?.('change', () => { warning.hidden = presetControl.value !== 'full-profile'; });
   samplerControl.addEventListener?.('change', () => { samplerOverrides.hidden = samplerControl.value !== 'recursion'; });
-  body.appendChild(grid);
   body.appendChild(el('div', { className: 'recursion-provider-actions' }, [
     el('button', {
       className: `recursion-button${testRunning ? ' is-busy' : ''}`,
@@ -3521,8 +3549,50 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
       }
     })
   ]));
+  body.appendChild(el('div', { className: 'recursion-help', dataset: providerDataset('Checks', lane) },
+    providerCheckLines(source, capability).map(text => el('p', { text }))));
+  body.appendChild(settingsDisclosureSection(`compatibility-${lane}`, 'Compatibility and tuning', [grid], {
+    defaultOpen: false, tooltipsEnabled, tooltip: 'Profile formatting, structured output, sampling, and request limits.'
+  }));
   group.appendChild(body);
   panel.appendChild(group);
+}
+
+function syncProviderSettingsForView(panel, view, uiState) {
+  const settings = asObject(view.settings);
+  const profiles = Array.isArray(view.providerProfiles) ? view.providerProfiles : uiState.connectionProfiles || [];
+  const tooltipsEnabled = asObject(settings.ui).tooltipsEnabled !== false;
+  const keys = uiState.providerDisplayKeys || (uiState.providerDisplayKeys = {});
+  for (const lane of ['utility', 'reasoner']) {
+    const body = panel.querySelector(providerSelector('body', lane));
+    if (!body) continue;
+    const source = asObject(settings.providers?.[lane]);
+    const capability = asObject(settings.providerCapabilities?.[lane]?.promptPacket || source.capability);
+    const displayKey = JSON.stringify({ source, capability, profiles, tooltipsEnabled });
+    if (keys[lane] === displayKey) continue;
+    keys[lane] = displayKey;
+    const status = providerStatusView(source, capability);
+    const statusText = providerStatusText(source, capability);
+    const statusNode = panel.querySelector(providerSelector('status', lane));
+    statusNode.textContent = statusText;
+    statusNode.className = providerStatusClass(status.label, { baseClass: 'recursion-provider-status' });
+    const detail = panel.querySelector(providerSelector('capability-detail', lane));
+    detail.textContent = status.detail;
+    detail.hidden = !status.detail;
+    detail.setAttribute('aria-label', status.detail ? `${status.detail} capability detail` : '');
+    const title = lane === 'reasoner' ? 'Reasoner Provider' : 'Utility Provider';
+    const accessibility = `${title}. Current state: ${statusText}.${status.detail ? ` Capability detail: ${status.detail}.` : ''}`;
+    const toggle = panel.querySelector(providerSelector('toggle', lane));
+    toggle.setAttribute('aria-label', accessibility);
+    setTooltip(toggle, tooltipsEnabled, `${title} Connection Profile and generation policy. Changes auto-save. ${accessibility}`);
+    const checks = panel.querySelector(providerSelector('checks', lane));
+    checks.replaceChildren(...providerCheckLines(source, capability).map(text => el('p', { text })));
+    setText(body, providerSelector('effective-limit', lane), `Effective limit: ${capability.safeConcurrency || 1}. Test Profile verifies concurrency; shared profiles use the lower qualified limit.`);
+    const combobox = panel.querySelector(providerSelector('profile-combobox', lane));
+    providerComboboxControllers.get(combobox)?.updateProfiles(profiles);
+    syncProviderReadiness(body, lane, source, { profiles });
+  }
+  uiState.connectionProfiles = profiles;
 }
 
 function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null, providerUiState = {}) {
@@ -3552,8 +3622,11 @@ function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null, pr
   const playPane = el('div', { className: 'recursion-settings-pane', dataset: { recursionSettingsPlay: '' } });
   const providersPane = el('div', { className: 'recursion-settings-pane', dataset: { recursionSettingsProviders: '' } });
   const advancedPane = el('div', { className: 'recursion-settings-pane', dataset: { recursionSettingsAdvanced: '' } });
-  renderHighLevelSettings(playPane, settings);
-  const route = providerRouteSummary(settings);
+  const connectionProfiles = runtimeConnectionProfiles(view, runtime);
+  providerUiState.connectionProfiles = connectionProfiles;
+  providerUiState.providerDisplayKeys = {};
+  const route = providerRouteForView(view, runtime, connectionProfiles);
+  renderHighLevelSettings(playPane, settings, route);
   providersPane.appendChild(el('div', {
     className: 'recursion-provider-route-summary',
     attrs: {
@@ -3563,7 +3636,6 @@ function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null, pr
   }, [
     el('span', { text: route.text })
   ]));
-  const connectionProfiles = runtimeConnectionProfiles(view, runtime);
   renderProviderSettings(providersPane, 'utility', settings.providers?.utility || {}, tooltipsEnabled, {
     capability: settings.providerCapabilities?.utility?.promptPacket,
     providerUiState: {
@@ -3589,6 +3661,15 @@ function renderSettingsPanel(panel, view, activeTab = 'play', runtime = null, pr
   panel.appendChild(playPane);
   panel.appendChild(providersPane);
   panel.appendChild(advancedPane);
+  for (const [id, open] of Object.entries(asObject(providerUiState.settingsDisclosureOpen))) {
+    const toggle = panel.querySelector(`[data-recursion-settings-section-toggle-${id}]`);
+    const body = panel.querySelector(`[data-recursion-settings-section-body-${id}]`);
+    const section = panel.querySelector(`[data-recursion-settings-section-${id}]`);
+    if (!toggle || !body) continue;
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    body.hidden = !open;
+    section?.classList?.toggle?.('is-open', Boolean(open));
+  }
 }
 
 function appendViewerSection(viewer, title, data, options = {}) {
@@ -4298,6 +4379,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
   const focusOriginByPanel = typeof WeakMap === 'function' ? new WeakMap() : new Map();
   const providerUiState = {
     disclosureOpen: {},
+    settingsDisclosureOpen: {},
     tests: {
       utility: { running: false },
       reasoner: { running: false }
@@ -4938,7 +5020,7 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     return stableStringify({
       notice: cleanText(notice),
       mode: normalizeMode(settings.mode),
-      maxCards: settings.maxCards,
+      cardsPerTurn: settings.cardsPerTurn,
       cardScope: normalizeCardScope(settings.cardScope || defaultCardScope()),
       preProcessDecks: normalizeCardDeckSettings(settings.preProcessDecks),
       editor: editorState ? {
@@ -6759,7 +6841,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       const id = cleanText(settingsDisclosure.dataset.recursionSettingsSectionToggle);
       const body = id ? root.querySelector(`[data-recursion-settings-section-body-${id}]`) : null;
       const section = id ? root.querySelector(`[data-recursion-settings-section-${id}]`) : null;
-      setDisclosureOpen(settingsDisclosure, body, section, body?.hidden === true);
+      const open = body?.hidden === true;
+      providerUiState.settingsDisclosureOpen[id] = open;
+      setDisclosureOpen(settingsDisclosure, body, section, open);
     }
     const providerDisclosure = control('recursionProviderToggle');
     if (providerDisclosure) {
@@ -6805,24 +6889,8 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     if (modeChoice) {
       const nextMode = normalizeMode(modeChoice.dataset.recursionModeChoice);
       const patch = { mode: nextMode };
-      if (nextMode === 'manual') {
-        const view = viewWithPendingCardScope(currentView());
-        const scoped = enforceManualSelectionCap(
-          normalizeCardScope(view.settings?.cardScope || defaultCardScope()),
-          { ...asObject(view.settings), mode: 'manual' },
-          { preferredFamilies: manualTrimPreferenceFamilies(view) }
-        );
-        if (scoped.trimmed) {
-          patch.cardScope = scoped.scope;
-          pendingCardScope = scoped.scope;
-          cardScopeNotice = '';
-          showCardSystemStatus(scoped.notice, 'warning');
-          renderCardsPanelForView(currentView());
-        }
-      } else {
-        pendingCardScope = null;
-        cardScopeNotice = '';
-      }
+      pendingCardScope = null;
+      cardScopeNotice = '';
       runAction(runtime?.updateSettings?.(patch));
       setModeMenuOpen(false);
     }
@@ -7361,15 +7429,9 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
     const injectionDepth = controlValue(sourceRoot, '[data-recursion-setting-injection-depth]');
     return {
       strength: controlValue(sourceRoot, '[data-recursion-setting-strength]'),
-      minCards: integerInRange(
-        controlNumber(sourceRoot, '[data-recursion-setting-min-cards]', DEFAULT_RECURSION_SETTINGS.minCards),
-        DEFAULT_RECURSION_SETTINGS.minCards,
-        0,
-        20
-      ),
-      maxCards: integerInRange(
-        controlNumber(sourceRoot, '[data-recursion-setting-max-cards]', DEFAULT_RECURSION_SETTINGS.maxCards),
-        DEFAULT_RECURSION_SETTINGS.maxCards,
+      cardsPerTurn: integerInRange(
+        controlNumber(sourceRoot, '[data-recursion-setting-cards-per-turn]', DEFAULT_RECURSION_SETTINGS.cardsPerTurn),
+        DEFAULT_RECURSION_SETTINGS.cardsPerTurn,
         0,
         20
       ),
@@ -7587,6 +7649,10 @@ export function mountRecursionUi({ runtime, mountPoint = null } = {}) {
       renderSettingsPanel(settingsPanel, view, settingsTab, runtime, providerUiState);
       settingsPanelRendered = true;
     }
+    const route = providerRouteForView(view, runtime, providerUiState.connectionProfiles);
+    setText(settingsPanel, '[data-recursion-card-target-summary]', cardTargetSummary(view.settings, route));
+    setText(settingsPanel, '[data-recursion-provider-route-summary] span', route.text);
+    syncProviderSettingsForView(settingsPanel, view, providerUiState);
     renderViewer(viewer, view, model);
     syncStaticTooltips(root, model);
     syncFloatingPanelGeometry();

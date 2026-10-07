@@ -1,5 +1,8 @@
 import { makeId } from '../core.mjs';
 import { normalizeInstructionValidationRule } from '../instruction-safety.mjs';
+import { normalizeOutputIssues } from '../providers/output-contract.mjs';
+import { recoveryCountsAfterAttempt, recoveryCountsAfterArtifact, normalizeRecoveryCounts } from './recovery-counts.mjs';
+import { failureMayContinue } from './recovery-policy.mjs';
 import {
   createCheckpoint,
   createStageRecord,
@@ -69,6 +72,7 @@ function failureRecord(failure, fallbackCode = 'RECURSION_STAGE_FAILED') {
     code: String(source.code || fallbackCode).slice(0, 120),
     failureClass: String(source.category || source.kind || 'internal').slice(0, 80),
     retryable: source.retryable === true,
+    ...(source.fieldIssues?.length ? { fieldIssues: normalizeOutputIssues(source.fieldIssues) } : {}),
     ...(validationRule ? { validationRule } : {}),
     ...(Number.isFinite(source.retryAfterMs) ? { retryAfterMs: Math.max(0, source.retryAfterMs) } : {}),
     ...(Number.isFinite(source.retryNotBefore) ? { retryNotBefore: source.retryNotBefore } : {}),
@@ -140,6 +144,7 @@ export function createExecutionScheduler({
   createId = makeId,
   attemptsPerStep = 2,
   retrySleep,
+  retryRandom = Math.random,
   onViewChanged = null
 } = {}) {
   for (const method of [
@@ -230,7 +235,7 @@ export function createExecutionScheduler({
       if (
         !checkpoint
         && record?.state === 'failed'
-        && dependencyStage?.failurePolicy === 'continue'
+        && failureMayContinue(dependencyStage, record)
       ) {
         const failure = clone(record.failure);
         dependencies[dependencyId] = {
@@ -380,6 +385,11 @@ export function createExecutionScheduler({
           ...record,
           state: 'failed',
           checkpoint: null,
+          recoveryCounts: normalizeRecoveryCounts({ ...record.recoveryCounts,
+            ...(stage.id.startsWith('preprocess.cards.segmented.') ? {
+              optionalOmissions: (record.recoveryCounts?.optionalOmissions || 0) + Number(failureMayContinue(stage, { failure: failureRecord(failure) })),
+              requiredBlocks: (record.recoveryCounts?.requiredBlocks || 0) + Number(stage.failurePolicy === 'blocking')
+            } : {}) }),
           failure: {
             ...(failure?.code === 'RECURSION_PROVIDER_RATE_LIMIT' && record.failure?.code === failure.code ? record.failure : {}),
             ...failureRecord(failure)
@@ -512,6 +522,7 @@ export function createExecutionScheduler({
         attemptResult = await runModelStageAttempts({
           attemptsPerStep: openedAttempts.limit,
           sleep: retrySleep,
+          random: retryRandom,
           capacityRecovery,
           request,
           signal: controller.signal,
@@ -609,6 +620,9 @@ export function createExecutionScheduler({
               },
               diagnosticCodes,
               lastAttemptAction,
+              recoveryCounts: recoveryCountsAfterAttempt(record.recoveryCounts, summary, {
+                segmentedRepair: stage.id.startsWith('preprocess.cards.segmented.') && Boolean(draft.stageRecords['preprocess.cards.fused'])
+              }),
               failure: summary.failure ? failureRecord({ ...summary.failure,
                 ...(summary.failure.code === 'RECURSION_PROVIDER_RATE_LIMIT' ? {
                   rateLimitFailures: summary.rateLimitFailures,
@@ -741,6 +755,7 @@ export function createExecutionScheduler({
           timings: { validationMs, artifactPersistenceMs },
           checkpoint,
           summary,
+          recoveryCounts: recoveryCountsAfterArtifact(record.recoveryCounts, summary),
           failure: settledFailure ? failureRecord(settledFailure) : null,
           executionToken: null,
           updatedAt: now()
@@ -794,7 +809,7 @@ export function createExecutionScheduler({
       if (stage.dependencies.some((dependencyId) => {
         const dependencyState = runtime.manifest.stageRecords[dependencyId]?.state;
         if (dependencyState === 'failed') {
-          return runtime.graph.getStage(dependencyId)?.failurePolicy !== 'continue';
+          return !failureMayContinue(runtime.graph.getStage(dependencyId), runtime.manifest.stageRecords[dependencyId]);
         }
         return ['skipped', 'stale'].includes(dependencyState);
       })) {
@@ -824,7 +839,7 @@ export function createExecutionScheduler({
       return dependencyState === 'completed'
         || (
           dependencyState === 'failed'
-          && runtime.graph.getStage(dependencyId)?.failurePolicy === 'continue'
+          && failureMayContinue(runtime.graph.getStage(dependencyId), runtime.manifest.stageRecords[dependencyId])
         );
     };
     while (runtime.epoch === epoch && runtime.manifest.state === 'running') {
@@ -891,7 +906,7 @@ export function createExecutionScheduler({
       }
 
       const blockingFailure = runtime.graph.stages.find((stage) => (
-        stage.failurePolicy !== 'continue'
+        !failureMayContinue(stage, runtime.manifest.stageRecords[stage.id])
         && runtime.manifest.stageRecords[stage.id]?.state === 'failed'
       ));
       if (blockingFailure) {
@@ -1179,7 +1194,7 @@ export function createExecutionScheduler({
         && record?.state === 'pending';
       if (
         !stage
-        || (stage.failurePolicy === 'continue' && !deadlineRetry)
+        || (failureMayContinue(stage, record) && !deadlineRetry)
         || loaded.state !== 'paused'
         || (record?.state !== 'failed' && !deadlineRetry)
       ) {

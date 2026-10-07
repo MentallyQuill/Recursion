@@ -56,7 +56,9 @@ V1 uses the audited fixed catalog below. The Arbiter receives this predetermined
 
 Each family also exposes fixed scope facets. Facets do not create separate cards; they define what the Arbiter and card generator should emphasize inside that family. The facet labels and descriptions live in `src/card-scope.mjs` and are reused for Arbiter catalog payloads, card-generation prompt focus, UI hover help, and diagnostics.
 
-In Manual mode, the selectable card unit is the family row, not the facet. A selected family counts as one forced Manual card and must be covered by valid cache reuse or provider generation unless that family fails validation. Facets remain per-family focus hints; toggling them never creates extra card jobs and never counts against `Max Cards`.
+In Manual mode, generated cards share one unit per family; facets remain focus hints and never create separate jobs or consume extra slots. Each authored card counts as its own unit. A pure per-turn projection reserves mandatory Refinement units first, then selects ordinary units in deck order up to Cards per turn (`cardsPerTurn`, default 6, range 0..20). Priority behaves as Active in Manual. The same retained source IDs drive scope, jobs, and the hand, without rewriting saved states or selections. At zero, only Refinement remains. Every retained Manual source requires valid reuse or generated/authored coverage; unresolved required validation blocks installation.
+
+Cards per turn is independent of Reasoning Level, Guidance strength, Guidance detail, and Fused/Segmented. Auto reserves runnable Priority and Refinement before discretionary work; mandatory coverage may exceed the target. Exhausted optional generated work can complete with a smaller hand and amber explanation. Selected Scene Constraints, Manual, Priority, and Refinement coverage remains required, including generated and authored sources.
 
 V1 should not support arbitrary user-defined card families. Custom families can wait until the fixed catalog proves insufficient.
 

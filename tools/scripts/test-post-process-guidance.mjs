@@ -180,7 +180,7 @@ const retried = await runModelStageAttempts({
   validate: (result) => result.ok
     ? { ok: true, value: result }
     : { ok: false, error: result.error },
-  buildCorrectionRequest: ({ request: attemptRequest }) => ({ ...attemptRequest })
+  buildCorrectionRequest: ({ request: attemptRequest }) => ({ ...attemptRequest, prompt: `${attemptRequest.prompt || ''}\nReturn valid post-process guidance.` })
 });
 assertEqual(retried.ok, true, 'attempt policy can recover guidance on the second request');
 assertEqual(retryCalls.length, 2, 'guidance uses at most the configured two-attempt window');

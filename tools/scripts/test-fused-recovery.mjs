@@ -34,6 +34,20 @@ const selectedCards = [...plan.cardJobs, { family: 'Character Motivation', role:
 const bundleRequest = buildFusedCardBundleRequest({ cardJobs: selectedCards }, { snapshotHash: 'test-snapshot' });
 const good = { family: 'Scene Frame', promptText: 'Keep the doorway in view.', evidenceRefs: ['message:8'] };
 const motive = { family: 'Character Motivation', promptText: 'Track the stated goal.', evidenceRefs: ['message:8'] };
+const salvaged = validateFusedProviderResult({ ok: false,
+  error: { code: 'RECURSION_PROVIDER_TOKEN_LIMIT', category: 'provider-length' },
+  recoverableItems: [good]
+}, { selectedCards, request: bundleRequest, cardContext: { firstMesId: 8, lastMesId: 8 } });
+assert.equal(salvaged.ok, true, 'complete validated siblings survive a truncated provider response');
+assert.deepEqual(salvaged.value.acceptedFamilies, ['Scene Frame']);
+assert.deepEqual(salvaged.value.fallback.families, ['Character Motivation']);
+for (const code of ['RECURSION_PROVIDER_AUTH_FAILED', 'RECURSION_PROVIDER_REFUSAL', 'RECURSION_PROVIDER_ABORTED', 'RECURSION_OPERATION_DEADLINE']) {
+  const blocked = validateFusedProviderResult({ ok: false, error: { code }, recoverableItems: [good] }, {
+    selectedCards, request: bundleRequest, cardContext: { firstMesId: 8, lastMesId: 8 }
+  });
+  assert.equal(blocked.ok, false, 'terminal provider and operation failures never salvage');
+  assert.equal(blocked.error.code, code);
+}
 for (const [code, items, diagnostics] of [
   ['missing-family', [good]],
   ['duplicate-family', [good, motive, motive]],

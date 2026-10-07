@@ -59,8 +59,7 @@ const mediumBudgetedJobs = limitCardJobsForHandBudget(allCatalogCardJobs, {
   behaviorPolicy: influencePolicyForSettings({
     strength: 'strong',
     focus: 'balanced',
-    minCards: 5,
-    maxCards: 12,
+    cardsPerTurn: 8,
     promptFootprint: 'rich'
   })
 });
@@ -400,8 +399,7 @@ const fusedMixedEvidence = cardsFromFusedProviderResult({
     }]
   }
 }, fusedCardContext);
-assertEqual(fusedMixedEvidence.cards.length, 1, 'Fused validator keeps cards with at least one valid message evidence ref');
-assertDeepEqual(fusedMixedEvidence.cards[0].evidenceRefs, ['message:8'], 'Fused validator drops stale evidence refs and keeps valid refs');
+assertEqual(fusedMixedEvidence.cards.length, 0, 'Fused validator rejects mixed invalid message evidence');
 const fusedEmptyCoverage = cardsFromFusedProviderResult({
   ok: true,
   data: {
@@ -527,7 +525,8 @@ assertEqual(fusedWrongSnapshotEnvelope.cards[0].snapshotHash, 'snapshot-fused-1'
 const fusedRecoveredFragment = cardsFromFusedProviderResult({
   ok: false,
   roleId: 'fusedCardBundle',
-  recoverableText: '{"schema":"recursion.cardBundle.v1","snapshotHash":"snapshot-fused-1","items":[{"schema":"recursion.card.v1","family":"Scene Frame","role":"sceneFrameCard","promptText":"FUSED_FRAGMENT_RECOVERED_SCENE survives truncation.","evidenceRefs":["message:8"]},{"schema":"recursion.card.v1","family":"Scene Constraints","role":"sceneConstraintsCard","promptText":"unfinished"'
+  error: { code: 'RECURSION_JSON_PARSE_FAILED' },
+  recoverableItems: [{ family: 'Scene Frame', promptText: 'Keep FUSED_FRAGMENT_RECOVERED_SCENE grounded.', evidenceRefs: ['message:8'] }]
 }, fusedCardContext);
 assertEqual(fusedRecoveredFragment.cards.length, 1, 'Fused validator recovers complete item before malformed tail');
 assert(fusedRecoveredFragment.cards[0].promptText.includes('FUSED_FRAGMENT_RECOVERED_SCENE'), 'recovered fragment card text is preserved');
@@ -1266,8 +1265,7 @@ const repairedOutOfWindowCards = cardsFromProviderResult({
   expectedRole: 'sceneFrameCard',
   expectedFamily: 'Scene Frame'
 });
-assertEqual(repairedOutOfWindowCards.length, 1, 'provider card with only out-of-window message refs repairs to active source window');
-assertDeepEqual(repairedOutOfWindowCards[0].evidenceRefs, ['message:2'], 'out-of-window provider message refs repair to latest source-window message');
+assertEqual(repairedOutOfWindowCards.length, 0, 'out-of-window message refs require model correction');
 const mixedEvidenceCards = cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',
@@ -1288,8 +1286,7 @@ const mixedEvidenceCards = cardsFromProviderResult({
   expectedRole: 'sceneFrameCard',
   expectedFamily: 'Scene Frame'
 });
-assertEqual(mixedEvidenceCards.length, 1, 'provider card with mixed out-of-window evidence keeps valid refs');
-assertDeepEqual(mixedEvidenceCards[0].evidenceRefs, ['message:1'], 'mixed out-of-window evidence drops stale refs');
+assertEqual(mixedEvidenceCards.length, 0, 'mixed out-of-window evidence requires model correction');
 const displayLimitEvidenceCards = cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',
@@ -1313,8 +1310,7 @@ const displayLimitEvidenceCards = cardsFromProviderResult({
   expectedRole: 'sceneFrameCard',
   expectedFamily: 'Scene Frame'
 });
-assertEqual(displayLimitEvidenceCards.length, 1, 'provider card with out-of-window evidence past normalized ref limit keeps valid refs');
-assert(displayLimitEvidenceCards[0].evidenceRefs.every((entry) => entry === 'message:1'), 'display-limited evidence drops stale refs');
+assertEqual(displayLimitEvidenceCards.length, 0, 'all raw evidence is checked before display truncation');
 const textLimitEvidenceCards = cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',
@@ -1338,8 +1334,7 @@ const textLimitEvidenceCards = cardsFromProviderResult({
   expectedRole: 'sceneFrameCard',
   expectedFamily: 'Scene Frame'
 });
-assertEqual(textLimitEvidenceCards.length, 1, 'provider card with out-of-window evidence past normalized text limit repairs');
-assertDeepEqual(textLimitEvidenceCards[0].evidenceRefs, ['message:2'], 'mixed refs in one overlong entry fall back to latest source-window message');
+assertEqual(textLimitEvidenceCards.length, 0, 'malformed and out-of-window evidence cannot use a fabricated fallback');
 assertEqual(cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',
@@ -1368,8 +1363,7 @@ const repairedEvidenceCards = cardsFromProviderResult({
   firstMesId: 7,
   lastMesId: 8
 });
-assertEqual(repairedEvidenceCards.length, 1, 'provider card without evidence refs accepted when active source window is known');
-assertDeepEqual(repairedEvidenceCards[0].evidenceRefs, ['message:8'], 'missing provider evidence refs repair to latest source-window message');
+assertEqual(repairedEvidenceCards.length, 0, 'missing evidence requires model correction even with a known source window');
 assertEqual(cardsFromProviderResult({
   ok: true,
   roleId: 'sceneFrameCard',
@@ -1493,7 +1487,7 @@ const compactFootprintHand = selectHand([
   behaviorPolicy: influencePolicyForSettings({ promptFootprint: 'compact' })
 });
 assertEqual(compactFootprintHand.cards.length, 6, 'compact footprint no longer owns card count after configured card budgets were added');
-assertEqual(compactFootprintHand.metadata.behaviorPolicy.effectiveMaxCards, 10, 'hand metadata records requested card budget when footprint is compact');
+assertEqual(compactFootprintHand.metadata.behaviorPolicy.effectiveMaxCards, 6, 'hand metadata records the configured target independently of footprint');
 
 const lightStrengthHand = selectHand([
   deckCard('Scene Frame', 'Scene one.', { id: 'scene-light', tokenEstimate: 20 }),

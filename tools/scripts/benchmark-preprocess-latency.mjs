@@ -122,7 +122,7 @@ try {
       const decks = configureSoakDeckFixture(await page.evaluate(() => globalThis.__recursionLiveHarnessRuntime.view().settings.preProcessDecks), { mode: 'manual', families });
       await page.evaluate(async ({ decks, profileName }) => {
         const runtime = globalThis.__recursionLiveHarnessRuntime;
-        await runtime.updateSettings({ enabled: true, mode: 'manual', minCards: 6, maxCards: 6,
+        await runtime.updateSettings({ enabled: true, mode: 'manual', cardsPerTurn: 6,
           reasoningLevel: 'medium', preProcessDecks: decks, postProcess: { enabled: false } });
         const context = SillyTavern.getContext();
         await context.selectCharacterById(0);

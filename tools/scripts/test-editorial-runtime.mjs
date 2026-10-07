@@ -3,7 +3,7 @@ import { createSettingsStore } from '../../src/settings.mjs';
 import { createMemoryStorageAdapter, createStorageRepository } from '../../src/storage.mjs';
 import { createActivityReporter } from '../../src/activity.mjs';
 import { createGenerationRouter } from '../../src/providers.mjs';
-import { providerConfigHash } from '../../src/provider-capability.mjs';
+import { providerConfigHash, providerProfileIdentityHash } from '../../src/provider-capability.mjs';
 import { hashJson } from '../../src/core.mjs';
 import { REDIRECT_ERROR_CODES, REDIRECT_VERIFICATION_CHECKS } from '../../src/editorial-transform.mjs';
 import { buildGenerationReviewTargets } from '../../src/generation-review.mjs';
@@ -11,7 +11,7 @@ import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert
 
 function createLegacyEnhancementSettingsStore() {
   const settingsStore = createSettingsStore({ root: {} });
-  settingsStore.update({ minCards: 1, maxCards: 1 });
+  settingsStore.update({ cardsPerTurn: 1 });
   let enhancements = { mode: 'off', target: 'off', applyMode: 'as-swipe', contextMessages: 13 };
   const canonicalGet = settingsStore.get.bind(settingsStore);
   const canonicalUpdate = settingsStore.update.bind(settingsStore);
@@ -43,7 +43,7 @@ const host = {
 };
 const diagnosis = {
   schema: 'recursion.editorialDiagnosis.v1', mode: 'recompose', sourceHash: hashJson(source), snapshotHash: 'any', decision: 'proceed',
-  brief: { mode: 'recompose', diagnosis: [{ dimension: 'continuity', problem: 'Unsupported sender detail.', evidenceRefs: ['source:0'] }], preserve: [], discard: [{ claim: 'sender name', evidenceRefs: ['source:0'] }], allowedChanges: ['Rewrite freely'], forbiddenChanges: ['Add unsupported facts'] }
+  brief: { mode: 'recompose', diagnosis: [{ dimension: 'scene-execution', problem: 'Unsupported sender detail.', evidenceRefs: ['source:0'] }], preserve: [], discard: [{ claim: 'sender name', evidenceRefs: ['source:0'] }], allowedChanges: ['Rewrite freely'], forbiddenChanges: ['Add unsupported facts'] }
 };
 const activity = createActivityReporter();
 let diagnosisAttempts = 0;
@@ -933,7 +933,7 @@ function createRedirectHarness({
     }
   };
   settingsStore = createLegacyEnhancementSettingsStore();
-  settingsStore.update({ minCards: 0, maxCards: 0 });
+  settingsStore.update({ cardsPerTurn: 0 });
   const reasonerProfileId = 'reasoner-profile';
   if (reasonerCapability !== 'unconfigured') {
     settingsStore.updateProviderConfig('reasoner', { connectionProfileId: reasonerProfileId });
@@ -942,6 +942,7 @@ function createRedirectHarness({
     const reasoner = settingsStore.get().providers.reasoner;
     settingsStore.recordProviderCertification('reasoner', {
       status: reasonerCapability === 'ready' ? 'pass' : 'fail',
+      profileIdentityHash: providerProfileIdentityHash({ id: reasonerProfileId, completionMode: 'chat' }),
       checkedAt: new Date().toISOString(),
       completionMode: 'chat',
       structuredOutput: 'prompt-json',
@@ -1476,6 +1477,7 @@ effectivenessSettings.updateProviderConfig('reasoner', { connectionProfileId: ef
 const effectivenessReasoner = effectivenessSettings.get().providers.reasoner;
 effectivenessSettings.recordProviderCertification('reasoner', {
   status: 'pass',
+  profileIdentityHash: providerProfileIdentityHash({ id: effectivenessProfileId, completionMode: 'chat' }),
   checkedAt: new Date().toISOString(),
   completionMode: 'chat',
   structuredOutput: 'prompt-json',

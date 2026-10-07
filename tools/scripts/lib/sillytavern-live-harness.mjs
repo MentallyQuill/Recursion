@@ -1174,20 +1174,21 @@ function manualScopeProofScript() {
 }
 
 function manualForcedProofScript() {
-  return async ({ cap = 2, families = ['Scene Frame', 'Open Threads'], blockedFamily = 'Active Cast' } = {}) => {
+  return async ({ targetCards = 2, families = ['Scene Frame', 'Open Threads'], extraFamily = 'Active Cast' } = {}) => {
+    const target = Number.isFinite(Number(targetCards)) ? Math.max(0, Math.min(20, Math.round(Number(targetCards)))) : 2;
     const selectedFamilies = (Array.isArray(families) ? families : [])
       .map((entry) => String(entry || '').trim())
       .filter(Boolean)
-      .slice(0, Math.max(1, Number(cap) || 2));
-    const blocked = String(blockedFamily || '').trim();
+      .slice(0, target);
+    const extra = String(extraFamily || '').trim();
     const proof = {
       requested: true,
       available: false,
-      cap: Math.max(1, Number(cap) || 2),
+      targetCards: target,
       selectedFamilies,
-      blockedFamily: blocked,
-      capBlocked: false,
-      capNotice: '',
+      savedEnabledFamilies: [],
+      extraFamily: extra,
+      enabledBeyondTarget: false,
       coveredFamilies: [],
       omittedFamilies: [],
       error: ''
@@ -1212,7 +1213,7 @@ function manualForcedProofScript() {
 
     try {
       if (context && typeof context === 'object') {
-        context.manualForcedCap = proof.cap;
+        context.manualTargetCards = proof.targetCards;
         context.manualForcedFamilies = selectedFamilies.slice();
       }
       const settingsRoots = [
@@ -1222,7 +1223,7 @@ function manualForcedProofScript() {
       ].filter((entry) => entry && typeof entry === 'object');
       for (const settings of settingsRoots) {
         settings.mode = 'manual';
-        settings.maxCards = proof.cap;
+        settings.cardsPerTurn = proof.targetCards;
       }
 
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1244,11 +1245,11 @@ function manualForcedProofScript() {
 
       const settingsPanel = document.querySelector('[data-recursion-settings-panel]');
       if (settingsPanel?.hidden) document.querySelector('[data-recursion-actions]')?.click();
-      const maxInput = document.querySelector('[data-recursion-setting-max-cards]');
-      if (maxInput) {
-        maxInput.value = String(proof.cap);
-        maxInput.dispatchEvent(new Event('input', { bubbles: true }));
-        maxInput.dispatchEvent(new Event('change', { bubbles: true }));
+      const targetInput = document.querySelector('[data-recursion-setting-cards-per-turn]');
+      if (targetInput) {
+        targetInput.value = String(proof.targetCards);
+        targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+        targetInput.dispatchEvent(new Event('change', { bubbles: true }));
         await afterUiChange();
       }
 
@@ -1268,7 +1269,6 @@ function manualForcedProofScript() {
         .filter((node) => isOn(node))
         .map((node) => String(node?.dataset?.recursionCardScopeFamilyName || '').trim())
         .filter(Boolean);
-      const cardsLabel = () => String(document.querySelector('[data-recursion-cards-label]')?.textContent || '').replace(/\s+/g, ' ').trim();
       const setFamilyState = async (family, enabled) => {
         for (let attempt = 0; attempt < 8; attempt += 1) {
           const node = toggleFor(family);
@@ -1294,7 +1294,7 @@ function manualForcedProofScript() {
         }
         for (const family of selectedFamilies) {
           if (selectedFamiliesNow().includes(family)) continue;
-          while (selectedFamiliesNow().length >= proof.cap) {
+          while (selectedFamiliesNow().length >= proof.targetCards) {
             const extra = selectedFamiliesNow().find((entry) => !desired.has(entry));
             if (!extra) break;
             await setFamilyState(extra, false);
@@ -1305,34 +1305,36 @@ function manualForcedProofScript() {
           await setFamilyState(family, false);
         }
         await waitForCondition(() => selectedFamilies.every((family) => selectedFamiliesNow().includes(family)), 3000);
-        await waitForCondition(() => cardsLabel().includes(`/${proof.cap}`), 3000);
-        const blockFamily = (!desired.has(blocked) && toggleFor(blocked) ? blocked : '')
+        const additionalFamily = (!desired.has(extra) && toggleFor(extra) ? extra : '')
           || familyNamesNow().find((family) => family && !desired.has(family) && !selectedFamiliesNow().includes(family))
           || '';
-        if (blockFamily) {
-          const blockNode = toggleFor(blockFamily);
-          if (blockNode && !isOn(blockNode)) {
-            blockNode.click();
+        if (additionalFamily) {
+          const additionalNode = toggleFor(additionalFamily);
+          if (additionalNode && !isOn(additionalNode)) {
+            additionalNode.click();
             await afterUiChange();
           }
         }
-        const panelText = String(cardsPanel?.textContent || '').replace(/\s+/g, ' ').trim();
-        const noticeText = String(document.querySelector('[data-recursion-card-scope-error]')?.textContent || panelText);
-        proof.capNotice = noticeText.includes('Max Cards is')
-          ? (noticeText.match(/Max Cards is \d+\. Change it in Settings to select more\./)?.[0] || noticeText)
-          : '';
-        proof.capBlocked = proof.capNotice.includes(`Max Cards is ${proof.cap}.`);
-        proof.selectedFamilies = selectedFamiliesNow().filter((family) => desired.has(family));
+        proof.savedEnabledFamilies = selectedFamiliesNow();
+        proof.enabledBeyondTarget = proof.savedEnabledFamilies.length > proof.targetCards;
+        proof.selectedFamilies = proof.savedEnabledFamilies.slice(0, proof.targetCards);
+        if (context && typeof context === 'object') {
+          context.manualEnabledFamilies = proof.savedEnabledFamilies.slice();
+          context.manualForcedFamilies = proof.selectedFamilies.slice();
+        }
         return storeProof();
       }
 
-      if (context && typeof context === 'object') {
-        context.manualForcedFamilies = selectedFamilies.slice();
-        context.manualForcedCap = proof.cap;
-        context.manualForcedBlockedFamily = blocked;
+      const entryScript = [...document.scripts].find((node) => /Recursion\/src\/extension\/index\.js/.test(node.src || node.dataset?.src || ''));
+      if (settingsRoots.length && entryScript) {
+        const entryUrl = new URL(entryScript.src || entryScript.dataset.src, location.href);
+        const { manualCardDeckSelection } = await import(new URL('../pre-process-decks.mjs', entryUrl).href);
+        const settings = settingsRoots[0];
+        const projection = manualCardDeckSelection(settings);
+        proof.savedEnabledFamilies = [...new Set([...projection.selectedUnits, ...projection.omitted].map((unit) => unit.family).filter(Boolean))];
+        proof.selectedFamilies = projection.selectedGeneratedFamilies;
+        proof.enabledBeyondTarget = projection.omitted.length > 0;
         proof.available = true;
-        proof.capBlocked = true;
-        proof.capNotice = `Max Cards is ${proof.cap}. Change it in Settings to select more.`;
         return storeProof();
       }
 
@@ -2337,11 +2339,12 @@ function generationEvidenceScript() {
         ? {
             requested: manualForcedProof.requested === true,
             available: manualForcedProof.available === true,
-            cap: Number(manualForcedProof.cap) || 0,
+            targetCards: Number(manualForcedProof.targetCards) || 0,
             selectedFamilies: forcedSelectedFamilies.slice(0, 12),
-            blockedFamily: String(manualForcedProof.blockedFamily || ''),
-            capBlocked: manualForcedProof.capBlocked === true,
-            capNotice: String(manualForcedProof.capNotice || ''),
+            savedEnabledFamilies: Array.isArray(manualForcedProof.savedEnabledFamilies) ? manualForcedProof.savedEnabledFamilies.slice(0, 12) : [],
+            extraFamily: String(manualForcedProof.extraFamily || ''),
+            enabledBeyondTarget: manualForcedProof.enabledBeyondTarget === true,
+            installedWithinTarget: normalizedSelectedCardRefs.length <= Number(manualForcedProof.targetCards),
             coveredFamilies: coveredForcedFamilies.slice(0, 12),
             omittedFamilies: omittedForcedFamilies.slice(0, 12),
             coverageOk: forcedSelectedFamilies.length > 0 && forcedSelectedFamilies.every((family) => resolvedForcedFamilies.has(family)),
@@ -2913,17 +2916,17 @@ async function runBrowserUiSmoke({
         };
       }, manualScopeProof).catch(() => {});
       const manualForcedProof = await page.evaluate(manualForcedProofScript(), {
-        cap: 2,
+        targetCards: 2,
         families: ['Scene Frame', 'Open Threads'],
-        blockedFamily: 'Active Cast'
+        extraFamily: 'Active Cast'
       }).catch((error) => ({
         requested: true,
         available: false,
-        cap: 2,
+        targetCards: 2,
         selectedFamilies: ['Scene Frame', 'Open Threads'],
-        blockedFamily: 'Active Cast',
-        capBlocked: false,
-        capNotice: '',
+        savedEnabledFamilies: [],
+        extraFamily: 'Active Cast',
+        enabledBeyondTarget: false,
         coveredFamilies: [],
         omittedFamilies: [],
         error: compactBrowserIssue(error)
@@ -3419,13 +3422,16 @@ function promptMetadataFromBrowserResult(report, browserResult) {
       ? {
           requested: generation.manualForcedProof.requested === true,
           available: generation.manualForcedProof.available === true,
-          cap: Number(generation.manualForcedProof.cap) || 0,
+          targetCards: Number(generation.manualForcedProof.targetCards) || 0,
           selectedFamilies: Array.isArray(generation.manualForcedProof.selectedFamilies)
             ? generation.manualForcedProof.selectedFamilies.map((entry) => sanitizeHarnessText(entry || '', 80)).filter(Boolean).slice(0, 12)
             : [],
-          blockedFamily: sanitizeHarnessText(generation.manualForcedProof.blockedFamily || '', 80),
-          capBlocked: generation.manualForcedProof.capBlocked === true,
-          capNotice: sanitizeHarnessText(generation.manualForcedProof.capNotice || '', 160),
+          savedEnabledFamilies: Array.isArray(generation.manualForcedProof.savedEnabledFamilies)
+            ? generation.manualForcedProof.savedEnabledFamilies.map((entry) => sanitizeHarnessText(entry || '', 80)).filter(Boolean).slice(0, 12)
+            : [],
+          extraFamily: sanitizeHarnessText(generation.manualForcedProof.extraFamily || '', 80),
+          enabledBeyondTarget: generation.manualForcedProof.enabledBeyondTarget === true,
+          installedWithinTarget: generation.manualForcedProof.installedWithinTarget === true,
           coveredFamilies: Array.isArray(generation.manualForcedProof.coveredFamilies)
             ? generation.manualForcedProof.coveredFamilies.map((entry) => sanitizeHarnessText(entry || '', 80)).filter(Boolean).slice(0, 12)
             : [],
@@ -3578,7 +3584,7 @@ function activityLatestRunFromReport(report, liveLog, browserResult) {
                   manualForcedProof: browserGeneration.manualForcedProof
                     ? {
                         available: browserGeneration.manualForcedProof.available === true,
-                        capBlocked: browserGeneration.manualForcedProof.capBlocked === true,
+                        enabledBeyondTarget: browserGeneration.manualForcedProof.enabledBeyondTarget === true,
                         selectedFamilies: browserGeneration.manualForcedProof.selectedFamilies || [],
                         coveredFamilies: browserGeneration.manualForcedProof.coveredFamilies || [],
                         omittedFamilies: browserGeneration.manualForcedProof.omittedFamilies || [],
@@ -4682,7 +4688,7 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
                     manualForcedProof: browserResult.snapshot.generation.manualForcedProof
                       ? {
                           available: browserResult.snapshot.generation.manualForcedProof.available === true,
-                          capBlocked: browserResult.snapshot.generation.manualForcedProof.capBlocked === true,
+                          enabledBeyondTarget: browserResult.snapshot.generation.manualForcedProof.enabledBeyondTarget === true,
                           coveredFamilies: browserResult.snapshot.generation.manualForcedProof.coveredFamilies || [],
                           omittedFamilies: browserResult.snapshot.generation.manualForcedProof.omittedFamilies || [],
                           coverageOk: browserResult.snapshot.generation.manualForcedProof.coverageOk === true
@@ -4749,7 +4755,7 @@ export async function runSillyTavernLiveSmoke({ argv = [], env = process.env, ar
                   manualForcedProof: browserResult.snapshot.generation.manualForcedProof
                     ? {
                         available: browserResult.snapshot.generation.manualForcedProof.available === true,
-                        capBlocked: browserResult.snapshot.generation.manualForcedProof.capBlocked === true,
+                        enabledBeyondTarget: browserResult.snapshot.generation.manualForcedProof.enabledBeyondTarget === true,
                         coveredFamilies: browserResult.snapshot.generation.manualForcedProof.coveredFamilies || [],
                         omittedFamilies: browserResult.snapshot.generation.manualForcedProof.omittedFamilies || [],
                         coverageOk: browserResult.snapshot.generation.manualForcedProof.coverageOk === true

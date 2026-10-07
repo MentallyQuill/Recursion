@@ -1,4 +1,5 @@
 import { normalizeProviderError } from './provider-errors.mjs';
+import { providerProfileIdentityHash } from '../provider-capability.mjs';
 
 function connectivityRequest(lane) {
   return {
@@ -79,6 +80,7 @@ function isNativeSchemaFailure(result) {
 
 function certificationResult({
   status,
+  profileIdentityHash,
   checkedAt,
   completionMode,
   structuredOutput,
@@ -90,6 +92,7 @@ function certificationResult({
   const normalizedError = error ? normalizeProviderError(error) : null;
   return Object.freeze({
     status,
+    profileIdentityHash,
     checkedAt,
     completionMode: ['chat', 'text'].includes(completionMode) ? completionMode : 'unknown',
     structuredOutput,
@@ -114,6 +117,7 @@ export async function certifyConnectionProfile({
   const diagnostics = [];
   const checks = { connectivity: 'not-run', singleCard: 'not-run', fusedCards: 'not-run', concurrency: 'not-run' };
   const completionMode = profile?.completionMode || 'unknown';
+  const profileIdentityHash = providerProfileIdentityHash(profile);
 
   let connectivity;
   try {
@@ -124,6 +128,7 @@ export async function certifyConnectionProfile({
   if (!validConnectivity(connectivity)) {
     return certificationResult({
       status: 'fail',
+      profileIdentityHash,
       checkedAt: now(),
       completionMode,
       structuredOutput: 'unknown',
@@ -162,6 +167,7 @@ export async function certifyConnectionProfile({
   if (checks.singleCard === 'fail') {
     return certificationResult({
       status: 'fail',
+      profileIdentityHash,
       checkedAt: now(),
       completionMode,
       structuredOutput: method,
@@ -203,6 +209,7 @@ export async function certifyConnectionProfile({
   if (includeFused !== true) {
     return certificationResult({
       status: 'partial',
+      profileIdentityHash,
       checkedAt: now(),
       completionMode,
       structuredOutput: method,
@@ -220,6 +227,7 @@ export async function certifyConnectionProfile({
   }
   checks.fusedCards = validFusedCards(fused) ? 'pass' : 'fail';
   return certificationResult({
+    profileIdentityHash,
     status: checks.fusedCards === 'pass' ? 'pass' : 'partial',
     checkedAt: now(),
     completionMode,

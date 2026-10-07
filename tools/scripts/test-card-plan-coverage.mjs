@@ -7,7 +7,7 @@ import { CARD_CATALOG, buildCardRequests, buildFusedCardBundleRequest, selectHan
 const deck = createDefaultCardDeck();
 deck.id = 'coverage'; deck.name = 'Coverage'; deck.bundled = false; deck.readonly = false;
 for (const card of Object.values(deck.cards)) card.selectionState = card.builtinFamily === 'Realism' ? 'priority' : 'active';
-const settings = normalizeSettings({ mode: 'auto', reasoningLevel: 'medium', minCards: 8, maxCards: 8,
+const settings = normalizeSettings({ mode: 'auto', reasoningLevel: 'medium', cardsPerTurn: 8,
   cardSelection: { variety: 'off', cooldownTurns: 0 },
   preProcessDecks: { activeDeckId: deck.id, customDecks: { [deck.id]: deck } } });
 const families = ['Realism', 'Knowledge', 'Character Motivation', 'Relationship', 'Active Cast', 'Open Threads', 'Scene Constraints', 'Social Subtext'];
@@ -71,7 +71,7 @@ console.log('[pass] planned hand omissions');
 // Verify actual generation, Guidance, installation and cached reuse in both pipelines.
 const { runCardBudgetFixture } = await import('../../tests/helpers/card-budget-fixture.mjs');
 for (const pipelineMode of ['fused', 'segmented']) {
-  const fixture = await runCardBudgetFixture({ pipelineMode, minCards: 8, maxCards: 8, authoredCount: 0,
+  const fixture = await runCardBudgetFixture({ pipelineMode, cardsPerTurn: 8, authoredCount: 0,
     priorityFamily: 'Realism', proposed: input.cardJobs });
   assert.equal(fixture.result.ok, true);
   assert.deepEqual(fixture.view.lastHand.cards.map(card => card.family), families);

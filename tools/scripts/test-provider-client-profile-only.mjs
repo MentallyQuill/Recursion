@@ -1,6 +1,6 @@
 import { createGenerationRouter, createProviderClient } from '../../src/providers.mjs';
 import { createSettingsStore, normalizeSettings } from '../../src/settings.mjs';
-import { providerConfigHash } from '../../src/provider-capability.mjs';
+import { providerConfigHash, providerProfileIdentityHash } from '../../src/provider-capability.mjs';
 import { createProfileRequestQueue } from '../../src/providers/profile-request-queue.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
@@ -124,6 +124,7 @@ for (const lane of ['utility', 'reasoner']) {
   const provider = parallelSettings.providers[lane];
   provider.certification = {
     status: 'pass', configHash: providerConfigHash(provider), safeConcurrency: 2,
+    profileIdentityHash: providerProfileIdentityHash(profile),
     checks: {connectivity: 'pass', singleCard: 'pass', fusedCards: 'pass', concurrency: 'pass'}
   };
 }

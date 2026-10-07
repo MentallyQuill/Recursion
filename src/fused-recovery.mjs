@@ -1,4 +1,5 @@
 import { CARD_SCOPE_CATALOG } from './card-scope.mjs';
+import { canSalvageStructuredOutput } from './execution/recovery-policy.mjs';
 
 // Only request-owned families and fixed codes cross persistence/UI boundaries.
 const families = new Set(CARD_SCOPE_CATALOG.map((card) => card.family));
@@ -33,6 +34,14 @@ export function summarizeFusedOutcome(value = {}) {
     acceptedFamilies: familyList(value.acceptedFamilies),
     unresolvedFamilies: familyList(value.unresolvedFamilies),
     rejections: normalizeFusedRejections(value.rejections),
-    fallback: (value.fallback?.mode || value.fallback) === 'segmented' ? 'segmented' : null
+    fallback: (value.fallback?.mode || value.fallback) === 'segmented' ? 'segmented' : null,
+    ...(canSalvageStructuredOutput({ code: value.recoveryCause }) || value.recoveryCause === 'RECURSION_PROVIDER_CONTEXT_LIMIT' ? {
+      recoveryCause: value.recoveryCause,
+      salvagedItemCount: Math.max(0, Math.min(40, Math.trunc(Number(value.salvagedItemCount) || 0)))
+    } : {}),
+    ...(['RECURSION_PROVIDER_REFUSAL', 'RECURSION_PROVIDER_CONTENT_FILTER'].includes(value.omissionCause) ? {
+      omissionCause: value.omissionCause,
+      optionalOmissionCount: Math.max(0, Math.min(40, Math.trunc(Number(value.optionalOmissionCount) || 0)))
+    } : {})
   };
 }

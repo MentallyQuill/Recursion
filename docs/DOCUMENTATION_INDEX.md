@@ -29,9 +29,10 @@ This is the canonical map for Recursion documentation. Undated manuals and specs
 ## Provider, Privacy, And Safety Docs
 
 - [Provider and Generation Spec](architecture/PROVIDER_AND_GENERATION_SPEC.md) - Current provider lanes, source routing, machine-JSON schema metadata, structured calls, validation, and secret handling contract.
-- [Structured Output Recovery Design](superpowers/specs/2026-07-13-recursion-structured-output-recovery-design.md) - **Historical recovery design; its fixed correction-budget and deadline claims are superseded by the current per-stage attempt contract.**
+- [Structured Output Recovery Design](superpowers/specs/2026-07-13-recursion-structured-output-recovery-design.md) - **Historical recovery design; current bounded parsing, corrections, attempts, operation deadlines, and salvage rules supersede it.**
+- [Recovery and Settings Design](superpowers/specs/2026-10-07-recovery-and-settings-design.md) - Current implementation decision record for validated sibling salvage, strict evidence, optional omissions, the independent card target, and live profile qualification. Undated V1 manuals/specs remain the maintained runtime authority.
 - [Storage and Diagnostics](architecture/STORAGE_AND_DIAGNOSTICS.md) - Current storage, journal, diagnostics, redaction, and retention contract.
-- [Provider Setup](user/PROVIDER_SETUP.md) - Utility and Reasoner setup, source options, autosaving provider fields, model discovery, session-only keys, provider tests, fallback behavior, and safe verification.
+- [Provider Setup](user/PROVIDER_SETUP.md) - Utility and Reasoner Connection Profiles, autosaving policies, explicit compatibility checks, routing, fallback behavior, and safe verification. SillyTavern owns models and credentials.
 - [Prompt Privacy And Safety](user/PROMPT_PRIVACY_AND_SAFETY.md) - Prompt packet contents, injection boundary, storage limits, redaction, external extension coexistence, and safety checks.
 
 ## Technical Manuals
@@ -52,7 +53,7 @@ This is the canonical map for Recursion documentation. Undated manuals and specs
 - [Recursion Extension Spec](RECURSION_EXTENSION_SPEC.md) - Top-level V1 design and implementation contract.
 - [Product Scope](design/RECURSION_PRODUCT_SCOPE.md) - Product promise, V1 scope, non-goals, and success criteria.
 - [Card System Spec](design/CARD_SYSTEM_SPEC.md) - Fixed V1 catalog, card lifecycle, Utility Arbiter responsibilities, and turn hand.
-- [Behavior Settings Policy Spec](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) - Source-backed V1 contract for Strength, Min/Max Cards, Focus, and Prompt Footprint backend effects.
+- [Behavior Settings Policy Spec](design/BEHAVIOR_SETTINGS_POLICY_SPEC.md) - Source-backed V1 contract for Guidance strength, Cards per turn, Focus, Guidance detail, and count-independent routing.
 - [UI Spec](design/UI_SPEC.md) - Recursion Bar, Hero Pixel Array progress menu, options/settings menu, Last Brief dropdown, viewer, settings, and provider controls.
 - [Turn Context Compiler Seed Note](design/RECURSION_TURN_CONTEXT_COMPILER.md) - Historical seed note superseded by the V1 spec family.
 - [Post-process Cards Design](superpowers/specs/2026-07-18-recursion-post-process-cards-design.md) - **Historical product design; current resumable execution, attempts, controls, and persistence are authoritative where they differ.**
@@ -60,7 +61,7 @@ This is the canonical map for Recursion documentation. Undated manuals and specs
 - [Post-process Cards Playwright Test Framework](testing/2026-07-18-post-process-cards-playwright-framework.md) - Required browser, visual, runtime-integration, and privacy proof framework.
 - [Generation Review and Enhancement Design](superpowers/specs/2026-07-12-recursion-generation-review-and-enhancement-design.md) - **Superseded by Post-process Cards; retained as historical context only.**
 - [Editorial Transformation Design](superpowers/specs/2026-07-13-recursion-editorial-transformation-design.md) - **Superseded by Post-process Cards; retained as historical context only.**
-- [Layered Failure Recovery Design](superpowers/specs/2026-07-17-recursion-layered-failure-recovery-design.md) - **Historical failure-recovery design; current stage attempts and resumable controls supersede fixed recovery budgets.**
+- [Layered Failure Recovery Design](superpowers/specs/2026-07-17-recursion-layered-failure-recovery-design.md) - **Historical design; current per-stage bounds, shared operation allowance, strict evidence, and Resume/Retry controls supersede its recovery contract.**
 - [Redirect Improvement Design](superpowers/specs/2026-07-15-recursion-redirect-improvement-design.md) - **Superseded by Post-process Cards; retained as historical context only.**
 - [Editorial Transformation Implementation Plan](superpowers/plans/2026-07-13-recursion-editorial-transformation.md) - **Superseded by Post-process Cards; retained as historical context only.**
 - [Design Folder Guide](design/README.md)
@@ -79,6 +80,7 @@ This is the canonical map for Recursion documentation. Undated manuals and specs
 ## Testing Docs
 
 - [Testing Strategy](testing/TESTING_STRATEGY.md)
+- [Recovery and Settings Verification](verification/2026-10-07-recovery-and-settings.md) - Implementation behavior, offline/browser evidence, review fixes, and live-benchmark limits for the approved recovery/settings work.
 - [SillyTavern Playwright Harness](testing/SILLYTAVERN_PLAYWRIGHT_HARNESS.md)
 - [Live Smoke Test Plan](testing/LIVE_SMOKE_TEST_PLAN.md)
 - [Artifact Contract](testing/ARTIFACT_CONTRACT.md)

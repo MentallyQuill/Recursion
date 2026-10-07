@@ -357,11 +357,8 @@ test('6. Unified host recovery reuses guidance and two identical host packets', 
     harness.hostCalls[1].guidancePacket,
     'host retry receives the identical packet'
   );
-  assertEqual(
-    harness.hostCalls[0].writerDirective,
-    harness.hostCalls[1].writerDirective,
-    'host retry receives the identical writer directive'
-  );
+  assert(harness.hostCalls[1].writerDirective.startsWith(harness.hostCalls[0].writerDirective), 'host correction preserves the original directive');
+  assert(harness.hostCalls[1].writerDirective.includes('previous output was empty'), 'host correction addresses empty visible output');
   assertEqual(result.outcomes[0].recoveredFailureCode, 'RECURSION_POST_PROCESS_WRITER_EMPTY', 'successful retry retains the first host failure code');
   assertEqual(result.diagnostics.categories[0].recoveredFailureCode, 'RECURSION_POST_PROCESS_WRITER_EMPTY', 'diagnostics retain the recovered failure code');
   assertEqual(harness.commitCalls[0].marker.categories[0].recoveredFailureCode, 'RECURSION_POST_PROCESS_WRITER_EMPTY', 'persisted marker retains the recovered failure code');

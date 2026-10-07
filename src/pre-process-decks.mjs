@@ -1,4 +1,4 @@
-import { CARD_SCOPE_CATALOG, CARD_SCOPE_VERSION } from './card-scope.mjs';
+import { CARD_SCOPE_CATALOG, CARD_SCOPE_VERSION, manualSelectionCap } from './card-scope.mjs';
 
 export const DEFAULT_PRE_PROCESS_DECK_ID = 'default';
 export const PRE_PROCESS_DECK_SETTINGS_VERSION = 2;
@@ -950,9 +950,51 @@ export function deckPriorityFamilies(deck, settings = {}) {
   return families;
 }
 
+// Select runtime units without changing the active deck or saved selection states.
+// One generated family is one unit; every authored card is a separate unit.
+export function manualCardDeckSelection(settings = {}) {
+  const deck = getActiveCardDeck(settings);
+  const cards = orderedDeckCardsAcrossCategories(deck).filter(card => getDeckCardStatus(card).runnable);
+  const unitsByKey = new Map();
+  for (const card of cards) {
+    const family = String(card.builtinFamily || '').trim();
+    const key = family ? `family:${family}` : `card:${card.id}`;
+    if (!unitsByKey.has(key)) unitsByKey.set(key, { key, family, cardId: family ? '' : card.id, sourceCardIds: [], mandatory: false });
+    const unit = unitsByKey.get(key);
+    unit.sourceCardIds.push(card.id);
+    if (cardSelectionState(card) === 'refinement') unit.mandatory = true;
+  }
+  const units = [...unitsByKey.values()];
+  const mandatory = units.filter(unit => unit.mandatory);
+  const ordinary = units.filter(unit => !unit.mandatory);
+  const targetCards = manualSelectionCap(settings);
+  const slots = Math.max(0, targetCards - mandatory.length);
+  const selected = [...mandatory, ...ordinary.slice(0, slots)];
+  const selectedCardIds = selected.flatMap(unit => unit.sourceCardIds);
+  return {
+    targetCards,
+    selectedCardIds,
+    selectedAuthoredCardIds: selected.filter(unit => !unit.family).map(unit => unit.cardId),
+    selectedGeneratedFamilies: selected.filter(unit => unit.family).map(unit => unit.family),
+    sourceCardIdsByFamily: Object.fromEntries(selected.filter(unit => unit.family).map(unit => [unit.family, unit.sourceCardIds.slice()])),
+    mandatoryCardIds: cards.filter(card => cardSelectionState(card) === 'refinement').map(card => card.id),
+    mandatoryFamilies: mandatory.filter(unit => unit.family).map(unit => unit.family),
+    mandatoryAuthoredCardIds: mandatory.filter(unit => !unit.family).map(unit => unit.cardId),
+    selectedUnits: selected,
+    omitted: ordinary.slice(slots).map(unit => ({ ...unit, reason: 'cards-per-turn' }))
+  };
+}
+
+function runtimeDeckCards(settings = {}) {
+  const cards = orderedDeckCardsAcrossCategories(getActiveCardDeck(settings));
+  if (settings.mode !== 'manual') return cards;
+  const selected = new Set(manualCardDeckSelection(settings).selectedCardIds);
+  return cards.filter(card => selected.has(card.id));
+}
+
 export function activeCardDeckEligibility(settings = {}) {
   const deck = getActiveCardDeck(settings);
-  const cards = orderedDeckCardsAcrossCategories(deck)
+  const cards = runtimeDeckCards(settings)
     .filter((card) => getDeckCardStatus(card).runnable);
   const activeCardIds = cards
     .filter((card) => cardSelectionState(card) === 'active')
@@ -980,9 +1022,8 @@ export function activeCardDeckEligibility(settings = {}) {
 }
 
 export function activeCardDeckSourceCards(settings = {}) {
-  const deck = getActiveCardDeck(settings);
   const grouped = {};
-  for (const card of orderedDeckCardsAcrossCategories(deck)) {
+  for (const card of runtimeDeckCards(settings)) {
     if (!getDeckCardStatus(card).runnable) continue;
     const selectionState = cardSelectionState(card);
     const family = String(card.builtinFamily || '').trim();
@@ -1002,8 +1043,7 @@ export function activeCardDeckSourceCards(settings = {}) {
 
 // Authored cards without a generator family are operator guidance, not model jobs.
 export function activeCardDeckAuthoredCards(settings = {}) {
-  const deck = getActiveCardDeck(settings);
-  return orderedDeckCardsAcrossCategories(deck)
+  return runtimeDeckCards(settings)
     .filter((card) => !card.builtinFamily && getDeckCardStatus(card).runnable)
     .map((card) => ({
       id: card.id,
@@ -1048,9 +1088,8 @@ function enableCardScopeSubItems(scope, familyName, subItems) {
 }
 
 export function activeCardDeckRuntimeScope(settings = {}) {
-  const deck = getActiveCardDeck(settings);
   const scope = emptyCardScope();
-  for (const card of Object.values(deck.cards || {})) {
+  for (const card of runtimeDeckCards(settings)) {
     if (!getDeckCardStatus(card).runnable) continue;
     const family = String(card.builtinFamily || '').trim();
     if (!family) continue;

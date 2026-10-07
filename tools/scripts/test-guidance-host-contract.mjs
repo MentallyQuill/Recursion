@@ -49,6 +49,8 @@ assertEqual(invalid.diagnostics.stageAttempt, 2, 'Guidance failure distinguishes
 const validation = validateGuidanceStageResult(invalid);
 assert(classifyModelFailure(validation.error, { kind: 'validation' }).message.includes('guidanceText:object'), 'durable failure summary preserves safe structural reason');
 const corrected = buildGuidanceCorrectionRequest({ request, failure: validation.error });
+const correctedMessages = buildGuidanceCorrectionRequest({ request: { ...request, messages: [{ role: 'user', content: 'Compose guidance.' }] }, failure: validation.error });
+assertEqual(correctedMessages.messages.length, 2, 'guidance correction reaches dispatched message payloads');
 assert(corrected.prompt.includes('guidanceText:object'), 'correction identifies the returned Guidance field type');
 assert(!corrected.prompt.includes('PRIVATE_RESPONSE_CANARY'), 'correction excludes rejected provider prose');
 console.log('[pass] Guidance host contract');

@@ -20,7 +20,6 @@ import {
 import {
   CARD_SCOPE_CATALOG,
   cardScopeSummary,
-  enforceManualSelectionCap,
   filterCardJobsForScope,
   filterCardsForScope,
   normalizeCardScope,
@@ -31,6 +30,7 @@ import {
   activeCardDeckEligibility,
   activeCardDeckSourceCards,
   activeCardDeckAuthoredCards,
+  manualCardDeckSelection,
   deckPriorityCardIds,
   deckPriorityFamilies,
   getActiveCardDeck,
@@ -54,6 +54,7 @@ import { PROVIDER_CONTRACT_HASH } from './providers.mjs';
 import { certifyConnectionProfile } from './providers/profile-certification.mjs';
 import {
   providerConfigHash,
+  providerProfileIdentityHash,
   resolveProviderCapability,
   sanitizeProviderCapability
 } from './provider-capability.mjs';
@@ -69,6 +70,8 @@ import { createPipelineRun } from './execution/checkpoints.mjs';
 import { settleOperationClock } from './execution/operation-budget.mjs';
 import { createExecutionScheduler } from './execution/scheduler.mjs';
 import { createExecutionGraph } from './execution/stage-registry.mjs';
+import { buildStructuredCorrectionRequest } from './execution/correction-request.mjs';
+import { requiredGeneratedCard, settledCardStage, canSalvageStructuredOutput } from './execution/recovery-policy.mjs';
 import {
   QUEUED_REPROCESS_SCHEMA,
   bindQueuedReprocess,
@@ -153,9 +156,6 @@ const REASONER_DECISION_MODES = new Set(['use', 'skip']);
 const PROMPT_FOOTPRINTS = new Set(['compact', 'normal', 'rich']);
 const SCENE_STATUSES = new Set(['same-scene', 'soft-shift', 'hard-shift', 'unknown']);
 const PROMPT_NEUTRAL_SETTING_KEYS = new Set(['reasoningLevel', 'reasonerUse', 'postProcess', 'postProcessDecks', 'enhancements']);
-const DEFAULT_LOW_REASONING_MAX_CARDS = 3;
-const DEFAULT_NORMAL_REASONING_MAX_CARDS = 6;
-const DEFAULT_ULTRA_REASONING_MAX_CARDS = 10;
 const HIGH_REASONER_CARD_PRIORITY = 88;
 const REASONING_LEVEL_POLICIES = Object.freeze({
   low: {
@@ -163,36 +163,28 @@ const REASONING_LEVEL_POLICIES = Object.freeze({
     composer: 'utility',
     arbiterLane: 'utility',
     cardLane: 'utility',
-    maxCardsCap: DEFAULT_LOW_REASONING_MAX_CARDS,
-    maxCardsFloor: 0,
-    prompt: 'Low uses Utility for Arbiter, card generation, and composition. Keep budgets lean and request only the most relevant cards for this scene/message.'
+    prompt: 'Low uses Utility for Arbiter, card generation, and composition.'
   },
   medium: {
     level: 'medium',
     composer: 'reasoner',
     arbiterLane: 'utility',
     cardLane: 'utility',
-    maxCardsCap: 0,
-    maxCardsFloor: 0,
-    prompt: 'Medium uses Utility for Arbiter and cards, then Reasoner for final prompt composition. Use normal card budgets.'
+    prompt: 'Medium uses Utility for Arbiter and cards, then Reasoner for final prompt composition.'
   },
   high: {
     level: 'high',
     composer: 'reasoner',
     arbiterLane: 'reasoner',
     cardLane: 'priority',
-    maxCardsCap: 0,
-    maxCardsFloor: 0,
-    prompt: 'High uses Reasoner for Arbiter, high-priority card families, and final composition. Keep lower-priority card families on Utility and use normal card budgets.'
+    prompt: 'High uses Reasoner for Arbiter, high-priority card families, and final composition. Keep lower-priority card families on Utility.'
   },
   ultra: {
     level: 'ultra',
     composer: 'reasoner',
     arbiterLane: 'reasoner',
     cardLane: 'reasoner',
-    maxCardsCap: 0,
-    maxCardsFloor: DEFAULT_ULTRA_REASONING_MAX_CARDS,
-    prompt: 'Ultra uses Reasoner for Arbiter, card generation, and final composition when the lane is healthy. Bias toward a larger relevant hand when the scene supports it.'
+    prompt: 'Ultra uses Reasoner for Arbiter, card generation, and final composition when the lane is healthy.'
   }
 });
 const HARD_CACHE_VERSION_FIELDS = Object.freeze([
@@ -243,6 +235,7 @@ export function preserveFusedProviderFailure(providerResult = {}) {
     code,
     ...(source.category ? { category: safeText(source.category, 100) } : {}),
     retryable: source.retryable === true,
+    ...(source.fieldIssues?.length ? { fieldIssues: source.fieldIssues } : {}),
     ...(Number.isFinite(providerResult?.error?.retryAfterMs) ? { retryAfterMs: providerResult.error.retryAfterMs } : {}),
     message: safeText(source.message || 'Fused provider request failed.', 500)
   };
@@ -254,7 +247,7 @@ export function validateFusedProviderResult(providerResult = {}, {
   cardContext = {}
 } = {}) {
   const providerFailure = preserveFusedProviderFailure(providerResult);
-  if (providerFailure) return { ok: false, error: providerFailure };
+  if (providerFailure && !canSalvageStructuredOutput(providerFailure)) return { ok: false, error: providerFailure };
 
   const parsed = cardsFromFusedProviderResult(providerResult, {
     ...cardContext,
@@ -292,6 +285,7 @@ export function validateFusedProviderResult(providerResult = {}, {
         acceptedFamilies,
         unresolvedFamilies,
         rejections,
+        ...(providerFailure ? { recoveryCause: providerFailure.code, salvagedItemCount: acceptedFamilies.length } : {}),
         fallback: unresolvedFamilies.length
           ? {
               mode: 'segmented',
@@ -305,7 +299,7 @@ export function validateFusedProviderResult(providerResult = {}, {
   return {
     ok: false,
     value: { cards, outcomes, acceptedFamilies, unresolvedFamilies, rejections },
-    error: {
+    error: providerFailure || {
       code: 'RECURSION_FUSED_ZERO_USEFUL_CARDS',
       category: 'validation',
       retryable: true,
@@ -383,8 +377,7 @@ function runtimeScopePayload(settings = {}) {
 }
 
 function usesCardDeckEligibility(settings = {}) {
-  const preProcessDecks = normalizeCardDeckSettings(settings?.preProcessDecks);
-  return settings.mode !== 'manual' || Object.keys(preProcessDecks.customDecks).length > 0;
+  return true;
 }
 
 function filterCardJobsForRuntimeScope(cardJobs, settings = {}) {
@@ -460,8 +453,7 @@ function cacheSettingsSignature(settings = {}) {
     pipelineMode: normalized.pipelineMode,
     cardScope: normalized.cardScope,
     strength: normalized.strength,
-    minCards: normalized.minCards,
-    maxCards: normalized.maxCards,
+    cardsPerTurn: normalized.cardsPerTurn,
     cardSelection: normalizeCardSelectionSettings(normalized.cardSelection),
     modelAttemptsPerStep: normalized.modelAttemptsPerStep,
     requestDeadlineSeconds: normalized.requestDeadlineSeconds,
@@ -882,15 +874,6 @@ function reasoningPolicyForSettings(settings = {}) {
   const level = safeText(settings?.reasoningLevel || 'medium', 40).toLowerCase();
   const base = REASONING_LEVEL_POLICIES[level] || REASONING_LEVEL_POLICIES.medium;
   const cardBudget = normalizeCardBudgetSettings(settings);
-  if (base.level === 'low') {
-    return { ...base, maxCardsCap: cardBudget.minCards, maxCardsFloor: 0, cardBudget };
-  }
-  if (base.level === 'medium' || base.level === 'high') {
-    return { ...base, maxCardsCap: cardBudget.normalCards, maxCardsFloor: 0, cardBudget };
-  }
-  if (base.level === 'ultra') {
-    return { ...base, maxCardsCap: cardBudget.maxCards, maxCardsFloor: cardBudget.maxCards, cardBudget };
-  }
   return { ...base, cardBudget };
 }
 
@@ -908,13 +891,11 @@ function arbiterLaneForSettings(settings, capabilityResolver = providerCapabilit
 function reasoningPolicyPromptLine(settings) {
   const policy = reasoningPolicyForSettings(settings);
   const budget = policy.cardBudget || normalizeCardBudgetSettings(settings);
-  return `Reasoning level policy: ${policy.prompt} Runtime-enforced card budgets: lowMinCards=${budget.minCards}; normalCards=${budget.normalCards}; ultraMaxCards=${budget.maxCards}. Runtime-enforced routing: composer=${policy.composer}; arbiterLane=${policy.arbiterLane}; cardLane=${policy.cardLane}.`;
+  return `Reasoning level policy: ${policy.prompt} Runtime-enforced cards per turn: ${budget.targetCards}; mandatory coverage may exceed the target. Runtime-enforced routing: composer=${policy.composer}; arbiterLane=${policy.arbiterLane}; cardLane=${policy.cardLane}.`;
 }
 
 function configuredCardTarget(policy) {
-  const budget = policy.cardBudget;
-  return policy.level === 'low' ? budget.minCards
-    : policy.level === 'ultra' ? budget.maxCards : budget.normalCards;
+  return policy.cardBudget.targetCards;
 }
 
 function applyReasoningPolicyToPlan(plan, settings) {
@@ -956,11 +937,8 @@ function applyBehaviorPolicyToPlan(plan, settings) {
   if (promptFootprint !== requestedFootprint) diagnostics.push('behavior-footprint-clamped');
 
   const budgets = asObject(plan?.budgets);
-  const fallbackMaxCards = normalizeBudget(cardBudget.normalCards, DEFAULT_NORMAL_REASONING_MAX_CARDS);
-  const requestedMaxCards = normalizeBudget(budgets.maxCards, fallbackMaxCards);
-  const reasoningFloor = normalizeBudget(reasoningPolicyForSettings(settings).maxCardsFloor, 0);
-  const ceiling = Math.max(normalizeBudget(cardBudget.maxCards, requestedMaxCards), reasoningFloor);
-  const maxCards = requestedMaxCards > 0 && ceiling > 0 ? Math.min(requestedMaxCards, ceiling) : requestedMaxCards;
+  const requestedMaxCards = normalizeBudget(budgets.maxCards, cardBudget.targetCards);
+  const maxCards = cardBudget.targetCards;
   if (maxCards !== requestedMaxCards) diagnostics.push('behavior-max-cards-clamped');
 
   const clampedReasonerUse = promptFootprint !== requestedFootprint
@@ -1509,8 +1487,7 @@ export function preparedGenerationSettingsSignature(settings = {}) {
     pipelineMode: normalized.pipelineMode,
     cardScope: normalized.cardScope,
     strength: normalized.strength,
-    minCards: normalized.minCards,
-    maxCards: normalized.maxCards,
+    cardsPerTurn: normalized.cardsPerTurn,
     cardSelection: normalizeCardSelectionSettings(normalized.cardSelection),
     modelAttemptsPerStep: normalized.modelAttemptsPerStep,
     requestDeadlineSeconds: normalized.requestDeadlineSeconds,
@@ -1669,12 +1646,10 @@ function budgetOr(value, fallback) {
 
 function prioritySelectionForSettings(settings = {}) {
   if (settings?.mode === 'manual') {
-    const forcedFamilies = runtimeScopePayload(settings).selectedFamilies || [];
+    const projection = manualCardDeckSelection(settings);
+    const forcedFamilies = projection.selectedGeneratedFamilies;
     return {
-      forcedCardIds: [...new Set([
-        ...deckPriorityCardIds(getActiveCardDeck(settings), settings),
-        ...activeCardDeckAuthoredCards(settings).map((card) => card.id)
-      ])],
+      forcedCardIds: projection.selectedCardIds,
       forcedFamilies,
       diagnostics: forcedFamilies.length > 0 ? ['manual-card-scope-active'] : []
     };
@@ -1714,6 +1689,35 @@ export function cardSelectionSettingsForPlan(settings, plan) {
     ...(settings.cardSelectionExcludedIds || []),
     ...Object.keys(deck.cards).filter((id) => !allowed.has(id))
   ])] };
+}
+
+function reconcileManualSelectionPlan(plan, settings) {
+  const projection = manualCardDeckSelection(settings);
+  const selectedUnits = projection.selectedUnits;
+  const plannedCount = selectedUnits.length;
+  return {
+    ...plan,
+    action: plan.cardJobs.length ? 'refresh-cards' : 'compose-brief',
+    budgets: { ...plan.budgets, maxCards: Math.max(projection.targetCards, plannedCount) },
+    selection: {
+      ...plan.selection,
+      source: 'manual',
+      targetCount: projection.targetCards,
+      plannedCount,
+      mandatoryCardIds: projection.mandatoryCardIds,
+      mandatoryFamilies: projection.mandatoryFamilies,
+      selectedAuthoredCardIds: projection.selectedAuthoredCardIds,
+      authoredCardIds: projection.selectedAuthoredCardIds,
+      authoredSlots: projection.selectedAuthoredCardIds.length,
+      eligibleCount: plannedCount + projection.omitted.length,
+      shortfallReason: plannedCount < projection.targetCards ? 'insufficient-eligible-cards' : '',
+      selectionOrder: selectedUnits.map(unit => unit.cardId || unit.family),
+      retained: selectedUnits.map(unit => ({ family: unit.family, cardId: unit.cardId,
+        sourceCardIds: unit.family ? unit.sourceCardIds : [], mandatory: true, reason: 'Manual per-turn deck selection.' })),
+      omitted: [...(plan.selection?.omitted || []), ...projection.omitted]
+    },
+    diagnostics: mergeDiagnostics(plan.diagnostics, projection.omitted.length ? ['manual-cards-per-turn-omitted'] : [])
+  };
 }
 
 export function reconcileAutoPriorityPlan(plan, settings, { seed = '', history = [] } = {}) {
@@ -1870,7 +1874,7 @@ function cardEvidenceTokenBudget(settings, plan, behaviorPolicy = null) {
 
 function autoSelectionBudget(settings) {
   const deck = getActiveCardDeck(settings);
-  const ids = settings.mode === 'auto' ? deckPriorityCardIds(deck, settings) : [];
+  const ids = deckPriorityCardIds(deck, settings);
   const families = [...new Set(ids.map((id) => deck.cards[id].builtinFamily).filter(Boolean))];
   const authoredSlots = ids.filter((id) => !deck.cards[id].builtinFamily).length;
   const maxCards = localFallbackPlan({}, settings).budgets.maxCards;
@@ -1893,8 +1897,7 @@ function arbiterSafeSettings(settings, capabilityResolver = providerCapability) 
     selectionBudget: autoSelectionBudget(source),
     cardScope: cardScopeSummary(source.cardScope),
     strength: safeText(source.strength || 'balanced', 40),
-    minCards: normalizeCardBudgetSettings(source).minCards,
-    maxCards: normalizeCardBudgetSettings(source).maxCards,
+    cardsPerTurn: normalizeCardBudgetSettings(source).targetCards,
     reasoningLevel: safeText(source.reasoningLevel || 'medium', 40),
     promptFootprint: safeText(source.promptFootprint || 'compact', 40),
     focus: safeText(source.focus || 'balanced', 80),
@@ -1939,6 +1942,7 @@ function safeProviderSettingsView(provider, settings, lane, capabilityResolver =
   const source = asObject(provider);
   const generationPolicy = asObject(source.generationPolicy);
   const samplerOverrides = asObject(source.samplerOverrides);
+  const capability = capabilityResolver(settings, lane, 'prompt-packet');
   return {
     lane: safeText(source.lane || lane, 40),
     connectionProfileId: safeText(source.connectionProfileId || '', 160),
@@ -1955,8 +1959,9 @@ function safeProviderSettingsView(provider, settings, lane, capabilityResolver =
     outputTokenCeiling: numberOr(source.outputTokenCeiling, 8192),
     maxConcurrentRequests: numberOr(source.maxConcurrentRequests, 2),
     configRevision: numberOr(source.configRevision, 0),
-    certification: safeProviderCertification(source.certification),
-    capability: sanitizeProviderCapability(capabilityResolver(settings, lane, 'prompt-packet'))
+    certification: safeProviderCertification(['unconfigured', 'uncertified'].includes(capability.state)
+      ? { status: 'not-run' } : source.certification),
+    capability: sanitizeProviderCapability(capability)
   };
 }
 
@@ -1974,8 +1979,7 @@ function safeSettingsView(settings, capabilityResolver = providerCapability) {
     preProcessDecks,
     cardScopeSummary: cardScopeSummary(cardScope),
     strength: safeText(source.strength || 'balanced', 40),
-    minCards: cardBudget.minCards,
-    maxCards: cardBudget.maxCards,
+    cardsPerTurn: cardBudget.targetCards,
     reasoningLevel: safeText(source.reasoningLevel || 'medium', 40),
     modelAttemptsPerStep: normalizedSettings.modelAttemptsPerStep,
     requestDeadlineSeconds: normalizedSettings.requestDeadlineSeconds,
@@ -2269,13 +2273,15 @@ function reconcileManualForcedCardJobs({ plan, settings, cacheCards = [], forceC
       omitted: []
     };
   }
-  const selectedFamilies = Array.isArray(scope.selectedFamilies) ? scope.selectedFamilies : [];
+  const projection = manualCardDeckSelection(settings);
+  const selectedFamilies = projection.selectedGeneratedFamilies;
   const reusableFamilies = forceContext ? new Set() : activeCardFamilies(cacheCards);
   const jobsByFamily = new Map();
   for (const job of entries) {
     const catalog = catalogForCard(job);
     if (catalog && selectedFamilies.includes(catalog.family) && !jobsByFamily.has(catalog.family)) {
-      jobsByFamily.set(catalog.family, { ...job, family: catalog.family, role: catalog.role });
+      jobsByFamily.set(catalog.family, { ...job, family: catalog.family, role: catalog.role,
+        sourceCardIds: projection.sourceCardIdsByFamily[catalog.family], forcedBy: 'manual-selection' });
     }
   }
   const diagnostics = [];
@@ -2295,12 +2301,13 @@ function reconcileManualForcedCardJobs({ plan, settings, cacheCards = [], forceC
     jobsByFamily.set(family, {
       family: catalog.family,
       role: catalog.role,
+      sourceCardIds: projection.sourceCardIdsByFamily[family],
       reason: 'Manual selected this card; runtime forced coverage because the Arbiter omitted it.',
       forcedBy: 'manual-selection'
     });
   }
   return {
-    cardJobs: [...jobsByFamily.values()],
+    cardJobs: selectedFamilies.map(family => jobsByFamily.get(family)).filter(Boolean),
     diagnostics,
     forcedFamilies: selectedFamilies.slice(),
     reusedFamilies,
@@ -2826,7 +2833,7 @@ export function createRecursionRuntime({
       operation,
       host: {
         currentModelAvailable: Boolean(generationRouter?.generate),
-        connectionProfiles: listProviderConnectionProfilesForUi()
+        connectionProfiles: listProviderConnectionProfilesForQualification()
       }
     });
   }
@@ -3302,22 +3309,6 @@ export function createRecursionRuntime({
     return clear;
   }
 
-  function manualTrimPreferenceFamiliesForRuntime(settings = {}) {
-    const fromLastHand = Array.isArray(preparedHand()?.cards)
-      ? preparedHand().cards.map((card) => safeText(card?.family || '', 120)).filter(Boolean)
-      : [];
-    const focusFamilies = influencePolicyForSettings(settings).focus?.boostedFamilies || [];
-    return [...fromLastHand, ...focusFamilies];
-  }
-
-  function shouldEnforceManualSelectionCapForPatch(currentSettings = {}, nextSettings = {}, patch = {}) {
-    if (nextSettings?.mode !== 'manual') return false;
-    const changedToManual = patch.mode === 'manual' && currentSettings?.mode !== 'manual';
-    const changedScope = Object.prototype.hasOwnProperty.call(patch, 'cardScope');
-    const changedMaxCards = Object.prototype.hasOwnProperty.call(patch, 'maxCards');
-    return changedToManual || changedScope || changedMaxCards;
-  }
-
   function settingValuesEqual(left, right) {
     return hashJson(left) === hashJson(right);
   }
@@ -3341,15 +3332,7 @@ export function createRecursionRuntime({
   async function updateSettings(patch = {}) {
     const cleanPatch = asObject(patch);
     const currentSettings = settingsStore.get();
-    let next = settingsStore.update(cleanPatch);
-    if (shouldEnforceManualSelectionCapForPatch(currentSettings, next, cleanPatch)) {
-      const manualScoped = enforceManualSelectionCap(activeCardDeckRuntimeScope(next), next, {
-        preferredFamilies: manualTrimPreferenceFamiliesForRuntime(next)
-      });
-      if (manualScoped.trimmed) {
-        next = settingsStore.update({ cardScope: manualScoped.scope });
-      }
-    }
+    const next = settingsStore.update(cleanPatch);
     const changedKeys = changedSettingKeys(cleanPatch, currentSettings, next);
     if (changedKeys.length === 0) {
       return { ok: true, settings: next, clear: null };
@@ -3424,8 +3407,7 @@ export function createRecursionRuntime({
     const next = settingsStore.resetSettingsMenu();
     const resetKeys = [
       'strength',
-      'minCards',
-      'maxCards',
+      'cardsPerTurn',
       'focus',
       'promptFootprint',
       'modelAttemptsPerStep',
@@ -3493,6 +3475,7 @@ export function createRecursionRuntime({
         id: safeIdentifier(profile?.id || '', '', 160),
         name: safeText(profile?.name || profile?.label || profile?.id || '', 180),
         model: safeText(profile?.model || '', 180),
+        api: safeText(profile?.api || '', 180),
         label: safeText(profile?.label || profile?.name || profile?.id || '', 240),
         completionMode: ['chat', 'text'].includes(safeText(profile?.completionMode || '', 20))
           ? safeText(profile?.completionMode, 20)
@@ -3503,21 +3486,24 @@ export function createRecursionRuntime({
       : [];
   }
 
-  function listProviderConnectionProfilesForUi(options = {}) {
+  function listProviderConnectionProfilesForQualification(options = {}) {
     try {
+      let profiles = [];
       if (typeof host?.providerProfiles?.list === 'function') {
-        return safeProviderProfiles(host.providerProfiles.list(options));
+        profiles = host.providerProfiles.list(options);
+      } else if (typeof host?.listConnectionProfiles === 'function') {
+        profiles = host.listConnectionProfiles(options);
+      } else if (typeof host?.providerClient?.listProfiles === 'function') {
+        profiles = host.providerClient.listProfiles(options);
       }
-      if (typeof host?.listConnectionProfiles === 'function') {
-        return safeProviderProfiles(host.listConnectionProfiles(options));
-      }
-      if (typeof host?.providerClient?.listProfiles === 'function') {
-        return safeProviderProfiles(host.providerClient.listProfiles(options));
-      }
+      return Array.isArray(profiles) ? profiles : [];
     } catch {
       return [];
     }
-    return [];
+  }
+
+  function listProviderConnectionProfilesForUi(options = {}) {
+    return safeProviderProfiles(listProviderConnectionProfilesForQualification(options));
   }
 
   function safeRuntimeView() {
@@ -5720,13 +5706,19 @@ export function createRecursionRuntime({
     return task;
   }
 
-  async function recordProviderCertificationResult(lane, certification, configHash, configRevision) {
+  async function recordProviderCertificationResult(lane, certification, configHash, configRevision, identityDrifted = false) {
     const beforeSettings = settingsStore.get();
     const beforeCapability = runtimeProviderCapability(beforeSettings, lane, 'prompt-packet');
-    const result = settingsStore.recordProviderCertification(lane, certification, {
-      configHash,
-      configRevision
-    });
+    const profile = listProviderConnectionProfilesForQualification()
+      .find((entry) => entry.id === beforeSettings.providers?.[lane]?.connectionProfileId);
+    const identityMatches = !identityDrifted
+      && providerProfileIdentityHash(profile) === certification.profileIdentityHash;
+    const result = identityMatches
+      ? settingsStore.recordProviderCertification(lane, certification, { configHash, configRevision })
+      : { ok: false, stale: true, error: {
+          code: 'RECURSION_PROVIDER_TEST_STALE',
+          message: 'The Connection Profile changed before the test completed.'
+        } };
     if (result.ok === true && typeof host?.settings?.flush === 'function') {
       await host.settings.flush();
     }
@@ -5757,8 +5749,20 @@ export function createRecursionRuntime({
       const providerSnapshot = settings.providers?.[resolvedLane] || {};
       const configHash = providerConfigHash(providerSnapshot);
       const configRevision = Number(providerSnapshot.configRevision || 0);
-      const profiles = listProviderConnectionProfilesForUi();
+      const profiles = listProviderConnectionProfilesForQualification();
       const profile = profiles.find((entry) => entry.id === providerSnapshot.connectionProfileId) || null;
+      const profileIdentityHash = providerProfileIdentityHash(profile);
+      let identityDrifted = false;
+      const assertProfileCurrent = () => {
+        const currentProfile = listProviderConnectionProfilesForQualification()
+          .find((entry) => entry.id === providerSnapshot.connectionProfileId);
+        if (providerProfileIdentityHash(currentProfile) !== profileIdentityHash) {
+          identityDrifted = true;
+          throw Object.assign(new Error('The Connection Profile changed during the test.'), {
+            code: 'RECURSION_PROVIDER_TEST_STALE'
+          });
+        }
+      };
       const capability = resolveProviderCapability({
         settings,
         lane: resolvedLane,
@@ -5780,6 +5784,7 @@ export function createRecursionRuntime({
       if (!capability.testable || !profile) {
         certification = {
           status: 'fail',
+          profileIdentityHash: providerProfileIdentityHash(profile),
           checkedAt: nowIso(),
           completionMode: profile?.completionMode || 'unknown',
           structuredOutput: 'unknown',
@@ -5791,6 +5796,7 @@ export function createRecursionRuntime({
       } else if (!generationRouter || typeof generationRouter.generate !== 'function') {
         certification = {
           status: 'fail',
+          profileIdentityHash: providerProfileIdentityHash(profile),
           checkedAt: nowIso(),
           completionMode: profile.completionMode || 'unknown',
           structuredOutput: 'unknown',
@@ -5814,13 +5820,18 @@ export function createRecursionRuntime({
           provider: providerSnapshot,
           profile,
           includeFused: certificationScope !== 'segmented',
-          generate: (roleId, request) => generationRouter.generate(roleId, {
-            ...request,
-            ...reasoningRequestMetadata({}, 'provider-test')
-          }, {
-            runId,
-            timeoutMs: PROVIDER_TEST_TIMEOUT_MS
-          })
+          generate: async (roleId, request) => {
+            assertProfileCurrent();
+            const result = await generationRouter.generate(roleId, {
+              ...request,
+              ...reasoningRequestMetadata({}, 'provider-test')
+            }, {
+              runId,
+              timeoutMs: PROVIDER_TEST_TIMEOUT_MS
+            });
+            assertProfileCurrent();
+            return result;
+          }
         });
       }
 
@@ -5828,7 +5839,8 @@ export function createRecursionRuntime({
         resolvedLane,
         certification,
         configHash,
-        configRevision
+        configRevision,
+        identityDrifted
       );
       const stale = persisted.stale === true;
       const passed = certification.status !== 'fail';
@@ -6914,7 +6926,7 @@ export function createRecursionRuntime({
       seed: hashJson({ turn: context.turnIdentity?.turnKeyHash, deck: activeDeckRevisionHash(context.settings), selection: context.settings.cardSelection }),
       history: context.snapshot.cardSelectionHistory || []
     }) : budgetCardJobsForGeneration(
-      plan,
+      reconcileManualSelectionPlan(plan, context.settings),
       runPolicyForEffectivePlan(context.settings, plan),
       prioritySelectionForSettings(context.settings).forcedFamilies
     ).plan;
@@ -6974,19 +6986,9 @@ export function createRecursionRuntime({
         }
         return normalizeDurableArbiterPlan(context, result);
       },
-      buildCorrectionRequest({ request, error, attempt }) {
-        return {
-          ...request,
-          request: {
-            ...request.request,
-            prompt: [
-              request.request.prompt,
-              'Correction required.',
-              `Attempt ${attempt} was rejected: ${safeText(error?.message || error?.code || 'invalid Arbiter plan', 180)}`,
-              `Return one corrected JSON object only using schema "${UTILITY_ARBITER_SCHEMA}".`
-            ].join('\n\n')
-          }
-        };
+      buildCorrectionRequest({ request, originalRequest, failure }) {
+        return buildStructuredCorrectionRequest({ originalRequest, currentRequest: request, failure,
+          taskFeedback: `Return a valid Arbiter plan using schema "${UTILITY_ARBITER_SCHEMA}" and the exact snapshotHash. Select only eligible card families.` });
       },
       summarizeArtifact: summarizeExecutionArtifact
     };
@@ -7014,7 +7016,7 @@ export function createRecursionRuntime({
         // Repair the bundle on the connection selected for that bundle. Applying
         // individual-card priority here silently moves low-priority repairs to
         // Utility, even when Reasoner produced all their accepted siblings.
-        if (rejection) {
+        if (rejection || job?.fusedRecovery === true) {
           const lane = context.pipelineDecision.selectedLane;
           return {
             ...corrected,
@@ -7092,6 +7094,7 @@ export function createRecursionRuntime({
               code,
               category,
               retryable: category === 'provider-output' || error.retryable === true,
+              ...(error.fieldIssues?.length ? { fieldIssues: error.fieldIssues } : {}),
               message: details,
               suggestedAction: providerSuggestedAction || (
                 category === 'provider-output'
@@ -7127,18 +7130,10 @@ export function createRecursionRuntime({
       }
     }).map((stage) => ({
       ...stage,
-      // Every dispatched family is part of the committed plan. Exhaustion must leave Retry on that family.
-      failurePolicy: 'blocking',
-      buildCorrectionRequest({ request, error, attempt }) {
-        return {
-          ...request,
-          prompt: [
-            request?.prompt || '',
-            'Correction required.',
-            `Attempt ${attempt} was rejected [${safeText(error?.code || 'RECURSION_CARD_INVALID', 120)}]: ${safeText(error?.message || 'Card response was invalid.', 300)}`,
-            'Return one corrected JSON object only with promptText and evidenceRefs.'
-          ].filter(Boolean).join('\n\n')
-        };
+      failurePolicy: requiredGeneratedCard(stage.selectedCard) ? 'blocking' : 'continue',
+      buildCorrectionRequest({ request, originalRequest, failure }) {
+        return buildStructuredCorrectionRequest({ originalRequest, currentRequest: request, failure,
+          taskFeedback: `Return one grounded ${selectedCards.find(card => stage.selectedCard === card)?.family || stage.selectedCard?.family || 'requested'} card with promptText and evidenceRefs. References must identify messages in the supplied snapshot. Preserve requested source-card coverage.` });
       },
       summarizeArtifact: stage.summarize
     }));
@@ -7290,6 +7285,17 @@ export function createRecursionRuntime({
           providerCards,
           generatedCards,
           reuseCacheOnly,
+          optionalFailures: cardStageIds.flatMap(stageId => {
+            const dependency = dependencies[stageId];
+            const job = (plan.cardJobs || []).find(card => stageId === `preprocess.cards.segmented.${card.family.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}`);
+            if (dependency?.state === 'failed' && job && !requiredGeneratedCard(job)) {
+              return [{ family: job.family, code: dependency.failure?.code || 'RECURSION_CARD_INVALID' }];
+            }
+            const artifact = dependency?.artifact;
+            return artifact?.fallback === null ? (artifact.unresolvedFamilies || [])
+              .filter(family => !requiredGeneratedCard((plan.cardJobs || []).find(card => card.family === family)))
+              .map(family => ({ family, code: artifact.outcomes?.[family]?.reason || 'RECURSION_CARD_INVALID' })) : [];
+          }).slice(0, 40),
           diagnostics: mergeDiagnostics(plan.diagnostics, scopedDiagnostics)
         };
       },
@@ -7329,7 +7335,7 @@ export function createRecursionRuntime({
         const deckArtifact = dependencies['preprocess.deck'].artifact;
         const behaviorPolicy = runPolicyForEffectivePlan(context.settings, plan);
         const prioritySelection = prioritySelectionForSettings(context.settings);
-        return selectHand(
+        const hand = selectHand(
           [...filterCardsForRuntimeScope(deckArtifact.deck.cards, cardSelectionSettingsForPlan(context.cardSettings || context.settings, plan)).cards,
             ...activeCardDeckAuthoredCards(cardSelectionSettingsForPlan(context.cardSettings || context.settings, plan))],
           {
@@ -7345,13 +7351,16 @@ export function createRecursionRuntime({
             ]) : null
           }
         );
+        hand.metadata.optionalCardFailures = deckArtifact.optionalFailures || [];
+        return hand;
       },
       validate(artifact) {
         if (!Array.isArray(artifact?.cards) || !Array.isArray(artifact?.omitted)) {
           return { ok: false, error: { code: 'RECURSION_HAND_INVALID' } };
         }
         const requirements = [
-          ...(plan.cardJobs || []),
+          ...(plan.cardJobs || []).filter(card => requiredGeneratedCard(card)
+            || !(artifact.metadata?.optionalCardFailures || []).some(failure => failure.family === card.family)),
           ...(plan.selection?.selectedAuthoredCardIds || []).map((cardId) => ({ cardId }))
         ];
         const missing = missingPlannedCards(artifact.cards, requirements);
@@ -7465,12 +7474,13 @@ export function createRecursionRuntime({
         };
         return validation;
       },
-      buildCorrectionRequest({ request, error, attempt }) {
+      buildCorrectionRequest({ request, originalRequest, failure, error, attempt }) {
         return {
           ...request,
           request: buildGuidanceCorrectionRequest({
             request: request.request,
-            failure: error,
+            originalRequest: originalRequest.request,
+            failure: { ...error, ...failure },
             attempt
           })
         };
@@ -7659,7 +7669,8 @@ export function createRecursionRuntime({
             const lane = request.lane === 'reasoner' ? 'reasoner' : 'utility';
             const configuredRequest = {
               ...request,
-              providerConfig: { outputTokenCeiling: context.settings.providers?.[lane]?.outputTokenCeiling }
+              providerConfig: { outputTokenCeiling: context.settings.providers?.[lane]?.outputTokenCeiling,
+                generationPolicy: context.settings.providers?.[lane]?.generationPolicy }
             };
             return envelope.request ? { ...envelope, request: configuredRequest } : configuredRequest;
           }
@@ -7685,8 +7696,11 @@ export function createRecursionRuntime({
     );
     return (Array.isArray(plan?.cardJobs) ? plan.cardJobs : [])
       .filter((job) => unresolved.has(safeText(job?.family || job?.role || '', 120)))
-      .map((job) => ({ ...job, fusedRejectionCode: normalizeFusedRejections(fusedArtifact?.rejections)
-        .find((entry) => entry.family === job.family)?.code || 'invalid-card' }));
+      .map((job) => ({ ...job, fusedRecovery: true,
+        ...(fusedArtifact?.recoveryCause ? { fusedRecoveryCause: fusedArtifact.recoveryCause } : {
+          fusedRejectionCode: normalizeFusedRejections(fusedArtifact?.rejections)
+            .find((entry) => entry.family === job.family)?.code
+        }) }));
   }
 
   function durableCardStageSet(context, plan, {
@@ -7902,7 +7916,7 @@ export function createRecursionRuntime({
       if (
         segmentedFallback
         && (validateDownstream || !fallbackStages.every(
-          (stage) => manifest.stageRecords?.[stage.id]?.state === 'completed'
+          (stage) => settledCardStage(stage, manifest.stageRecords?.[stage.id])
         ))
       ) {
         manifest = await startDurableGraph(
@@ -7919,7 +7933,7 @@ export function createRecursionRuntime({
       }
     } else if (
       validateDownstream || !durableSegmentedStages(context, plan).every(
-        (stage) => manifest.stageRecords?.[stage.id]?.state === 'completed'
+        (stage) => settledCardStage(stage, manifest.stageRecords?.[stage.id])
       )
     ) {
       manifest = await startDurableGraph(
@@ -7976,6 +7990,9 @@ export function createRecursionRuntime({
       context.turnIdentity
     );
     const installed = installSettlement?.installed === true;
+    const optionalOmissions = (hand.metadata?.selection?.missingPlannedCards || [])
+      .filter(card => !requiredGeneratedCard((plan.cardJobs || []).find(job => job.family === card.family) || card));
+    const degraded = installed && optionalOmissions.length > 0;
     if (candidate && installed) commitPreparedGeneration(candidate);
     lastPlan = plan;
     lastSnapshot = installSettlement?.cardSelectionSourcePrefixHash
@@ -8015,10 +8032,11 @@ export function createRecursionRuntime({
     });
     settleRuntimeActivity({
       runId: context.runId,
-      outcome: installed ? 'success' : 'warning',
+      outcome: installed && !degraded ? 'success' : 'warning',
       phase: 'settled',
-      severity: installed ? 'success' : 'warning',
-      label: installed ? 'Recursion prompt ready.' : INSTALL_FAILURE_LABEL
+      severity: installed && !degraded ? 'success' : 'warning',
+      label: degraded ? `Recursion prompt ready with ${optionalOmissions.length} optional card(s) omitted.`
+        : installed ? 'Recursion prompt ready.' : INSTALL_FAILURE_LABEL
     });
     clearActiveRun(context.runId);
     return {

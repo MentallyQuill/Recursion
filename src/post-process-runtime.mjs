@@ -10,6 +10,7 @@ import {
   postProcessGuidanceRoute
 } from './post-process-guidance.mjs';
 import { runModelStageAttempts } from './execution/attempt-policy.mjs';
+import { buildStructuredCorrectionRequest } from './execution/correction-request.mjs';
 import { createExecutionGraph } from './execution/stage-registry.mjs';
 import { createPipelineRun } from './execution/checkpoints.mjs';
 import { buildRunProvenance } from './execution/provenance.mjs';
@@ -378,11 +379,10 @@ async function synthesizeCategoryGuidance(stage, operation, generationRouter) {
         }
       };
     },
-    buildCorrectionRequest: ({ request }) => {
-      const correction = guidanceRequestForStage(stage, operation);
-      correction.prompt = `${cleanText(request.prompt)}\n\nReturn valid post-process guidance matching the requested schema.`;
-      return correction;
-    }
+    buildCorrectionRequest: ({ request, originalRequest, failure }) => buildStructuredCorrectionRequest({
+      originalRequest, currentRequest: request, failure,
+      taskFeedback: 'Return valid post-process guidance matching the requested schema. guidanceText must contain actionable editing instructions.'
+    })
   });
   if (attemptResult.aborted || operation.signal.aborted) {
     return { ok: false, canceled: true, attempts: attemptResult.attempts.length };
@@ -482,7 +482,8 @@ async function rewriteWithRetry(stage, guidance, operation, host) {
       signal: operation.signal
     }),
     validate: (result) => validateWriterResult(result, { draft: stage.draft }),
-    buildCorrectionRequest: ({ request }) => request
+    buildCorrectionRequest: ({ request, originalRequest }) => ({ ...request,
+      writerDirective: `${originalRequest.writerDirective}\nThe previous output was empty. Return the complete revised draft as visible prose.` })
   });
   if (attemptResult.aborted || operation.signal.aborted) {
     return {
@@ -906,15 +907,9 @@ export function createPostProcessStages({
           categoryIds
         });
       },
-      buildCorrectionRequest({ request, error, attempt }) {
-        return {
-          ...request,
-          prompt: [
-            cleanText(request?.prompt),
-            `Correction required after attempt ${attempt}: ${cleanText(error?.message || error?.code || 'invalid guidance')}.`,
-            'Return valid post-process guidance matching the requested schema.'
-          ].filter(Boolean).join('\n\n')
-        };
+      buildCorrectionRequest({ request, originalRequest = request, failure }) {
+        return buildStructuredCorrectionRequest({ originalRequest, currentRequest: request, failure,
+          taskFeedback: 'Return valid post-process guidance matching the requested schema. guidanceText must contain actionable editing instructions.' });
       },
       summarizeArtifact(artifact) {
         return {

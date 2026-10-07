@@ -49,13 +49,15 @@ flowchart LR
     Install --> Continue["Host generation"]
 ```
 
-Fused changes only the foreground card-generation stage. It keeps the Segmented Arbiter, scope, Manual forced-card reconciliation, deck, hand, guidance, packet, and install stages, but sends all requested card families as one `fusedCardBundle` model call. Runtime accepts valid requested siblings, rejects unrequested or duplicate cards, repairs damaged or missing requested siblings with individual Segmented card calls, and uses full Segmented fallback only when the bundle yields no useful cards. Fused still obeys Reasoning Level: Low/Medium route the bundle to Utility, while High/Ultra may route it to Reasoner. A configured physical lane does not need a Fused test; explicit selection dispatches the bundle before any response-based repair or fallback.
+Fused changes only the foreground card-generation stage. It keeps the Segmented Arbiter, scope, per-turn Manual projection, deck, hand, guidance, packet, and install stages, but sends requested generated families as one `fusedCardBundle` call. Complete validated siblings can survive a damaged envelope or completion-token exhaustion. Accepted cards checkpoint; only unresolved families use individual Segmented calls on the bundle's selected lane. When no complete item survives, bounded correction may precede individual-family fallback. Authentication, refusal/content filtering, cancellation, transport outages, stale source, storage, and operation-budget failures cannot authorize salvage. Fused still obeys Reasoning Level routing, independently of card count. A configured physical lane does not need a Fused test.
 
 Fused is designed for stronger reasoning models such as recent DeepSeek, GLM, MiniMax, Kimi, MiMo, Qwen, and similar. Segmented is usually the better pipeline for smaller, simpler, or less reliable structured-output models.
 
-Every Pre-process and Post-process run is represented as a durable stage graph. Accepted stage outputs are stored as hash-addressed artifacts before the manifest advances. Recursion sets no default generation timeout: a model call may wait indefinitely until it returns, fails, or the user stops it. `Attempts per step` supplies a bounded one-to-five total attempt window for model stages only, with a default of two. SillyTavern's primary story generation is never automatically retried by Recursion.
+Every Pre-process and Post-process run is represented as a durable stage graph. Accepted stage outputs are stored as hash-addressed artifacts before the manifest advances. `modelAttemptsPerStep` ranges from one to five, defaults to two, and includes the initial call. Rate-limit retries (at most eight) and retryable transient retries (at most three) have separate per-stage bounds. Defaults are `requestDeadlineSeconds: 180` and `operationDeadlineSeconds: 300`; active queue/cooldown waits count toward the operation deadline. The shared durable recovery allowance may stop extra calls earlier, with required work protected before optional recovery. SillyTavern's primary story generation is never automatically retried.
 
-Stop aborts the active call, requests native host Stop, and pauses the operation without discarding accepted checkpoints. Resume requests the matching native host action and continues only when the interceptor returns. Retry Stage discards the current stage output and resets only that stage's attempt window. Reprocess from here on the next swipe invalidates the selected stage and dependent stages when consumed. Full Rebuild bypasses all reusable Pre-process work for one matching swipe.
+Stop aborts the active call, requests native host Stop, and pauses the operation without discarding accepted checkpoints. Resume requests the matching native host action, continues only when the interceptor returns, and preserves the current budget and inherited cooldown. Deliberate Retry Stage opens a new attempt/recovery window for its invalidation scope; it does not bypass profile cooldown. Reprocess from here on the next swipe invalidates the selected stage and dependents when consumed and opens a new deliberate window. Full Rebuild bypasses all reusable Pre-process work for one matching swipe.
+
+Structured parsing is bounded to 262,144 characters, nesting depth 64, and 40 complete bundle items. Duplicate keys within one object, including escaped equivalent keys, and competing top-level JSON values are ambiguous. Formatting repair still passes canonical structural and role-specific semantic checks. `jsonSchemaForRequest` supplies the local structural contract; Fused envelope and item checks are separate so one bad sibling cannot discard good siblings. Corrections rebuild from original prompts/messages, retain token/format adjustments, and include at most eight fixed field issues without copying rejected output. An unchanged correction request stops instead of spending another call.
 
 ## Component Ownership
 
@@ -64,9 +66,9 @@ Stop aborts the active call, requests native host Stop, and pauses the operation
 | Core helpers | `src/core.mjs` | Stable hashing, safe ids, truncation, JSON parsing, cloning, timestamps, and redaction. |
 | Execution contracts | `src/execution-contracts.mjs` | Durable operation, stage, artifact, queued-intent, failure, and lifecycle contracts. |
 | Execution scheduler | `src/execution-scheduler.mjs` | Checkpoint-aware stage traversal, attempt windows, stop/pause/resume/retry, stale guards, and queued invalidation. |
-| Settings | `src/settings.mjs` | Mode, Segmented/Fused pipeline mode, attempts per step, Reasoning Level, strength, footprint, focus, Connection Profile policies, staged certification, injection settings, retention caps, and UI limits. |
+| Settings | `src/settings.mjs` | Mode, pipeline, cardsPerTurn, attempts and deadlines, Reasoning Level, Guidance strength/detail, focus, Connection Profile policies and identity-bound qualification, injection, retention, and UI limits. |
 | Retention policy | `src/retention-policy.mjs` | User-facing cap defaults, ranges, settings normalization, and bounded source-window selection. |
-| Behavior policy | `src/settings-policy.mjs` | Source-backed Strength, Min/Max Cards, Focus, Prompt Footprint, policy prompt lines, effective footprint, and diagnostics summaries. |
+| Behavior policy | `src/settings-policy.mjs` | Independent card target, Guidance strength/detail, Focus, policy prompt lines, effective footprint, and diagnostics summaries. |
 | Activity | `src/activity.mjs` | Sanitized user-facing activity events for the bar, progress menu, viewer, and diagnostics. |
 | Progress model | `src/progress.mjs` | Hero Pixel Array blocks, progress-menu rows, nested card/model-call status, and compact current-step text. |
 | Providers | `src/providers.mjs` | Utility and Reasoner Connection Profile routing, policy resolution, per-profile queuing, structured response parsing, role validation, bounded stage attempts, certification, aborts, and privacy-safe model-call diagnostics. |
@@ -83,9 +85,9 @@ Stop aborts the active call, requests native host Stop, and pauses the operation
 
 Power-off clears or avoids Recursion prompt entries and does not inspect chat for prompt compilation.
 
-Manual captures the current turn and follows the selected prompt-install pipeline, but it constrains card generation and cached-card reuse to the selected card families. Disabled families are omitted before provider card jobs run and filtered again before deck and hand selection.
+Manual captures the current turn and projects the active deck without mutating saved card states. Mandatory Refinement units are reserved first; eligible authored cards and generated family requests then fill the remaining `cardsPerTurn` target in deck order. Authored cards count individually and repeated built-in family sources share one unit. The projection governs provider scope, jobs, authored inclusion, and required coverage. Zero requests only Refinement. Disabled and over-target sources are excluded for this turn; Scene Constraints is required only when selected.
 
-Auto mode runs the selected pipeline and installs validated prompt blocks through Recursion-owned SillyTavern prompt keys when the selected path produces useful guidance. User-selected card families and sub-items are preferred in Auto, but the Utility Arbiter still sees the full fixed catalog in Segmented and can request unselected families when they have high relevance to scene constraints, scene coherence, or the current user message.
+Auto runs the selected pipeline and installs validated prompt blocks through Recursion-owned SillyTavern prompt keys. The Arbiter ranks currently eligible sources; disabled sources stay excluded. Priority and Refinement coverage is mandatory and reserved before discretionary work. Focus informs ranking without changing the target or creating a hard whitelist.
 
 Settings and provider changes supersede the active run, abort stale provider work where possible, and await prompt cleanup before their operation results resolve. `updateSettings` returns updated settings plus the prompt-clear result; `updateProviderConfig` returns updated profile policy plus the prompt-clear result. A material provider edit increments `configRevision` and invalidates prior certification. Clear failure leaves the setting or provider change applied, returns `ok: false`, and surfaces the sanitized prompt-clear warning.
 
@@ -98,9 +100,11 @@ Recursion has two provider lanes:
 | Utility | Required default lane for Arbiter planning, card work, provider tests, guidance composition, and fail-soft guidance support. |
 | Reasoner | Optional composer lane for rich, crowded, conflicted, or subtle hands. Utility remains the fallback. |
 
-Each lane requires a selected SillyTavern Connection Profile. Recursion stores no endpoint, credential, model-discovery result, or authorization header. The generation policy independently controls Behavioral Preset isolation, text-completion instruct formatting, sampler inheritance, and structured-output method. Same-profile calls run through a FIFO queue with concurrency one.
+Each lane requires a selected, available SillyTavern Connection Profile. Recursion stores no endpoint, credential, model-discovery result, or authorization header. Generation policy controls Behavioral Preset isolation, text-completion instruct formatting, sampler inheritance, and structured-output method. Qualification matches both the Recursion configuration hash and a separate live `profileIdentityHash` of ID, model, API, completion mode, preset, and instruct descriptors. Names, labels, endpoints, and secrets are excluded. Same-ID profile edits become untested; no hidden paid probe runs, and test-time drift invalidates saving.
 
-Reasoning Level is the operator-facing lane-depth control. Low is Utility-only, Medium uses an eligible Reasoner for guidance composition, High adds Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy. Configured untested profiles can run Segmented. Explicit Fused selection depends on route configuration, not certification, and does not automatically downgrade based on test status. Post-process guidance stays on the selected lane for its operation and fails soft when that lane is unavailable or its routed call fails.
+Auto uses native output only when the saved native check is current. Unsupported explicit Native Schema stops with a compatibility explanation; only Auto may downgrade to Prompt JSON within budget. Same-profile calls share a FIFO queue with conservative concurrency one unless an explicit test proves overlap up to the configured limit of three. Lanes sharing a profile use the smallest current verified limit; stale or failed qualification restores one.
+
+Reasoning Level is the operator-facing routing control. Low is Utility-only, Medium uses an eligible Reasoner for guidance composition, High adds Reasoner for Arbiter and priority card families, and Ultra is Reasoner-heavy. Every level uses the same `cardsPerTurn` target (default 6, range 0..20). Guidance strength and detail do not own card count. Configured untested profiles can run conservative generation. Explicit Fused selection depends on route configuration, not certification. Post-process guidance stays on its selected operation lane and fails soft when that lane is unavailable or its call fails.
 
 ## Card And Hand System
 
@@ -111,6 +115,8 @@ Cards are disposable scene-local cache artifacts. The scene deck stores active, 
 Every Pre-process operation is source-revision aware. Runtime hashes the exact bounded visible source, including latest user identity and relevant selected-swipe metadata, into a turn key. A new user message always builds fresh work. An unchanged swipe may reinstall the completed packet without model calls only when every turn, settings, provider, pipeline, dependency, and artifact binding still matches. An edit or selected-swipe change inside the bounded band rejects incompatible reuse.
 
 Cards expand scene implications rather than preserve facts for their own sake. For example, a location card should derive routes, sightlines, plausible interruptions, usable local details, and relevance boundaries from the active location instead of restating the place name or dumping broad setting lore.
+
+Evidence refs must bind to the supplied source window; missing, malformed, partially invalid, or out-of-window refs are rejected instead of being replaced with the latest message. Mechanical normalization cannot change the cited message. Selected Scene Constraints and generated Manual/Priority/Refinement jobs are mandatory, as are required authored coverage and all selected authored instructions. Exhausted optional generated families can settle with explicit omissions and an amber smaller-hand explanation. Required exhaustion blocks installation; optional omissions cannot revive stale cards or invent local evidence.
 
 Character Motivation cards are behavior-facing. They can describe visible pressure, established goals, and likely posture, but they cannot inject private internal-thought dumps or hidden motives as fact.
 
@@ -149,6 +155,8 @@ Execution manifests contain stage metadata and artifact references, never artifa
 
 Diagnostics are bounded and sanitized. Normal records may include hashes, ids, card families, operation/stage states, attempt numbers, token estimates, provider lane labels, durations, artifact byte counts, lifecycle codes, and compact errors. They must not include API keys, raw provider prompts, raw provider responses, artifact bodies, full transcripts, hidden reasoning, private story plans, or unbounded local paths. Explicit diagnostic excerpts remain opt-in and bounded.
 
+The fixed recovery counters are `parseFailures`, `shapeFailures`, `correctionRequests`, `budgetAdjustments`, `rateLimitRetries`, `transientRetries`, `salvagedItems`, `segmentedRepairCalls`, `optionalOmissions`, and `requiredBlocks`. They derive from actual stage attempts/outcomes and validated accepted cards, not model claims or rejected prose. Offline fixtures establish these boundaries; they do not establish a live first-pass success rate or latency improvement.
+
 Context Windows and Storage Retention are local Recursion tuning controls. Source Freshness Messages and Source Freshness Text Budget bound the visible source window by walking backward from the latest visible chat message; Provider Analysis Messages bounds provider-safe snapshots; Journal Entries bounds sanitized run journals. Generated prior-turn work is pruned automatically. These controls do not delete, hide, summarize, or rewrite SillyTavern chat history.
 
 ```mermaid
@@ -179,7 +187,7 @@ The Last Brief and Full Viewer are observatories, while the Cards surface is the
 
 - Provider failure pauses or degrades the affected Recursion stage, not the chat.
 - Invalid Utility Arbiter output falls back to conservative local behavior.
-- Invalid card output omits only that card.
+- Invalid optional generated output can omit that family after bounded recovery; missing mandatory coverage blocks installation.
 - Reasoner failure falls back to Utility guidance plus raw selected Card Evidence.
 - Prompt composition over budget trims by priority and records omissions.
 - Prompt install failure records a warning and stops narration. Accepted checkpoints remain available for explicit recovery.

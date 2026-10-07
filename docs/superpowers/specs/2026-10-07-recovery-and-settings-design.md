@@ -149,6 +149,8 @@ Capability resolution and generation policy agree on current qualification. Cert
 
 Use the existing diagnostics export and journal. Add a bounded recovery summary derived from stage attempts/outcomes: corrected attempts, local repairs, salvaged accepted families, unresolved families, optional omissions, total calls when observable, and preprocessing duration. Label unavailable measurements explicitly. Do not claim a first-pass success rate or live latency improvement from offline fixtures.
 
+The implementation's fixed stage/operation counter keys are `parseFailures`, `shapeFailures`, `correctionRequests`, `budgetAdjustments`, `rateLimitRetries`, `transientRetries`, `salvagedItems`, `segmentedRepairCalls`, `optionalOmissions`, and `requiredBlocks`. Per-call journal diagnostics retain the existing `structuredOutputRepaired` / `structuredOutputRepairCode` flags for local syntax repair. Fused summaries expose accepted/unresolved families and safe recovery/omission causes; existing stage attempts, timing, and active-operation allowance describe observable calls and duration. These are event counts and timings, not model quality or performance estimates.
+
 Keep a small sanitized regression corpus spanning valid JSON, syntax repair, ambiguous keys/objects, partial bundles, long bundles, invalid refs, context/token limits, refusals, and capacity errors. Use real router/validator/scheduler integration with fake transport only where a real model would be external and paid. Include negative controls proving mandatory failure, Stop, source change, reload, and budgets prevent installation or extra dispatch.
 
 ## 13. Implementation strategy and alternatives

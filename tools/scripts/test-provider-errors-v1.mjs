@@ -11,6 +11,12 @@ assertEqual(
 );
 
 assertEqual(
+  normalizeProviderError({ status: 400, message: 'Invalid json_schema: required must include every property.' }).code,
+  'RECURSION_PROVIDER_FAILED',
+  'an invalid native schema is a rejected request, not evidence that the provider lacks native output'
+);
+
+assertEqual(
   normalizeProviderError(new Error('maximum context length exceeded')).code,
   'RECURSION_PROVIDER_CONTEXT_LIMIT',
   'context overflow is classified'

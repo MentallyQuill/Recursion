@@ -1,6 +1,7 @@
 import {
   PROVIDER_CAPABILITY_STATES,
   providerConfigHash,
+  providerProfileIdentityHash,
   resolveProviderCapability,
   sanitizeProviderCapability
 } from '../../src/provider-capability.mjs';
@@ -40,6 +41,7 @@ function provider(lane, {
     base.certification = {
       ...certification,
       configHash: providerConfigHash(base),
+      profileIdentityHash: providerProfileIdentityHash({ id: profileId }),
       checkedAt: '2026-08-06T00:00:00.000Z',
       completionMode: certification.completionMode || 'text',
       structuredOutput: certification.structuredOutput || 'prompt-json',

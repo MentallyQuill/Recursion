@@ -12,8 +12,7 @@ const SMOKE_PROFILE_ID = 'recursion-smoke-profile';
 function profileBackedSettings(settings = {}) {
   return {
     recursion: {
-      minCards: 0,
-      maxCards: 0,
+      cardsPerTurn: 0,
       ...settings,
       providers: {
         utility: { connectionProfileId: SMOKE_PROFILE_ID },
@@ -700,7 +699,7 @@ if (lifecycleFailures.length) {
       })
     };
   };
-  globalThis.extension_settings = profileBackedSettings({ pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off', minCards: 1, maxCards: 1 });
+  globalThis.extension_settings = profileBackedSettings({ pipelineMode: 'segmented', mode: 'auto', reasonerUse: 'off', cardsPerTurn: 1 });
   globalThis.SillyTavern = { getContext: () => fake.context };
   globalThis.__recursionLiveHarness = true;
 
@@ -1622,12 +1621,13 @@ if (false) {
       extension_prompt_roles: { SYSTEM: 'SYSTEM' },
       getRequestHeaders: () => ({ 'X-CSRF-Token': 'journal-token' }),
       setExtensionPrompt() {},
-      async generateRaw() {
+      async generateRaw(request = {}) {
         return {
           providerId: 'journal-success-provider',
           model: 'journal-success-model',
           text: JSON.stringify({
             schema: 'recursion.utilityArbiter.v1',
+            snapshotHash: String(request.prompt || '').match(/Snapshot hash:\s*([^\s]+)/)?.[1] || '',
             action: 'compose-brief',
             cardJobs: [],
             reasonerDecision: { mode: 'skip', reason: 'journal smoke', signals: [] },

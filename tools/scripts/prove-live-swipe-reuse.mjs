@@ -63,7 +63,7 @@ function proofScript() {
         ]
       };
       const settingsStore = settingsModule.createSettingsStore({ root: {} });
-      settingsStore.update({ enabled: true, mode: 'auto', pipelineMode, reasonerUse: 'off', minCards: 1, maxCards: 1 });
+      settingsStore.update({ enabled: true, mode: 'auto', pipelineMode, reasonerUse: 'off', cardsPerTurn: 1 });
       const storage = storageModule.createStorageRepository({
         storage: storageModule.createMemoryStorageAdapter()
       });

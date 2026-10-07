@@ -67,12 +67,12 @@ If profile sampler projection fails, Recursion falls back to its Temperature and
 
 ### Structured Output
 
-`Auto` uses the method established by current profile certification.
+`Auto` uses the method established by qualification matching both the current Recursion settings and live Connection Profile identity. Without a current native check, it uses Prompt JSON.
 
 - Native schema is used only when the profile has demonstrated support.
 - Prompt JSON is used when native schema is unavailable or rejected.
 
-The explicit modes exist for diagnosis. `Auto` is the normal operator choice.
+Explicit Native Schema stops with a compatibility explanation when unsupported; only Auto can downgrade an attempted native call to Prompt JSON within budget. `Auto` is the normal operator choice.
 
 ## Test Profile
 
@@ -81,6 +81,7 @@ The explicit modes exist for diagnosis. `Auto` is the normal operator choice.
 1. Connectivity check: a small JSON object.
 2. Single-card check: the compact card contract used by Segmented.
 3. Fused check: a representative two-family bundle.
+4. Concurrency check when a higher configured limit is requested.
 
 The provider header displays one capability:
 
@@ -94,11 +95,11 @@ The provider header displays one capability:
 
 A partial certification is useful: a model may be reliable for Segmented even when it cannot return a valid Fused bundle.
 
-Profile certification is bound to the selected profile and generation policy. Changing the profile, preset policy, instruct policy, sampler policy, structured-output policy, sampler overrides, or output ceiling invalidates the previous result.
+Profile qualification binds both Recursion generation policy and the live profile's ID, model, API, completion mode, preset, and instruct identity. Names, endpoints, and credentials are excluded. Recursion policy edits invalidate the result; editing the model or another fingerprint field under the same profile ID makes it Untested, returns effective concurrency to one, and prevents Auto from trusting stale native support. Drift during Test Profile discards the result. Opening settings or reading status launches no hidden paid probes.
 
 ## Pipeline Eligibility
 
-Segmented makes one narrow card request per unresolved family. Requests are logically independent but physically serialized when they share a Connection Profile.
+Segmented makes one narrow card request per unresolved family. Requests are logically independent and share the selected Connection Profile's effective concurrency limit.
 
 Fused asks one model call for the requested card bundle. Explicit Fused selection dispatches it without requiring a profile test.
 
@@ -114,10 +115,10 @@ When no useful item survives, the Fused attempt window settles once and Recursio
 
 ## Local Model Traffic
 
-Every Connection Profile has a FIFO request queue with concurrency one.
+Every Connection Profile has a FIFO request queue. Effective concurrency remains one until current qualification verifies a higher configured limit (at most three); Utility and Reasoner sharing a profile use the most conservative matching qualification.
 
-- Ten Segmented card stages using one profile produce one physical model request at a time.
-- Utility and Reasoner may overlap only when they select different profiles.
+- Segmented calls respect the current verified limit and preserve FIFO dispatch order.
+- Utility and Reasoner share that limit when they select the same profile. Different profiles have independent queues.
 - Stop removes queued requests before they start and aborts the active request where supported.
 
 This protects local backends from request bursts while preserving durable stage checkpoints.
@@ -139,7 +140,7 @@ A context-limit retry lowers only the stage output budget. It does not change th
 | Text model emits wrappers or roleplay prose | Instruct template missing or behavioral preset contaminating the request. | Use Instruct Auto and Behavioral Preset Isolated. |
 | Samplers appear ignored | Profile preset materialization unavailable or unsupported field name. | Inspect sanitized diagnostics for `profile-sampler-projection-failed`; use Recursion Override if needed. |
 | Context-limit failures | Output ceiling or prompt footprint is too large for the model context. | Reduce the lane ceiling or prompt footprint; stage retries already reduce output allowance within safe floors. |
-| Requests stall behind each other | Same profile selected for multiple active stages. | This is expected serialization. Use different profiles only when the backend can safely serve them concurrently. |
+| Requests wait behind each other | The profile's effective limit is reached. | Inspect configured and verified concurrency. Untested, stale, or failed qualification safely uses one. |
 | Fused selection runs Segmented repair or fallback | The bundle response had damaged or missing cards, or no useful cards survived. | Inspect the bundle failure details; profile testing is optional diagnostic help. |
 
 ## Privacy And Security
@@ -166,7 +167,7 @@ Before relying on a profile:
 3. Keep Isolated, Auto instruct, Connection Profile samplers, and Auto structured output.
 4. Run Test Profile.
 5. Confirm the lane reports Segmented or Fused.
-6. Run a Segmented turn and verify one physical request at a time for the profile.
+6. Run a Segmented turn and verify physical requests respect the displayed effective profile limit.
 7. Select Fused to bundle card requests; no passing Fused test is required.
 8. Press Stop during a queued multi-card run and verify queued calls do not start.
 9. Export diagnostics and confirm they contain no prompt, output, profile id, endpoint, credential, or hidden reasoning.

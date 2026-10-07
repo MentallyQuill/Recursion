@@ -4,9 +4,12 @@
 
 This spec defines the implemented V1 contract for the Play-tab behavior controls:
 
-- Strength
+- Guidance strength
+- Cards per turn
 - Focus
-- Prompt Footprint
+- Guidance detail
+
+The visible Guidance strength and Guidance detail controls retain the internal `strength` and `promptFootprint` fields. Cards per turn persists only as `cardsPerTurn`.
 
 These controls must create observable backend behavior, not merely send vague hints to the Arbiter. The design keeps Recursion mostly turnkey by making each setting a small pressure control over the automatic card and prompt pipeline.
 
@@ -39,7 +42,7 @@ Recursion should not implement brittle deterministic relevance scoring. Runtime 
 
 ```mermaid
 flowchart LR
-    Settings["Strength, Focus, Prompt Footprint"] --> Policy["Derived behavior policy"]
+    Settings["Guidance strength, Cards per turn, Focus, Guidance detail"] --> Policy["Derived behavior policy"]
     Policy --> Arbiter["Arbiter prompt lines"]
     Policy --> Plan["Plan shaping"]
     Policy --> Hand["Hand selection pressure"]
@@ -74,12 +77,12 @@ flowchart LR
 | Control | Owns | Does not own |
 | --- | --- | --- |
 | Mode | Auto versus Manual enforcement. | Provider lane depth, prompt size, or semantic relevance. |
-| Card Scope | Family/sub-item preference in Auto and strict family/sub-item whitelist in Manual. | Final prose style or provider cost. |
+| Card Scope | Family/sub-item preference in Auto; eligible Manual sources are projected into the turn hand in deck order after mandatory Refinement reservations. | Final prose style or provider routing. |
 | Reasoning Level | Provider lane policy and Reasoner cost depth. | Prompt size, card family focus, or intervention strength. |
-| Min Cards / Max Cards | Total hand target: Low uses Min, Medium/High use the rounded-down average, Ultra uses Max. Runtime fills eligible slots before either workflow; mandatory Priority coverage may exceed the target. | Prompt section size, provider lane routing, or semantic relevance. |
-| Strength | Intervention pressure, refresh pressure, cache reuse posture, and composer assertiveness. | Prompt Footprint size or Reasoning Level lane selection. |
+| Cards per turn | One total hand target, default 6, range 0..20, shared by Low, Medium, High, Ultra, Fused, and Segmented. Mandatory coverage may exceed the target. | Prompt section size, provider lane routing, or semantic relevance. |
+| Guidance strength | Intervention pressure, refresh pressure, cache reuse posture, and composer assertiveness. | Guidance detail size, card count, or Reasoning Level lane selection. |
 | Focus | Broad family priority profile. | Hard exclusion, except where Manual card scope already excludes a family. |
-| Prompt Footprint | Packet size, section budgets, and detail level. | Provider lane policy, semantic truth, or card-count bounds. |
+| Guidance detail | Packet size, section budgets, and detail level. | Provider lane policy, semantic truth, or card-count bounds. |
 | Advanced Injection | Final composed packet placement, role, and depth. | Card selection, card generation, or composition content. |
 
 ## Influence Policy Object
@@ -112,9 +115,7 @@ type RecursionInfluencePolicy = {
     composerLine: string;
   };
   cardBudget: {
-    minCards: number;
-    normalCards: number;
-    maxCards: number;
+    targetCards: number;
   };
   footprint: {
     level: "compact" | "normal" | "rich";
@@ -134,7 +135,7 @@ type RecursionInfluencePolicy = {
 
 The implementation lives in `src/settings-policy.mjs`. Runtime, card selection, prompt composition, tests, docs, and renders should use this single policy contract rather than duplicating Strength, Focus, or Prompt Footprint meaning in separate modules.
 
-## Strength Contract
+## Guidance Strength Contract
 
 Strength controls how much Recursion should intervene in the next generation when relevant cards exist.
 
@@ -197,30 +198,33 @@ Prohibited effects:
 
 ## Card Budget Contract
 
-Min Cards and Max Cards are high-level behavior settings, not per-card micromanagement. Runtime derives Normal Cards from their average:
+Cards per turn is one high-level behavior setting, not per-card micromanagement. The persisted setting and normalized policy are:
 
 ```text
-normalCards = floor((minCards + maxCards) / 2)
+cardsPerTurn: integer 0..20, default 6
+normalizeCardBudgetSettings(settings) -> { targetCards }
 ```
 
-Reasoning Level applies the values mechanically:
+Reasoning Level changes routing independently of the target:
 
 | Reasoning Level | Card budget behavior |
 | --- | --- |
-| Low | Target Min Cards. |
-| Medium | Target Normal Cards. |
-| High | Target Normal Cards. |
-| Ultra | Target Max Cards. |
+| Low | Same Cards per turn target; Utility-only routing. |
+| Medium | Same target; eligible Reasoner guidance. |
+| High | Same target; eligible Reasoner Arbiter, priority cards, and guidance. |
+| Ultra | Same target; eligible Reasoner-heavy routing. |
 
-Defaults preserve the original V1 pressure: Min Cards `3`, Max Cards `10`, Normal Cards `6`.
+Only `cardsPerTurn` is persisted. Removed Min/Max inputs are ignored. Internal `plan.budgets.maxCards` and `selectHand({maxCards})` are derived operation budgets, not operator settings.
 
-These are total-hand targets, including authored cards and generated families. Auto selection includes every runnable Priority card in deck order first; Priority coverage may exceed the target. Ordinary jobs fill remaining capacity in Arbiter relevance order. If the Arbiter supplies too few families, runtime completes the selection from eligible families in stable order before either workflow executes. A smaller model budget or skip action cannot lower a positive target. Zero requests no ordinary cards. Disabled and draft cards remain unavailable.
+The target includes authored cards and generated families. Auto selection reserves every runnable Priority and Refinement unit in deck order before ordinary jobs; mandatory coverage may exceed the target. Ordinary jobs fill remaining capacity in Arbiter relevance order. If the Arbiter supplies too few families, runtime completes the selection from eligible families in stable order before either workflow executes. A smaller model budget or skip action cannot lower a positive target. Zero requests no ordinary cards. Disabled and draft cards remain unavailable.
 
-Both Fused and Segmented execute this finalized selection. Fused keeps valid bundle items and repairs missing siblings individually. The delivered hand records its target, authored/generated counts, and any shortfall caused by insufficient eligible cards or failed generation. It never fabricates fallback cards to hide failed selected work. Same-turn cached hands retain this summary. Changed selection contracts invalidate old checkpoints.
+Manual uses a pure per-turn projection shared by scope, forced source IDs, provider jobs, and hand selection. Refinement reserves units first. Remaining slots select ordinary authored cards and generated families in deck order; Priority behaves as Active. Each authored card counts separately, while multiple selected sources for one generated family share its unit and remain covered. Omitted sources retain their saved state and scope. At zero, only mandatory Refinement remains. For example, target five with two Refinement units retains three ordinary units.
 
-## Prompt Footprint Contract
+Both Fused and Segmented execute this finalized selection. Fused keeps validated complete bundle items and repairs unresolved siblings individually. Selected Scene Constraints, Manual, Priority, and Refinement coverage is mandatory, including generated and authored work. Exhausted optional generated work can complete with a smaller hand and amber explanation; unresolved mandatory work blocks installation. The delivered hand records its target, authored/generated counts, and truthful shortfalls. It never fabricates card text or evidence. Same-turn cached hands retain this summary. Changed selection contracts invalidate old checkpoints.
 
-Prompt Footprint owns packet size and detail. It controls section budgets and how much card detail survives into the composed packet. It no longer owns card-count ceilings; Min Cards and Max Cards own that behavior through Reasoning Level.
+## Guidance Detail Contract
+
+Guidance detail owns packet size and detail through the internal `promptFootprint` policy. It controls section budgets and how much guidance surrounds the selected card evidence. Cards per turn owns the independent hand target; neither detail nor Reasoning Level changes the count.
 
 The current code-level section budgets are:
 
@@ -244,7 +248,7 @@ Mechanical effects:
 
 - Arbiter prompt includes the user's footprint policy and allowed profiles.
 - Sanitized Arbiter plan resolves to one effective footprint.
-- Plan card counts are clamped by Reasoning Level plus Min/Max Cards.
+- Plan card counts use Cards per turn with mandatory coverage reservations.
 - Hand selection uses the configured card budget, then applies Strength and Focus tie-breakers.
 - Prompt composition uses the effective footprint's section budgets.
 - UI and diagnostics show both stored footprint and effective footprint when they differ.
@@ -290,9 +294,9 @@ This block must stay compact. It is a policy hint, not a hidden prompt chain.
 
 ## Hand Selection Rules
 
-Auto selection applies validity and eligibility first, reserves every runnable Priority card in deck order, then fills remaining slots in the Arbiter's scene-specific cardJobs order. Focus informs the Arbiter's relevance judgment; it does not reorder a validated Auto proposal after generation. No structural family has an automatic claim on a discretionary slot.
+Auto selection applies validity and eligibility first, reserves every runnable Priority and Refinement unit in deck order, then fills remaining slots in the Arbiter's scene-specific cardJobs order. Focus informs the Arbiter's relevance judgment; it does not reorder a validated Auto proposal after generation. No structural family has an automatic claim on a discretionary slot.
 
-The model receives the effective capacity after authored and generated Priority reservations. Runtime enforces the total card limit before dispatch, except that mandatory coverage may expand the hand. Token estimates remain diagnostic. Manual selections remain forced by scope; generic hand selection without an Auto order retains its existing emphasis/focus tie-breakers.
+The model receives the effective capacity after authored and generated mandatory reservations. Runtime enforces the total card limit before dispatch, except that mandatory coverage may expand the hand. Token estimates remain diagnostic. Manual forces only sources retained by its per-turn projection; generic hand selection without an Auto order retains its existing emphasis/focus tie-breakers.
 
 Diagnostics retain the proposal and short contribution reasons, mandatory coverage, eligibility/budget omissions, and the actual hand. Repeated swipes may reuse the same prepared packet without a new selection call.
 
@@ -346,15 +350,17 @@ Pipeline scheduling is an orthogonal behavior setting. The canonical settings sh
 ```json
 {
   "pipelineMode": "segmented",
-  "modelAttemptsPerStep": 2
+  "modelAttemptsPerStep": 2,
+  "requestDeadlineSeconds": 180,
+  "operationDeadlineSeconds": 300
 }
 ```
 
-`pipelineMode` accepts `segmented` or `fused`. Segmented uses independent, simple per-card calls and is the safer fit for smaller or locally hosted models. Fused makes one structured bundle call, validates each outcome, and uses the Segmented card path only when no useful bundle item survives.
+`pipelineMode` accepts `segmented` or `fused`. Segmented uses independent, simple per-card calls and is the safer fit for smaller or locally hosted models. Fused makes one structured bundle call, checkpoints validated siblings, and uses Segmented calls only for unresolved families. If no useful item survives bounded bundle recovery, it uses the full Segmented card path.
 
-Advanced settings label the numeric attempt control `Attempts per step` and explain: `Total automatic model attempts for each Recursion step. Slow calls are not retried unless they fail.` Values are one through five, default two. Only model stages consume the window. Recursion has no default generation timeout and does not automatically retry primary SillyTavern story generation.
+Advanced settings label the numeric attempt control `Attempts per step`. Values are one through five, default two, including the initial model call. Rate-limit retries are bounded separately at eight and retryable transient retries at three; the operation recovery allowance can stop extra calls earlier. Request timeout defaults to 180 seconds and active operation budget to 300 seconds, including queue/cooldown waits. Pending slow calls are not duplicated. Local stages do not consume model attempts, and Recursion does not automatically retry primary SillyTavern story generation.
 
-Changing pipeline or attempt settings invalidates incompatible active work through the normal provenance rules. It does not start generation. Resume continues a paused compatible operation; Retry explicitly reruns a blocking failed stage; Reprocess is `Queued` for the next generation and invalidates that stage plus dependents; full fresh is also a one-shot queued action.
+Changing pipeline or attempt settings invalidates incompatible active work through the normal provenance rules. It does not start generation. Resume continues a paused compatible operation with its existing recovery budget. Deliberate Retry or Reprocess opens a new active window without bypassing inherited cooldown; Reprocess is `Queued` for the next generation and invalidates that stage plus dependents. Full fresh is also a one-shot queued action.
 
 ## Implementation Status
 
@@ -365,7 +371,7 @@ Current source-backed behavior:
 - `influencePolicyForSettings(settings)` derives Strength, Focus, Prompt Footprint, card-budget, reasoning-level, and injection policy data from normalized settings.
 - `behaviorPolicyPromptLines(policy)` adds compact Strength, Focus, and Prompt Footprint policy lines to the Utility Arbiter request.
 - `runPolicyForEffectivePlan(settings, plan)` resolves the stored Prompt Footprint plus the Arbiter's current-run footprint request into an effective footprint for hand selection, composition, and diagnostics.
-- Runtime owns the total hand target through Reasoning Level plus Min/Max Cards, preserves Arbiter ranking, and fills missing eligible slots before workflow dispatch. Strength and Focus shape guidance and ordering without lowering the target.
+- Runtime owns the total hand target through `cardsPerTurn`, preserves Arbiter ranking, and fills missing eligible slots before workflow dispatch. Reasoning Level owns routing independently. Guidance strength, detail, and Focus do not change the target.
 - Reasoning Level derives provider reasoning intent per work category: guidance composition scales from minimal to medium/high, High and Ultra Reasoner Arbiter work uses medium, Reasoner card work stays minimal except Ultra, and provider tests always use minimal.
 - Prompt composition consumes the effective behavior policy, guidance/card-evidence/guardrail budgets, and composer policy lines without exposing raw provider output or hidden reasoning.
 
@@ -381,7 +387,8 @@ Required focused tests:
 - Focus Character, Constraints, Scene, and Plot reorder boosted families without excluding non-boosted critical cards.
 - Manual mode plus Focus never includes disabled Manual-scope families.
 - Auto mode plus partial Card Scope prefers selected scope but still permits high-relevance exceptions.
-- Compact, Normal, and Rich produce different section budgets and packet detail while Min Cards, Max Cards, and Reasoning Level own card-count pressure.
+- Compact, Normal, and Rich produce different section budgets and packet detail while `cardsPerTurn` owns the same count at every Reasoning Level and pipeline.
+- Manual projection reserves Refinement first, counts authored cards separately and generated families once, retains deck order, and never rewrites omitted saved sources.
 - Arbiter footprint override is accepted only when allowed by the stored footprint policy.
 - Invalid Arbiter footprint falls back to stored setting.
 - Reasoner unavailable still produces Utility guidance plus raw selected Card Evidence with policy diagnostics.

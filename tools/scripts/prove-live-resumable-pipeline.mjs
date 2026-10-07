@@ -163,8 +163,7 @@ function lifecycleProofScript() {
         modelAttemptsPerStep: 2,
         reasoningLevel: 'low',
         reasonerUse: 'off',
-        minCards: 1,
-        maxCards: 1,
+        cardsPerTurn: 1,
         ...settings
       });
       const storage = storageModule.createStorageRepository({

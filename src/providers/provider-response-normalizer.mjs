@@ -1,3 +1,5 @@
+import { STRUCTURED_OUTPUT_LIMITS, parseStructuredJsonText } from './structured-output-parser.mjs';
+
 export const PROVIDER_RESPONSE_ERROR_CODES = Object.freeze({
   EMPTY_CONTENT: 'provider_empty_content',
   REASONING_ONLY: 'provider_reasoning_only',
@@ -116,6 +118,8 @@ export function extractProviderResponseText(value = '') {
   const text = extractProviderContentText(choice?.message?.content)
     || extractProviderContentText(choice?.delta?.content)
     || extractProviderContentText(choice?.text)
+    || extractProviderContentText(choice?.message?.tool_calls?.[0]?.function?.arguments)
+    || extractProviderContentText(choice?.message?.function_call?.arguments)
     || extractProviderContentText(candidate?.content)
     || extractProviderContentText(candidate?.text)
     || extractProviderContentText(output?.content)
@@ -331,7 +335,14 @@ export function createProviderResponseError(failureOrCode, message = '', details
 
 export function assertProviderResponseText(value = '', options = {}) {
   const failure = getProviderResponseFailure(value, options);
-  if (failure) throw createProviderResponseError(failure);
+  if (failure) {
+    const error = createProviderResponseError(failure);
+    const text = extractProviderResponseText(value);
+    if (failure.code === PROVIDER_RESPONSE_ERROR_CODES.TOKEN_LIMIT && text.length <= STRUCTURED_OUTPUT_LIMITS.maxCharacters) {
+      error.recoverableText = text;
+    }
+    throw error;
+  }
   return extractProviderResponseText(value);
 }
 
@@ -339,12 +350,8 @@ export function assertProviderResponseText(value = '', options = {}) {
 function parseArguments(value) {
   if (isObject(value)) return value;
   if (typeof value !== 'string' || !value.trim()) return null;
-  try {
-    const parsed = JSON.parse(value);
-    return isObject(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+  const parsed = parseStructuredJsonText(value);
+  return parsed.ok ? parsed.value : null;
 }
 
 function looksLikeStructuredPayload(value) {

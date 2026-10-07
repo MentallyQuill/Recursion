@@ -13,7 +13,7 @@ import {
   validateProviderConfiguration
 } from '../../src/providers.mjs';
 import { createSettingsStore } from '../../src/settings.mjs';
-import { providerConfigHash } from '../../src/provider-capability.mjs';
+import { providerConfigHash, providerProfileIdentityHash } from '../../src/provider-capability.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
 
 const PROFILES = Object.freeze([
@@ -53,6 +53,7 @@ function certifyProfile(store, lane, { fused = false, fail = false } = {}) {
   const provider = store.get().providers[lane];
   const result = store.recordProviderCertification(lane, {
     status: fail ? 'fail' : (fused ? 'pass' : 'partial'),
+    profileIdentityHash: providerProfileIdentityHash(PROFILES.find((profile) => profile.id === provider.connectionProfileId)),
     checkedAt: '2026-08-06T00:00:00.000Z',
     completionMode: lane === 'reasoner' ? 'chat' : 'text',
     structuredOutput: 'prompt-json',
@@ -140,6 +141,9 @@ assertEqual(JSON.stringify(status).includes('api-url'), false, 'profile status d
 const routeStore = createStore();
 configureProfile(routeStore, 'utility', 'profile-utility');
 configureProfile(routeStore, 'reasoner', 'profile-reasoner');
+routeStore.update({ reasoningLevel: 'high' });
+const untestedSummary = providerRouteSummary(routeStore.get(), { connectionProfiles: PROFILES });
+assertEqual(untestedSummary.reasonerHealthy, true, 'selected untested Reasoner remains available for routing');
 certifyProfile(routeStore, 'utility');
 certifyProfile(routeStore, 'reasoner');
 routeStore.update({ reasoningLevel: 'high' });

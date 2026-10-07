@@ -80,6 +80,7 @@ function validateBundle(bundle, { selectedCards }) {
         ok: false,
         value: { cards, outcomes },
         error: {
+          kind: 'validation',
           code: 'RECURSION_FUSED_ZERO_USEFUL_CARDS',
           category: 'validation',
           retryable: true,
@@ -142,6 +143,7 @@ function validateBundle(bundle, { selectedCards }) {
   const settled = await stage.settleExhausted({
     lastArtifact,
     failure: {
+      kind: 'validation',
       code: 'RECURSION_FUSED_ZERO_USEFUL_CARDS',
       category: 'validation',
       retryable: true

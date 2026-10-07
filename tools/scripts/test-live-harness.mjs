@@ -583,15 +583,15 @@ function recursionSmokeFixtureHtml({
         <button type="button" data-recursion-cards-button aria-expanded="false">Cards</button>
         <div data-recursion-cards-panel hidden>
           <button type="button" data-recursion-card-scope-family-toggle data-recursion-card-scope-family-name="Scene Frame" aria-pressed="true">Scene Frame</button>
-          <button type="button" data-recursion-card-scope-family-toggle data-recursion-card-scope-family-name="Active Cast" aria-pressed="true">Active Cast</button>
           <button type="button" data-recursion-card-scope-family-toggle data-recursion-card-scope-family-name="Open Threads" aria-pressed="true">Open Threads</button>
+          <button type="button" data-recursion-card-scope-family-toggle data-recursion-card-scope-family-name="Active Cast" aria-pressed="true">Active Cast</button>
           <div data-recursion-card-scope-error role="status"></div>
           <span data-recursion-cards-label>Cards</span>
         </div>
         <div data-recursion-settings-panel hidden>
           <button type="button" data-recursion-viewer-toggle>Open Viewer</button>
           <select data-recursion-setting-mode aria-label="Mode"><option value="auto" selected>Auto</option><option value="manual">Manual</option></select>
-          <input type="number" data-recursion-setting-max-cards aria-label="Max Cards" value="10">
+          <input type="number" min="0" max="20" data-recursion-setting-cards-per-turn aria-label="Cards per turn" value="6">
           <select data-recursion-setting-reasoner aria-label="Reasoner Use"><option value="auto">Auto</option><option value="always">Always</option></select>
           <button type="button" data-recursion-provider-test data-recursion-provider-lane="utility">Test Provider</button>
           <button type="button" data-recursion-provider-toggle="reasoner" aria-expanded="true">Reasoner Provider</button>
@@ -622,7 +622,7 @@ function recursionSmokeFixtureHtml({
         enabled: true,
         mode: 'auto',
         disabledFamilies: [],
-        manualForcedCap: 10,
+        manualTargetCards: 6,
         unclearedPromptOnDisable: ${unclearedPromptOnDisable ? 'true' : 'false'},
         async selectCharacterById(id) {
           const normalized = Number(id);
@@ -790,10 +790,9 @@ function recursionSmokeFixtureHtml({
         const selected = [...document.querySelectorAll('[data-recursion-card-scope-family-toggle]')]
           .filter((button) => button.getAttribute('aria-pressed') !== 'false')
           .length;
-        const cap = smokeContext.mode === 'manual' ? smokeContext.manualForcedCap : 3;
         document.querySelector('[data-recursion-cards-label]').textContent = selected === 3 && smokeContext.mode !== 'manual'
           ? 'Cards'
-          : String(selected) + '/' + String(cap) + ' cards selected';
+          : String(selected) + ' cards enabled';
       }
       function rerenderCardScopeFixtureButtons() {
         for (const button of [...document.querySelectorAll('[data-recursion-card-scope-family-toggle]')]) {
@@ -809,10 +808,6 @@ function recursionSmokeFixtureHtml({
             .map((node) => String(node.dataset.recursionCardScopeFamilyName || ''));
           const currentlyOn = button.getAttribute('aria-pressed') !== 'false';
           const notice = document.querySelector('[data-recursion-card-scope-error]');
-          if (!currentlyOn && smokeContext.mode === 'manual' && selected.length >= smokeContext.manualForcedCap) {
-            if (notice) notice.textContent = 'Max Cards is ' + smokeContext.manualForcedCap + '. Change it in Settings to select more.';
-            return;
-          }
           if (notice) notice.textContent = '';
           if (currentlyOn) {
             smokeContext.disabledFamilies.push(family);
@@ -824,16 +819,16 @@ function recursionSmokeFixtureHtml({
           updateCardScopeFixtureLabel();
           rerenderCardScopeFixtureButtons();
       });
-      function applyFixtureMaxCards(value) {
+      function applyFixtureCardsPerTurn(value) {
         const number = Math.round(Number(value));
-        smokeContext.manualForcedCap = Number.isFinite(number) ? Math.max(1, Math.min(20, number)) : 10;
+        smokeContext.manualTargetCards = Number.isFinite(number) ? Math.max(0, Math.min(20, number)) : 6;
         updateCardScopeFixtureLabel();
       }
-      document.querySelector('[data-recursion-setting-max-cards]')?.addEventListener('input', (event) => {
-        applyFixtureMaxCards(event.target?.value);
+      document.querySelector('[data-recursion-setting-cards-per-turn]')?.addEventListener('input', (event) => {
+        applyFixtureCardsPerTurn(event.target?.value);
       });
-      document.querySelector('[data-recursion-setting-max-cards]')?.addEventListener('change', (event) => {
-        applyFixtureMaxCards(event.target?.value);
+      document.querySelector('[data-recursion-setting-cards-per-turn]')?.addEventListener('change', (event) => {
+        applyFixtureCardsPerTurn(event.target?.value);
       });
       function applyModeChange(mode) {
         const applyMode = () => {
@@ -1781,7 +1776,10 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assertEqual(report.browser.snapshot.generation.manualScopeProof?.disabled, true, 'Manual scope proof narrows the card scope');
     assertEqual(report.browser.snapshot.generation.manualScopeProof?.promptRespectsDisabledFamily, true, 'Manual scope proof shows disabled family absent from selected prompt refs');
     assertEqual(report.browser.snapshot.generation.manualForcedProof?.available, true, 'generation smoke finds Manual forced controls');
-    assertEqual(report.browser.snapshot.generation.manualForcedProof?.capBlocked, true, 'manual forced proof records cap block');
+    assertEqual(report.browser.snapshot.generation.manualForcedProof?.enabledBeyondTarget, true, 'Manual proof retains enabled saved families beyond the target');
+    assertEqual(report.browser.snapshot.generation.manualForcedProof?.targetCards, 2, 'Manual proof records the turn target');
+    assertDeepEqual(report.browser.snapshot.generation.manualForcedProof?.savedEnabledFamilies, ['Scene Frame', 'Open Threads', 'Active Cast'], 'all saved family entries remain enabled');
+    assertEqual(report.browser.snapshot.generation.manualForcedProof?.installedWithinTarget, true, 'installed selected refs honor the turn target');
     assertDeepEqual(report.browser.snapshot.generation.manualForcedProof?.coveredFamilies, ['Scene Frame', 'Open Threads'], 'manual forced proof records covered selected families');
     assertEqual(/screenshot/i.test(report.nextAction || ''), false, 'generation success guidance does not ask for suppressed screenshots');
     assertEqual(report.browser.snapshot.generation.promptInstalled, true, 'generation smoke records Recursion prompt install');
@@ -1811,7 +1809,8 @@ await assertRejects(() => rejectUnsafeLiveUser('default-user'), /Unsafe SillyTav
     assert(promptMetadata.includes('"manualProof"'), 'generation prompt metadata records Manual proof');
     assert(promptMetadata.includes('"manualScopeProof"'), 'generation prompt metadata records Manual scope proof');
     assert(promptMetadata.includes('"manualForcedProof"'), 'generation prompt metadata records Manual forced proof');
-    assert(promptMetadata.includes('"capBlocked": true'), 'generation prompt metadata records Manual cap block');
+    assert(promptMetadata.includes('"enabledBeyondTarget": true'), 'generation prompt metadata records saved selection beyond the target');
+    assert(!promptMetadata.includes('capBlocked'), 'obsolete saved-toggle cap proof is absent');
     assert(promptMetadata.includes('"promptRespectsDisabledFamily": true'), 'generation prompt metadata records disabled family absence');
     assert(promptMetadata.includes('"mode": "manual"'), 'generation prompt metadata records Manual mode');
     assert(promptMetadata.includes('"promptInstalled": true'), 'generation prompt metadata records Manual injection');

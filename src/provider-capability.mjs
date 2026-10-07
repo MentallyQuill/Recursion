@@ -67,9 +67,12 @@ function validateProviderRoute(provider = {}, host = {}) {
   return { complete: true, testable: true, reasonCode: '' };
 }
 
-function certificationMatches(provider, configHash) {
+function certificationMatches(provider, configHash, profile) {
   const certification = provider?.certification || {};
-  return text(certification.configHash) === configHash;
+  const identityHash = providerProfileIdentityHash(profile);
+  return text(certification.configHash) === configHash
+    && Boolean(identityHash)
+    && text(certification.profileIdentityHash) === identityHash;
 }
 
 function capabilityState({ configured, certification, hashMatches }) {
@@ -126,13 +129,27 @@ export function providerConfigHash(provider = {}) {
   });
 }
 
-export function effectiveProfileConcurrency(settings = {}, profileId = '') {
+export function providerProfileIdentityHash(profile = {}) {
+  if (!text(profile?.id)) return '';
+  return hashJson({
+    id: text(profile.id),
+    model: text(profile.model),
+    api: text(profile.api),
+    completionMode: text(profile.completionMode),
+    presetName: text(profile.presetName),
+    instructName: text(profile.instructName)
+  });
+}
+
+export function effectiveProfileConcurrency(settings = {}, profileId = '', profile = {}) {
   const providers = Object.values(settings.providers || {})
     .filter((provider) => provider.connectionProfileId === profileId);
   if (!providers.length) return 1;
   return Math.min(...providers.map((provider) => {
     const certification = provider.certification || {};
-    if (certification.configHash !== providerConfigHash(provider)
+    if (!certificationMatches(provider, providerConfigHash(provider), profile)
+        || !['pass', 'partial'].includes(certification.status)
+        || certification.checks?.singleCard !== 'pass'
         || certification.checks?.concurrency !== 'pass') return 1;
     return Math.min(3, Math.max(1, Math.trunc(Number(provider.maxConcurrentRequests) || 2)),
       Math.max(1, Math.trunc(Number(certification.safeConcurrency) || 1)));
@@ -149,11 +166,14 @@ export function resolveProviderCapability({
   const provider = settings.providers?.[resolvedLane] || {};
   const configHash = providerConfigHash({ ...provider, lane: resolvedLane });
   const configuration = validateProviderRoute(provider, host);
+  const profiles = host.connectionProfiles || host.availableConnectionProfiles || [];
+  const profile = profiles.find((entry) => text(entry?.id) === text(provider.connectionProfileId));
   const certification = provider.certification || { status: 'not-run' };
+  const hashMatches = certificationMatches(provider, configHash, profile);
   const state = capabilityState({
     configured: configuration.complete,
     certification,
-    hashMatches: certificationMatches(provider, configHash)
+    hashMatches
   });
   const reasoningLevel = normalizeReasoningLevel(settings.reasoningLevel);
   const resolvedOperation = normalizeOperation(operation);
@@ -182,9 +202,9 @@ export function resolveProviderCapability({
     ready: state === 'segmented-ready' || state === 'fused-ready',
     segmentedEligible,
     fusedEligible,
-    completionMode: text(certification.completionMode) || 'unknown',
-    structuredOutput: text(certification.structuredOutput) || 'unknown',
-    safeConcurrency: effectiveProfileConcurrency(settings, provider.connectionProfileId),
+    completionMode: hashMatches ? text(certification.completionMode) || 'unknown' : 'unknown',
+    structuredOutput: hashMatches ? text(certification.structuredOutput) || 'unknown' : 'unknown',
+    safeConcurrency: effectiveProfileConcurrency(settings, provider.connectionProfileId, profile),
     required,
     selectedByPolicy,
     eligible,

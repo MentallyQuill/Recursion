@@ -70,6 +70,81 @@ assertDeepEqual(parseStructuredJsonText('[1,2]\nTrailing object: {"ok":true}').v
 assertEqual(JSON.stringify(parseStructuredJsonText('not json')).includes('sample'), false, 'diagnostics contain no output sample');
 
 const strict = parseStructuredJsonText('{"schema":"recursion.providerTest.v1","ok":true}');
+const quotedPunctuationValue = { promptText: 'He said “{” loudly.', evidenceRefs: ['message:1'] };
+const quotedPunctuation = parseStructuredJsonText(JSON.stringify(quotedPunctuationValue));
+assertEqual(quotedPunctuation.ok, true, 'curly quotes inside a valid JSON string do not expose its braces');
+assertDeepEqual(quotedPunctuation.value, quotedPunctuationValue, 'strict JSON string punctuation is unchanged');
+assertEqual(quotedPunctuation.repaired, false, 'valid JSON with curly punctuation needs no repair');
+assertDeepEqual(extractJsonObjectsFromArrayProperty(`{"items":[${JSON.stringify(quotedPunctuationValue)},{"family":`),
+  [quotedPunctuationValue], 'complete salvaged member preserves curly punctuation and quoted braces');
+assertDeepEqual(parseStructuredJsonText('{“promptText”:“Keep the doorway visible.”}').value,
+  { promptText: 'Keep the doorway visible.' }, 'typographic delimiter repair remains supported');
+const duplicateKey = parseStructuredJsonText('{"promptText":"first","promptText":"second"}');
+assertEqual(duplicateKey.ok, false, 'same-object duplicate keys require correction');
+assertEqual(duplicateKey.diagnostic.code, 'json_ambiguous', 'duplicate-key failure is ambiguity');
+const competingRoots = parseStructuredJsonText('Example: {"example":true}\nAnswer: {"promptText":"answer"}');
+assertEqual(competingRoots.ok, false, 'competing root objects require correction');
+assertEqual(competingRoots.diagnostic.code, 'json_ambiguous', 'competing roots are ambiguous');
+assertEqual(parseStructuredJsonText('{"promptText":"first","prompt\\u0054ext":"second"}').diagnostic.code,
+  'json_ambiguous', 'escaped equivalent names are duplicate keys');
+assertEqual(parseStructuredJsonText('{"left":{"name":"one"},"right":{"name":"two"}}').ok,
+  true, 'same key in distinct objects is legal');
+assertEqual(parseStructuredJsonText('{"promptText":"Quoted { braces } and \\\"items\\\": [{ text } ]"}').ok,
+  true, 'quoted JSON-like content never becomes a root');
+assertEqual(parseStructuredJsonText('[{"ok":true}]').repairKind, 'singleton-array-normalization',
+  'singleton array unwrapping is recorded as normalization');
+const oversized = parseStructuredJsonText('{"text":"' + 'a'.repeat(262144) + '"}');
+assertEqual(oversized.ok, false, 'oversized structured text fails without a partial object');
+assertEqual(oversized.diagnostic.code,
+  'json_size_limit', 'oversized structured text is bounded');
+const tooDeep = parseStructuredJsonText('{"nested":'.repeat(65) + 'true' + '}'.repeat(65));
+assertEqual(tooDeep.ok, false, 'depth overflow rejects the whole object');
+assertEqual(tooDeep.diagnostic.code, 'json_depth_limit', 'depth overflow diagnostic is specific');
+const unfinishedObject = parseStructuredJsonText('{"items":[{"promptText":"complete"}');
+assertEqual(unfinishedObject.ok, false, 'JSON repair never fabricates a closing bundle boundary');
+assertDeepEqual(extractJsonObjectsFromArrayProperty('{"note":"fake \\\"items\\\": [{\\\"family\\\":\\\"Fake\\\"}]", "items":[{"family":"Real"}]}'),
+  [{ family: 'Real' }], 'fragment scanning uses an actual array property outside strings');
+assertDeepEqual(extractJsonObjectsFromArrayProperty('{"debug":{"items":[{"family":"Nested"}]},"items":[[{"family":"Array child"}],{"family":"Real"}]}'),
+  [{ family: 'Real' }], 'only direct root-property object members are recovered');
+const excessiveBundleText = JSON.stringify({ items: Array.from({ length: 41 }, (_, i) => ({ family: `family-${i}` })) });
+const excessiveBundle = parseStructuredJsonText(excessiveBundleText);
+assertEqual(excessiveBundle.ok, false, 'more than forty bundle members fails the output bound');
+assertEqual(excessiveBundle.diagnostic.code, 'json_item_limit', 'bundle bound diagnostic is specific');
+assertDeepEqual(extractJsonObjectsFromArrayProperty(excessiveBundleText), [], 'overflow does not become a partial trusted bundle');
+const ambiguousProvider = await createGenerationRouter({ client: { generate: async () => ({ text: '{"items":[],"items":[]}' }) } }).generate('fusedCardBundle', {});
+assertEqual(ambiguousProvider.error.code, 'RECURSION_JSON_AMBIGUOUS', 'router exposes a fixed ambiguity code for correction');
+const longPartialText = '{"items":[' + JSON.stringify({ family: 'Scene Frame', promptText: 'a'.repeat(13000), evidenceRefs: ['message:8'] })
+  + ',' + JSON.stringify({ family: 'Active Cast', promptText: 'Keep the cast visible.', evidenceRefs: ['message:8'] }) + ',{"family":';
+const longPartialProvider = await createGenerationRouter({ client: { generate: async () => ({ text: longPartialText }) } }).generate('fusedCardBundle', {
+  requestedCards: [{ family: 'Scene Frame' }, { family: 'Active Cast' }]
+});
+assertEqual(longPartialProvider.ok, false, 'broken bundle envelope remains an output failure');
+assert(Array.isArray(longPartialProvider.recoverableItems), 'provider failures return transient complete members');
+assertDeepEqual(longPartialProvider.recoverableItems.map((item) => item.family), ['Scene Frame', 'Active Cast'],
+  'complete later members survive beyond old diagnostic truncation');
+const badToolEnvelope = normalizeProviderEnvelope({ choices: [{ message: { tool_calls: [{ function: { arguments: '{"promptText":"first","promptText":"second"}' } }] } }] });
+assertEqual(badToolEnvelope.structured, null, 'tool arguments cannot bypass duplicate-key checks');
+assertEqual(badToolEnvelope.text, '{"promptText":"first","promptText":"second"}', 'unsafe tool JSON remains visible parser input for a fixed diagnostic');
+const incompleteCard = parseStructuredJsonText('MODEL_PRIVATE_TEXT is not JSON');
+assertEqual(incompleteCard.ok, false, 'unparseable prose fails structured output');
+assertEqual(JSON.stringify(incompleteCard).includes('MODEL_PRIVATE_TEXT'), false, 'parse diagnostics never echo rejected model values');
+assertDeepEqual(extractJsonObjectsFromArrayProperty('{"items":[garbage {"family":"Not a member"},{"family":"Real"}]}'),
+  [{ family: 'Real' }], 'a brace inside a malformed scalar is not an actual array-member start');
+const nonObjectOverflow = parseStructuredJsonText(JSON.stringify({ items: Array(41).fill(null) }));
+assertEqual(nonObjectOverflow.ok, false, 'invalid scalar members still count toward a complete bundle bound');
+assertEqual(nonObjectOverflow.diagnostic.code, 'json_item_limit');
+assertDeepEqual(extractJsonObjectsFromArrayProperty('{"items":[' + Array(40).fill('null').join(',') + ',{"family":"Real"}]}'), [],
+  'fragment recovery cannot ignore scalar members to bypass the bundle bound');
+assertDeepEqual(parseStructuredJsonText('Explanation: "quoted { } text"\nAnswer: {"ok":true}').value, { ok: true },
+  'balanced recovery ignores a quoted empty object in wrapper prose');
+assertDeepEqual(parseStructuredJsonText('// comment with { }\nActual answer: {"ok":true}').value, { ok: true },
+  'balanced recovery ignores object-like text inside comments');
+const singletonBundleOverflow = parseStructuredJsonText('[' + excessiveBundleText + ']');
+assertEqual(singletonBundleOverflow.ok, false, 'singleton normalization cannot bypass bundle limits');
+assertEqual(singletonBundleOverflow.diagnostic.code, 'json_item_limit');
+const singletonCompetitor = parseStructuredJsonText('[{"example":true}]\nAnswer: {"ok":true}');
+assertEqual(singletonCompetitor.ok, false, 'a competing singleton object array remains ambiguous after normalization');
+assertEqual(singletonCompetitor.diagnostic.code, 'json_ambiguous');
 assertEqual(strict.ok, true, 'strict object parses');
 assertEqual(strict.repaired, false, 'strict object is not marked repaired');
 assertEqual(strict.value.schema, 'recursion.providerTest.v1', 'strict object value returned');

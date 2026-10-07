@@ -2,6 +2,7 @@ import { hashJson, safeId } from '../../core.mjs';
 import { cardSelectionHistoryForChat, cardSelectionCompletionStatus, normalizeCardSelectionReceipt, setCardSelectionReceipt, setCardSelectionIncomplete, cardSelectionGenerationStartedAt, validCardSelectionReceipt } from './card-selection-history.mjs';
 import { packetToPromptBlocks } from '../../prompt.mjs';
 import { createProviderClient, jsonSchemaForRequest } from '../../providers.mjs';
+import { requestMessages } from '../../providers/request-payload.mjs';
 import { normalizeRetentionSettings, selectBoundedSourceWindow } from '../../retention-policy.mjs';
 import { asObject } from '../../safe-values.mjs';
 import { createSettingsStore } from '../../settings.mjs';
@@ -10,12 +11,14 @@ import { createSillyTavernUserFileStorageAdapter } from './storage.mjs';
 import {
   completionModeFromApiMap,
   listSillyTavernConnectionProfiles,
+  sillyTavernConnectionProfileDescriptor,
   requireConnectionManagerService
 } from './provider-profiles.mjs';
 import { projectProfileSamplerPayload } from './profile-samplers.mjs';
 import { resolvePostProcessWriter, sendPostProcessProfileWriter } from './post-process-profile-writer.mjs';
 import { profileSecretOverride, readSillyTavernSecretMetadata } from './profile-secrets.mjs';
 import { resolveGenerationPolicy } from '../../providers/generation-policy.mjs';
+import { resolveProviderCapability } from '../../provider-capability.mjs';
 import { normalizeReasoningIntent } from '../../reasoning-policy.mjs';
 import { normalizeProviderError } from '../../providers/provider-errors.mjs';
 import { extractProviderResponseText, getProviderResponseFailure, isProviderResponseTokenLimitFinishReason } from '../../providers/provider-response-normalizer.mjs';
@@ -993,25 +996,6 @@ function requestJsonSchema(request = {}) {
   return jsonSchema ? { name: jsonSchema.name, value: jsonSchema.schema } : null;
 }
 
-function requestMessages(request = {}) {
-  if (Array.isArray(request.messages) && request.messages.length > 0) {
-    return request.messages
-      .map((message) => ({
-        role: ['system', 'assistant', 'user'].includes(stringValue(message?.role).trim())
-          ? stringValue(message.role).trim()
-          : 'user',
-        content: stringValue(message?.content ?? message?.text ?? message?.value)
-      }))
-      .filter((message) => message.content.trim());
-  }
-  return [
-    ...(stringValue(request.systemPrompt).trim()
-      ? [{ role: 'system', content: stringValue(request.systemPrompt) }]
-      : []),
-    { role: 'user', content: stringValue(request.prompt) }
-  ];
-}
-
 function profileError(code, message) {
   const error = new Error(message);
   error.code = code;
@@ -1037,7 +1021,12 @@ async function sendViaConnectionProfile(context, request = {}, readSecretMetadat
   }
 
   const provider = request.providerConfig || {};
-  const policy = resolveGenerationPolicy({ provider, completionMode, request });
+  const lane = provider.lane === 'reasoner' ? 'reasoner' : 'utility';
+  const certificationValid = resolveProviderCapability({
+    settings: { providers: { [lane]: provider } }, lane,
+    host: { connectionProfiles: [sillyTavernConnectionProfileDescriptor(profile, apiMap)] }
+  }).ready;
+  const policy = resolveGenerationPolicy({ provider, completionMode, request, certificationValid });
   let samplerPayload = {};
   let samplerSource = policy.samplerMode;
   let samplerDiagnosticCode = '';
@@ -1107,6 +1096,7 @@ async function sendViaConnectionProfile(context, request = {}, readSecretMetadat
     error.providerDiagnostics = {
       ...error.providerDiagnostics,
       model,
+      structuredOutputMethod: policy.structuredOutputMethod,
       providerSource: stringValue(apiMap.source || apiMap.type || profile.api).trim(),
       timings: {
         hostPreparationMs: transportStartedAt - preparationStartedAt,

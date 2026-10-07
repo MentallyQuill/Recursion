@@ -9,13 +9,16 @@ function enumOr(value, allowed, fallback) {
   return allowed.has(normalized) ? normalized : fallback;
 }
 
-export function resolveGenerationPolicy({ provider = {}, completionMode = 'unknown', request = {} } = {}) {
+export function resolveGenerationPolicy({
+  provider = {}, completionMode = 'unknown', request = {}, certificationValid = false
+} = {}) {
   const configured = provider?.generationPolicy || {};
   const presetMode = enumOr(configured.presetMode, PRESET_MODES, 'isolated');
   const instructMode = enumOr(configured.instructMode, INSTRUCT_MODES, 'auto');
   const samplerMode = enumOr(configured.samplerMode, SAMPLER_MODES, 'profile');
   const configuredStructured = enumOr(configured.structuredOutputMode, STRUCTURED_MODES, 'auto');
-  const certifiedStructured = provider?.certification?.structuredOutput === 'native-schema'
+  const certifiedStructured = certificationValid === true
+    && provider?.certification?.structuredOutput === 'native-schema'
     ? 'native-schema'
     : 'prompt-json';
   const requestStructured = enumOr(request?.structuredOutputMethod, REQUEST_STRUCTURED_MODES, '');

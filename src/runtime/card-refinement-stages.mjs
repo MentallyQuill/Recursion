@@ -1,4 +1,5 @@
 import { hashJson } from '../core.mjs';
+import { buildStructuredCorrectionRequest } from '../execution/correction-request.mjs';
 import { getActiveCardDeck, getDeckCardStatus } from '../pre-process-decks.mjs';
 import {
   collectRefinementTargets,
@@ -118,8 +119,9 @@ export function createCardRefinementStages({ settings, snapshot, snapshotHash, g
         status: checked.value.items.some(item => item.verdict === 'revise') ? 'changes-requested' : 'accepted'
       } };
     },
-    buildCorrectionRequest({ request, error }) {
-      return { ...request, prompt: `${request.prompt}\n\nCorrect the invalid structured result. Preserve the original task, requested IDs, and supplied evidence. Validation: ${String(error?.message || 'Invalid result').slice(0, 600)}` };
+    buildCorrectionRequest({ request, originalRequest = request, failure }) {
+      return buildStructuredCorrectionRequest({ originalRequest, currentRequest: request, failure,
+        taskFeedback: 'Preserve the Refinement phase, requested IDs, card text, and supplied evidence. Return the requested structured result.' });
     },
     summarizeArtifact: refinementSummary
   }));

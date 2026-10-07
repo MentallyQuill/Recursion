@@ -1,7 +1,7 @@
 import { createActivityReporter } from '../../src/activity.mjs';
 import { createRecursionRuntime } from '../../src/runtime.mjs';
 import { createSettingsStore } from '../../src/settings.mjs';
-import { providerConfigHash } from '../../src/provider-capability.mjs';
+import { providerConfigHash, providerProfileIdentityHash } from '../../src/provider-capability.mjs';
 import { normalizeProviderError } from '../../src/providers/provider-errors.mjs';
 import {
   createMemoryStorageAdapter,
@@ -64,8 +64,7 @@ function createHarness({
     modelAttemptsPerStep: 2,
     reasoningLevel: 'low',
     // Lifecycle fixtures request one card unless the scenario specifies a larger hand.
-    minCards: 1,
-    maxCards: 1,
+    cardsPerTurn: 1,
     reasonerUse: 'off',
     ...settings
   });
@@ -79,6 +78,7 @@ function createHarness({
     const segmented = full || utilityCertification === 'partial';
     settingsStore.recordProviderCertification('utility', {
       status: utilityCertification,
+      profileIdentityHash: providerProfileIdentityHash({ id: utilityProvider.connectionProfileId, completionMode: 'chat' }),
       checkedAt: '2026-08-06T00:00:00.000Z',
       completionMode: 'chat',
       structuredOutput: 'prompt-json',
@@ -222,7 +222,7 @@ function roleCounts(calls = []) {
 {
   const calls = [];
   let bundleAttempts = 0;
-  const harness = createHarness({ settings: { pipelineMode: 'fused', minCards: 8, maxCards: 8 }, provider: {
+  const harness = createHarness({ settings: { pipelineMode: 'fused', cardsPerTurn: 8 }, provider: {
     async generate(roleId, request) {
       calls.push(roleId);
       if (roleId === 'utilityArbiter') return arbiterResponse(request);
@@ -280,8 +280,14 @@ for (const pipelineMode of ['fused', 'segmented']) {
 {
   const calls = [];
   let failRepair = true;
+  const { createDefaultCardDeck } = await import('../../src/pre-process-decks.mjs');
+  const requiredDeck = createDefaultCardDeck();
+  requiredDeck.id = 'required-repair'; requiredDeck.bundled = false; requiredDeck.readonly = false;
+  for (const card of Object.values(requiredDeck.cards)) card.selectionState = card.builtinFamily === 'Social Subtext'
+    ? 'priority' : card.builtinFamily === 'Scene Frame' ? 'active' : 'off';
   const settings = {
-    pipelineMode: 'fused', reasoningLevel: 'high', reasonerUse: 'always', minCards: 2, maxCards: 2,
+    pipelineMode: 'fused', reasoningLevel: 'high', reasonerUse: 'always', cardsPerTurn: 2,
+    preProcessDecks: { activeDeckId: requiredDeck.id, customDecks: { [requiredDeck.id]: requiredDeck } },
     providers: { reasoner: { connectionProfileId: 'reasoner-profile' } }
   };
   const provider = { async generate(roleId, request) {
@@ -879,7 +885,7 @@ for (const pipelineMode of ['fused', 'segmented']) {
       throw new Error(`unexpected provider role ${roleId}`);
     }
   };
-  const { runtime, storage } = createHarness({ provider, settings: { minCards: 2, maxCards: 2 } });
+  const { runtime, storage } = createHarness({ provider, settings: { cardsPerTurn: 2 } });
   const preparing = runtime.prepareForGeneration({
     userMessage: 'I ask what she remembers.',
     hostGeneration: true
@@ -1405,7 +1411,7 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
   };
   const { runtime, storage } = createHarness({
     provider,
-    settings: { pipelineMode: 'fused', minCards: 0, maxCards: 0 }
+    settings: { pipelineMode: 'fused', cardsPerTurn: 0 }
   });
 
   const result = await runtime.prepareForGeneration({
@@ -1436,7 +1442,7 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
   };
   const { runtime, storage } = createHarness({
     provider,
-    settings: { pipelineMode: 'segmented', minCards: 0, maxCards: 0 }
+    settings: { pipelineMode: 'segmented', cardsPerTurn: 0 }
   });
 
   const result = await runtime.prepareForGeneration({
@@ -1504,7 +1510,7 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
     provider,
     settings: {
       pipelineMode: 'segmented',
-      minCards: 3, maxCards: 3,
+      cardsPerTurn: 3,
       modelAttemptsPerStep: 2
     }
   });
@@ -1519,7 +1525,7 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
   const activeCastRequests = providerCalls.filter((entry) => entry.roleId === 'activeCastCard');
   assert(
     activeCastRequests[1].request.prompt.includes('RECURSION_PROVIDER_SCHEMA_MISMATCH')
-      && activeCastRequests[1].request.prompt.includes('Returned fields: envelope, items.'),
+      && activeCastRequests[1].request.prompt.includes('promptText and evidenceRefs'),
     'Segmented correction request names the exact provider contract failure'
   );
   const manifest = await storage.loadPipelineRun('chat-preprocess');
@@ -1555,19 +1561,25 @@ for (const [utilityCertification, reasoningLevel] of [['partial', 'low'], ['fail
       throw new Error(`unexpected provider role ${roleId}`);
     }
   };
+  const { createDefaultCardDeck } = await import('../../src/pre-process-decks.mjs');
+  const requiredDeck = createDefaultCardDeck();
+  requiredDeck.id = 'required-active-cast'; requiredDeck.bundled = false; requiredDeck.readonly = false;
+  for (const card of Object.values(requiredDeck.cards)) card.selectionState = card.builtinFamily === 'Active Cast'
+    ? 'priority' : card.builtinFamily === 'Scene Frame' ? 'active' : 'off';
   const { runtime, storage } = createHarness({
     provider,
     settings: {
       pipelineMode: 'segmented',
       modelAttemptsPerStep: 2,
-      minCards: 2, maxCards: 2
+      cardsPerTurn: 2,
+      preProcessDecks: { activeDeckId: requiredDeck.id, customDecks: { [requiredDeck.id]: requiredDeck } }
     }
   });
   const result = await runtime.prepareForGeneration({
     userMessage: 'I ask what she remembers.',
     hostGeneration: true
   });
-  assertEqual(result.ok, false, 'Segmented semantic exhaustion stops incomplete preparation');
+  assertEqual(result.ok, false, 'required Segmented semantic exhaustion stops incomplete preparation');
   assertEqual(result.continuePrimaryGeneration, false, 'incomplete hand blocks narration');
   assertEqual(cardAttempts.get('sceneFrameCard'), 1, 'valid sibling remains checkpointed during another card exhaustion');
   assertEqual(cardAttempts.get('activeCastCard'), 2, 'invalid Active Cast card consumes its bounded attempt window');
@@ -1635,7 +1647,7 @@ for (const reasoningLevel of ['low', 'high']) {
   const { runtime, storage } = createHarness({
     provider,
     settings: {
-      pipelineMode: 'fused', minCards: 3, maxCards: 3, reasoningLevel,
+      pipelineMode: 'fused', cardsPerTurn: 3, reasoningLevel,
       reasonerUse: 'always', providers: { reasoner: { connectionProfileId: 'reasoner-profile' } }
     }
   });
@@ -1717,7 +1729,7 @@ for (const reasoningLevel of ['low', 'high']) {
     provider,
     settings: {
       pipelineMode: 'fused',
-      minCards: 2, maxCards: 2,
+      cardsPerTurn: 2,
       modelAttemptsPerStep: 2
     }
   });
@@ -2045,7 +2057,7 @@ for (const proposed of [
   ['Environment', 'Items', 'Consequences', 'Scene Frame', 'Scene Constraints', 'Active Cast']
 ]) {
   const harness = createHarness({
-    settings: { reasoningLevel: 'medium', minCards: 3, maxCards: 3, cardSelection: { variety: 'off' } },
+    settings: { reasoningLevel: 'medium', cardsPerTurn: 3, cardSelection: { variety: 'off' } },
     provider: { async generate(roleId, request) {
       if (roleId === 'utilityArbiter') return arbiterResponse(request, proposed.map(family => ({ family, reason: 'Distinct contribution to the current scene.' })));
       if (roleId === 'guidanceComposer') return guidanceResponse(request);
@@ -2063,7 +2075,7 @@ for (const proposed of [
 {
   let cachedId = '';
   const harness = createHarness({
-    settings: { reasoningLevel: 'medium', minCards: 4, maxCards: 4 },
+    settings: { reasoningLevel: 'medium', cardsPerTurn: 4 },
     provider: { async generate(roleId, request) {
       if (roleId === 'utilityArbiter') {
         const response = arbiterResponse(request, [{ family: cachedId ? 'Knowledge' : 'Environment' }]);
@@ -2120,7 +2132,7 @@ for (const restoreFirst of [true, false]) for (const stateBefore of ['paused', '
   deck.id = 'eligibility-proposals'; deck.readonly = false; deck.bundled = false;
   for (const card of Object.values(deck.cards)) card.selectionState = card.builtinFamily === 'Knowledge' ? 'active' : 'off';
   const harness = createHarness({
-    settings: { reasoningLevel: 'medium', minCards: 3, maxCards: 3, preProcessDecks: { activeDeckId: deck.id, customDecks: { [deck.id]: deck } } },
+    settings: { reasoningLevel: 'medium', cardsPerTurn: 3, preProcessDecks: { activeDeckId: deck.id, customDecks: { [deck.id]: deck } } },
     provider: { async generate(roleId, request) {
       if (roleId === 'utilityArbiter') return arbiterResponse(request, [{ family: 'Character Motivation', reason: 'Personal stakes.' }, { family: 'Knowledge', reason: 'Clarify meaning.' }]);
       if (roleId === 'guidanceComposer') return guidanceResponse(request);
@@ -2143,7 +2155,7 @@ for (const pipelineMode of ['segmented', 'fused']) for (const selectRealism of [
   const calls = [];
   let installed;
   const harness = createHarness({
-    settings: { pipelineMode, reasoningLevel: 'medium', minCards: 1, maxCards: 1 },
+    settings: { pipelineMode, reasoningLevel: 'medium', cardsPerTurn: 1 },
     installPrompt: async packet => { installed = packet; return { ok: true, installed: true }; },
     provider: { async generate(roleId, request) {
       calls.push({ roleId, request });

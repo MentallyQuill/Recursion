@@ -3,6 +3,8 @@ import { normalizeInstructionValidationRule } from '../instruction-safety.mjs';
 import { normalizeProviderError } from '../providers/provider-errors.mjs';
 import { minimumOutputBudgetForRole, outputBudgetForRequest } from '../providers/stage-output-budgets.mjs';
 import { RATE_LIMIT_RETRY_LIMIT, rateLimitDelay } from '../providers/rate-limit-policy.mjs';
+import { jsonSchemaForRequest } from '../providers.mjs';
+import { requestMessages } from '../providers/request-payload.mjs';
 
 const ATTEMPT_MIN = 1;
 const ATTEMPT_MAX = 5;
@@ -51,6 +53,7 @@ export function classifyModelFailure(error, { kind = 'transport', signal = null 
       category: failure.category,
       message: failure.message,
       retryable: failure.retryable,
+      ...(failure.fieldIssues?.length ? { fieldIssues: failure.fieldIssues } : {}),
       ...(validationRule ? { validationRule } : {}),
       ...(failure.suggestedAction ? { suggestedAction: failure.suggestedAction } : {})
     });
@@ -98,12 +101,16 @@ function stopDirective(diagnosticCode = '') {
   return retryDirective('stop', { diagnosticCode });
 }
 
-export function resolveModelRetryDirective({ failure, request, attempt, limit, rateLimitFailures = 1, transientFailures = 1 }) {
+function jitterDelay(ms, random) {
+  return Math.min(2147483647, Math.round(ms * (1 + Math.max(0, Math.min(1, Number(random()) || 0)) * 0.1)));
+}
+
+export function resolveModelRetryDirective({ failure, request, attempt, limit, rateLimitFailures = 1, transientFailures = 1, random = Math.random }) {
   if (failure?.kind === 'abort') return stopDirective();
   if (failure?.code === 'RECURSION_PROVIDER_RATE_LIMIT') {
     if (rateLimitFailures > RATE_LIMIT_RETRY_LIMIT) return stopDirective('provider-rate-limit-exhausted');
     return retryDirective('retry-same', {
-      delayMs: rateLimitDelay(failure.retryAfterMs, rateLimitFailures),
+      delayMs: jitterDelay(rateLimitDelay(failure.retryAfterMs, rateLimitFailures), random),
       diagnosticCode: 'provider-rate-limit-retry',
       nextRequest: request
     });
@@ -111,7 +118,7 @@ export function resolveModelRetryDirective({ failure, request, attempt, limit, r
   if (failure?.code === 'RECURSION_PROVIDER_TRANSIENT' && failure?.retryable !== false) {
     if (transientFailures > TRANSIENT_RETRY_LIMIT) return stopDirective('provider-transient-exhausted');
     return retryDirective('retry-same', {
-      delayMs: Math.max(2000 * (2 ** Math.max(0, transientFailures - 1)), failure.retryAfterMs || 0),
+      delayMs: jitterDelay(Math.max(2000 * (2 ** Math.max(0, transientFailures - 1)), failure.retryAfterMs || 0), random),
       diagnosticCode: 'provider-transient-retry',
       nextRequest: request
     });
@@ -122,11 +129,20 @@ export function resolveModelRetryDirective({ failure, request, attempt, limit, r
     return stopDirective('provider-declined-request');
   }
 
+  const wrapped = request?.request && typeof request.request === 'object' && !Array.isArray(request.request);
+  const providerRequest = wrapped ? request.request : request;
+  const configuredMode = providerRequest?.providerConfig?.generationPolicy?.structuredOutputMode
+    || providerRequest?.providerConfig?.generationPolicy;
   if (failure?.code === 'RECURSION_STRUCTURED_OUTPUT_UNSUPPORTED'
-      && request?.structuredOutputMethod === 'native-schema') {
+      && failure?.attemptedStructuredOutputMethod !== 'prompt-json'
+      && providerRequest?.structuredOutputMethod !== 'prompt-json'
+      && configuredMode !== 'prompt-json') {
+    if (configuredMode === 'native-schema') return stopDirective('native-schema-required');
     return retryDirective('downgrade-structured-output', {
       diagnosticCode: 'structured-output-downgraded',
-      nextRequest: { ...request, structuredOutputMethod: 'prompt-json' }
+      nextRequest: wrapped
+        ? { ...request, request: { ...providerRequest, structuredOutputMethod: 'prompt-json' } }
+        : { ...request, structuredOutputMethod: 'prompt-json' }
     });
   }
 
@@ -214,6 +230,22 @@ async function notifyAttempt(onAttemptSettled, attempts, summary) {
   if (typeof onAttemptSettled === 'function') await onAttemptSettled(frozen);
 }
 
+function requestSignature(request) {
+  const actual = request?.request || request;
+  // The host sends messages in preference to prompt.
+  const fields = ['structuredOutputMethod', 'connectionProfileId',
+    'lane', 'roleId', 'reasoningIntent', 'writerDirective', 'guidancePacket'];
+  const config = actual?.providerConfig || {};
+  return JSON.stringify({
+    ...Object.fromEntries(fields.map(key => [key, actual?.[key]])),
+    outputBudget: outputBudgetForRequest(actual?.roleId || request?.roleId, actual, config.outputTokenCeiling),
+    content: requestMessages(actual),
+    outputSchema: jsonSchemaForRequest({ ...actual, roleId: actual?.roleId || request?.roleId }),
+    providerConfig: { connectionProfileId: config.connectionProfileId, generationPolicy: config.generationPolicy,
+      samplerOverrides: config.samplerOverrides, outputTokenCeiling: config.outputTokenCeiling }
+  });
+}
+
 export async function runModelStageAttempts({
   attemptsPerStep = 2,
   request,
@@ -222,6 +254,7 @@ export async function runModelStageAttempts({
   buildCorrectionRequest,
   resolveDirective = resolveModelRetryDirective,
   sleep = abortableSleep,
+  random = Math.random,
   signal = null,
   capacityRecovery = null,
   onAttemptSettled = null
@@ -283,14 +316,25 @@ export async function runModelStageAttempts({
     if (lastFailure.code === 'RECURSION_PROVIDER_RATE_LIMIT') rateLimitFailures += 1;
     else if (lastFailure.code === 'RECURSION_PROVIDER_TRANSIENT') transientFailures += 1;
     else modelAttempts += 1;
-    const directive = resolveDirective({
+    let directive = resolveDirective({
       failure: lastFailure,
       request: currentRequest,
       attempt: modelAttempts,
       limit,
       rateLimitFailures,
-      transientFailures
+      transientFailures,
+      random
     });
+    let correctedRequest;
+    if (directive.action === 'retry-corrected') {
+      correctedRequest = typeof buildCorrectionRequest === 'function'
+        ? await buildCorrectionRequest({ request: currentRequest, currentRequest, originalRequest: request,
+          response: lastResponse, error: validationError, failure: lastFailure, attempt })
+        : null;
+      if (!correctedRequest || requestSignature(correctedRequest) === requestSignature(currentRequest)) {
+        directive = stopDirective('correction-request-unchanged');
+      }
+    }
     await notifyAttempt(onAttemptSettled, attempts, {
       attempt,
       outcome,
@@ -317,13 +361,7 @@ export async function runModelStageAttempts({
     }
 
     if (directive.action === 'retry-corrected') {
-      if (typeof buildCorrectionRequest !== 'function') break;
-      currentRequest = await buildCorrectionRequest({
-        request: currentRequest,
-        response: lastResponse,
-        error: validationError,
-        attempt
-      });
+      currentRequest = correctedRequest;
     } else {
       currentRequest = directive.nextRequest;
     }

@@ -31,10 +31,12 @@ Every release candidate must preserve these boundaries:
 - Every Pre-process and Post-process operation has a durable manifest and separate artifact records.
 - A stage advances only after its accepted artifact is durable.
 - Only dispatched model calls consume `Attempts per step`; the setting range is one through five and defaults to two total attempts per model stage.
-- Recursion has no default production generation timeout. Slow pending calls are not duplicated.
+- Request timeout defaults to 180 seconds and active operation budget to 300 seconds, including queue/cooldown waits. Slow pending calls are not duplicated. Rate-limit and retryable transient retries have separate bounds of eight and three; recovery allowance and deadlines can stop extra calls earlier.
 - Recursion never automatically retries SillyTavern's primary story generation.
 - Stop aborts the active Recursion call and pauses the operation while preserving accepted checkpoints.
-- Resume starts at the earliest incomplete stage. Retry Stage resets only that stage's attempt window and output.
+- Resume starts at the earliest incomplete stage with its existing recovery budget. Deliberate Retry Stage resets that stage's attempt window/output and opens a fresh active window without bypassing inherited cooldown.
+- Cards per turn (`cardsPerTurn`, default 6, range 0..20) stays independent of Reasoning Level and pipeline. Manual projection reserves Refinement first, groups generated families, counts authored units separately, and preserves saved source states.
+- Exhausted optional generated families can complete with amber omissions and validated siblings; unresolved selected Scene Constraints, Manual, Priority, Refinement, or required authored coverage blocks installation.
 - Reprocess from Here queues next-generation invalidation for the selected stage and its dependents; it does not race the current run.
 - Queue a full fresh generation starts no work on click and is consumed once by the next send or swipe.
 - Late or stale results cannot mutate artifacts, scene cache, prompt keys, activity truth, or host messages.

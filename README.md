@@ -14,6 +14,10 @@ Recursion is a scene reasoning layer for the reply in front of you.
 
 This beta brings mandatory Priority coverage, reviewed Refinement cards, configurable Auto selection variety and cooldown, optional Realism analysis, and a dedicated Post-process writer with revision review. Fused and Segmented now share the same card plan, with stronger recovery and checks that stop generation when required preparation is incomplete.
 
+Current Play settings use one **Cards per turn** target: default 6, range 0–20, independent of Reasoning Level and pipeline. Guidance strength controls intervention pressure; Guidance detail controls the final prompt footprint. Mandatory coverage can exceed the target. Manual selects this turn's work in deck order after reserving Refinement, without changing saved card states.
+
+Recovery preserves complete validated siblings from eligible damaged bundles and retries only unresolved work. Evidence must cite the supplied source window. Exhausted optional generated families can leave a smaller hand with an amber omission explanation; required coverage still blocks installation.
+
 Read the [release notes](docs/release/0.3.0-beta.1.md) for the September 17–24 update roundup, or the [release announcement](docs/release/0.3.0-beta.1-announcement.md) for the highlights.
 
 ## How It Works
@@ -118,7 +122,7 @@ Pipeline controls decide how Recursion schedules scene work. Auto and Manual dec
 | Pipeline | Best Fit | Tradeoff |
 | --- | --- | --- |
 | Segmented | Smaller, simpler, or locally hosted models that are more reliable with one independent card request at a time. | More model calls, but each request has a narrow contract and completed cards can be resumed independently. |
-| Fused | Models with stronger structured reasoning, such as DeepSeek, MiniMax, MiMo, Nemotron, Qwen, and similar. | Fewer card calls through one larger bundle. Each returned card is validated independently; if the bundle yields zero useful cards, Recursion falls back to the Segmented card path. |
+| Fused | Models reliable with a larger structured bundle. | Fewer card calls; complete valid siblings survive eligible output damage, while unresolved families use bounded correction and individual Segmented fallback. |
 
 ## Resumable Execution
 
@@ -131,15 +135,18 @@ Advanced settings expose `Attempts per step` from one through five:
 ```json
 {
   "pipelineMode": "segmented",
-  "modelAttemptsPerStep": 2
+  "cardsPerTurn": 6,
+  "modelAttemptsPerStep": 2,
+  "requestDeadlineSeconds": 180,
+  "operationDeadlineSeconds": 300
 }
 ```
 
-This is the total automatic model-attempt window for each model stage. Local stages do not consume it, and SillyTavern's primary story generation is never automatically retried by Recursion. Recursion imposes no default generation timeout, so slow local and remote models may continue indefinitely until they return, fail, or the user stops them. An automatic attempt can recover a known failed call, but Recursion cannot promise cost recovery when a provider charged for a response that never reached the extension.
+Attempts include the initial call. Rate-limit retries (up to eight) and retryable transient retries (up to three) have separate bounds; the operation allowance or deadline can stop recovery earlier. Request timeout defaults to 180 seconds and active operation budget to 300 seconds, including queue/cooldown waits. Resume preserves the current budget and accepted work; deliberate Retry/Reprocess opens a new window without bypassing inherited cooldown. Local stages do not consume model attempts, and Recursion never automatically retries SillyTavern's primary story generation. A provider may still charge for an interrupted response.
 
 ### Cost Shape
 
-Recursion adds provider work around the host model's normal generation: Pre-process planning and card guidance before the host writes, followed by optional Post-process guidance and rewriting after the response lands. Utility or Reasoner supplies structured guidance; the selected Post-process writer returns revised prose. Prompt Footprint affects the final Pre-process packet. Post-process Evidence Messages bounds the frozen evidence supplied to guidance and profile writing; the current-model writer retains native host context.
+Recursion adds provider work around the host model's normal generation: Pre-process planning and card guidance before the host writes, followed by optional Post-process guidance and rewriting after the response lands. Utility or Reasoner supplies structured guidance; the selected Post-process writer returns revised prose. Guidance detail affects the final Pre-process packet. Post-process Evidence Messages bounds the frozen evidence supplied to guidance and profile writing; the current-model writer retains native host context.
 
 Cost depends most on pipeline, Reasoning Level, card count, footprint, cache reuse, provider hidden reasoning, and any external model multiplier. For the detailed call breakdown and planning estimates, see [Recursion Cost Research](docs/technical/RECURSION_COST_RESEARCH.md).
 
@@ -178,6 +185,8 @@ Open the revision comparison to inspect original/revised text, keep the original
 - Post-process Results: guidance status, category outcomes, retries, host-writer settlement, swipe/replace behavior, and explicit failure reasons.
 - Tense & PoV: Auto story-form detection or a forced past/present first-, second-, third-person, or mixed POV form for the next prompt contract.
 - Provider Health: Utility and Reasoner profile tests, certification state, fallback visibility, and lane status.
+
+Provider checks bind to both Recursion settings and the live profile identity. Editing a profile's model, API, completion mode, preset, or instruct under the same ID makes it Untested and restores conservative concurrency. Status refresh does not make hidden paid calls. Auto can downgrade unsupported native output to Prompt JSON within budget; explicit Native Schema stops with a compatibility explanation. Explicit Fused selection uses actual-result recovery regardless of combined-card test status.
 
 ## Fast Start
 

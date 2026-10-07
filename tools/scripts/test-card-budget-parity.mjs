@@ -4,7 +4,7 @@ import { assert, assertEqual, assertDeepEqual } from '../../tests/helpers/assert
 
 const segmented = await runCardBudgetFixture();
 assertEqual(segmented.result.ok, true, 'target hand prepares successfully');
-assertEqual(segmented.view.lastHand.cards.length, 10, 'Medium 8-12 fills ten total slots despite an Arbiter budget of one');
+assertEqual(segmented.view.lastHand.cards.length, 10, 'operator target fills ten total slots despite an Arbiter budget of one');
 assertEqual(segmented.view.lastPlan.cardJobs.length, 7, 'three authored Priority cards leave seven generated slots');
 assertDeepEqual(segmented.view.lastHand.cards.slice(0, 3).map(card => card.id),
   ['authored-0', 'authored-1', 'authored-2'], 'authored Priority stays in deck order');
@@ -31,10 +31,10 @@ for (const partial of [false, true]) {
   assertEqual(reusedProgress.steps.find(step => step.id === 'preprocess.cards.fused').children.length, 7, 'cached Fused outcomes remain visible');
 }
 for (const reasoningLevel of ['low', 'medium', 'high', 'ultra']) {
-  const expected = reasoningLevel === 'low' ? 8 : reasoningLevel === 'ultra' ? 12 : 10;
+  const expected = 10;
   const fixture = await runCardBudgetFixture({ reasoningLevel, strength: 'light' });
   assertEqual(fixture.result.ok, true, 'reasoning target prepares');
-  assertEqual(fixture.view.lastHand.cards.length, expected, 'reasoning determines target and Light does not subtract a card');
+  assertEqual(fixture.view.lastHand.cards.length, expected, 'routing and Light strength preserve the target');
 }
 const scarce = await runCardBudgetFixture({ allowedFamilies: ['Knowledge'], authoredCount: 1 });
 assertEqual(scarce.view.lastHand.cards.length, 2, 'insufficient eligible families never invent cards');
@@ -48,15 +48,15 @@ for (const pipelineMode of ['fused', 'segmented']) {
   const duplicate = await runCardBudgetFixture({ pipelineMode, proposed: Array(7).fill('Knowledge') });
   assertEqual(duplicate.result.ok, true, 'duplicate rankings prepare successfully');
   assertDeepEqual(duplicate.view.lastHand.cards.map(card => card.id), segmented.view.lastHand.cards.map(card => card.id), 'duplicate rankings preserve first preference and fill distinct slots');
-  const overflow = await runCardBudgetFixture({ pipelineMode, minCards: 1, maxCards: 1, authoredCount: 3, priorityFamily: 'Environment' });
+  const overflow = await runCardBudgetFixture({ pipelineMode, cardsPerTurn: 1, authoredCount: 3, priorityFamily: 'Environment' });
   assertEqual(overflow.result.ok, true, 'mandatory overflow prepares');
   assertEqual(overflow.view.lastHand.cards.length, 4, 'all four Priority units survive a target of one');
   assertDeepEqual(overflow.view.lastPlan.cardJobs.map(job => job.family), ['Environment'], 'overflow schedules no ordinary work');
-  const empty = await runCardBudgetFixture({ pipelineMode, minCards: 0, maxCards: 0, authoredCount: 0 });
+  const empty = await runCardBudgetFixture({ pipelineMode, cardsPerTurn: 0, authoredCount: 0 });
   assertEqual(empty.result.ok, true, 'explicit zero target prepares without cards');
   assertEqual(empty.view.lastHand.cards.length, 0, 'zero target retains no cards');
   assert(!empty.calls.some(call => call.roleId === 'fusedCardBundle' || call.request.metadata?.family), 'zero target creates no card provider calls');
-  const failed = await runCardBudgetFixture({ pipelineMode, failedFamily: 'Knowledge' });
+  const failed = await runCardBudgetFixture({ pipelineMode, failedFamily: 'Knowledge', priorityFamily: 'Knowledge' });
   assertEqual(failed.result.ok, false, 'missing planned output blocks narration after recovery is exhausted');
   assertEqual(failed.installed, null, 'partial planned hand is never installed');
   assert(!failed.calls.some(call => call.roleId === 'guidanceComposer'), 'Guidance never consumes the incomplete hand');

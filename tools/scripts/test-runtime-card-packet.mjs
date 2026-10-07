@@ -81,8 +81,7 @@ const { runtime, installedBlocks, storage } = createRuntimeHarness({
     reasoningLevel: 'medium',
     reasonerUse: 'off',
     promptFootprint: 'normal',
-    minCards: 6,
-    maxCards: 6
+    cardsPerTurn: 6
   },
   generationRouter: {
     async generate(roleId, request) {

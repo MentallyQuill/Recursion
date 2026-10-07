@@ -1,4 +1,5 @@
 import { certifyConnectionProfile } from '../../src/providers/profile-certification.mjs';
+import { providerProfileIdentityHash } from '../../src/provider-capability.mjs';
 import { createGenerationRouter, createProviderClient } from '../../src/providers.mjs';
 import { createSettingsStore } from '../../src/settings.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
@@ -58,6 +59,8 @@ const full = await certifyConnectionProfile({
   now: () => '2026-08-06T00:00:00.000Z'
 });
 assertEqual(full.status, 'pass', 'prompt JSON can fully certify profile');
+assertEqual(full.profileIdentityHash, providerProfileIdentityHash({ id: 'profile-a', completionMode: 'text' }),
+  'certification records the live profile identity exercised by the test');
 assertEqual(full.structuredOutput, 'prompt-json', 'fallback method is persisted');
 assertEqual(full.checks.fusedCards, 'pass', 'representative Fused bundle passes');
 assert(full.diagnosticCodes.includes('structured-output-downgraded'), 'native schema downgrade is recorded');

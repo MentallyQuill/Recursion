@@ -29,13 +29,13 @@ function deckSettings({ authored = false, refinement = true } = {}) {
     categories: { general: { id: 'general', name: 'General' } }, categoryOrder: ['general'], cards,
     cardOrderByCategory: { general: Object.keys(cards) } } } };
 }
-function createHarness({ pipelineMode = 'segmented', authored = false, refinement = true, rejectTwice = false, providerFailure = false, draftGate = null, mode = 'auto', maxCards = 4, acceptUnchanged = false } = {}) {
+function createHarness({ pipelineMode = 'segmented', authored = false, refinement = true, rejectTwice = false, providerFailure = false, draftGate = null, mode = 'auto', cardsPerTurn = 4, acceptUnchanged = false } = {}) {
   const calls = [];
   const installed = [];
   let currentSnapshot = initialSnapshot();
   let draftBlocked = false;
   const settingsStore = createSettingsStore({ root: {} });
-  settingsStore.update({ pipelineMode, mode, modelAttemptsPerStep: 2, reasoningLevel: 'low', reasonerUse: 'off', minCards: 1, maxCards,
+  settingsStore.update({ pipelineMode, mode, modelAttemptsPerStep: 2, reasoningLevel: 'low', reasonerUse: 'off', cardsPerTurn,
     preProcessDecks: deckSettings({ authored, refinement }) });
   for (const lane of ['utility', 'reasoner']) settingsStore.updateProviderConfig(lane, { connectionProfileId: `${lane}-profile` });
   const storage = createStorageRepository({ storage: createMemoryStorageAdapter() });
@@ -44,7 +44,7 @@ function createHarness({ pipelineMode = 'segmented', authored = false, refinemen
     if (roleId === 'utilityArbiter') return { ok: true, data: {
       schema: 'recursion.utilityArbiter.v1', snapshotHash: request.snapshotHash, action: 'compose-brief', sceneStatus: 'same-scene',
       promptFootprint: 'normal', cardJobs: mode === 'manual' ? [] : [{ family: 'Realism', role: 'realismCard', reason: 'Check the archive claim.' }],
-      budgets: { targetBriefTokens: 500, maxCards }, reasonerDecision: { mode: 'skip', reason: 'Unit test', signals: [] }, diagnostics: []
+      budgets: { targetBriefTokens: 500, maxCards: cardsPerTurn }, reasonerDecision: { mode: 'skip', reason: 'Unit test', signals: [] }, diagnostics: []
     } };
     if (roleId === 'fusedCardBundle') return { ok: true, data: { items: request.requestedCards.map(card => ({
       family: card.family, promptText: ORIGINAL, evidenceRefs: ['message:1'], coveredSourceCardIds: card.sourceCardIds
@@ -234,7 +234,7 @@ for (const failureMode of ['unresolved', 'provider']) {
 }
 
 for (const pipelineMode of ['segmented', 'fused']) {
-  const harness = createHarness({ pipelineMode, mode: 'manual', maxCards: 1, authored: true });
+  const harness = createHarness({ pipelineMode, mode: 'manual', cardsPerTurn: 1, authored: true });
   assert.equal((await prepare(harness)).ok, true, 'Manual Refinement succeeds despite requested one-card limit');
   assert.ok(harness.calls.some(call => ['realismCard', 'fusedCardBundle'].includes(call.roleId)), 'Manual generates marked cards despite empty Arbiter selection');
   const hand = harness.runtime.view().lastHand;

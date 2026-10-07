@@ -107,7 +107,7 @@ const completedBaseStages = [
   'preprocess.install'
 ].map((stageId) => ({ stageId, stageState: 'completed', attemptCount: 1 }));
 const diagnosticsFor = ({ pipeline, cardStages, mode = 'auto', families = ['Scene Frame', 'Open Threads'], planDiagnostics = [] }) => ({
-  settings: { mode, minCards: 2, maxCards: 2 },
+  settings: { mode, cardsPerTurn: 2 },
   runtime: {
     execution: {
       operationId: 'operation-current',

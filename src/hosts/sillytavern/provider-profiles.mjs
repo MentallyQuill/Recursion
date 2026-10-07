@@ -32,21 +32,24 @@ function supportedProfiles(service) {
 
 export function listSillyTavernConnectionProfiles({ context = null } = {}) {
   const service = requireConnectionManagerService(context || {});
-  return supportedProfiles(service).map((profile) => {
-    const apiMap = service.validateProfile(profile);
-    const name = textValue(profile?.name || profile?.label || profile?.id);
-    const model = textValue(profile?.model);
-    return {
-      id: textValue(profile?.id),
-      name,
-      model,
-      label: model ? `${name} / ${model}` : name,
-      api: textValue(profile?.api),
-      completionMode: completionModeFromApiMap(apiMap),
-      presetName: textValue(profile?.preset),
-      instructName: textValue(profile?.instruct)
-    };
-  }).filter((profile) => profile.id && profile.completionMode !== 'unknown');
+  return supportedProfiles(service)
+    .map((profile) => sillyTavernConnectionProfileDescriptor(profile, service.validateProfile(profile)))
+    .filter((profile) => profile.id && profile.completionMode !== 'unknown');
+}
+
+export function sillyTavernConnectionProfileDescriptor(profile = {}, apiMap = {}) {
+  const name = textValue(profile?.name || profile?.label || profile?.id);
+  const model = textValue(profile?.model);
+  return {
+    id: textValue(profile?.id),
+    name,
+    model,
+    label: model ? `${name} / ${model}` : name,
+    api: textValue(profile?.api),
+    completionMode: completionModeFromApiMap(apiMap),
+    presetName: textValue(profile?.preset),
+    instructName: textValue(profile?.instruct)
+  };
 }
 
 export const completionModeFromMap = completionModeFromApiMap;

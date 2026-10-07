@@ -4,6 +4,8 @@ import {
 } from './provenance.mjs';
 import { normalizeOperationBudget } from './operation-budget.mjs';
 import { normalizeInstructionValidationRule } from '../instruction-safety.mjs';
+import { normalizeOutputIssues } from '../providers/output-contract.mjs';
+import { normalizeRecoveryCounts } from './recovery-counts.mjs';
 import { normalizePipelineDecision } from '../runtime/pipeline-policy.mjs';
 
 export const PIPELINE_RUN_SCHEMA = 'recursion.pipelineRun.v2';
@@ -35,6 +37,8 @@ export const CHECKPOINT_DIAGNOSTIC_CODES = Object.freeze([
   'output-budget-reduced',
   'output-budget-at-floor',
   'model-output-corrected',
+  'correction-request-unchanged',
+  'native-schema-required',
   'provider-rate-limit-retry',
   'provider-rate-limit-exhausted',
   'provider-transient-retry',
@@ -282,6 +286,7 @@ export function createStageRecord({
     checkpoint: null,
     summary: null,
     timings: null,
+    recoveryCounts: normalizeRecoveryCounts(),
     failure: null,
     diagnosticCodes: [],
     lastAttemptAction: null,
@@ -310,6 +315,7 @@ export function normalizeStageRecord(value) {
     state: STAGE_STATES.includes(value.state) ? value.state : 'pending',
     checkpoint: normalizeCheckpoint(value.checkpoint),
     summary: normalizeStageSummary(value.summary),
+    recoveryCounts: normalizeRecoveryCounts(value.recoveryCounts),
     timings: value.timings ? {
       validationMs: Math.max(0, Number(value.timings.validationMs) || 0),
       artifactPersistenceMs: Math.max(0, Number(value.timings.artifactPersistenceMs) || 0)
@@ -321,6 +327,7 @@ export function normalizeStageRecord(value) {
           code: cleanText(value.failure.code),
           failureClass: cleanText(value.failure.failureClass),
           retryable: value.failure.retryable === true,
+          ...(value.failure.fieldIssues?.length ? { fieldIssues: normalizeOutputIssues(value.failure.fieldIssues) } : {}),
           ...(normalizeInstructionValidationRule(value.failure.validationRule)
             ? { validationRule: normalizeInstructionValidationRule(value.failure.validationRule) } : {}),
           ...(Number.isFinite(value.failure.retryAfterMs)

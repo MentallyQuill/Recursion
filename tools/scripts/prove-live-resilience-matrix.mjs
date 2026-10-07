@@ -1098,8 +1098,7 @@ export function matrixSettingsPatch(settings = {}) {
   const excludedKey = 'post' + 'Process';
   return {
     mode: 'auto',
-    minCards: 2,
-    maxCards: 2,
+    cardsPerTurn: 2,
     reasoningLevel: 'medium',
     [excludedKey]: { ...(settings[excludedKey] || {}), enabled: false },
     injection: { ...(settings.injection || {}), placement: 'in_prompt', depth: 1, role: 'system' }
@@ -1120,7 +1119,7 @@ async function configureLiveMatrixSurface(page, timeoutMs) {
     const settings = runtime?.view?.()?.settings || {};
     const excludedKey = 'post' + 'Process';
     await runtime?.updateSettings?.({
-      mode: 'auto', minCards: 2, maxCards: 2, reasoningLevel: 'medium',
+      mode: 'auto', cardsPerTurn: 2, reasoningLevel: 'medium',
       [excludedKey]: { ...(settings[excludedKey] || {}), enabled: false },
       injection: { ...(settings.injection || {}), placement: 'in_prompt', depth: 1, role: 'system' }
     });

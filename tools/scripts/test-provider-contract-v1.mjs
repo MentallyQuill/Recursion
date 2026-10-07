@@ -5,6 +5,7 @@ import {
 import {
   PROVIDER_CAPABILITY_STATES,
   providerConfigHash,
+  providerProfileIdentityHash,
   resolveProviderCapability
 } from '../../src/provider-capability.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
@@ -52,6 +53,7 @@ const initial = store.get().providers.utility;
 const hash = providerConfigHash(initial);
 const recorded = store.recordProviderCertification('utility', {
   status: 'partial',
+  profileIdentityHash: providerProfileIdentityHash({ id: 'profile-local-text' }),
   checkedAt: '2026-08-06T00:00:00.000Z',
   completionMode: 'text',
   structuredOutput: 'prompt-json',

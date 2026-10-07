@@ -1,6 +1,7 @@
 import {
   providerCapabilityDetail,
   providerCapabilityLabel,
+  providerCheckLines,
   readProviderDraftFromControls
 } from '../../src/ui/provider-panel.mjs';
 import { assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
@@ -15,6 +16,24 @@ for (const [state, label, detail] of [
   assertEqual(providerCapabilityLabel(state), label, `${state} maps to the approved compact provider state`);
   assertEqual(providerCapabilityDetail(state), detail, `${state} retains its separate capability detail`);
 }
+
+assertDeepEqual(providerCheckLines({
+  maxConcurrentRequests: 4,
+  generationPolicy: { structuredOutputMode: 'auto' },
+  certification: { checks: { connectivity: 'pass', singleCard: 'pass', fusedCards: 'fail' } }
+}, { state: 'segmented-ready', safeConcurrency: 2, structuredOutput: 'native-schema' }), [
+  'Connection: Passed · Single cards: Passed · Combined cards: Failed',
+  'Structured output: Native Schema · Concurrent requests: 4 configured, 2 effective',
+  'Profile checks test capability; they do not predict combined-card reliability for every turn.'
+], 'provider checks report separate single and combined outcomes with effective policy details');
+assertDeepEqual(providerCheckLines({
+  generationPolicy: { structuredOutputMode: 'auto' },
+  certification: { checks: { connectivity: 'pass', singleCard: 'pass', fusedCards: 'pass' } }
+}, { state: 'uncertified', safeConcurrency: 1 }), [
+  'Connection: Not checked · Single cards: Not checked · Combined cards: Not checked',
+  'Structured output: Prompt JSON · Concurrent requests: 2 configured, 1 effective',
+  'Profile checks test capability; they do not predict combined-card reliability for every turn.'
+], 'stale checks are not presented as current passes');
 
 const values = new Map([
   ['[data-recursion-provider-profile-utility]', 'profile-text'],

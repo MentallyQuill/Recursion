@@ -153,7 +153,8 @@ for (const [reasonerUse, footprint, expectedLane, intent] of [
     attempt: 1
   });
   assert(corrected.prompt.includes('Correction required'), 'guidance retry explicitly corrects the invalid response');
-  assert(corrected.prompt.includes('wrong schema'), 'guidance retry carries a bounded failure reason');
+  assert(corrected.prompt.includes('Failure: RECURSION_GUIDANCE_INVALID.'), 'guidance retry carries the fixed failure code');
+  assert(corrected.prompt.includes('recursion.guidanceComposer.v1'), 'guidance retry preserves the requested schema');
 }
 
 const guidanceCalls = [];

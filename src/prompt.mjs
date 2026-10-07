@@ -1,4 +1,5 @@
 import { unsafeInstructionMatch } from './instruction-safety.mjs';
+import { buildStructuredCorrectionRequest } from './execution/correction-request.mjs';
 import { SCENE_INTERPRETATION_CONTRACT } from './cards.mjs';
 import { compact, hashJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { normalizeInjectionSettings } from './settings.mjs';
@@ -570,23 +571,20 @@ function guidanceResponseShape(result) {
 
 export function buildGuidanceCorrectionRequest({
   request = {},
+  originalRequest = request,
   failure = {},
   attempt = 1
 } = {}) {
   const source = asObject(request);
   const contentRule = GUIDANCE_CONTENT_RULES.find((rule) => rule.id === failure.validationRule);
-  const reason = safeText(
-    failure?.message || failure?.reason || failure?.code || 'invalid structured guidance',
-    MAX_DIAGNOSTIC_TEXT
-  );
-  return {
-    ...source,
-    prompt: [
-      safeTextSource(source.prompt, MAX_PACKET_SECTION),
+  return buildStructuredCorrectionRequest({
+    originalRequest, currentRequest: source, failure,
+    taskFeedback: [
       'Correction required.',
-      `The previous response was rejected after attempt ${Math.max(1, Number(attempt) || 1)}: ${reason}`,
+      `The previous response was rejected after attempt ${Math.max(1, Number(attempt) || 1)}.`,
       ...(Array.isArray(failure.responseShape) && failure.responseShape.length
         ? [`Returned field types: ${guidanceResponseShape({ error: failure }).join(', ')}.`] : []),
+      contentRule?.message,
       contentRule?.correction || (failure.reason === 'source-ids-invalid'
         ? `Use only supplied card identifiers in sourceCardIds, guardrailCardIds, and omittedCardIds: ${JSON.stringify(source.guidanceCardIds || [])}. Leave unused lists empty.`
         : failure.reason === 'snapshot-mismatch'
@@ -594,7 +592,7 @@ export function buildGuidanceCorrectionRequest({
           : 'guidanceText must be a nonempty string containing the actual response guidance, not an object or a schema definition.'),
       `Return one corrected JSON object only using schema "${GUIDANCE_SCHEMA}".`
     ].filter(Boolean).join('\n\n')
-  };
+  });
 }
 
 function buildReasonerPrompt({ runId, snapshotHash: sourceSnapshotHash, footprint, cards, guidance, behaviorPolicy = null, storyForm = UNKNOWN_STORY_FORM }) {

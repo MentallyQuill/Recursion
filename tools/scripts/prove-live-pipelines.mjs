@@ -154,7 +154,7 @@ export function inspectMilestoneVerdict({ pipeline, mode, requestedFamilies = []
   const packetPipeline = String(runtime?.packet?.diagnostics?.pipelineMode || '');
 
   if (settings.mode !== mode) errors.push('settings-mode-mismatch');
-  if (Number(settings.minCards) !== 2 || Number(settings.maxCards) !== 2) errors.push('two-card-budget-mismatch');
+  if (Number(settings.cardsPerTurn) !== 2) errors.push('two-card-budget-mismatch');
   if (execution.operationState !== 'completed') errors.push('operation-not-completed');
   if (packetPipeline !== pipeline) errors.push('effective-pipeline-mismatch');
   if (Number(runtime?.hand?.selectedCount) !== 2 || new Set(handFamilies).size !== 2) errors.push('hand-not-two-unique-families');
@@ -499,8 +499,7 @@ export async function ensureRunnableDeckFixture(page, args, timeoutMs) {
     if (!runtime) return;
     await runtime.updateSettings({
       mode,
-      minCards: 2,
-      maxCards: 2,
+      cardsPerTurn: 2,
       preProcessDecks
     });
   }, { mode: args.mode, preProcessDecks: configuredDecks });

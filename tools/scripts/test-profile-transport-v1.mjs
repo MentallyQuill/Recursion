@@ -125,6 +125,7 @@ assertEqual(resolveGenerationPolicy({
   }
 }).structuredOutputMethod, 'prompt-json', 'Structured Output Auto is conservative before certification');
 assertEqual(resolveGenerationPolicy({
+  certificationValid: true,
   provider: {
     generationPolicy: { structuredOutputMode: 'auto' },
     certification: { structuredOutput: 'native-schema' }

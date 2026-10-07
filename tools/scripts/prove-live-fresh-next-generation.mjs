@@ -63,8 +63,7 @@ async function forceStandardAuto(page, timeoutMs) {
       mode: 'auto',
       pipelineMode: 'segmented',
       reasonerUse: 'off',
-      minCards: 1,
-      maxCards: 2
+      cardsPerTurn: 1
     });
   });
   await page.waitForFunction(() => {

@@ -4,7 +4,7 @@ import { normalizeFusedRejections } from './fused-recovery.mjs';
 import { compact, hashJson, makeId, nowIso, redact, safeId, truncate } from './core.mjs';
 import { CARD_SCOPE_CATALOG } from './card-scope.mjs';
 import { UTILITY_ROLE_IDS } from './providers.mjs';
-import { extractJsonObjectsFromArrayProperty } from './providers/structured-output-parser.mjs';
+import { canSalvageStructuredOutput } from './execution/recovery-policy.mjs';
 import { summarizeBehaviorPolicyForDiagnostics } from './settings-policy.mjs';
 import { UNKNOWN_STORY_FORM, normalizeStoryForm, storyFormPromptBlock } from './story-form.mjs';
 
@@ -499,41 +499,16 @@ function messageEvidenceRefs(value) {
 }
 
 function hasValidMessageEvidenceRefs(value, context = {}) {
+  const entries = evidenceRefEntries(value);
+  if (!entries.length || entries.some(entry => typeof entry !== 'string' || !/^message:\d+$/i.test(entry.trim()))) return false;
   const refs = messageEvidenceRefs(value);
-  if (refs.length === 0) return false;
+  if (refs.length !== entries.length) return false;
   const firstMesId = optionalNumber(context.firstMesId);
   const lastMesId = optionalNumber(context.lastMesId);
   if (firstMesId === undefined || lastMesId === undefined) return true;
   const minMesId = Math.min(firstMesId, lastMesId);
   const maxMesId = Math.max(firstMesId, lastMesId);
   return refs.every((entry) => entry >= minMesId && entry <= maxMesId);
-}
-
-function sourceWindowFallbackEvidenceRefs(context = {}) {
-  const lastMesId = optionalNumber(context.lastMesId);
-  const firstMesId = optionalNumber(context.firstMesId);
-  const fallback = lastMesId ?? firstMesId;
-  if (!Number.isSafeInteger(fallback)) return null;
-  return [`message:${fallback}`];
-}
-
-function repairProviderEvidenceRefs(value, context = {}) {
-  const entries = evidenceRefEntries(value);
-  const fallback = sourceWindowFallbackEvidenceRefs(context);
-  if (entries.length === 0) return fallback || value;
-  const refs = messageEvidenceRefs(entries);
-  if (hasValidMessageEvidenceRefs(entries, context)) return value;
-  const firstMesId = optionalNumber(context.firstMesId);
-  const lastMesId = optionalNumber(context.lastMesId);
-  if (firstMesId === undefined || lastMesId === undefined) return value;
-  const minMesId = Math.min(firstMesId, lastMesId);
-  const maxMesId = Math.max(firstMesId, lastMesId);
-  const validEntries = entries.filter((entry) => {
-    const entryRefs = messageEvidenceRefs([entry]);
-    return entryRefs.length > 0 && entryRefs.every((ref) => ref >= minMesId && ref <= maxMesId);
-  });
-  if (validEntries.length > 0) return validEntries;
-  return fallback || value;
 }
 
 function cleanCardPromptText(value) {
@@ -689,7 +664,7 @@ export function providerCardRejectReason(result, context = {}) {
   } catch {
     return 'catalog-mismatch';
   }
-  const evidenceRefs = repairProviderEvidenceRefs(item.evidenceRefs ?? item.evidence, context);
+  const evidenceRefs = item.evidenceRefs ?? item.evidence;
   if (!hasValidMessageEvidenceRefs(evidenceRefs, context)) return 'evidence-message-missing';
   try {
     normalizeCard({
@@ -848,7 +823,7 @@ function forcedFamilyOmission(family) {
 function effectiveMaxCardsForPolicy(maxCards, policy) {
   const base = numberInRange(maxCards, 6, 0, 64);
   if (!policy) return base;
-  const ceiling = numberInRange(policy.cardBudget?.maxCards, base, 0, 64);
+  const ceiling = numberInRange(policy.cardBudget?.targetCards, base, 0, 64);
   return Math.min(base, ceiling);
 }
 
@@ -1162,7 +1137,7 @@ export function cardsFromProviderResult(result, context = {}) {
   const expectedSnapshotHash = String(context.expectedSnapshotHash || context.snapshotHash || legacyEnvelope?.snapshotHash || '').trim();
   const catalog = resolveCatalog({ role: expectedRole, family: expectedFamily }, { strict: false });
   if (!catalog) return [];
-  const evidenceRefs = repairProviderEvidenceRefs(source.evidenceRefs ?? source.evidence, context);
+  const evidenceRefs = source.evidenceRefs ?? source.evidence;
   if (!hasValidMessageEvidenceRefs(evidenceRefs, context)) return [];
 
   try {
@@ -1217,7 +1192,8 @@ export function cardsFromFusedProviderResult(result, context = {}) {
   let data = asObject(result?.data);
   if (result?.ok !== true) {
     output.diagnostics.push('fused-bundle-provider-failed');
-    const recoveredItems = extractJsonObjectsFromArrayProperty(result?.recoverableText || result?.text || '', 'items');
+    if (!canSalvageStructuredOutput(result?.error || result?.failure)) return finalize();
+    const recoveredItems = Array.isArray(result?.recoverableItems) ? result.recoverableItems.slice(0, 40) : [];
     if (!recoveredItems.length) return finalize();
     output.diagnostics.push('fused-bundle-fragment-recovered');
     data = { items: recoveredItems };
@@ -1483,7 +1459,7 @@ export function selectHand(cards = [], { maxCards = 6, maxTokens = 700, behavior
           selectedFamilies: selected.map((card) => card.family),
           planShaping: [
             policy.focus?.level && policy.focus.level !== 'balanced' ? 'focus-family-ordering' : '',
-            policy.cardBudget?.maxCards && policy.cardBudget.maxCards < requestedCardLimit ? 'card-budget-ceiling' : ''
+            Number.isFinite(policy.cardBudget?.targetCards) && policy.cardBudget.targetCards < requestedCardLimit ? 'card-budget-ceiling' : ''
           ]
         }),
         effectiveMaxCards: cardLimit

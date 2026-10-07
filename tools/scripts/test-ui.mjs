@@ -19,7 +19,8 @@ import {
 import { providerSelector, providerStatusClass } from '../../src/ui/provider-panel.mjs';
 import { progressPanelState } from '../../src/ui/progress-panel.mjs';
 import { createHeroPixelBlocks, createProgressRunModel } from '../../src/progress.mjs';
-import { DEFAULT_RECURSION_SETTINGS } from '../../src/settings.mjs';
+import { createSettingsStore, DEFAULT_RECURSION_SETTINGS } from '../../src/settings.mjs';
+import { providerConfigHash, providerProfileIdentityHash, resolveProviderCapability } from '../../src/provider-capability.mjs';
 import { STARTER_POST_PROCESS_DECK_ID } from '../../src/post-process-decks.mjs';
 import { DEFAULT_PRE_PROCESS_DECK_ID } from '../../src/pre-process-decks.mjs';
 import { assert, assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
@@ -1878,8 +1879,8 @@ try {
     'configured Reasoner provider header does not replace capability state with optional copy'
   );
   assert(
-    fakeDocument.textTree(configuredReasonerRoot.querySelector('[data-recursion-provider-route-summary]')).includes('Utility fallback'),
-    'Reasoner route behavior stays visible in the route summary'
+    fakeDocument.textTree(configuredReasonerRoot.querySelector('[data-recursion-provider-route-summary]')).includes('Composer: Reasoner'),
+    'live selected Reasoner availability stays visible even when its saved certification is stale'
   );
   assertEqual(
     configuredReasonerRoot.querySelector('[data-recursion-provider-body-reasoner]').hidden,
@@ -1895,6 +1896,73 @@ try {
     'explicitly collapsed configured Reasoner profile section stays collapsed during the UI session'
   );
   configuredReasonerUi.destroy();
+
+  const driftStore = createSettingsStore({ root: {} });
+  const driftProfile = { id: 'drift-profile', name: 'Current', label: 'Current', model: 'original-model', api: 'openai', completionMode: 'chat' };
+  driftStore.updateProviderConfig('utility', { connectionProfileId: driftProfile.id });
+  const driftProvider = driftStore.get().providers.utility;
+  driftStore.recordProviderCertification('utility', {
+    status: 'pass', profileIdentityHash: providerProfileIdentityHash(driftProfile), completionMode: 'chat', structuredOutput: 'native-schema',
+    checks: { connectivity: 'pass', singleCard: 'pass', fusedCards: 'pass' }, safeConcurrency: 2
+  }, { configHash: providerConfigHash(driftProvider), configRevision: driftProvider.configRevision });
+  const driftCapability = lane => resolveProviderCapability({ settings: driftStore.get(), lane, host: { connectionProfiles: [driftProfile] } });
+  let driftSaveCalls = 0;
+  let driftProfileLookups = 0;
+  const driftUi = mountRecursionUi({ mountPoint: fakeDocument.body, runtime: {
+    view: () => ({ settings: { ...driftStore.get(), providerCapabilities: { utility: { promptPacket: driftCapability('utility') }, reasoner: { promptPacket: driftCapability('reasoner') } } }, providerProfiles: [{ ...driftProfile }], activity: { phase: 'idle' } }),
+    providerCapability: driftCapability,
+    listProviderConnectionProfiles: () => { driftProfileLookups += 1; return [{ ...driftProfile }]; },
+    updateProviderConfig: () => { driftSaveCalls += 1; }
+  } });
+  const driftRoot = fakeDocument.getElementById('recursion-root');
+  driftRoot.querySelector('[data-recursion-actions]').click();
+  driftRoot.querySelector('[data-recursion-settings-tab-providers]').click({ ignoreStopPropagation: true });
+  assertEqual(driftRoot.querySelector('[data-recursion-provider-status-utility]').textContent, 'Ready', 'certified current profile starts Ready');
+  assert(fakeDocument.textTree(driftRoot.querySelector('[data-recursion-provider-checks-utility]')).includes('Single cards: Passed'), 'current check lines start Passed');
+  driftRoot.querySelector('[data-recursion-settings-section-toggle-compatibility-utility]').click();
+  const driftDraft = driftRoot.querySelector('[data-recursion-provider-output-token-ceiling-utility]');
+  driftDraft.value = '7777';
+  const driftSearch = driftRoot.querySelector('[data-recursion-provider-profile-filter-utility]');
+  driftSearch.value = 'unsaved search';
+  driftSearch.focus();
+  driftSearch.dispatchEvent({ type: 'input', target: driftSearch });
+  const driftLookupsBefore = driftProfileLookups;
+  driftProfile.model = 'edited-model';
+  driftUi.update();
+  assertEqual(driftCapability('utility').state, 'uncertified', 'same-id host edit invalidates current capability');
+  assertEqual(driftRoot.querySelector('[data-recursion-provider-status-utility]').textContent, 'Untested', 'mounted provider status follows host profile drift');
+  const driftChecks = fakeDocument.textTree(driftRoot.querySelector('[data-recursion-provider-checks-utility]'));
+  assert(driftChecks.includes('Single cards: Not checked') && driftChecks.includes('Combined cards: Not checked'), 'stale mounted checks stop showing passes');
+  assert(driftChecks.includes('Prompt JSON') && driftChecks.includes('1 effective'), 'mounted output and concurrency follow current eligibility');
+  assert(fakeDocument.textTree(driftRoot.querySelector('[data-recursion-provider-effective-limit-utility]')).includes('Effective limit: 1.'), 'nested effective limit also follows host drift');
+  assertEqual(driftRoot.querySelector('[data-recursion-provider-capability-detail-utility]').hidden, true, 'stale Fused detail is hidden');
+  assert(fakeDocument.textTree(driftRoot.querySelector('[data-recursion-provider-readiness-utility]')).includes('edited-model'), 'safe live profile metadata follows the host edit');
+  assertEqual(driftRoot.querySelector('[data-recursion-provider-profile-filter-utility]'), driftSearch, 'profile search node remains mounted');
+  assertEqual(driftSearch.value, 'unsaved search', 'host refresh preserves the profile search draft');
+  assertEqual(fakeDocument.activeElement, driftSearch, 'host refresh preserves focused input');
+  assertEqual(driftRoot.querySelector('[data-recursion-provider-output-token-ceiling-utility]'), driftDraft, 'tuning node remains mounted');
+  assertEqual(driftDraft.value, '7777', 'host refresh preserves unsaved tuning draft');
+  assertEqual(driftRoot.querySelector('[data-recursion-settings-section-body-compatibility-utility]').hidden, false, 'host refresh preserves nested disclosure');
+  assertEqual(driftSaveCalls, 0, 'host refresh never autosaves drafts');
+  assertEqual(driftProfileLookups, driftLookupsBefore, 'host refresh uses the safe live view instead of another profile scan');
+  driftSearch.keydown({ key: 'Escape' });
+  assertEqual(driftSearch.value, 'Current', 'Escape restores the current safe profile label');
+  driftSearch.value = 'edited-model';
+  driftSearch.dispatchEvent({ type: 'input', target: driftSearch });
+  assertEqual(driftRoot.querySelector('[data-recursion-provider-profile-list-utility]').children[0].textContent, 'Current', 'profile filtering uses refreshed host metadata');
+  driftUi.destroy();
+
+  const unlabelledProfileUi = mountRecursionUi({ mountPoint: fakeDocument.body, runtime: {
+    view: () => ({ settings: { providers: { utility: { connectionProfileId: 'opaque-profile-id' } } }, activity: { phase: 'idle' } }),
+    listProviderConnectionProfiles: () => [{ id: 'opaque-profile-id', model: 'Readable model', name: 'opaque-profile-id', label: 'opaque-profile-id' }]
+  } });
+  const unlabelledProfileRoot = fakeDocument.getElementById('recursion-root');
+  unlabelledProfileRoot.querySelector('[data-recursion-actions]').click();
+  unlabelledProfileRoot.querySelector('[data-recursion-settings-tab-providers]').click({ ignoreStopPropagation: true });
+  const unlabelledProfileText = fakeDocument.textTree(unlabelledProfileRoot.querySelector('[data-recursion-settings-providers]'));
+  assert(!unlabelledProfileText.includes('opaque-profile-id'), 'unlabelled live profiles never fall back to displaying raw ids');
+  assert(unlabelledProfileText.includes('Readable model'), 'unlabelled live profile still shows safe model metadata');
+  unlabelledProfileUi.destroy();
 
   for (const [state, label, detail] of [
     ['fused-ready', 'Ready', 'Fused'],
@@ -1942,6 +2010,7 @@ try {
       null,
       'Reasoner provider does not render a hidden enabled control'
     );
+    assert(!fakeDocument.textTree(capabilityHeaderRoot.querySelector('[data-recursion-settings-providers]')).includes('reasoner-profile'), 'unavailable saved profile ids stay hidden from provider text');
     capabilityHeaderUi.destroy();
   }
 
@@ -2538,7 +2607,7 @@ try {
     'Auto mode tooltip matches the reference copy'
   );
   assert(
-    fakeDocument.textTree(root.querySelector('[data-recursion-mode-choice-manual]')).includes('Forces selected card families up to Max Cards.'),
+    fakeDocument.textTree(root.querySelector('[data-recursion-mode-choice-manual]')).includes('Includes enabled cards in deck order up to Cards per turn. Refinement is always included.'),
     'Manual mode tip explains forced card-family selection'
   );
   assert(
@@ -2572,16 +2641,16 @@ try {
   assert(root.querySelector('[data-recursion-mobile-status-text]'), 'mobile status drawer renders a dedicated status text node');
   assert(root.querySelector('[data-recursion-reasoning-chain]'), 'compact bar renders the reasoning level chain');
   assert(root.querySelector('[data-recursion-reasoning-level-high]'), 'reasoning chain defaults to the High node');
-  assertEqual(root.querySelector('[data-recursion-reasoning-level-low]').getAttribute('aria-label'), 'Low reasoning level. Low: Utility-only, reduced cards.', 'Low reasoning node has explicit accessible label');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-low]').getAttribute('aria-label'), 'Low reasoning level. Low: Utility plans, generates cards, and composes guidance.', 'Low reasoning node describes routing');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-medium]').getAttribute('aria-label'), 'Medium reasoning level. Medium: Utility checks, Reasoner guidance.', 'Medium reasoning node has explicit accessible label');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-high]').getAttribute('aria-label'), 'High reasoning level. High: Reasoner Arbiter, priority cards, and guidance.', 'High reasoning node has explicit accessible label');
-  assertEqual(root.querySelector('[data-recursion-reasoning-level-ultra]').getAttribute('aria-label'), 'Ultra reasoning level. Ultra: Reasoner-heavy calls with a larger card bias.', 'Ultra reasoning node has explicit accessible label');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-ultra]').getAttribute('aria-label'), 'Ultra reasoning level. Ultra: Reasoner plans, generates cards, and composes guidance.', 'Ultra reasoning node describes routing');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-high]').getAttribute('tabindex'), '0', 'selected reasoning node is the roving tab stop');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-low]').getAttribute('tabindex'), '-1', 'unselected reasoning node leaves the tab sequence');
-  assertEqual(root.querySelector('[data-recursion-reasoning-level-low]').getAttribute('title'), 'Low: Utility-only, reduced cards.', 'Low reasoning tooltip matches the reference copy');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-low]').getAttribute('title'), 'Low: Utility plans, generates cards, and composes guidance.', 'Low reasoning tooltip explains routing');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-medium]').getAttribute('title'), 'Medium: Utility checks, Reasoner guidance.', 'Medium reasoning tooltip matches the reference copy');
   assertEqual(root.querySelector('[data-recursion-reasoning-level-high]').getAttribute('title'), 'High: Reasoner Arbiter, priority cards, and guidance.', 'High reasoning tooltip matches the reference copy');
-  assertEqual(root.querySelector('[data-recursion-reasoning-level-ultra]').getAttribute('title'), 'Ultra: Reasoner-heavy calls with a larger card bias.', 'Ultra reasoning tooltip matches the reference copy');
+  assertEqual(root.querySelector('[data-recursion-reasoning-level-ultra]').getAttribute('title'), 'Ultra: Reasoner plans, generates cards, and composes guidance.', 'Ultra reasoning tooltip explains routing');
   assert(root.querySelector('[data-recursion-brief-arrow]'), 'compact bar renders a dedicated last-brief dropdown arrow');
   assert(root.querySelector('[data-recursion-cards-button]'), 'compact bar renders the Cards scope button');
   assertEqual(root.querySelector('[data-recursion-cards-button]').querySelectorAll('rect').length, 3, 'Cards scope button owns the stacked-cards SVG');
@@ -3065,11 +3134,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-mode-menu]').style.left, '69px', 'mode menu follows reference 6px inset from mode cluster');
   root.querySelector('[data-recursion-mode-choice-manual]').querySelector('[data-recursion-mode-choice-name]').click();
   assertEqual(settingsUpdates.at(-1).mode, 'manual', 'mode menu updates Manual from nested row content clicks');
-  assertEqual(
-    CARD_SCOPE_CATALOG.filter((entry) => settingsUpdates.at(-1).cardScope?.families?.[entry.family]?.enabled === true).length,
-    10,
-    'Manual mode switch trims default all-scope to the Manual Max Cards cap'
-  );
+  assertDeepEqual(settingsUpdates.at(-1), { mode: 'manual' }, 'Manual switch keeps saved deck selections intact');
   assertEqual(root.querySelector('[data-recursion-mode-button]').getAttribute('aria-expanded'), 'false', 'mode button reflects closed menu after selection');
   ui.update();
   assert(root.querySelector('[data-recursion-mode-icon]').querySelector('[data-recursion-mode-arrow-parallel]'), 'Manual mode button uses the parallel three-arrow mode icon after selection');
@@ -3717,6 +3782,15 @@ try {
   assert(root.querySelector('[data-recursion-settings-play]'), 'settings menu renders Play pane');
   assert(root.querySelector('[data-recursion-settings-providers]'), 'settings menu renders Providers pane');
   assert(root.querySelector('[data-recursion-settings-advanced]'), 'settings menu renders Advanced pane');
+  const targetControl = root.querySelector('[data-recursion-setting-cards-per-turn]');
+  assert(targetControl, 'Play exposes one Cards per turn control');
+  assertEqual(targetControl.getAttribute('min'), '0', 'target control permits zero');
+  assertEqual(targetControl.getAttribute('max'), '20', 'target control caps at twenty');
+  assert(!root.querySelector('[data-recursion-setting-min-cards]') && !root.querySelector('[data-recursion-setting-max-cards]'), 'removed range controls are absent');
+  const playText = fakeDocument.textTree(root.querySelector('[data-recursion-settings-play]'));
+  assert(playText.includes('Guidance strength') && playText.includes('Guidance detail'), 'Play labels describe guidance behavior');
+  assert(playText.includes('Mandatory cards can exceed the target'), 'mandatory overflow help is visible without hover');
+  assert(root.querySelector('[data-recursion-card-target-summary]'), 'Play shows computed target and available routing');
   assert(root.querySelector('[data-recursion-settings-panel]').querySelector('[data-recursion-viewer-toggle]'), 'settings menu renders visible Full Viewer entry point');
   assert(!root.querySelector('[data-recursion-settings-save]'), 'settings menu does not render a Save Settings button');
   assert(!root.querySelector('[data-recursion-settings-close]'), 'settings menu does not render a redundant close button');
@@ -3743,6 +3817,14 @@ try {
   assertEqual(root.querySelector('[data-recursion-provider-body-reasoner]').hidden, true, 'Reasoner provider section defaults collapsed without a selected profile');
   root.querySelector('[data-recursion-provider-toggle-reasoner]').click();
   assertEqual(root.querySelector('[data-recursion-provider-body-reasoner]').hidden, false, 'Reasoner provider section expands');
+  const tuningBody = root.querySelector('[data-recursion-settings-section-body-compatibility-reasoner]');
+  assert(tuningBody, 'provider has Compatibility and tuning disclosure');
+  assertEqual(tuningBody.hidden, true, 'compatibility tuning starts collapsed');
+  assertEqual(tuningBody.querySelector('[data-recursion-provider-preset-mode-reasoner]'), root.querySelector('[data-recursion-provider-preset-mode-reasoner]'), 'policy fields are inside tuning disclosure');
+  assert(!tuningBody.querySelector('[data-recursion-provider-profile-filter-reasoner]'), 'Connection Profile remains outside collapsed tuning');
+  assert(root.querySelector('[data-recursion-provider-checks-reasoner]'), 'plain check results remain visible outside tuning');
+  root.querySelector('[data-recursion-settings-section-toggle-compatibility-reasoner]').click();
+  assertEqual(root.querySelector('[data-recursion-settings-section-body-compatibility-reasoner]').hidden, false, 'operator can disclose tuning');
   assert(root.querySelector('[data-recursion-provider-preset-mode-reasoner]'), 'Reasoner provider exposes behavioral preset policy');
   assert(root.querySelector('[data-recursion-provider-instruct-mode-reasoner]'), 'Reasoner provider exposes instruct formatting policy');
   assert(root.querySelector('[data-recursion-provider-sampler-mode-reasoner]'), 'Reasoner provider exposes sampler policy');
@@ -3785,6 +3867,7 @@ try {
   assertDeepEqual(providerUpdates.at(-1).patch, { generationPolicy: { presetMode: 'full-profile' } }, 'Reasoner preset autosave is field-scoped');
   assertEqual(providerUpdates.at(-1).options.expectedRevision, 3, 'Reasoner policy autosave includes rendered revision');
   assertEqual(root.querySelector('[data-recursion-provider-body-reasoner]').hidden, false, 'Reasoner provider stays expanded after autosave rerender');
+  assertEqual(root.querySelector('[data-recursion-settings-section-body-compatibility-reasoner]').hidden, false, 'Compatibility tuning stays expanded after provider autosave');
   assertEqual(root.querySelector('[data-recursion-provider-full-preset-warning-reasoner]').hidden, false, 'full-profile mode exposes the structured-output warning');
 
   assertEqual(root.querySelector('[data-recursion-provider-source-utility]'), null, 'provider source selector is removed');
@@ -3873,6 +3956,9 @@ try {
   assertEqual(root.querySelector('[data-recursion-settings-section-body-diagnostics]').hidden, false, 'Diagnostics section defaults open');
   root.querySelector('[data-recursion-settings-section-toggle-injection]').click();
   assertEqual(root.querySelector('[data-recursion-settings-section-body-injection]').hidden, true, 'Injection section collapses');
+  root.querySelector('[data-recursion-settings-tab-play]').click({ ignoreStopPropagation: true });
+  root.querySelector('[data-recursion-settings-tab-advanced]').click({ ignoreStopPropagation: true });
+  assertEqual(root.querySelector('[data-recursion-settings-section-body-injection]').hidden, true, 'Advanced disclosure stays collapsed across tab rerenders');
   root.querySelector('[data-recursion-settings-section-toggle-injection]').click();
   assertEqual(root.querySelector('[data-recursion-settings-section-body-injection]').hidden, false, 'Injection section expands');
   assertEqual(root.querySelector('[data-recursion-clear-run-journal]').disabled, false, 'Clear Run Journal is enabled when runtime handler exists');
@@ -3888,9 +3974,13 @@ try {
   assertEqual(attemptsPerStepControl.getAttribute('max'), '5', 'Attempts per step has a maximum of five');
   assert(
     fakeDocument.textTree(root.querySelector('[data-recursion-settings-section-execution]'))
-      .includes('Total automatic model attempts for each Recursion step. Slow calls are not retried unless they fail.'),
-    'Attempts per step renders the approved helper'
+      .includes('The first call counts toward Attempts per step.'),
+    'Attempts per step visibly explains the initial call'
   );
+  const executionHelp = fakeDocument.textTree(root.querySelector('[data-recursion-settings-section-execution]'));
+  assert(root.querySelector('[data-recursion-execution-help]'), 'execution helper uses the visible help surface instead of hidden row notes');
+  assert(executionHelp.includes('Capacity retries are separately bounded') && executionHelp.includes('operation allowance can stop recovery earlier'), 'visible attempts help explains separate retry and operation bounds');
+  assert(executionHelp.includes('Resume keeps the current budget') && executionHelp.includes('Retry or Reprocess opens a new window'), 'visible attempts help explains deliberate recovery controls');
   assert(root.querySelector('[data-recursion-setting-post-process-context-messages]'), 'Context Windows renders Post-process evidence cap');
   assert(root.querySelector('[data-recursion-setting-source-window-messages]'), 'Context Windows renders source freshness message cap');
   assert(root.querySelector('[data-recursion-setting-source-window-characters]'), 'Context Windows renders source freshness character budget');
@@ -3915,8 +4005,7 @@ try {
   assertEqual(root.querySelector('[data-recursion-setting-selection-variety]').value, 'medium', 'variety survives settings rerender');
   assertEqual(root.querySelector('[data-recursion-setting-card-cooldown]').value, '2', 'cooldown survives settings rerender');
   const typedIntegerSettingSelectors = [
-    '[data-recursion-setting-min-cards]',
-    '[data-recursion-setting-max-cards]',
+    '[data-recursion-setting-cards-per-turn]',
     '[data-recursion-setting-card-cooldown]',
     '[data-recursion-setting-model-attempts-per-step]',
     '[data-recursion-setting-progress-child-limit]',
@@ -4121,9 +4210,25 @@ try {
   for (const listener of rerenderedChildren.eventListeners.scroll || []) listener({ target: rerenderedChildren });
   assert(rerenderedChildren.className.includes('is-at-end'), 'child progress fade clears at scroll end');
 
+  const beforeTargetSummaryView = view;
+  view = { ...view, settings: { ...view.settings, cardsPerTurn: 7, providers: { ...view.settings.providers, reasoner: { ...view.settings.providers.reasoner, connectionProfileId: 'removed-profile-id' } } } };
+  ui.update();
+  const liveTargetSummary = root.querySelector('[data-recursion-card-target-summary]').textContent;
+  assert(liveTargetSummary.startsWith('Target: 7 cards per turn.'), 'target summary follows live setting changes without rerendering controls');
+  assert(liveTargetSummary.includes('Utility fallback'), 'target summary reflects a saved Reasoner profile missing from the live host');
+  assert(!liveTargetSummary.includes('removed-profile-id'), 'target summary does not expose a raw saved profile id');
+  view = beforeTargetSummaryView;
+  ui.update();
+
+  const targetUpdatesBefore = settingsUpdates.length;
+  const targetAutosave = root.querySelector('[data-recursion-setting-cards-per-turn]');
+  targetAutosave.value = '0';
+  for (const listener of root.querySelector('[data-recursion-settings-panel]').eventListeners.input || []) listener({ target: targetAutosave });
+  assertEqual(settingsUpdates.length, targetUpdatesBefore + 1, 'editing Cards per turn directly autosaves');
+  assertEqual(settingsUpdates.at(-1).cardsPerTurn, 0, 'target autosave preserves zero');
+
   root.querySelector('[data-recursion-setting-strength]').value = 'strong';
-  root.querySelector('[data-recursion-setting-min-cards]').value = '4';
-  root.querySelector('[data-recursion-setting-max-cards]').value = '12';
+  root.querySelector('[data-recursion-setting-cards-per-turn]').value = '12';
   root.querySelector('[data-recursion-setting-selection-variety]').value = 'medium';
   root.querySelector('[data-recursion-setting-card-cooldown]').value = '2';
   root.querySelector('[data-recursion-setting-footprint]').value = 'rich';
@@ -4147,8 +4252,7 @@ try {
   assertEqual(settingsUpdates.length, autoSaveBefore + 1, 'settings controls auto-save as soon as a value changes');
   assertDeepEqual(settingsUpdates.at(-1), {
     strength: 'strong',
-    minCards: 4,
-    maxCards: 12,
+    cardsPerTurn: 12,
     cardSelection: { variety: 'medium', cooldownTurns: 2 },
     promptFootprint: 'rich',
     focus: 'character',

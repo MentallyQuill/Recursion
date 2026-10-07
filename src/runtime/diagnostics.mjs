@@ -4,6 +4,8 @@ import { summarizePreparedGenerationArtifact } from './prepared-generation.mjs';
 import { normalizeGuidanceOmissions } from '../guidance-omissions.mjs';
 import { summarizeFusedOutcome } from '../fused-recovery.mjs';
 import { normalizeInstructionValidationRule } from '../instruction-safety.mjs';
+import { normalizeOutputIssues } from '../providers/output-contract.mjs';
+import { normalizeRecoveryCounts, RECOVERY_COUNT_KEYS } from '../execution/recovery-counts.mjs';
 
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 const RESUME_BODY_KEY_PATTERN = /(arbiter|card|reference|packet|hand|guidance|draft|prose|prompt|response|artifact).*(body|text|payload|content)|^(body|text|payload|content)$/i;
@@ -13,6 +15,16 @@ const EXECUTION_DIAGNOSTIC_CODE_SET = new Set([
   'operation-paused:operation-deadline',
   'operation-stale:source-changed',
   'stage-attempt-exhausted',
+  'correction-request-unchanged',
+  'native-schema-required',
+  'model-output-corrected',
+  'output-budget-increased',
+  'output-budget-reduced',
+  'output-budget-at-ceiling',
+  'output-budget-at-floor',
+  'structured-output-downgraded',
+  'provider-transient-retry',
+  'provider-transient-exhausted',
   'provider-rate-limit-retry',
   'provider-rate-limit-exhausted',
   'stage-checkpoint-reused',
@@ -134,10 +146,12 @@ function summarizeExecutionStage(record) {
     stageState: safeText(source.state, 40),
     attemptCount: boundedInteger(source.attempts?.total, 100000),
     attemptLimit: boundedInteger(source.attempts?.limit, 100000),
+    recoveryCounts: normalizeRecoveryCounts(source.recoveryCounts),
     elapsedMs: elapsedMilliseconds(source.startedAt, source.updatedAt),
     ...(source.timings ? { timings: safeDiagnosticValue(source.timings) } : {}),
     failureClass: safeText(source.failure?.failureClass, 80),
     failureCode: safeText(source.failure?.code, 120),
+    ...(source.failure?.fieldIssues?.length ? { fieldIssues: normalizeOutputIssues(source.failure.fieldIssues) } : {}),
     ...(normalizeInstructionValidationRule(source.failure?.validationRule)
       ? { validationRule: normalizeInstructionValidationRule(source.failure.validationRule) } : {}),
     ...(Number.isFinite(source.failure?.retryAfterMs)
@@ -169,6 +183,8 @@ export function summarizeExecutionForDiagnostics(manifest) {
       deadlineMs: boundedInteger(source.recoveryBudget.deadlineMs)
     } } : {}),
     operationState: safeText(source.state, 40),
+    recoveryCounts: normalizeRecoveryCounts(Object.fromEntries(RECOVERY_COUNT_KEYS.map(key => [key,
+      stages.reduce((total, stage) => total + stage.recoveryCounts[key], 0)]))),
     turnKeyHash: safeText(source.turnKeyHash, 180),
     hostOwned: source.hostOwned === true,
     nativeGenerationType: ['normal', 'swipe', 'regenerate'].includes(source.nativeGenerationType)
@@ -325,8 +341,7 @@ function mapSettingsSummary(settings) {
     mode: safeText(source.mode, 40),
     pipelineMode: safeText(source.pipelineMode, 40),
     strength: safeText(source.strength, 40),
-    minCards: numberOr(source.minCards, 0),
-    maxCards: numberOr(source.maxCards, 0),
+    cardsPerTurn: numberOr(source.cardsPerTurn, 6),
     reasoningLevel: safeText(source.reasoningLevel, 40),
     promptFootprint: safeText(source.promptFootprint, 40),
     focus: safeText(source.focus, 80),

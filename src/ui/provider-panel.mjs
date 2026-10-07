@@ -23,6 +23,19 @@ export function providerCapabilityDetail(state) {
   return CAPABILITY_DETAILS[String(state || '').trim().toLowerCase()] || '';
 }
 
+export function providerCheckLines(provider = {}, capability = {}) {
+  const current = ['segmented-ready', 'fused-ready', 'unhealthy'].includes(capability.state);
+  const checks = current ? provider.certification?.checks || {} : {};
+  const label = value => value === 'pass' ? 'Passed' : value === 'fail' ? 'Failed' : 'Not checked';
+  const mode = provider.generationPolicy?.structuredOutputMode;
+  const native = mode === 'native-schema' || (mode !== 'prompt-json' && capability.structuredOutput === 'native-schema');
+  return [
+    `Connection: ${label(checks.connectivity)} · Single cards: ${label(checks.singleCard)} · Combined cards: ${label(checks.fusedCards)}`,
+    `Structured output: ${native ? 'Native Schema' : 'Prompt JSON'} · Concurrent requests: ${provider.maxConcurrentRequests ?? 2} configured, ${capability.safeConcurrency || 1} effective`,
+    'Profile checks test capability; they do not predict combined-card reliability for every turn.'
+  ];
+}
+
 export function providerStatusClass(text, { baseClass = '' } = {}) {
   const normalized = String(text || '').trim().toLowerCase();
   const stateClass = ['segmented', 'fused', 'ok', 'pass', 'passed', 'ready'].includes(normalized)

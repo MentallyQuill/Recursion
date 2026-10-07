@@ -102,7 +102,7 @@ async function configureSegmentedSurface(page, timeoutMs) {
     const settings = runtime?.view?.()?.settings || {};
     const excludedKey = 'post' + 'Process';
     await runtime?.updateSettings?.({
-      mode: 'auto', pipelineMode: 'segmented', minCards: 2, maxCards: 2, reasoningLevel: 'medium',
+      mode: 'auto', pipelineMode: 'segmented', cardsPerTurn: 2, reasoningLevel: 'medium',
       [excludedKey]: { ...(settings[excludedKey] || {}), enabled: false },
       injection: { ...(settings.injection || {}), placement: 'in_prompt', depth: 1, role: 'system' }
     });

@@ -1,6 +1,6 @@
 # Card budget and progress parity
 
-Approved scope: Play settings set the total hand target (Low = Min, Medium/High = midpoint, Ultra = Max). Mandatory Priority coverage precedes ordinary work and may exceed that target. Fused and Segmented execute the same finalized selection. Progress reports delivered totals and shortfalls and survives restoration.
+Current scope: Play persists one `cardsPerTurn` target (default 6, range 0..20), independent of Low/Medium/High/Ultra routing, Guidance strength/detail, and Fused/Segmented. Mandatory Priority and Refinement coverage precedes ordinary Auto work and may exceed that target. Manual reserves Refinement first, then projects ordinary authored cards and generated families in deck order into remaining slots without changing saved states. Both pipelines execute that finalized selection. Progress reports delivered totals and truthful shortfalls and survives restoration; exhausted optional generated work is amber, while unresolved required coverage blocks installation.
 
 Implementation sequence:
 1. Reproduce under-selection with real runtime fixtures, then enforce the shared target and complete eligible selection before dispatch. Preserve deck-ordered Priority coverage and explicit eligibility.
@@ -8,7 +8,7 @@ Implementation sequence:
 3. Exercise parity, partial bundle repair, insufficient eligibility, overflow, zero target, failure, and restored/cache state; update contracts and docs.
 4. Run the full suite and isolated browser proof, review the scoped diff, integrate with latest main, push, and verify remote HEAD.
 
-Verification record:
+Historical verification record (retained as measured; the current target contract above supersedes the earlier Min/Max settings):
 - Existing local restoration regression was reproduced before its fix; copied only its three scoped files into an isolated managed worktree. Unrelated viewer-scroll changes remain in the original checkout.
 - All 89 offline test scripts pass after integration with current main, including target parity, actual installed packet references, Priority overflow, insufficient eligibility, failed generation, duplicate rankings, partial Fused repair, and same-turn reuse. The runtime race fixture polling allowance was widened from 100 to 1000 iterations to tolerate full-suite load without changing its ordering assertions.
 - Independent code review found duplicate family proposals could create duplicate execution stages. Added a failing reproduction, deduplicated by canonical family while preserving first rank, and verified both workflows.

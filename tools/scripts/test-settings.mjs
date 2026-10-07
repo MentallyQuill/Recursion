@@ -331,26 +331,19 @@ assertEqual(defaultUi.reasoningLevel, 'medium', 'reasoning level defaults to med
 assertEqual(defaultUi.promptFootprint, 'compact', 'prompt footprint defaults to compact');
 assertEqual(defaultUi.providers.utility.outputTokenCeiling, 8192, 'utility provider output ceiling defaults to 8192');
 assertEqual(defaultUi.providers.reasoner.outputTokenCeiling, 8192, 'reasoner provider output ceiling defaults to 8192');
-assertEqual(defaultUi.minCards, 3, 'minimum cards defaults to low reasoning card budget');
-assertEqual(defaultUi.maxCards, 10, 'maximum cards defaults to ultra reasoning card budget');
+assertEqual(defaultUi.cardsPerTurn, 6, 'cards per turn defaults to six');
 assertEqual(defaultUi.ui.progressChildVisibleLimit, 5, 'sub-tier visible item default is five');
 assertEqual(defaultUi.ui.progressListVisibleLimit, 15, 'whole progress list visible item default is fifteen');
 assertEqual(defaultUi.ui.tooltipsEnabled, true, 'tooltips default on');
 assertEqual(normalizeSettings({ ui: { tooltipsEnabled: false } }).ui.tooltipsEnabled, false, 'tooltip setting can disable hover help');
-assertEqual(normalizeSettings({ minCards: '5', maxCards: '11' }).minCards, 5, 'minimum cards numeric strings normalize');
-assertEqual(normalizeSettings({ minCards: '5', maxCards: '11' }).maxCards, 11, 'maximum cards numeric strings normalize');
-assertDeepEqual(
-  { minCards: normalizeSettings({ minCards: 14, maxCards: 4 }).minCards, maxCards: normalizeSettings({ minCards: 14, maxCards: 4 }).maxCards },
-  { minCards: 4, maxCards: 14 },
-  'card budget settings sort inverted min and max'
-);
-assertEqual(normalizeSettings({ minCards: -20, maxCards: 99 }).minCards, 0, 'minimum cards clamps low');
-assertEqual(normalizeSettings({ minCards: -20, maxCards: 99 }).maxCards, 20, 'maximum cards clamps high');
-const zeroMaxManual = normalizeSettings({ mode: 'manual', maxCards: 0 });
-assertEqual(zeroMaxManual.maxCards, 0, 'stored Max Cards can remain zero for existing card budget semantics');
+assertEqual(normalizeSettings({ cardsPerTurn: '5' }).cardsPerTurn, 5, 'cards per turn numeric strings normalize');
+assertEqual(normalizeSettings({ cardsPerTurn: -20 }).cardsPerTurn, 0, 'cards per turn clamps low');
+assertEqual(normalizeSettings({ cardsPerTurn: 99 }).cardsPerTurn, 20, 'cards per turn clamps high');
+const zeroMaxManual = normalizeSettings({ mode: 'manual', cardsPerTurn: 0 });
+assertEqual(zeroMaxManual.cardsPerTurn, 0, 'Manual target can remain zero');
 assert(zeroMaxManual.preProcessDecks, 'manual settings still normalize card decks');
-const highMax = normalizeSettings({ mode: 'manual', maxCards: 50 });
-assertEqual(highMax.maxCards, 20, 'Max Cards remains capped at twenty');
+const highMax = normalizeSettings({ mode: 'manual', cardsPerTurn: 50 });
+assertEqual(highMax.cardsPerTurn, 20, 'cards per turn remains capped at twenty');
 
 const invalidReasoning = normalizeSettings({ reasoningLevel: 'maximum' });
 assertEqual(invalidReasoning.reasoningLevel, 'medium', 'invalid reasoning level falls back to medium');
@@ -577,12 +570,10 @@ assertEqual(root.recursion.retention.runJournalEntries, 120, 'partial retention 
 
 store.update({ reasoningLevel: 'medium' });
 store.update({ strength: 'light' });
-store.update({ minCards: 4 });
-store.update({ maxCards: 12 });
+store.update({ cardsPerTurn: 12 });
 assertEqual(root.recursion.reasoningLevel, 'medium', 'partial settings update preserves reasoning level');
 assertEqual(root.recursion.strength, 'light', 'partial settings update changes strength');
-assertEqual(root.recursion.minCards, 4, 'partial settings update changes minimum cards');
-assertEqual(root.recursion.maxCards, 12, 'partial settings update preserves minimum cards and changes maximum cards');
+assertEqual(root.recursion.cardsPerTurn, 12, 'partial settings update changes target');
 
 store.update({ ui: { progressChildVisibleLimit: 7 } });
 store.update({ ui: { progressListVisibleLimit: 22 } });
@@ -620,8 +611,7 @@ store.update({
   storyFormOverride: 'present-third-limited',
   preProcessDecks: preservedDecks,
   strength: 'strong',
-  minCards: 8,
-  maxCards: 16,
+  cardsPerTurn: 16,
   focus: 'plot',
   promptFootprint: 'rich',
   injection: { placement: 'in_chat', role: 'assistant', depth: 8 },
@@ -650,8 +640,7 @@ assertEqual(resetSettings.pipelineMode, beforeMenuReset.pipelineMode, 'menu rese
 assertEqual(resetSettings.reasoningLevel, beforeMenuReset.reasoningLevel, 'menu reset preserves reasoning level');
 assertEqual(resetSettings.storyFormOverride, beforeMenuReset.storyFormOverride, 'menu reset preserves story form');
 assertEqual(resetSettings.strength, DEFAULT_RECURSION_SETTINGS.strength, 'menu reset restores Play strength');
-assertEqual(resetSettings.minCards, DEFAULT_RECURSION_SETTINGS.minCards, 'menu reset restores minimum cards');
-assertEqual(resetSettings.maxCards, DEFAULT_RECURSION_SETTINGS.maxCards, 'menu reset restores maximum cards');
+assertEqual(resetSettings.cardsPerTurn, DEFAULT_RECURSION_SETTINGS.cardsPerTurn, 'menu reset restores target');
 assertDeepEqual(resetSettings.injection, DEFAULT_RECURSION_SETTINGS.injection, 'menu reset restores injection settings');
 assertDeepEqual(resetSettings.ui, { ...DEFAULT_RECURSION_SETTINGS.ui, viewerOpen: beforeMenuReset.ui.viewerOpen }, 'menu reset restores UI settings while preserving viewer state');
 assertDeepEqual(resetSettings.postProcess, DEFAULT_RECURSION_SETTINGS.postProcess, 'menu reset restores post-process settings');

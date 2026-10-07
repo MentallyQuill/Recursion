@@ -240,8 +240,7 @@ assertDeepEqual(module.matrixSettingsPatch({
   injection: { placement: 'in_chat', depth: 4, role: 'user' }
 }), {
   mode: 'auto',
-  minCards: 2,
-  maxCards: 2,
+  cardsPerTurn: 2,
   reasoningLevel: 'medium',
   postProcess: { enabled: false, mode: 'automatic' },
   injection: { placement: 'in_prompt', depth: 1, role: 'system' }

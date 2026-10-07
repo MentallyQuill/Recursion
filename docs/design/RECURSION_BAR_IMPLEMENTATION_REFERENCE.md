@@ -189,10 +189,10 @@ Runtime toggles:
     <div class="right-tools">
       <div class="reasoning-chain" role="radiogroup" aria-label="Reasoning level" data-selected="high">
         <span class="reasoning-line-fill" aria-hidden="true"></span>
-        <button class="reasoning-node is-lit" type="button" role="radio" aria-checked="false" data-level="low" title="Low: Utility-only, reduced cards."></button>
+        <button class="reasoning-node is-lit" type="button" role="radio" aria-checked="false" data-level="low" title="Low: Utility-only routing. Cards per turn stays unchanged."></button>
         <button class="reasoning-node is-lit" type="button" role="radio" aria-checked="false" data-level="medium" title="Medium: Utility checks, Reasoner guidance."></button>
         <button class="reasoning-node is-lit is-selected" type="button" role="radio" aria-checked="true" data-level="high" title="High: Reasoner Arbiter, priority cards, and guidance."></button>
-        <button class="reasoning-node" type="button" role="radio" aria-checked="false" data-level="ultra" title="Ultra: Reasoner-heavy calls with a larger card bias."></button>
+        <button class="reasoning-node" type="button" role="radio" aria-checked="false" data-level="ultra" title="Ultra: Reasoner-heavy routing. Cards per turn stays unchanged."></button>
       </div>
       <button class="icon-button brief-arrow" id="brief-arrow" aria-label="Open last brief preview" aria-expanded="false">
         <span class="arrow-down" aria-hidden="true"></span>

@@ -51,7 +51,7 @@ export const FOOTPRINT_POLICIES = Object.freeze({
     preferredProfile: 'compact',
     detailPressure: 'compact',
     arbiterLine: 'Prompt Footprint: Compact. Keep compact unless a safety or hard scene-constraint reason requires temporary expansion.',
-    composerLine: 'Prompt Footprint: Compact. Use fewer cards and shorter guidance; do not truncate raw selected card text.'
+    composerLine: 'Prompt Footprint: Compact. Use shorter guidance over every selected card; do not truncate raw selected card text.'
   }),
   normal: Object.freeze({
     level: 'normal',
@@ -138,8 +138,6 @@ export function runPolicyForEffectivePlan(settings = {}, plan = {}) {
       effectivePolicy: clone(effectiveFootprint),
       detailPressure: effectiveFootprint.detailPressure,
       sectionBudgets: { ...FOOTPRINT_SECTION_BUDGETS[effectiveLevel] },
-      maxCardsTarget: effectiveFootprint.maxCardsTarget,
-      maxCardsCeiling: effectiveFootprint.maxCardsCeiling,
       composerLine: effectiveFootprint.composerLine,
       footprintOverrideReason: footprintOverrideReason(plan)
     }

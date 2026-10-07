@@ -133,11 +133,11 @@ When sampler projection fails, Recursion uses its lane temperature and top-p ove
 
 ### Structured Output
 
-`auto` uses the structured-output method established by current profile certification.
+`auto` uses the structured-output method established by certification matching both the current Recursion configuration and the live profile identity; otherwise it uses Prompt JSON.
 
 `native-schema` explicitly requests native schema support. `prompt-json` relies on the prompt contract and Recursion's parser.
 
-An unsupported native-schema response may downgrade to prompt JSON only when the current attempt directive allows that single change. Downgrade state is recorded as a fixed code, not raw provider text.
+Only `auto` may downgrade a definitively unsupported native-schema attempt to Prompt JSON within budget. Explicit `native-schema` stops with a compatibility explanation. The actual attempted method and downgrade action are safe fixed metadata, not raw provider text.
 
 ## Request Flow
 
@@ -189,12 +189,12 @@ Unknown profile mappings are unsupported. The adapter does not silently redirect
 
 ## Traffic Control
 
-Every Connection Profile has an abort-aware FIFO queue with physical concurrency one.
+Every Connection Profile has an abort-aware FIFO queue. Effective concurrency is one until current qualification verifies a higher configured limit, at most three. Qualification matches both the settings hash and the live profile identity; lanes sharing a profile use the most conservative matching limit. Drift or failed qualification returns the effective limit to one.
 
 Consequences:
 
-- Segmented sibling stages can remain logically independent and checkpointable while their model calls execute one at a time on the same profile.
-- Utility and Reasoner may overlap only when they use different profiles.
+- Segmented sibling stages remain logically independent and checkpointable while calls respect the effective profile limit.
+- Utility and Reasoner share that limit when they select the same profile; different profiles have independent queues.
 - An aborted queued request is removed before execution.
 - An active request receives the runtime abort signal.
 - A queue failure cannot strand later entries.
@@ -203,29 +203,29 @@ The queue boundary exists below all pipeline paths, so certification, Pre-proces
 
 ## Output Budgets
 
-The provider lane's `outputTokenCeiling` is a hard maximum, not the default for every request. Each role receives a smaller stage budget.
+The provider lane's `outputTokenCeiling` is the default production output allowance and hard maximum, default 8192. An explicit request allowance can be smaller; it is capped at the lane ceiling. The allowance is not a target response length.
 
 Representative budgets:
 
 | Stage | Initial budget |
 | --- | ---: |
 | Connectivity certification | 128 |
-| Single card | 900 |
-| Utility Arbiter | 1,200 |
-| Guidance Composer | 1,600 |
-| Reasoner Composer | 1,800 |
-| Fused bundle | Scales with requested family count and remains capped |
-| Editorial stages | Derived from the specific editorial contract and lane ceiling |
+| Single-card certification | 900 |
+| Fused certification | Bounded representative two-family allowance |
+| Production card, Arbiter, composer, and editorial stages | Lane ceiling unless the request supplies a smaller allowance |
 
 A context-limit directive reduces only the current stage's output allowance, normally by 25 percent and never below its role floor. It does not also change samplers, prompt policy, profile, or structured-output method.
 
 ## Staged Profile Certification
 
-`Test Profile` performs three checks:
+`Test Profile` performs these bounded checks:
 
 1. Small connectivity JSON.
 2. Representative compact single-card JSON.
 3. Representative two-family Fused JSON.
+4. Observed concurrency when a higher configured limit is requested.
+
+The result binds to the Recursion `configHash` and the live `profileIdentityHash`, computed only from ID, model, API, completion mode, preset, and instruct identity. Names, endpoints, and secrets are excluded. Same-ID profile edits make saved qualification untested, and drift during the test prevents saving its result. Status reads do not dispatch probes.
 
 Certification never stores the prompt, raw response, provider exception, profile object, endpoint data, or credentials.
 
@@ -236,7 +236,7 @@ Capability states are:
 | `unconfigured` | No selected available profile. |
 | `uncertified` | Profile is configured but no current certification matches its configuration. |
 | `segmented-ready` | Connectivity and single-card checks passed; Fused did not pass. |
-| `fused-ready` | All three checks passed. |
+| `fused-ready` | Connectivity, single-card, and Fused checks passed. |
 | `unhealthy` | Connectivity or single-card compatibility failed. |
 
 Certification reports observed capability. Explicit Fused selection dispatches a bundle for a configured profile regardless of whether testing is absent, partial, or failed. Runtime validation, repair, and fallback handle actual responses.

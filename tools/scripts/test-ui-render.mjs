@@ -42,7 +42,7 @@ assert(!Object.values(queued.dataset).some((value) => /expand|menu/i.test(value)
 const uiSource = readFileSync(new URL('../../src/ui.mjs', import.meta.url), 'utf8');
 assert(uiSource.includes('Attempts per step'), 'Advanced UI renders Attempts per step');
 assert(
-  uiSource.includes('Total automatic model attempts for each Recursion step. Slow calls are not retried unless they fail.'),
+  uiSource.includes('The first call counts toward Attempts per step. Capacity retries are separately bounded; the operation allowance can stop recovery earlier. Resume keeps the current budget. Retry or Reprocess opens a new window while retaining accepted work.'),
   'Attempts setting renders the approved helper'
 );
 assert(/recursionSettingModelAttemptsPerStep[\s\S]*?min:\s*1[\s\S]*?max:\s*5/.test(uiSource), 'Attempts control is bounded from one to five');

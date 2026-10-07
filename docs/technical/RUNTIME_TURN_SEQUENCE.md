@@ -7,11 +7,12 @@ This manual is the current execution-order authority for Recursion V1. It covers
 | Control | Runtime effect |
 | --- | --- |
 | Power | Off aborts Recursion work, clears owned prompt keys, and prevents new preparation. |
-| Auto / Manual | Auto lets the Arbiter choose from the runnable catalog. Manual restricts work to the operator-selected runnable families and sub-items. |
+| Auto / Manual | Auto reserves Priority and Refinement before discretionary work. Manual reserves Refinement, then projects ordinary authored cards and generated families in deck order into the remaining Cards per turn slots without changing saved scope/states. |
+| Cards per turn | One persisted `cardsPerTurn` target, default 6, range 0..20, shared by every Reasoning Level and pipeline. Mandatory coverage may exceed it. |
 | Segmented / Fused | Segmented generates requested card families in separate narrow calls. Fused requests one bundle, validates every sibling, repairs useful partial bundles with Segmented calls, and uses full Segmented fallback only after zero useful cards. |
 | Stop | Pauses the operation, aborts active Recursion work, requests native host Stop, clears owned prompts, and preserves accepted checkpoints. |
 | Resume | Requests the matching native SillyTavern action and continues only after the host interceptor returns. |
-| Retry Stage | Discards the failed stage's partial output and gives that stage a fresh configured attempt window. Accepted upstream checkpoints remain reusable. |
+| Retry Stage | Discards the failed stage's partial output and gives that stage a fresh configured attempt and active-operation window. Accepted upstream checkpoints remain reusable; inherited cooldown remains. |
 | Reprocess from here | Queues a next-swipe invalidation for the chosen stage and its dependents. It does not interrupt or race the active run. |
 | Full Rebuild | Queues one fresh Pre-process pass for the next matching swipe. The click starts no provider or host work. |
 
@@ -42,7 +43,7 @@ The scheduler recognizes these stage states:
 
 Only model stages consume `Attempts per step`. The setting range is one through five and defaults to two total attempts per model stage. Snapshotting, validation, cache reads, persistence, prompt installation, and host commits do not consume the window.
 
-Recursion sets no default generation timeout. A slow call remains pending until it returns, its provider fails it, or the user stops it. Provider-owned deadlines may still surface as provider failures. A pending call is never duplicated merely because it is slow.
+Request timeout defaults to 180 seconds and active operation budget to 300 seconds, including queue/cooldown waits. Pending calls are never duplicated merely because they are slow. Rate-limit retries (up to eight) and retryable transient retries (up to three) have separate bounds from model-output correction attempts; the operation recovery allowance or deadline can stop additional dispatch earlier.
 
 ## Pre-process Sequence
 
@@ -106,7 +107,9 @@ flowchart TD
     Fallback --> Continue
 ```
 
-Unrequested, duplicate, wrong-source, or invalid siblings are rejected individually. Partial success is checkpointed before repair begins. Full Segmented fallback is reserved for a bundle with no useful accepted cards.
+Unrequested, duplicate, wrong-source, or invalid siblings are rejected individually. Complete items from eligible damaged JSON or token exhaustion pass the same validation as successful siblings. Evidence must cite the supplied source window; missing or out-of-window refs cannot be replaced with the latest message. Accepted siblings checkpoint before unresolved-family repair. If no useful item survives bounded output recovery, Fused uses the full Segmented path; token/context capacity exhaustion can also narrow to individual families. Transport, refusal, Stop, stale-source, storage, and operation-budget failures cannot authorize equivalent fallback calls.
+
+Selected Scene Constraints, Manual, Priority, and Refinement coverage is required, including generated and authored work. Exhausted optional generated families can complete with a smaller hand and amber omissions; unresolved required coverage blocks installation.
 
 ## Stop, Resume, Retry, And Reprocess
 
@@ -118,7 +121,7 @@ Stop is operation-scoped:
 4. Runtime waits for settlement, clears owned prompt lanes once, and leaves accepted upstream artifacts referenced.
 5. The active stage settles paused. The progress row exposes Resume; a known retryable failure exposes Retry Stage.
 
-Resume preserves the stage's attempt history. It requests the stored native Send, Swipe, or Regenerate action and makes no provider call directly. The graph continues only when the matching host interceptor returns. If the stopped call had already been dispatched, it consumed an attempt. Retry Stage explicitly resets only that stage to the configured total attempt window and removes its partial artifact.
+Resume preserves attempt history and the current recovery budget. It requests the stored native Send, Swipe, or Regenerate action and makes no provider call directly. The graph continues only when the matching host interceptor returns. If the stopped call had already been dispatched, it consumed an attempt. Deliberate Retry Stage resets that stage to the configured total attempt window, removes its partial artifact, and opens a new active window without bypassing inherited cooldown. Reprocess likewise opens a new window when its queued intent is consumed.
 
 `Reprocess from here on the next swipe` remains available on eligible completed or stale rows after the fleeting active state is gone. Clicking it queues a turn-bound dependency invalidation and starts nothing. The queued row action becomes `Cancel queued reprocess`. The next matching swipe consumes it once; a new user message or source mismatch cancels it.
 

@@ -1,3 +1,5 @@
+import { normalizeOutputIssues } from './providers/output-contract.mjs';
+
 export const FAILURE_CATEGORIES = Object.freeze([
   'provider-account',
   'provider-request',
@@ -79,12 +81,14 @@ export function createFailure(input = {}) {
   const category = CATEGORY_SET.has(source.category) ? source.category : 'internal';
   const attemptedRecovery = optionalText(source.attemptedRecovery);
   const suggestedAction = optionalText(source.suggestedAction);
+  const fieldIssues = normalizeOutputIssues(source.fieldIssues).map((issue) => Object.freeze(issue));
   return Object.freeze({
     code,
     stage: safeStage(source.stage),
     category,
     message: normalizedMessage(source.message),
     retryable: source.retryable === true,
+    ...(fieldIssues.length ? { fieldIssues: Object.freeze(fieldIssues) } : {}),
     ...(attemptedRecovery ? { attemptedRecovery } : {}),
     ...(suggestedAction ? { suggestedAction } : {})
   });
@@ -175,14 +179,18 @@ export function providerFailure(error = {}, context = {}) {
       suggestedAction: 'Increase the provider token limit or reduce the request context.'
     });
   }
-  if (['RECURSION_JSON_PARSE_FAILED', 'RECURSION_JSON_OBJECT_REQUIRED'].includes(code)) {
+  if (['RECURSION_JSON_PARSE_FAILED', 'RECURSION_JSON_OBJECT_REQUIRED', 'RECURSION_JSON_AMBIGUOUS',
+    'RECURSION_JSON_SIZE_LIMIT', 'RECURSION_JSON_DEPTH_LIMIT', 'RECURSION_JSON_ITEM_LIMIT'].includes(code)) {
     return createFailure({
       code,
       stage,
       category: 'provider-output',
       message: code === 'RECURSION_JSON_OBJECT_REQUIRED'
         ? 'Provider returned structured output that was not a JSON object.'
-        : 'Provider returned malformed JSON.',
+        : code === 'RECURSION_JSON_AMBIGUOUS'
+          ? 'Provider returned competing JSON values or duplicate object keys.'
+          : code.endsWith('_LIMIT') ? 'Provider structured output exceeded the processing limits.'
+            : 'Provider returned malformed JSON.',
       retryable: true
     });
   }
@@ -190,12 +198,14 @@ export function providerFailure(error = {}, context = {}) {
     'RECURSION_PROVIDER_EMPTY_RESPONSE',
     'RECURSION_PROVIDER_REASONING_ONLY',
     'RECURSION_PROVIDER_SCHEMA_MISMATCH',
-    'RECURSION_PROVIDER_RESPONSE_JSON_INVALID'
+    'RECURSION_PROVIDER_RESPONSE_JSON_INVALID',
+    'RECURSION_POST_PROCESS_GUIDANCE_INVALID'
   ].includes(code)) {
     return createFailure({
       code,
       stage,
       category: 'provider-output',
+      fieldIssues: error?.fieldIssues,
       message: code === 'RECURSION_PROVIDER_EMPTY_RESPONSE'
         ? 'Provider returned no visible content.'
         : code === 'RECURSION_PROVIDER_REASONING_ONLY'
@@ -251,7 +261,8 @@ export function failureFrom(value, fallback = {}) {
     message: source.message || defaults.message || '',
     retryable: source.retryable ?? defaults.retryable,
     attemptedRecovery: source.attemptedRecovery || defaults.attemptedRecovery,
-    suggestedAction: source.suggestedAction || defaults.suggestedAction
+    suggestedAction: source.suggestedAction || defaults.suggestedAction,
+    fieldIssues: source.fieldIssues || defaults.fieldIssues
   });
 }
 
@@ -264,7 +275,8 @@ export function failureFromError(error = {}, context = {}) {
     category: context.category || 'internal',
     message: INTERNAL_FAILURE_MESSAGE,
     retryable: false,
-    suggestedAction: INTERNAL_FAILURE_ACTION
+    suggestedAction: INTERNAL_FAILURE_ACTION,
+    fieldIssues: error?.fieldIssues
   });
 }
 

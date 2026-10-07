@@ -58,8 +58,7 @@ export const DEFAULT_RECURSION_SETTINGS = deepFreeze({
     categoryExpansion: {}
   },
   strength: 'balanced',
-  minCards: 3,
-  maxCards: 10,
+  cardsPerTurn: 6,
   cardSelection: { variety: 'low', cooldownTurns: 0 },
   modelAttemptsPerStep: 2,
   requestDeadlineSeconds: 180,
@@ -161,34 +160,15 @@ function normalizeModelAttemptsPerStep(value) {
 
 export function normalizeCardBudgetSettings(value = {}) {
   const source = value && typeof value === 'object' ? value : {};
-  const hasMinCards = Object.prototype.hasOwnProperty.call(source, 'minCards');
-  const hasMaxCards = Object.prototype.hasOwnProperty.call(source, 'maxCards');
-  const rawMin = Math.round(numberInRange(
-    source.minCards,
-    DEFAULT_RECURSION_SETTINGS.minCards,
+  const raw = source.cardsPerTurn;
+  const valueIsNumeric = typeof raw === 'number' || (typeof raw === 'string' && raw.trim() !== '');
+  const targetCards = Math.round(numberInRange(
+    valueIsNumeric ? raw : undefined,
+    DEFAULT_RECURSION_SETTINGS.cardsPerTurn,
     CARD_BUDGET_MIN,
     CARD_BUDGET_MAX
   ));
-  const rawMax = Math.round(numberInRange(
-    source.maxCards,
-    DEFAULT_RECURSION_SETTINGS.maxCards,
-    CARD_BUDGET_MIN,
-    CARD_BUDGET_MAX
-  ));
-  if (hasMaxCards && !hasMinCards && rawMax < rawMin) {
-    return {
-      minCards: rawMax,
-      normalCards: rawMax,
-      maxCards: rawMax
-    };
-  }
-  const minCards = Math.min(rawMin, rawMax);
-  const maxCards = Math.max(rawMin, rawMax);
-  return {
-    minCards,
-    normalCards: Math.floor((minCards + maxCards) / 2),
-    maxCards
-  };
+  return { targetCards };
 }
 
 function normalizeInjectionDepth(value) {
@@ -258,18 +238,6 @@ function mergeSettingsPatch(base, patch) {
   if (Object.prototype.hasOwnProperty.call(patch, 'postProcessDecks')) {
     result.postProcessDecks = normalizePostProcessDeckSettings(patch.postProcessDecks);
   }
-  const hasMinCards = Object.prototype.hasOwnProperty.call(patch, 'minCards');
-  const hasMaxCards = Object.prototype.hasOwnProperty.call(patch, 'maxCards');
-  if (hasMaxCards && !hasMinCards) {
-    const maxCards = normalizeCardBudgetSettings({ minCards: 0, maxCards: patch.maxCards }).maxCards;
-    const currentMin = normalizeCardBudgetSettings(base).minCards;
-    if (maxCards < currentMin) result.minCards = maxCards;
-  }
-  if (hasMinCards && !hasMaxCards) {
-    const minCards = normalizeCardBudgetSettings({ minCards: patch.minCards, maxCards: CARD_BUDGET_MAX }).minCards;
-    const currentMax = normalizeCardBudgetSettings(base).maxCards;
-    if (minCards > currentMax) result.maxCards = minCards;
-  }
   return result;
 }
 
@@ -293,6 +261,7 @@ function normalizeProviderCertification(value = {}) {
   return {
     status,
     configHash: String(source.configHash || '').slice(0, 16),
+    profileIdentityHash: String(source.profileIdentityHash || '').slice(0, 16),
     checkedAt: String(source.checkedAt || '').slice(0, 80),
     completionMode: enumValue(source.completionMode, COMPLETION_MODES, 'unknown'),
     structuredOutput: enumValue(source.structuredOutput, STRUCTURED_METHODS, 'unknown'),
@@ -434,8 +403,7 @@ export function normalizeSettings(value = {}) {
     pipelineMode: enumValue(source.pipelineMode, PIPELINE_MODES, DEFAULT_RECURSION_SETTINGS.pipelineMode),
     preProcessDecks,
     strength: enumValue(source.strength, STRENGTHS, DEFAULT_RECURSION_SETTINGS.strength),
-    minCards: cardBudget.minCards,
-    maxCards: cardBudget.maxCards,
+    cardsPerTurn: cardBudget.targetCards,
     cardSelection: normalizeCardSelectionSettings(source.cardSelection),
     modelAttemptsPerStep: normalizeModelAttemptsPerStep(source.modelAttemptsPerStep),
     requestDeadlineSeconds: Math.min(600, Math.max(30, Math.round(Number(source.requestDeadlineSeconds) || 180))),
@@ -568,6 +536,7 @@ export function createSettingsStore({ root = globalThis.extension_settings || {}
       const provider = current.providers[resolvedLane];
       const allowedResultKeys = new Set([
         'status',
+        'profileIdentityHash',
         'checkedAt',
         'completionMode',
         'structuredOutput',

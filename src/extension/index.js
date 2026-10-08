@@ -3,10 +3,12 @@ import { createActivityReporter } from '../activity.mjs';
 import { createSillyTavernHost } from '../hosts/sillytavern/host.mjs';
 import { createGenerationRouter } from '../providers.mjs';
 import { createRecursionRuntime } from '../runtime.mjs';
+import { createBuildIdentityReader } from '../runtime/build-identity.mjs';
 import { createStorageRepository } from '../storage.mjs';
 import { mountRecursionUi } from '../ui.mjs';
 
 let runtime = null;
+const buildIdentityReader = createBuildIdentityReader({ url: new URL('../../build-info.json', import.meta.url) });
 let ui = null;
 let host = null;
 let hostEventUnsubscribers = [];
@@ -688,6 +690,7 @@ export function bootstrapRecursion() {
 
   try {
     const nextHost = createSillyTavernHost();
+    void buildIdentityReader.load();
     const activity = createActivityReporter();
     const storage = createStorageRepository({
       storage: nextHost.storageAdapter,
@@ -706,7 +709,8 @@ export function bootstrapRecursion() {
       settingsStore: nextHost.settingsStore,
       storage,
       activity,
-      generationRouter
+      generationRouter,
+      buildIdentity: buildIdentityReader.snapshot
     });
     const nextUi = mountRecursionUi({ runtime: nextRuntime });
     host = nextHost;

@@ -39,7 +39,7 @@ Tasks 1–4 establish safe identity/history/status contracts. Task 5 corrects th
 
 **Interfaces:** `productionTreeIdentity(root) -> {productionHash,files}`; `prepareRecursionInstall({repositoryRoot,outputRoot,sourceRevision,dirty,createdAt}) -> stagingReport`; `normalizeBuildIdentity(value) -> immutableDescriptor`; `createBuildIdentityReader({fetchImpl,url}) -> {load(),snapshot()}`. Runtime accepts a `buildIdentity` getter, defaulting to unavailable; entry point loads only its own `../../build-info.json` once. Status is `declared` or `unavailable`, with no generated timestamp as a build identity key.
 
-- [ ] Write tests for equal LF/CRLF text fingerprints, changed production bytes, binary changes, ignored docs/dependencies, unsafe symlink inventory, missing/oversized/invalid metadata, and input immutability. A stamp with a short/fake SHA cannot claim declared identity.
+- [x] Write tests for equal LF/CRLF text fingerprints, changed production bytes, binary changes, ignored docs/dependencies, unsafe symlink inventory, missing/oversized/invalid metadata, and input immutability. A stamp with a short/fake SHA cannot claim declared identity.
 
 ```js
 assert.equal(productionTreeIdentity(lfTree).productionHash, productionTreeIdentity(crlfTree).productionHash);
@@ -47,11 +47,11 @@ assert.notEqual(productionTreeIdentity(changedTree).productionHash, productionTr
 assert.equal(normalizeBuildIdentity({...validBuild,sourceRevision:'main'}).status, 'unavailable');
 ```
 
-- [ ] Run `node tools/scripts/test-build-identity.mjs`; observe the missing implementation or incorrect identity fail. Use temporary workspace directories and a fake HTTP response for the metadata reader; no live extension read is needed.
-- [ ] Implement deterministic hashing over the existing `productionFilePaths()` inventory. Generated metadata is excluded from its own hash. Staging accepts an explicit empty output directory; reject repository-root output, symlinks, and preexisting unrelated files. Source revision/dirty fields come from actual Git state at CLI time. Do not overwrite a live extension through the staging command.
-- [ ] Load metadata with a 2-second timeout and allowlist validation; unavailable metadata never prevents extension startup. Pass the getter into runtime diagnostics. Preserve metadata status and hash through sanitized export.
-- [ ] Extend installed verification to check generated metadata's production hash when present, without counting metadata itself as executable code or treating a stamp as proof of content agreement. Verify all actual code/assets with the existing byte comparisons.
-- [ ] Run build-identity, installed-copy-verifier, diagnostics, and extension-smoke suites. Commit `feat: identify and stage production builds` with current install instructions.
+- [x] Run `node tools/scripts/test-build-identity.mjs`; observe the missing implementation or incorrect identity fail. Use temporary workspace directories and a fake HTTP response for the metadata reader; no live extension read is needed.
+- [x] Implement deterministic hashing over the existing `productionFilePaths()` inventory. Generated metadata is excluded from its own hash. Staging accepts an explicit empty output directory; reject repository-root output, symlinks, and preexisting unrelated files. Source revision/dirty fields come from actual Git state at CLI time. Do not overwrite a live extension through the staging command.
+- [x] Load metadata with a 2-second timeout and allowlist validation; unavailable metadata never prevents extension startup. Pass the getter into runtime diagnostics. Preserve metadata status and hash through sanitized export.
+- [x] Extend installed verification to check generated metadata's production hash when present, without counting metadata itself as executable code or treating a stamp as proof of content agreement. Verify all actual code/assets with the existing byte comparisons.
+- [x] Run build-identity, installed-copy-verifier, diagnostics, and extension-smoke suites. Commit `feat: identify and stage production builds` with current install instructions.
 
 ### Task 2: Bounded attempt outcomes and operation summaries
 

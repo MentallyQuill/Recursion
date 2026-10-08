@@ -1,78 +1,19 @@
 import { createHash } from 'node:crypto';
 import {
   existsSync,
-  readFileSync,
-  readdirSync
+  lstatSync,
+  readFileSync
 } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
-const ROOT_PRODUCTION_FILES = Object.freeze(['manifest.json', 'package.json']);
-const PRODUCTION_TREES = Object.freeze(['src', 'styles', 'assets/icons']);
-const IGNORED_DIRECTORY_NAMES = new Set([
-  '.git',
-  '.tmp',
-  'artifacts',
-  'coverage',
-  'node_modules',
-  'test',
-  'tests',
-  'tmp'
-]);
-const IGNORED_FILE_NAMES = new Set(['.gitkeep', 'README.md', 'debug.log']);
-
-function forwardSlashes(value) {
-  return String(value || '').split(sep).join('/');
-}
-
-function ignoredFile(name) {
-  return IGNORED_FILE_NAMES.has(name) || name.toLowerCase().endsWith('.log');
-}
+import { isAbsolute, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { inventoryProduction, productionFilePaths, productionTreeIdentity } from './lib/production-build.mjs';
+import { BUILD_INFO_MAX_CHARACTERS, normalizeBuildIdentity } from '../../src/runtime/build-identity.mjs';
+export { productionFilePaths } from './lib/production-build.mjs';
 
 function ensureRoot(root, label) {
   const resolved = resolve(String(root || ''));
-  if (!root || !existsSync(resolved)) {
-    throw new Error(`${label} does not exist: ${resolved}`);
-  }
+  if (!root || !existsSync(resolved)) throw new Error(`${label} does not exist: ${resolved}`);
   return resolved;
-}
-
-function walkProductionTree(root, tree, files, symlinks) {
-  const absoluteTree = join(root, ...tree.split('/'));
-  if (!existsSync(absoluteTree)) return;
-  const pending = [absoluteTree];
-  while (pending.length > 0) {
-    const directory = pending.pop();
-    const entries = readdirSync(directory, { withFileTypes: true })
-      .sort((left, right) => left.name.localeCompare(right.name));
-    for (const entry of entries) {
-      if (IGNORED_DIRECTORY_NAMES.has(entry.name)) continue;
-      const absolutePath = join(directory, entry.name);
-      const relativePath = forwardSlashes(relative(root, absolutePath));
-      if (entry.isSymbolicLink()) {
-        symlinks.add(relativePath);
-      } else if (entry.isDirectory()) {
-        pending.push(absolutePath);
-      } else if (entry.isFile() && !ignoredFile(entry.name)) {
-        files.add(relativePath);
-      }
-    }
-  }
-}
-
-function inventoryProduction(root) {
-  const files = new Set();
-  const symlinks = new Set();
-  for (const relativePath of ROOT_PRODUCTION_FILES) {
-    if (existsSync(join(root, relativePath))) files.add(relativePath);
-  }
-  for (const tree of PRODUCTION_TREES) {
-    walkProductionTree(root, tree, files, symlinks);
-  }
-  return {
-    files: [...files].sort(),
-    symlinks: [...symlinks].sort()
-  };
 }
 
 function sha256(path) {
@@ -118,26 +59,25 @@ function compareDifference(left, right) {
     || left.kind.localeCompare(right.kind);
 }
 
-export function productionFilePaths(repositoryRoot) {
-  const root = ensureRoot(repositoryRoot, 'Repository root');
-  const inventory = inventoryProduction(root);
-  if (inventory.symlinks.length > 0) {
-    throw new Error(`Repository production tree contains a symbolic link: ${inventory.symlinks[0]}`);
-  }
-  for (const required of ROOT_PRODUCTION_FILES) {
-    if (!inventory.files.includes(required)) {
-      throw new Error(`Repository production file is missing: ${required}`);
+function verifyBuildInfo(copyRoot, copy, differences) {
+  const path = join(copyRoot, 'build-info.json');
+  if (!existsSync(path)) return { copy, status: 'unavailable' };
+  let build;
+  try {
+    if (lstatSync(path).isSymbolicLink()) throw new Error('Unsafe metadata');
+    const text = readFileSync(path, 'utf8');
+    if (text.length > BUILD_INFO_MAX_CHARACTERS) throw new Error('Oversized metadata');
+    build = normalizeBuildIdentity(JSON.parse(text));
+    if (build.status !== 'declared') throw new Error('Invalid metadata');
+    if (productionTreeIdentity(copyRoot).productionHash !== build.productionHash) {
+      differences.push({ copy, kind: 'build-info-hash-mismatch', path: 'build-info.json' });
+      return { copy, status: 'mismatch' };
     }
+  } catch {
+    differences.push({ copy, kind: 'build-info-invalid', path: 'build-info.json' });
+    return { copy, status: 'invalid' };
   }
-  for (const path of inventory.files) {
-    if (!/\.(?:m?js|json|css|svg)$/i.test(path)) continue;
-    try {
-      new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(join(root, ...path.split('/'))));
-    } catch {
-      throw new Error(`Repository production file contains invalid UTF-8: ${path}`);
-    }
-  }
-  return inventory.files;
+  return { ...build, copy, status: differences.some(item => item.copy === copy) ? 'mismatch' : 'verified' };
 }
 
 export function verifyInstalledCopies({
@@ -165,10 +105,14 @@ export function verifyInstalledCopies({
       copyRoot: roots.publicRoot,
       copy: 'public'
     }))
-  ].sort(compareDifference);
+  ];
+  const builds = [verifyBuildInfo(roots.installedRoot, 'installed', differences),
+    ...(accountOnly ? [] : [verifyBuildInfo(roots.publicRoot, 'public', differences)])];
+  differences.sort(compareDifference);
   return {
     ok: differences.length === 0,
     filesCompared: expectedFiles.length,
+    builds,
     differences
   };
 }

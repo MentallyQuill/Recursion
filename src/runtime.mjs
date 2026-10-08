@@ -107,6 +107,7 @@ import {
 } from './editorial-transform.mjs';
 import { failureFrom } from './failures.mjs';
 import { buildDiagnosticsPayload } from './runtime/diagnostics.mjs';
+import { normalizeBuildIdentity } from './runtime/build-identity.mjs';
 import {
   clearJournalDetails,
   clearJournalSummary,
@@ -2518,8 +2519,12 @@ export function createRecursionRuntime({
   settingsStore = createSettingsStore({ root: {} }),
   storage = createStorageRepository({ storage: createMemoryStorageAdapter() }),
   activity = createActivityReporter(),
-  generationRouter = null
+  generationRouter = null,
+  buildIdentity = () => null
 } = {}) {
+  function currentBuildIdentity() {
+    try { return normalizeBuildIdentity(buildIdentity()); } catch { return normalizeBuildIdentity(null); }
+  }
   const runState = createRuntimeRunState();
   const reviewSubscribers = new Set();
   let reviewActionTail = Promise.resolve();
@@ -3621,6 +3626,7 @@ export function createRecursionRuntime({
     const sameChat = safeId(chatKey, 'chat') === safeId(currentDiagnosticsChatKey(), 'chat');
     const diagnosticView = sameChat ? cachedView : { settings: cachedView.settings, providerProfiles: cachedView.providerProfiles };
     const payload = buildDiagnosticsPayload({
+      buildIdentity: currentBuildIdentity(),
       view: { ...diagnosticView, postProcessStatus: currentPostProcessStatus(chatKey) },
       settings,
       cacheContracts: cacheContractVersions(settings),

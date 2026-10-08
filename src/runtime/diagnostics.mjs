@@ -6,6 +6,7 @@ import { summarizeFusedOutcome } from '../fused-recovery.mjs';
 import { normalizeInstructionValidationRule } from '../instruction-safety.mjs';
 import { normalizeOutputIssues } from '../providers/output-contract.mjs';
 import { normalizeRecoveryCounts, RECOVERY_COUNT_KEYS } from '../execution/recovery-counts.mjs';
+import { normalizeBuildIdentity } from './build-identity.mjs';
 
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 const RESUME_BODY_KEY_PATTERN = /(arbiter|card|reference|packet|hand|guidance|draft|prose|prompt|response|artifact).*(body|text|payload|content)|^(body|text|payload|content)$/i;
@@ -427,6 +428,7 @@ function mapQueuedReprocess(value) {
 }
 
 export function buildDiagnosticsPayload({
+  buildIdentity,
   view,
   settings,
   cacheContracts,
@@ -443,6 +445,7 @@ export function buildDiagnosticsPayload({
   const postProcessStatus = summarizePostProcessOutcome(runtime.postProcessStatus, diagnosticChatKey) || postProcessHistory.at(-1) || null;
   const payload = {
     schema: 'recursion.diagnostics.v1',
+    build: normalizeBuildIdentity(buildIdentity),
     createdAt,
     settings: mapSettingsSummary(settings),
     runtime: {

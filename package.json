@@ -20,6 +20,8 @@
     "test:runtime": "node tools/scripts/test-runtime.mjs",
     "test:ui": "node tools/scripts/test-ui.mjs",
     "test:host": "node tools/scripts/test-host.mjs",
+    "prepare:install": "node tools/scripts/prepare-recursion-install.mjs",
+    "verify:install": "node tools/scripts/verify-installed-copy.mjs",
     "test:live-harness": "node tools/scripts/test-live-harness.mjs",
     "test:model-eval": "node tools/scripts/test-model-eval-harness.mjs",
     "check:playwright": "node tools/scripts/check-playwright-readiness.mjs",

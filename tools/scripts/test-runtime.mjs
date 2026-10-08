@@ -1484,6 +1484,9 @@ for (const applyMode of ['as-swipe', 'replace']) {
     snapshot: {chatId:'usage-chat',sceneKey:'scene',latestMesId:2,messages:[{mesid:2,role:'user',text:'Continue.'}],cardSelectionSourcePrefixHash:'prefix'},
     hostMessages: {
       postProcessSourceIdentity: async () => target,
+      cardSelectionReceiptBasis: async ({generationType}) => Object.freeze({ok:true,generationType,
+        chatIdentityHash:target.chatIdentityHash,sourcePrefixHash:'prefix',targetIndex:3,
+        targetMessageId:null,targetSwipeId:null,previousReceipt:null}),
       cardSelectionCompletionStatus: () => ({completed,reason:completed?'':'stopped'}),
       saveCardSelectionUsage: async (request) => { saves.push(request); return {ok:true}; },
       markCardSelectionIncomplete: async (request) => { incomplete.push(request); return {ok:true}; }

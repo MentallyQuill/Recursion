@@ -61,7 +61,8 @@ for (const pipelineMode of ['segmented','fused']) {
   localDeck.cardOrderByCategory[localDeck.categoryOrder[0]].push('authored');
   const store=createSettingsStore({root:{recursion:{mode:'auto',pipelineMode,reasoningLevel:'low',cardsPerTurn: 1,cardSelection:{variety:'off',cooldownTurns:2},preProcessDecks:{activeDeckId:localDeck.id,customDecks:{[localDeck.id]:localDeck}},providers:{utility:{connectionProfileId:'u'},reasoner:{connectionProfileId:'r'}}}}});
   const normalizedSources=Object.values(getActiveCardDeck(store.get()).cards).filter(c=>c.builtinFamily==='Scene Frame');
-  const chat={chatId:`selection-${pipelineMode}`,chat:[{is_user:true,mes:'What changed?'}],async saveChat(){}};
+  const chat={chatId:`selection-${pipelineMode}`,chat:[{is_user:true,mes:'What changed?'},
+    {is_user:false,mes:'Initial narration remains in the model source.'}],async saveChat(){}};
   const realHost=createSillyTavernHost({contextFactory:()=>chat,settingsRoot:{}});
   const requests=[];let turn=0;
   const router={async generate(roleId,request){
@@ -73,9 +74,46 @@ for (const pipelineMode of ['segmented','fused']) {
     return {ok:true,data:{schema:'recursion.card.v1',snapshotHash:request.snapshotHash,role:roleId,family:catalog.family,items:[{promptText:'Current exchange guidance.',evidenceRefs:['message:0']}]}};
   }};
   const installedPackets = [];
-  const storage = createStorageRepository(createMemoryStorageAdapter());
+  let storage = createStorageRepository(createMemoryStorageAdapter());
   const newRuntime = () => createRecursionRuntime({host:{...realHost,providerProfiles:{list:()=>[{id:'u',completionMode:'chat'},{id:'r',completionMode:'chat'}]},prompt:{install:async packet=>{ installedPackets.push(structuredClone(packet)); return {ok:true,installed:true}; },clear:async()=>({ok:true})}},settingsStore:store,storage,generationRouter:router});
   let runtime = newRuntime();
+  const continued = await runtime.prepareForGeneration({hostGeneration:true,generationType:'continue'});
+  assert.equal(continued.ok,true);
+  assert(requests.some(({request})=>request.prompt.includes('Initial narration remains in the model source.')),
+    'Continue preserves the prior narration in actual model requests');
+  chat.chat[1].mes += ' Continued narration.';
+  await runtime.handleHostGenerationEnded({eventName:'generation_ended'});
+  assert.equal((await realHost.snapshot()).cardSelectionHistory[0].cards[0]?.cardId,normalizedSources[0].id,
+    'real runtime persists Continue through the host-owned basis');
+  await runtime.prepareForGeneration({hostGeneration:true,generationType:'continue'});
+  chat.chat[0].mes = 'Changed prior branch';
+  chat.chat[1].mes += ' Late continuation';
+  assert.equal((await runtime.handleHostGenerationEnded({eventName:'generation_ended'})).ok,true,
+    'a rejected optional receipt does not fail completed narration');
+  let rejected = (await storage.loadRunJournal(chat.chatId)).entries.findLast(entry=>entry.event==='card-selection.history-not-saved');
+  assert.equal(rejected.details.reason,'card-selection-prefix-changed');
+  assert.notEqual(rejected.details.expectedPrefixHash,rejected.details.observedPrefixHash);
+  chat.chat[0].mes = 'What changed?';
+  await runtime.prepareForGeneration({hostGeneration:true,generationType:'continue'});
+  chat.chat[1].mes += ' Narration with unavailable storage';
+  chat.saveChat = async () => {throw new Error('PRIVATE_STORY_CANARY');};
+  assert.equal((await runtime.handleHostGenerationEnded({eventName:'generation_ended'})).ok,true);
+  rejected = (await storage.loadRunJournal(chat.chatId)).entries.findLast(entry=>entry.event==='card-selection.history-not-saved');
+  assert.equal(rejected.details.reason,'history-save-failed');
+  assert(!JSON.stringify(rejected).includes('PRIVATE_STORY_CANARY'));
+  chat.saveChat = async () => {};
+  const captureBasis = realHost.messages.cardSelectionReceiptBasis;
+  realHost.messages.cardSelectionReceiptBasis = async () => null;
+  assert.equal((await runtime.prepareForGeneration({hostGeneration:true,generationType:'continue'})).ok,true,
+    'unavailable receipt basis leaves successful preparation usable');
+  rejected = (await storage.loadRunJournal(chat.chatId)).entries.findLast(entry=>entry.event==='card-selection.history-not-saved');
+  assert.equal(rejected.details.reason,'card-selection-basis-unavailable','unavailable capture is explained without guessing a prefix');
+  realHost.messages.cardSelectionReceiptBasis = captureBasis;
+  await runtime.dispose();
+  chat.chat.splice(1); // A fresh synthetic branch for the Normal/Swipe cache checks.
+  storage = createStorageRepository(createMemoryStorageAdapter());
+  requests.length = 0; installedPackets.length = 0;
+  runtime = newRuntime();
   for(turn=0;turn<3;turn++){
     if(turn===2)store.update({cardsPerTurn: 2});
     const prepared=await runtime.prepareForGeneration({hostGeneration:true,userMessage:chat.chat.at(-1).mes});
@@ -95,7 +133,7 @@ for (const pipelineMode of ['segmented','fused']) {
     chat.chat.push({is_user:false,mes:`Completed response ${turn}`});
     await runtime.handleHostGenerationEnded({eventName:'generation_ended'});
     const history=(await realHost.snapshot()).cardSelectionHistory;
-    assert.equal(history.at(-1).cards.length,1,'real host persists actual installed source usage');
+    assert.equal(history.at(-1).cards.length,1,'real runtime persists Continue and Normal usage through the host-owned basis');
     if(turn<2)assert.equal(history.at(-1).cards[0].cardId,normalizedSources[turn].id);
     if(turn===0){
       const callCount=requests.length;
@@ -120,9 +158,47 @@ for (const pipelineMode of ['segmented','fused']) {
       message.swipe_info=[{extra:structuredClone(message.extra)},{extra:{}}];
       message.swipe_id=1;message.mes=message.swipes[1];
       await runtime.handleHostGenerationEnded({eventName:'generation_ended'});
+      assert.deepEqual((await realHost.snapshot()).cardSelectionHistory[0].cards,[],
+        'an active swipe change after capture cannot redirect the late receipt');
+      const rejection=(await storage.loadRunJournal(chat.chatId)).entries.findLast(entry=>entry.event==='card-selection.history-not-saved');
+      assert.equal(rejection.details.reason,'card-selection-target-changed');
+      assert.equal(rejection.details.expectedTargetMessageId,1);
+      assert.equal(rejection.details.observedTargetMessageId,1,'numeric target details help distinguish swipe changes');
+      await runtime.prepareForGeneration({hostGeneration:true,generationType:'swipe'});
+      await runtime.handleHostGenerationEnded({eventName:'generation_ended'});
       const swipedHistory=(await realHost.snapshot()).cardSelectionHistory;
       assert.equal(swipedHistory.length,1,'same response swipe never ages cooldown');
       assert.equal(swipedHistory[0].cards[0].cardId,normalizedSources[0].id,'swipe retains exact prepared hand provenance');
+    }
+    if(turn===2){
+      await runtime.prepareForGeneration({hostGeneration:true,generationType:'swipe'});
+      let releaseSave;
+      let enteredSave;
+      const saveStarted = new Promise(resolve=>{enteredSave=resolve;});
+      const blockedSave = new Promise(resolve=>{releaseSave=resolve;});
+      let saveCalls = 0;
+      chat.saveChat = async () => {saveCalls++;enteredSave();await blockedSave;};
+      const completionA = runtime.handleHostGenerationEnded({eventName:'generation_ended'});
+      const completionB = runtime.handleHostGenerationEnded({eventName:'generation_ended'});
+      await saveStarted;
+      let preparedNext = false;
+      const next = runtime.prepareForGeneration({hostGeneration:true,generationType:'swipe'}).then(value=>{
+        preparedNext=true;return value;
+      });
+      await Promise.resolve();
+      assert.equal(preparedNext,false,'the next preparation waits for the in-flight receipt commit');
+      releaseSave();
+      await Promise.all([completionA,completionB,next]);
+      assert.equal(saveCalls,1,'concurrent native completion records once');
+      chat.saveChat = async () => {};
+      chat.streamingProcessor={messageId:chat.chat.length-1,isStopped:true};
+      chat.chat.at(-1).mes += ' Partial continuation';
+      await runtime.handleHostGenerationStopped({eventName:'generation_stopped'});
+      assert.equal((await realHost.snapshot()).cardSelectionHistory.at(-1)?.messageId,3,
+        'stopped active output does not age the history window');
+      chat.streamingProcessor=null;
+      assert.equal((await realHost.snapshot()).cardSelectionHistory.at(-1)?.messageId,3,
+        'the runtime passes the binding to the persisted incomplete marker');
     }
     chat.chat.push({is_user:true,mes:`Next request ${turn}`});
   }

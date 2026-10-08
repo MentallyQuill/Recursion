@@ -147,11 +147,11 @@ assert.equal((await host.messages.saveCardSelectionUsage({expectedSourceIdentity
 
 **Interfaces:** `pendingCardSelectionUsage` includes immutable `receiptBasis`; `completeCardSelectionTurn()` passes it to complete/incomplete saves and emits the precise safe guard reason/details. Main-generation source snapshot and prompt provenance remain unchanged.
 
-- [ ] Write a runtime/actual-host integration regression proving `prepareForGeneration({generationType:'continue',hostGeneration:true})` creates correct pending basis while preserving the initial assistant reply in the model source. Complete it and verify the receipt persists. The test must exercise installed runtime wiring, not call only the new host helper.
-- [ ] Add concurrent completion, next generation, chat switch, active-swipe edit, Stop during incomplete streaming, and altered source before completion. Assert stale work never saves into the next turn, and the first pending completion is awaited before preparing another operation.
-- [ ] Observe RED. Capture the host-owned basis once before primary generation; abort/skipped basis does not get replaced with a guessed snapshot prefix. Continue uses captured prior receipt only under its same-deck/target guard. Preserve existing prompt install, primary-generation, and Post-process authority.
-- [ ] Emit bounded diagnostic details for rejected writes, preserve unavailable completion explanation, and test that failed receipt save does not retroactively report successful narration as failed.
-- [ ] Run card-selection-runtime, runtime-preprocess, runtime-card-packet, refinement, host-stop, and installed extension smoke tests. Commit `fix: preserve receipt identity through completion`.
+- [x] Write a runtime/actual-host integration regression proving `prepareForGeneration({generationType:'continue',hostGeneration:true})` creates correct pending basis while preserving the initial assistant reply in the model source. Complete it and verify the receipt persists. The test must exercise installed runtime wiring, not call only the new host helper.
+- [x] Add concurrent completion, next generation, chat switch, active-swipe edit, Stop during incomplete streaming, and altered source before completion. Assert stale work never saves into the next turn, and the first pending completion is awaited before preparing another operation.
+- [x] Observe RED. Capture the host-owned basis once before primary generation; abort/skipped basis does not get replaced with a guessed snapshot prefix. Continue uses captured prior receipt only under its same-deck/target guard. Preserve existing prompt install, primary-generation, and Post-process authority.
+- [x] Emit bounded diagnostic details for rejected writes, preserve unavailable completion explanation, and test that failed receipt save does not retroactively report successful narration as failed.
+- [x] Run card-selection-runtime, runtime-preprocess, runtime-card-packet, refinement, host-stop, and installed extension smoke tests. Commit `fix: preserve receipt identity through completion`.
 
 ### Task 7: Read-only benchmark analysis and explicit live inputs
 

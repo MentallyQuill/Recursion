@@ -4039,6 +4039,23 @@ export function createRecursionRuntime({
   let pendingCardSelectionUsage = null;
   let cardSelectionCompletionPromise = null;
 
+  function cardSelectionRejectionDetails(result = {}) {
+    const reasons = new Set(['card-selection-chat-changed','card-selection-receipt-invalid',
+      'card-selection-prefix-changed','card-selection-target-changed','streaming-stopped','streaming-unfinished',
+      'completion-unavailable','RECURSION_POST_PROCESS_SOURCE_STALE','RECURSION_POST_PROCESS_COMMIT_CANCELED']);
+    const reason = reasons.has(result.reason) ? result.reason
+      : reasons.has(result.error?.code) ? result.error.code : 'history-save-failed';
+    const details = {reason};
+    for (const key of ['expectedPrefixHash','observedPrefixHash']) {
+      if (typeof result.details?.[key] === 'string' && /^[a-f0-9]{8}$/.test(result.details[key])) details[key] = result.details[key];
+    }
+    for (const key of ['targetMessageId','expectedTargetMessageId','observedTargetMessageId']) {
+      const value = result.details?.[key];
+      if (value === null || Number.isSafeInteger(value) && value >= 0) details[key] = value;
+    }
+    return details;
+  }
+
   async function completeCardSelectionTurn({ incomplete = false } = {}) {
     if (cardSelectionCompletionPromise) return cardSelectionCompletionPromise;
     const pending = pendingCardSelectionUsage;
@@ -4051,17 +4068,19 @@ export function createRecursionRuntime({
         const completion = host.messages?.cardSelectionCompletionStatus?.();
         if (!completion) return { ok: true, skipped: true, reason: 'completion-unavailable' };
         const result = incomplete || !completion.completed
-          ? await host.messages?.markCardSelectionIncomplete?.({ expectedSourceIdentity: identity, sourcePrefixHash: pending.usage.sourcePrefixHash })
-          : await host.messages?.saveCardSelectionUsage?.({ expectedSourceIdentity: identity, usage: pending.usage });
+          ? await host.messages?.markCardSelectionIncomplete?.({ expectedSourceIdentity: identity,
+            sourcePrefixHash: pending.usage.sourcePrefixHash, receiptBasis:pending.receiptBasis })
+          : await host.messages?.saveCardSelectionUsage?.({ expectedSourceIdentity: identity, usage: pending.usage,
+            receiptBasis:pending.receiptBasis });
         if (result?.ok === false) await appendJournalSafe(pending.runId, pending.chatKey, {
           event: 'card-selection.history-not-saved', severity: 'warn', summary: 'Card selection history could not be saved.',
-          details: { reason: safeText(result.reason || 'save-failed', 120) }
+          details: cardSelectionRejectionDetails(result)
         });
         return result || { ok: true, skipped: true };
-      } catch (error) {
+      } catch {
         await appendJournalSafe(pending.runId, pending.chatKey, {
           event: 'card-selection.history-not-saved', severity: 'warn', summary: 'Card selection history could not be saved.',
-          details: { reason: safeText(error?.message || 'save-failed', 120) }
+          details: { reason: 'history-save-failed' }
         });
         return { ok: false, reason: 'history-save-failed' };
       }
@@ -8667,11 +8686,17 @@ export function createRecursionRuntime({
       await waitForExternalMutations();
       const runId = makeId('run');
       let preGenerationSourceIdentity = null;
+      let receiptBasis = null;
       if (hostGeneration === true) {
         try {
           preGenerationSourceIdentity = await host?.messages?.postProcessSourceIdentity?.() || null;
         } catch {
           preGenerationSourceIdentity = null;
+        }
+        try {
+          receiptBasis = await host.messages?.cardSelectionReceiptBasis?.({generationType:hostGenerationType || 'normal'}) || null;
+        } catch {
+          receiptBasis = null;
         }
         armProseEnhancementForHostGeneration(settings, runId);
         if (pendingProseEnhancement?.blockedCapability) {
@@ -8748,11 +8773,16 @@ export function createRecursionRuntime({
             selected.set(id, { cardId: id, categoryId: source.categoryId || '', reason: safeText(rationale?.reason || (source.selectionState === 'priority' ? 'Priority card.' : 'Selected for this turn.'), 240) });
           }
         }
-        if (lastSnapshot?.cardSelectionSourcePrefixHash && typeof host.messages?.saveCardSelectionUsage === 'function') {
+        if (receiptBasis?.ok === true && typeof host.messages?.saveCardSelectionUsage === 'function') {
           pendingCardSelectionUsage = { runId, chatKey: lastSnapshot.chatKey,
-            chatIdentityHash: preGenerationSourceIdentity?.chatIdentityHash || '',
-            usage: { turnKeyHash: preprocessTurnKeyHash, sourcePrefixHash: lastSnapshot.cardSelectionSourcePrefixHash,
+            chatIdentityHash: receiptBasis.chatIdentityHash, receiptBasis,
+            usage: { turnKeyHash: preprocessTurnKeyHash, sourcePrefixHash: receiptBasis.sourcePrefixHash,
               deckId: deck.id, generationType: hostGenerationType || 'normal', cards: [...selected.values()] } };
+        } else if (typeof host.messages?.saveCardSelectionUsage === 'function') {
+          await appendJournalSafe(runId,lastSnapshot.chatKey,{
+            event:'card-selection.history-not-saved',severity:'warn',summary:'Card selection history basis was unavailable.',
+            details:receiptBasis ? cardSelectionRejectionDetails(receiptBasis) : {reason:'card-selection-basis-unavailable'}
+          });
         }
         postProcessRuntime.preparePostProcessTrigger({
           preprocessTurnKeyHash,

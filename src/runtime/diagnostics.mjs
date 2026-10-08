@@ -7,6 +7,8 @@ import { normalizeInstructionValidationRule } from '../instruction-safety.mjs';
 import { normalizeOutputIssues } from '../providers/output-contract.mjs';
 import { normalizeRecoveryCounts, RECOVERY_COUNT_KEYS } from '../execution/recovery-counts.mjs';
 import { normalizeBuildIdentity } from './build-identity.mjs';
+import { normalizeOperationSummaries } from '../storage/operation-history.mjs';
+import { normalizeAttemptOutcomes } from '../execution/attempt-outcomes.mjs';
 
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 const RESUME_BODY_KEY_PATTERN = /(arbiter|card|reference|packet|hand|guidance|draft|prose|prompt|response|artifact).*(body|text|payload|content)|^(body|text|payload|content)$/i;
@@ -146,6 +148,7 @@ function summarizeExecutionStage(record) {
     stageId: safeText(source.stageId, 180),
     stageState: safeText(source.state, 40),
     attemptCount: boundedInteger(source.attempts?.total, 100000),
+    attemptOutcomes: normalizeAttemptOutcomes(source.attemptOutcomes),
     attemptLimit: boundedInteger(source.attempts?.limit, 100000),
     recoveryCounts: normalizeRecoveryCounts(source.recoveryCounts),
     elapsedMs: elapsedMilliseconds(source.startedAt, source.updatedAt),
@@ -477,6 +480,7 @@ export function buildDiagnosticsPayload({
       journalUpdatedAt: safeText(journal?.updatedAt, 80)
     },
     journal: sourceEntries.slice(-50).map(mapJournalEntry),
+    operationSummaries: normalizeOperationSummaries(journal?.operationSummaries),
     excerpts: includeExcerpts ? safeDiagnosticValue({
       lastPacket: runtime.lastPacket || null,
       lastHand: runtime.lastHand || null,

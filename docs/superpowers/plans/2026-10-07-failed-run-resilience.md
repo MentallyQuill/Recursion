@@ -59,7 +59,7 @@ assert.equal(normalizeBuildIdentity({...validBuild,sourceRevision:'main'}).statu
 
 **Interfaces:** `normalizeAttemptOutcomes(values) -> atMostFiveAllowlistedOutcomes`; `attemptOutcomeFrom(summary,{attempt,window}) -> outcome`; `buildOperationSummary(manifest,{build,previous}) -> summary`; `normalizeOperationSummaries(values) -> atMostTwentySummaries`. Repository adds `saveOperationSummary(chatKey,manifest)` under the same per-chat journal serialization seam. Journal gains `operationSummaries`; no separate unbounded file or raw-response archive.
 
-- [ ] Write a scheduler + real-memory-repository test: first attempt has `RECURSION_JSON_PARSE_FAILED`, second succeeds; active failure is null and final state completed, while exported retained history contains both outcomes and one correction. Then append 500 ordinary cleanup events and reload; the operation explanation survives.
+- [x] Write a scheduler + real-memory-repository test: first attempt has `RECURSION_JSON_PARSE_FAILED`, second succeeds; active failure is null and final state completed, while exported retained history contains both outcomes and one correction. Then append 500 ordinary cleanup events and reload; the operation explanation survives.
 
 ```js
 assert.equal(saved.stageRecords['preprocess.guidance'].failure, null);
@@ -68,13 +68,13 @@ assert.equal(history[0].stages[0].attempts[0].code, 'RECURSION_JSON_PARSE_FAILED
 assert.equal(history[0].recoveryCounts.correctionRequests, 1);
 ```
 
-- [ ] Add deterministic 21-operation eviction, 33-stage truncation, six-attempt truncation, same-operation upsert, chat isolation, reset/clear, restored-interruption, optional-omission, semantic field-issue, and private/unsafe arbitrary-property tests. Assert total counters remain correct after detailed outcomes truncate.
-- [ ] Observe RED with `node tools/scripts/test-operation-history.mjs` before writing production normalizers.
-- [ ] Add `attemptOutcomes` to the current stage record/checkpoint normalization contract. Persist an allowlisted outcome in `scheduler.onAttemptSettled` before active failure is replaced/cleared. Use existing canonical issue normalization and semantic-rule enums. Accept no provider message, prompt, rationale, payload, stack, endpoint, or unknown numeric/string metadata.
-- [ ] After verified `savePipelineRun()`, update its summary from the persisted manifest through the journal queue. Do not hold one journal mutation while attempting another. Bound each collection on both read and write; preserve the ordinary ring and Post-process outcomes. Save summary storage failures as a nonrecursive warning without failing the already committed manifest.
-- [ ] Bind first-observed and latest-written build descriptors honestly; an unavailable first observation remains unavailable. Diagnostics/analyzer distinguish mixed or unavailable build identity rather than attributing every attempt to the final installed build.
-- [ ] Join existing operation summaries with `turn.timing.*` events by chat and `details.operationId`; retain only observed numeric/null timing fields. Cover ring rollover, late completion for an evicted ID, another chat with the same ID, and absent first-visible-token data. Unknown code values map to a fixed internal fallback or are omitted.
-- [ ] Run operation-history, execution-contracts, execution-privacy, execution-storage, execution-scheduler, durable-card-recovery, storage, and diagnostics suites. Commit `feat: retain bounded operation recovery history`.
+- [x] Add deterministic 21-operation eviction, 33-stage truncation, six-attempt truncation, same-operation upsert, chat isolation, reset/clear, restored-interruption, optional-omission, semantic field-issue, and private/unsafe arbitrary-property tests. Assert total counters remain correct after detailed outcomes truncate.
+- [x] Observe RED with `node tools/scripts/test-operation-history.mjs` before writing production normalizers.
+- [x] Add `attemptOutcomes` to the current stage record/checkpoint normalization contract. Persist an allowlisted outcome in `scheduler.onAttemptSettled` before active failure is replaced/cleared. Use existing canonical issue normalization and semantic-rule enums. Accept no provider message, prompt, rationale, payload, stack, endpoint, or unknown numeric/string metadata.
+- [x] After verified `savePipelineRun()`, update its summary from the persisted manifest through the journal queue. Do not hold one journal mutation while attempting another. Bound each collection on both read and write; preserve the ordinary ring and Post-process outcomes. Save summary storage failures as a nonrecursive warning without failing the already committed manifest.
+- [x] Bind first-observed and latest-written build descriptors honestly; an unavailable first observation remains unavailable. Diagnostics/analyzer distinguish mixed or unavailable build identity rather than attributing every attempt to the final installed build.
+- [x] Join existing operation summaries with `turn.timing.*` events by chat and `details.operationId`; retain only observed numeric/null timing fields. Cover ring rollover, late completion for an evicted ID, another chat with the same ID, and absent first-visible-token data. Unknown code values map to a fixed internal fallback or are omitted.
+- [x] Run operation-history, execution-contracts, execution-privacy, execution-storage, execution-scheduler, durable-card-recovery, storage, and diagnostics suites. Commit `feat: retain bounded operation recovery history`.
 
 ### Task 3: Profile cooldown status and cross-operation verification
 

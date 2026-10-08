@@ -695,6 +695,7 @@ export function bootstrapRecursion() {
     const storage = createStorageRepository({
       storage: nextHost.storageAdapter,
       activity,
+      getBuildIdentity: buildIdentityReader.snapshot,
       getRetentionSettings: () => nextHost.settingsStore.get().retention
     });
     const generationRouter = createGenerationRouter({

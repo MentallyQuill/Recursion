@@ -7385,6 +7385,8 @@ export function createRecursionRuntime({
           authoredCount: (artifact?.cards || []).filter((card) => card.origin === 'authored').length,
           generatedCount: (artifact?.cards || []).filter((card) => card.origin !== 'authored').length,
           targetCount: artifact?.metadata?.selection?.targetCount ?? artifact?.metadata?.requestedMaxCards ?? 0,
+          selectedCount: Number.isFinite(artifact?.metadata?.selection?.plannedCount)
+            ? artifact.metadata.selection.plannedCount : null,
           shortfallCount: artifact?.metadata?.selection?.shortfallCount || 0,
           shortfallReasons: artifact?.metadata?.selection?.shortfallReasons || [],
           authoredCards: (artifact?.cards || []).filter((card) => card.origin === 'authored').map((card) => ({

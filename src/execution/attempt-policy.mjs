@@ -301,7 +301,9 @@ export async function runModelStageAttempts({
           outcome: 'accepted',
           action: 'stop',
           delayMs: 0,
-          diagnosticCode: ''
+          diagnosticCode: '',
+          timings: response?.timings,
+          usage: response?.usage
         });
         return { ok: true, value: normalized.value, response, attempts };
       }
@@ -342,7 +344,9 @@ export async function runModelStageAttempts({
       rateLimitFailures,
       action: directive.action,
       delayMs: directive.delayMs,
-      diagnosticCode: directive.diagnosticCode
+      diagnosticCode: directive.diagnosticCode,
+      timings: response?.timings,
+      usage: response?.usage
     });
 
     if (lastFailure.kind === 'abort') {

@@ -6,6 +6,7 @@ import { UNKNOWN_STORY_FORM, normalizeStoryForm } from './story-form.mjs';
 import { normalizeRetentionSettings } from './retention-policy.mjs';
 import { stableHash } from './execution/provenance.mjs';
 import { normalizePipelineRun } from './execution/checkpoints.mjs';
+import { buildOperationSummary, normalizeOperationSummaries, normalizeOperationTiming } from './storage/operation-history.mjs';
 import {
   QUEUED_REPROCESS_ENVELOPE_SCHEMA,
   normalizeQueuedReprocess,
@@ -513,6 +514,7 @@ function normalizeJournal(chatKey, value = {}, maxEntries = 100) {
     maxEntries: limit,
     nextIndex: Math.max(normalizeNextIndex(source.nextIndex, entries.length), entries.length),
     postProcessOutcomes: normalizePostProcessOutcomes(source.postProcessOutcomes, chatKey),
+    operationSummaries: normalizeOperationSummaries(source.operationSummaries),
     entries
   });
 }
@@ -876,7 +878,8 @@ export function createStorageRepository({
   storage = createMemoryStorageAdapter(),
   maxJournalEntries = 100,
   activity = null,
-  getRetentionSettings = null
+  getRetentionSettings = null,
+  getBuildIdentity = () => null
 } = {}) {
   const fallbackJournalEntryLimit = normalizeMaxEntries(maxJournalEntries);
   const journalWrites = new Map();
@@ -1089,6 +1092,27 @@ export function createStorageRepository({
     return normalizeJournal(chatKey, await storage.readJson(key), currentRetention().runJournalEntries);
   }
 
+  function saveOperationSummary(chatKey, manifest) {
+    if (!manifest || safeId(manifest.chatKey, 'chat') !== safeId(chatKey, 'chat')) {
+      throw new TypeError('Operation summary belongs to another chat.');
+    }
+    return serializeJournal(chatKey, async () => {
+      const journal = await loadRunJournal(chatKey);
+      const previous = journal.operationSummaries.find(summary => summary.operationId === manifest.operationId);
+      let build;
+      try { build = getBuildIdentity(); } catch { build = null; }
+      const summary = buildOperationSummary(manifest, {build,previous});
+      if (!summary) throw new TypeError('Operation summary is invalid.');
+      journal.operationSummaries = normalizeOperationSummaries([...journal.operationSummaries, summary]);
+      journal.updatedAt = nowIso();
+      const key = runJournalKey(chatKey);
+      const result = await storage.writeJson(key, journal);
+      if (storageWriteStatus(result).persisted === false) throw new Error('Operation history write failed.');
+      await writeIndexEntry(key, 'runJournal', safeId(chatKey, 'chat'));
+      return summary;
+    });
+  }
+
   function appendJournal(chatKey, entry) {
     return serializeJournal(chatKey, async () => {
       const key = runJournalKey(chatKey);
@@ -1098,6 +1122,15 @@ export function createStorageRepository({
         const outcome = summarizePostProcessOutcome(entry.details, chatKey);
         if (!outcome) throw new TypeError('Post-process outcome belongs to another chat or is invalid.');
         journal.postProcessOutcomes = normalizePostProcessOutcomes([...journal.postProcessOutcomes, outcome], chatKey);
+      }
+      if (['turn.timing.prepared','turn.timing.host-request-ready','turn.timing.first-visible-token','turn.timing.completed']
+        .includes(clean.event)) {
+        const summary = journal.operationSummaries.find(item => item.operationId === clean.details?.operationId);
+        if (summary) {
+          const observed = normalizeOperationTiming(clean.details);
+          summary.turnTiming = Object.fromEntries(Object.entries(observed).map(([field, value]) =>
+            [field, value ?? summary.turnTiming?.[field] ?? null]));
+        }
       }
       journal.entries.push(clean);
       journal.entries = journal.entries.slice(-journal.maxEntries);
@@ -1255,6 +1288,11 @@ export function createStorageRepository({
     await writeAuxiliaryIndexEntry(key, 'pipelineRun', safeId(chatKey, 'chat'), {
       operationId: safeId(normalized.operationId, 'operation')
     });
+    try { await saveOperationSummary(chatKey, persistedManifest); } catch {
+      reportStorageWriteStatus(activity, normalized.operationId, {persisted:false, reason:'operation-history-write-failed'},
+        {failure:{code:'RECURSION_OPERATION_HISTORY_WRITE_FAILED',stage:'storage',category:'storage',
+          message:'Operation state was saved but its diagnostic summary could not be saved.',retryable:false}});
+    }
     return normalized;
   }
 
@@ -1599,6 +1637,7 @@ export function createStorageRepository({
     savePipelineArtifact,
     loadPipelineRun,
     savePipelineRun,
+    saveOperationSummary,
     loadQueuedReprocessEnvelope,
     loadQueuedReprocess,
     saveQueuedReprocess,

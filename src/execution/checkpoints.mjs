@@ -30,35 +30,8 @@ export const STAGE_STATES = Object.freeze([
 
 const TERMINAL_OPERATION_STATES = new Set(['completed', 'stale', 'abandoned']);
 
-export const CHECKPOINT_DIAGNOSTIC_CODES = Object.freeze([
-  'structured-output-downgraded',
-  'output-budget-increased',
-  'output-budget-at-ceiling',
-  'output-budget-reduced',
-  'output-budget-at-floor',
-  'model-output-corrected',
-  'correction-request-unchanged',
-  'native-schema-required',
-  'provider-rate-limit-retry',
-  'provider-rate-limit-exhausted',
-  'provider-transient-retry',
-  'provider-transient-exhausted',
-  'provider-retry',
-  'stage-reprocess-consumed',
-  'profile-sampler-projection-failed',
-  'fused-fallback-segmented',
-  'unresolved-fused-families',
-  'zero-useful-fused-cards'
-]);
-
-export const CHECKPOINT_ATTEMPT_ACTIONS = Object.freeze([
-  'stop',
-  'downgrade-structured-output',
-  'increase-output-budget',
-  'reduce-output-budget',
-  'retry-corrected',
-  'retry-same'
-]);
+import { normalizeAttemptOutcomes, CHECKPOINT_DIAGNOSTIC_CODES, CHECKPOINT_ATTEMPT_ACTIONS } from './attempt-outcomes.mjs';
+export { CHECKPOINT_DIAGNOSTIC_CODES, CHECKPOINT_ATTEMPT_ACTIONS } from './attempt-outcomes.mjs';
 
 const CHECKPOINT_DIAGNOSTIC_CODE_SET = new Set(CHECKPOINT_DIAGNOSTIC_CODES);
 const CHECKPOINT_ATTEMPT_ACTION_SET = new Set(CHECKPOINT_ATTEMPT_ACTIONS);
@@ -193,6 +166,7 @@ export function createCheckpoint({
   artifactRef,
   diagnosticCodes = [],
   lastAttemptAction = null,
+  attemptOutcomes = [],
   completedAt
 }) {
   return {
@@ -206,6 +180,7 @@ export function createCheckpoint({
     dependencyHashes: normalizeHashMap(dependencyHashes),
     provenance: normalizeExecutionProvenance(provenance),
     attempts: normalizeAttempts(attempts),
+    attemptOutcomes: normalizeAttemptOutcomes(attemptOutcomes),
     artifactRef: normalizeArtifactRef(artifactRef),
     diagnosticCodes: normalizeCheckpointDiagnosticCodes(diagnosticCodes),
     lastAttemptAction: normalizeCheckpointAttemptAction(lastAttemptAction),
@@ -237,6 +212,7 @@ export function normalizeCheckpoint(value) {
     dependencyHashes: normalizeHashMap(value.dependencyHashes),
     provenance: normalizeExecutionProvenance(value.provenance),
     attempts: normalizeAttempts(value.attempts),
+    attemptOutcomes: normalizeAttemptOutcomes(value.attemptOutcomes),
     artifactRef,
     diagnosticCodes: normalizeCheckpointDiagnosticCodes(value.diagnosticCodes),
     lastAttemptAction: normalizeCheckpointAttemptAction(value.lastAttemptAction),
@@ -283,6 +259,7 @@ export function createStageRecord({
     stageVersion: positiveInteger(stageVersion),
     kind: cleanText(kind),
     state: 'pending',
+    attemptOutcomes: [],
     checkpoint: null,
     summary: null,
     timings: null,
@@ -316,6 +293,7 @@ export function normalizeStageRecord(value) {
     checkpoint: normalizeCheckpoint(value.checkpoint),
     summary: normalizeStageSummary(value.summary),
     recoveryCounts: normalizeRecoveryCounts(value.recoveryCounts),
+    attemptOutcomes: normalizeAttemptOutcomes(value.attemptOutcomes),
     timings: value.timings ? {
       validationMs: Math.max(0, Number(value.timings.validationMs) || 0),
       artifactPersistenceMs: Math.max(0, Number(value.timings.artifactPersistenceMs) || 0)

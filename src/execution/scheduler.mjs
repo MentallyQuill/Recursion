@@ -1,4 +1,5 @@
 import { makeId } from '../core.mjs';
+import { attemptOutcomeFrom, normalizeAttemptOutcomes } from './attempt-outcomes.mjs';
 import { normalizeInstructionValidationRule } from '../instruction-safety.mjs';
 import { normalizeOutputIssues } from '../providers/output-contract.mjs';
 import { recoveryCountsAfterAttempt, recoveryCountsAfterArtifact, normalizeRecoveryCounts } from './recovery-counts.mjs';
@@ -620,6 +621,8 @@ export function createExecutionScheduler({
               },
               diagnosticCodes,
               lastAttemptAction,
+              attemptOutcomes: normalizeAttemptOutcomes([...(record.attemptOutcomes || []),
+                attemptOutcomeFrom(summary, {attempt:Number(record.attempts.total || 0) + 1, window:record.attempts.window})]),
               recoveryCounts: recoveryCountsAfterAttempt(record.recoveryCounts, summary, {
                 segmentedRepair: stage.id.startsWith('preprocess.cards.segmented.') && Boolean(draft.stageRecords['preprocess.cards.fused'])
               }),
@@ -731,6 +734,7 @@ export function createExecutionScheduler({
         ),
         provenance: runtime.provenance,
         attempts: currentRecord.attempts,
+        attemptOutcomes: currentRecord.attemptOutcomes,
         diagnosticCodes: currentRecord.diagnosticCodes,
         lastAttemptAction: currentRecord.lastAttemptAction,
         artifactRef: {

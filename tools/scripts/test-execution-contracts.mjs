@@ -167,6 +167,7 @@ assertDeepEqual(stageRecord, {
   stageVersion: 3,
   kind: 'model',
   state: 'pending',
+  attemptOutcomes: [],
   checkpoint: null,
   summary: null,
   timings: null,
@@ -217,6 +218,7 @@ assertDeepEqual(checkpoint, {
   dependencyHashes: { 'preprocess.snapshot': 'snapshot-a' },
   provenance,
   attempts: { window: 1, limit: 2, used: 1, total: 1 },
+  attemptOutcomes: [],
   artifactRef: {
     kind: 'logical-storage',
     key: 'artifact-a',

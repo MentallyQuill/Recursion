@@ -1,4 +1,5 @@
 import { normalizeOutputIssues } from './output-contract.mjs';
+import { normalizeCancellationOrigin } from '../failures.mjs';
 
 const TRANSIENT_TRANSPORT_CODES = new Set([
   'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN',
@@ -7,14 +8,16 @@ const TRANSIENT_TRANSPORT_CODES = new Set([
 
 function providerFailureRecord(code, message, retryable, {
   kind = 'transport',
-  category = 'provider'
+  category = 'provider',
+  cancellationOrigin
 } = {}) {
   return Object.freeze({
     kind,
     code,
     category,
     message,
-    retryable: retryable === true
+    retryable: retryable === true,
+    ...(code === 'RECURSION_PROVIDER_ABORTED' ? {cancellationOrigin:normalizeCancellationOrigin(cancellationOrigin)} : {})
   });
 }
 
@@ -102,9 +105,9 @@ function classifyProviderError(error, chain, status) {
       || codes.has('RECURSION_PROVIDER_ABORTED')) {
     return providerFailureRecord(
       'RECURSION_PROVIDER_ABORTED',
-      'Provider request was stopped.',
+      'Provider request was canceled.',
       false,
-      { kind: 'abort', category: 'stale-state' }
+      { kind: 'abort', category: 'cancellation', cancellationOrigin:error?.cancellationOrigin }
     );
   }
 

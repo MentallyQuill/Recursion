@@ -728,6 +728,8 @@ for (const pipelineMode of ['fused', 'segmented']) {
     ...saved,
     state: 'running',
     frontierStageIds: [],
+    recoveryBudget:{...saved.recoveryBudget,elapsedActiveMs:1200,activeSince:Date.parse('2026-10-07T12:00:00.000Z')},
+    updatedAt:'2026-10-07T12:00:02.000Z',
     stageRecords: {
       ...saved.stageRecords,
       [stageId]: {
@@ -759,6 +761,16 @@ for (const pipelineMode of ['fused', 'segmented']) {
   );
   assertDeepEqual(restored.frontierStageIds, [stageId], 'restore exposes the interrupted pending stage as the visible Resume frontier');
   assertEqual(restoredCalls.length, 0, 'restore never starts provider work');
+  const restoredStored = await storage.loadPipelineRun('chat-preprocess');
+  assertEqual(restoredStored.stageRecords[stageId].executionToken,null,'reload revokes unfinished commit authority');
+  assertDeepEqual(restoredStored.stageRecords['preprocess.arbiter'].checkpoint,saved.stageRecords['preprocess.arbiter'].checkpoint,
+    'reload preserves accepted dependency checkpoints');
+  assertEqual(restoredStored.recoveryBudget.elapsedActiveMs,3200,'app-closed time is excluded from the operation clock');
+  assertEqual(restoredStored.recoveryBudget.activeSince,null);
+  const diagnostic = (await restoredRuntime.exportDiagnostics()).diagnostics;
+  assert(diagnostic.runtime.execution.diagnosticCodes.includes('operation-interrupted-after-reload'),
+    'interruption has a fixed export code');
+  assertEqual(diagnostic.operationSummaries.at(-1).outcome,'interrupted');
   const started = await restoredRuntime.resumeOperation({
     operationId: restored.operationId
   });

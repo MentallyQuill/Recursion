@@ -40,6 +40,7 @@ function normalizeSummary(value) {
   if (!operationId) return null;
   return {operationId, phase:['preprocess','postprocess'].includes(value.phase) ? value.phase : 'unknown',
     state:STATES.has(value.state) ? value.state : 'paused', outcome:OUTCOMES.has(value.outcome) ? value.outcome : 'paused',
+    diagnosticCodes:value.outcome === 'interrupted' ? ['operation-interrupted-after-reload'] : [],
     createdAt:timestamp(value.createdAt), updatedAt:timestamp(value.updatedAt),
     firstObservedBuild:normalizeBuildIdentity(value.firstObservedBuild), latestBuild:normalizeBuildIdentity(value.latestBuild),
     pipelineMode:['segmented','fused'].includes(value.pipelineMode) ? value.pipelineMode : 'unknown',

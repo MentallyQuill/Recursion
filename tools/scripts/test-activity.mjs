@@ -1,6 +1,29 @@
 import { createActivityReporter } from '../../src/activity.mjs';
 import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
 
+for (const field of ['reason','statusReason','cautionReason','decision','fallbackReason']) {
+  for (const spaces of [0,121,501]) {
+    const reporter = createActivityReporter();
+    reporter.start({runId:'reason-test'});
+    const input = field === 'fallbackReason' ? {fallbackReason:' '.repeat(spaces)+'card-selection-prefix-changed'}
+      : {detail:{[field]:' '.repeat(spaces)+'card-selection-prefix-changed'}};
+    const event = reporter.stage({severity:'warning',label:'History receipt was skipped.',...input});
+    assertEqual(event.detail?.failure,undefined,`${field} is an explanation rather than a missing cause`);
+  }
+}
+{
+  const reporter = createActivityReporter();
+  reporter.start({runId:'unsafe-reason'});
+  const unsafe = reporter.stage({severity:'warning',detail:{reason:'safe '.repeat(121)+'provider response PRIVATE_CANARY'}});
+  assertEqual(unsafe.detail.reason,'[redacted]','unsafe text is screened before truncation');
+  assertEqual(unsafe.detail.failure.code,'RECURSION_ACTIVITY_REASON_MISSING');
+  const missing = reporter.stage({severity:'warning',detail:{reason:' '.repeat(501)}});
+  assertEqual(missing.detail.failure.code,'RECURSION_ACTIVITY_REASON_MISSING');
+  const explicit = reporter.stage({severity:'warning',detail:{reason:'an explained skip',failure:{
+    code:'RECURSION_PROVIDER_TOKEN_LIMIT',stage:'provider-call',category:'provider-length',message:'Response hit its limit.'}}});
+  assertEqual(explicit.detail.failure.code,'RECURSION_PROVIDER_TOKEN_LIMIT','explicit descriptors take precedence');
+}
+
 function assertNoSecret(value, message) {
   const serialized = JSON.stringify(value);
   assert(!serialized.includes('secret-value'), message);
@@ -133,8 +156,10 @@ assertEqual(secretRun.providerLane, null, 'invalid provider lane is omitted as n
 assertEqual(secretRun.composerLane, null, 'invalid composer lane is omitted as null');
 assertEqual(secretRun.label.length, 160, 'labels are truncated to exact cap');
 assert(secretRun.label.endsWith('...'), 'truncated labels use ellipsis');
-assertEqual(secretRun.fallbackReason.length, 240, 'fallback reason is truncated to exact cap');
-assert(secretRun.fallbackReason.endsWith('...'), 'truncated fallback reason uses ellipsis');
+assertEqual(secretRun.fallbackReason, '[redacted]', 'unsafe fallback reason is screened before bounds');
+const boundedReason = createActivityReporter().start({fallbackReason:'B'.repeat(600)}).fallbackReason;
+assertEqual(boundedReason.length,240,'safe fallback reason remains bounded');
+assert(boundedReason.endsWith('...'),'truncated safe fallback reason uses ellipsis');
 assertEqual(secretRun.chips[0].length, 80, 'chips are truncated to exact cap');
 assertNoSecret(secretRun.detail, 'detail secrets are redacted');
 assertNoSecret(secretRun.cardCounts, 'card count secrets are redacted');
@@ -161,8 +186,8 @@ const decisionSettlement = decisionReporter.settle({
   detail: { decision: 'requires-recompose' }
 });
 assert(
-  decisionSettlement.detail?.failure?.message === 'requires-recompose',
-  'warning Editorial decisions become explicit activity reasons'
+  decisionSettlement.detail?.decision === 'requires-recompose' && !decisionSettlement.detail?.failure,
+  'warning Editorial decisions remain explained without a fabricated failure'
 );
 
 const laneReporter = createActivityReporter();

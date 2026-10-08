@@ -1,4 +1,5 @@
 import { makeId } from '../core.mjs';
+import { normalizeCancellationOrigin } from '../failures.mjs';
 import { attemptOutcomeFrom, normalizeAttemptOutcomes } from './attempt-outcomes.mjs';
 import { normalizeInstructionValidationRule } from '../instruction-safety.mjs';
 import { normalizeOutputIssues } from '../providers/output-contract.mjs';
@@ -73,6 +74,7 @@ function failureRecord(failure, fallbackCode = 'RECURSION_STAGE_FAILED') {
     code: String(source.code || fallbackCode).slice(0, 120),
     failureClass: String(source.category || source.kind || 'internal').slice(0, 80),
     retryable: source.retryable === true,
+    ...(source.code === 'RECURSION_PROVIDER_ABORTED' ? {cancellationOrigin:normalizeCancellationOrigin(source.cancellationOrigin)} : {}),
     ...(source.fieldIssues?.length ? { fieldIssues: normalizeOutputIssues(source.fieldIssues) } : {}),
     ...(validationRule ? { validationRule } : {}),
     ...(Number.isFinite(source.retryAfterMs) ? { retryAfterMs: Math.max(0, source.retryAfterMs) } : {}),

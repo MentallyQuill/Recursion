@@ -105,7 +105,7 @@ assert.equal(dispatches, 0);
 
 **Interfaces:** `FAILURE_CATEGORIES` adds `cancellation`; provider abort descriptor retains `RECURSION_PROVIDER_ABORTED`, `retryable:false`, and fixed cancellation message. Trusted origin enum is `recursion-stop|host-stop|operation-deadline|profile-changed|chat-changed|unknown`; it never substitutes a guess for unknown. Interrupted display derives from paused + `restored-after-reload`; manifest state remains paused.
 
-- [ ] Write RED for aborted provider failure receiving a generic connection message/category. Write RED for explained activity warnings receiving `RECURSION_ACTIVITY_REASON_MISSING`, including 121/501 spaces and unsafe text after 500 characters.
+- [x] Write RED for aborted provider failure receiving a generic connection message/category. Write RED for explained activity warnings receiving `RECURSION_ACTIVITY_REASON_MISSING`, including 121/501 spaces and unsafe text after 500 characters.
 
 ```js
 const stopped = providerFailure({code:'RECURSION_PROVIDER_ABORTED'});
@@ -114,10 +114,10 @@ assert.equal(stopped.message, 'Provider request was canceled.');
 assert.equal(stopped.retryable, false);
 ```
 
-- [ ] Test explicit failure precedence, sanitized string aliases, missing reason fallback, completion after successful correction, unknown host initiator, and late canceled provider resolution. Verify the activity consumer still renders a readable warning without requiring a fabricated failure.
-- [ ] Implement abort classification before generic provider matching; align activity explanations with the current journal contract and trim before bounds. Carry only trusted origins through normalization/diagnostics where supplied.
-- [ ] Pin existing reload behavior with actual storage/runtime fixtures: running becomes paused/interrupted, completed checkpoints preserved, unfinished tokens revoked, no model call on restore, app-closed duration not charged, and source changes produce stale instead of Resume. Add fixed interruption diagnostic/history code and neutral explicit UI text.
-- [ ] Run relevant failure/activity/host-stop/execution/runtime/UI tests. Commit `fix: distinguish canceled and interrupted work`.
+- [x] Test explicit failure precedence, sanitized string aliases, missing reason fallback, completion after successful correction, unknown host initiator, and late canceled provider resolution. Verify the activity consumer still renders a readable warning without requiring a fabricated failure.
+- [x] Implement abort classification before generic provider matching; align activity explanations with the current journal contract and trim before bounds. Carry only trusted origins through normalization/diagnostics where supplied.
+- [x] Pin existing reload behavior with actual storage/runtime fixtures: running becomes paused/interrupted, completed checkpoints preserved, unfinished tokens revoked, no model call on restore, app-closed duration not charged, and source changes produce stale instead of Resume. Add fixed interruption diagnostic/history code and neutral explicit UI text.
+- [x] Run relevant failure/activity/host-stop/execution/runtime/UI tests. Commit `fix: distinguish canceled and interrupted work`.
 
 ### Task 5: Host-owned receipt basis and precise guard failures
 

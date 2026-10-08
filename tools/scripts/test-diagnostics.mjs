@@ -13,6 +13,9 @@ import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
 import { classifyModelFailure } from '../../src/execution/attempt-policy.mjs';
 import { normalizeStageRecord } from '../../src/execution/checkpoints.mjs';
 
+assert(summarizeExecutionForDiagnostics({operationId:'interrupted',state:'paused',pauseReason:'restored-after-reload'})
+  .diagnosticCodes.includes('operation-interrupted-after-reload'),'reload interruption exports its fixed cause');
+
 const issueRecord = normalizeStageRecord({ stageId: 'shape', state: 'failed', failure: {
   code: 'RECURSION_PROVIDER_SCHEMA_MISMATCH', fieldIssues: [{ path: '$.promptText', rule: 'type', message: 'PRIVATE_CANARY' }]
 } });

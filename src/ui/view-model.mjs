@@ -200,6 +200,7 @@ export function activityLabel(activity = {}) {
 }
 
 function runtimeHealthLabel(activity, progressRun) {
+  if (progressRun?.title === 'Interrupted') return 'Interrupted';
   if (!READY_PHASES.has(activity.phase)) return 'Working';
   const severity = normalizeSeverity(activity.severity);
   if (severity === 'error') return 'Issue';

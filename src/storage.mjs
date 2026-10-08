@@ -1,3 +1,4 @@
+import { UNSAFE_DIAGNOSTIC_TEXT_PATTERN as UNSAFE_JOURNAL_TEXT_PATTERN } from './diagnostic-reasons.mjs';
 import { normalizePostProcessOutcomes, summarizePostProcessOutcome } from './post-process-diagnostics.mjs';
 import { createPostProcessComparisonStore, POST_PROCESS_COMPARISONS_PATTERN, postProcessComparisonsKey } from './post-process-comparison.mjs';
 import { cloneJson, makeId, nowIso, redact, safeId } from './core.mjs';
@@ -47,7 +48,6 @@ const INDEX_KINDS = new Set([
 ]);
 const DEFAULT_JOURNAL_EVENT = 'activity.stage_changed';
 const JOURNAL_REASON_FIELDS = ['reason', 'statusReason', 'cautionReason'];
-const UNSAFE_JOURNAL_TEXT_PATTERN = /\b(raw[-_\s]*prompt|rawPrompt|raw[-_\s]*response|rawResponse|provider[-_\s]*prompt|providerPrompt|provider[-_\s]*response|providerResponse|hidden[-_\s]*reasoning|hiddenReasoning|reasoning[-_\s]*(?:content|details)|reasoningContent|reasoningDetails|private[-_\s]*story[-_\s]*plan|privateStoryPlan|private[-_\s]*plan|privatePlan|session[-_\s]*id|sessionId|session[-_\s]*key\s*[:=]|sessionKey\s*[:=]|session[-_\s]*token|credentials?|password\s*[:=]|token\s*[:=]|api[-_\s]*key\s*[:=]|apiKey\s*[:=]|authorization\s*[:=]|set-cookie\s*[:=]|cookie\s*[:=]|bearer\s+[A-Za-z0-9._-]+|sk-[A-Za-z0-9_-]+)/i;
 const OBJECT_COERCION_TEXT_PATTERN = /\[object Object\]|object-Object/i;
 const PATH_LIKE_TEXT_PATTERN = /(^|[\s"'`=:(\[])(?:[A-Za-z]:[\\/]|\\\\|\/\/|\.{1,2}[\\/]|\/[A-Za-z0-9_.-]+(?:[\\/][A-Za-z0-9_.-]+)+|[A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.\\/-]*|[A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.\\/-]*\.(?:jsonl?|mjs|js|css|md|txt|png|jpe?g|webp|db|sqlite)\b)/i;
 const FORBIDDEN_STORAGE_KEY_PARTS = [

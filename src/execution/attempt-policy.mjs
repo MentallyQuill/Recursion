@@ -35,7 +35,8 @@ export function classifyModelFailure(error, { kind = 'transport', signal = null 
   if (isAbort(error, signal)) {
     return normalizeProviderError(Object.assign(new Error('Stopped.'), {
       name: 'AbortError',
-      code: 'RECURSION_PROVIDER_ABORTED'
+      code: 'RECURSION_PROVIDER_ABORTED',
+      cancellationOrigin: error?.cancellationOrigin
     }));
   }
   if (kind === 'validation') {

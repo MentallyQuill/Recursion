@@ -1,5 +1,6 @@
 import { normalizeOutputIssues } from '../providers/output-contract.mjs';
 import { normalizeInstructionValidationRule } from '../instruction-safety.mjs';
+import { FAILURE_CATEGORIES, normalizeCancellationOrigin } from '../failures.mjs';
 
 export const CHECKPOINT_DIAGNOSTIC_CODES = Object.freeze([
   'structured-output-downgraded', 'output-budget-increased', 'output-budget-at-ceiling',
@@ -28,7 +29,7 @@ const FAILURE_CODES = new Set([
   'RECURSION_PROVIDER_ROLE_UNSUPPORTED', 'RECURSION_PROVIDER_ROUTER_UNAVAILABLE', 'RECURSION_PROVIDER_SCHEMA_MISMATCH',
   'RECURSION_PROVIDER_SINGLE_CARD_INVALID', 'RECURSION_PROVIDER_TIMEOUT', 'RECURSION_PROVIDER_TOKEN_LIMIT', 'RECURSION_PROVIDER_TRANSIENT'
 ]);
-const FAILURE_CLASSES = new Set(['abort', 'validation', 'transport', 'internal', 'capacity', 'cancellation',
+const FAILURE_CLASSES = new Set([...FAILURE_CATEGORIES, 'abort', 'validation', 'transport', 'internal', 'capacity', 'cancellation',
   'provider', 'provider-account', 'provider-request', 'provider-timeout', 'provider-length',
   'configuration', 'compatibility', 'stale-state']);
 const TIMING_KEYS = ['queueMs', 'providerMs', 'normalizationMs', 'validationMs', 'artifactPersistenceMs'];
@@ -49,6 +50,7 @@ function normalizeOutcome(value) {
   const validationRule = normalizeInstructionValidationRule(value.validationRule);
   return { attempt:boundedCount(value.attempt), window:boundedCount(value.window), outcome:value.outcome,
     action:CHECKPOINT_ATTEMPT_ACTIONS.includes(value.action) ? value.action : 'stop',
+    ...(value.outcome === 'canceled' ? {cancellationOrigin:normalizeCancellationOrigin(value.cancellationOrigin)} : {}),
     ...(value.outcome !== 'accepted' ? {code:normalizeAttemptFailureCode(value.code)} : {}),
     ...(FAILURE_CLASSES.has(value.failureClass) ? {failureClass:value.failureClass} : {}),
     ...(CHECKPOINT_DIAGNOSTIC_CODES.includes(value.diagnosticCode) ? {diagnosticCode:value.diagnosticCode} : {}),
@@ -64,5 +66,6 @@ export function attemptOutcomeFrom(summary, {attempt = summary?.attempt, window 
   return normalizeOutcome({ ...summary, attempt, window,
     outcome: ({invalid:'rejected',aborted:'canceled'})[summary?.outcome] || summary?.outcome,
     code:summary?.failure?.code, failureClass:summary?.failure?.category || summary?.failure?.kind,
-    fieldIssues:summary?.failure?.fieldIssues, validationRule:summary?.failure?.validationRule });
+    fieldIssues:summary?.failure?.fieldIssues, validationRule:summary?.failure?.validationRule,
+    cancellationOrigin:summary?.failure?.cancellationOrigin });
 }

@@ -1,6 +1,15 @@
 import { createRecursionViewModel } from '../../src/ui/view-model.mjs';
 import { assert, assertEqual } from '../../tests/helpers/assert.mjs';
 
+{
+  const interrupted = createRecursionViewModel({settings:{enabled:true},activity:{phase:'idle'},
+    execution:{operationId:'restored',state:'paused',pauseReason:'restored-after-reload',
+      frontierStageIds:['preprocess.guidance'],stages:[{stageId:'preprocess.guidance',state:'pending',kind:'model',executable:true}]}});
+  assertEqual(interrupted.progressRun.title,'Interrupted','reload interruption is distinct from a provider issue');
+  assertEqual(interrupted.progressRun.subtitle,'Resume available');
+  assertEqual(interrupted.statusSeverity,'info','interruption without a failure is neutral');
+}
+
 assertEqual(
   createRecursionViewModel({
     settings: { pipelineMode: 'segmented' }

@@ -79,7 +79,10 @@ assert.equal(evicted[0].operationId,'operation-1');
 assert.equal(normalizeOperationSummaries([...all,{...bounded,operationId:'operation-1'}]).at(-1).operationId,'operation-1');
 for (const [state,pauseReason,outcome] of [['paused','restored-after-reload','interrupted'], ['paused','user-stop','canceled'],
   ['paused','stage-failed:guidance','failed'],['running','','running'],['stale','','stale'],['abandoned','','abandoned']]) {
-  assert.equal(buildOperationSummary({...manifest(),state,pauseReason}).outcome,outcome);
+  const classified = buildOperationSummary({...manifest(),state,pauseReason});
+  assert.equal(classified.outcome,outcome);
+  if (outcome === 'interrupted') assert(classified.diagnosticCodes?.includes('operation-interrupted-after-reload'),
+    'retained interruption history carries its fixed code');
 }
 assert.equal(buildOperationSummary({...many,stageRecords:{optional:{stageId:'optional',state:'failed',
   recoveryCounts:{optionalOmissions:1}}}}).outcome,'completed-with-omissions');

@@ -1,8 +1,28 @@
 import assert from 'node:assert/strict';
-import { failureFrom } from '../../src/failures.mjs';
+import { failureFrom, providerFailure } from '../../src/failures.mjs';
 import { createStorageRepository } from '../../src/storage.mjs';
 import { installPrompt, installJournalDetails, installSummary } from '../../src/runtime/prompt-install.mjs';
 import { progressFromExecution } from '../../src/progress.mjs';
+import { normalizeProviderError } from '../../src/providers/provider-errors.mjs';
+import { normalizeStageRecord } from '../../src/execution/checkpoints.mjs';
+import { attemptOutcomeFrom } from '../../src/execution/attempt-outcomes.mjs';
+
+for (const error of [{code:'RECURSION_PROVIDER_ABORTED'}, {code:'ABORT_ERR'}, {name:'AbortError',message:'rate limit'}]) {
+  const stopped = providerFailure(error);
+  assert.equal(stopped.code,'RECURSION_PROVIDER_ABORTED');
+  assert.equal(stopped.category,'cancellation');
+  assert.equal(stopped.message,'Provider request was canceled.');
+  assert.equal(stopped.retryable,false);
+  assert.equal(stopped.cancellationOrigin,'unknown','abort alone does not identify who stopped generation');
+}
+assert.equal(providerFailure({code:'RECURSION_PROVIDER_ABORTED',cancellationOrigin:'recursion-stop'}).cancellationOrigin,'recursion-stop');
+assert.equal(providerFailure({code:'RECURSION_PROVIDER_ABORTED',cancellationOrigin:'PRIVATE_CANARY'}).cancellationOrigin,'unknown');
+const canceled = normalizeProviderError({code:'RECURSION_PROVIDER_ABORTED',cancellationOrigin:'chat-changed'});
+assert.equal(canceled.category,'cancellation','provider normalizer uses the cancellation contract');
+assert.equal(canceled.cancellationOrigin,'chat-changed');
+const durableCancel = normalizeStageRecord({stageId:'guidance',state:'failed',failure:{...canceled,failureClass:canceled.category}});
+assert.equal(durableCancel.failure.cancellationOrigin,'chat-changed');
+assert.equal(attemptOutcomeFrom({outcome:'aborted',failure:canceled}).cancellationOrigin,'chat-changed');
 
 // Journal normalizes a compact provider token-limit cause.
 {

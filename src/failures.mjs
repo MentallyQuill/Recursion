@@ -1,6 +1,7 @@
 import { normalizeOutputIssues } from './providers/output-contract.mjs';
 
 export const FAILURE_CATEGORIES = Object.freeze([
+  'cancellation',
   'provider-account',
   'provider-request',
   'provider-timeout',
@@ -14,6 +15,12 @@ export const FAILURE_CATEGORIES = Object.freeze([
   'storage',
   'internal'
 ]);
+
+export const CANCELLATION_ORIGINS = Object.freeze(['recursion-stop','host-stop','operation-deadline',
+  'profile-changed','chat-changed','unknown']);
+export function normalizeCancellationOrigin(value) {
+  return CANCELLATION_ORIGINS.includes(value) ? value : 'unknown';
+}
 
 const CATEGORY_SET = new Set(FAILURE_CATEGORIES);
 const GENERIC_MESSAGES = new Set([
@@ -88,6 +95,7 @@ export function createFailure(input = {}) {
     category,
     message: normalizedMessage(source.message),
     retryable: source.retryable === true,
+    ...(category === 'cancellation' ? {cancellationOrigin:normalizeCancellationOrigin(source.cancellationOrigin)} : {}),
     ...(fieldIssues.length ? { fieldIssues: Object.freeze(fieldIssues) } : {}),
     ...(attemptedRecovery ? { attemptedRecovery } : {}),
     ...(suggestedAction ? { suggestedAction } : {})
@@ -108,6 +116,7 @@ function looksLikeProviderFailure(error = {}) {
   const status = errorStatus(error);
   const message = String(error?.message || error || '').toLowerCase();
   return status >= 400
+    || ['RECURSION_PROVIDER_ABORTED','ABORT_ERR','ABORTERROR'].includes(code)
     || code.startsWith('RECURSION_PROVIDER_')
     || code.startsWith('RECURSION_JSON_')
     || /timed?\s*out|timeout|rate limit|context length|finish_reason.?length/.test(message);
@@ -119,6 +128,12 @@ export function providerFailure(error = {}, context = {}) {
   const rawMessage = String(error?.message || error || '');
   const lower = rawMessage.toLowerCase();
   const stage = context.stage || 'provider-call';
+
+  if (['RECURSION_PROVIDER_ABORTED','ABORT_ERR','ABORTERROR'].includes(code) || error?.name === 'AbortError') {
+    return createFailure({code:'RECURSION_PROVIDER_ABORTED',stage,category:'cancellation',
+      message:'Provider request was canceled.',retryable:false,
+      cancellationOrigin:error?.cancellationOrigin || context.cancellationOrigin});
+  }
 
   if (['RECURSION_PROVIDER_CONFIG_STALE', 'RECURSION_PROVIDER_TEST_STALE', 'RECURSION_PROVIDER_CERTIFICATION_INVALID'].includes(code)) {
     return createFailure({
@@ -262,7 +277,8 @@ export function failureFrom(value, fallback = {}) {
     retryable: source.retryable ?? defaults.retryable,
     attemptedRecovery: source.attemptedRecovery || defaults.attemptedRecovery,
     suggestedAction: source.suggestedAction || defaults.suggestedAction,
-    fieldIssues: source.fieldIssues || defaults.fieldIssues
+    fieldIssues: source.fieldIssues || defaults.fieldIssues,
+    cancellationOrigin: source.cancellationOrigin || defaults.cancellationOrigin
   });
 }
 

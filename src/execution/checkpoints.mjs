@@ -7,6 +7,7 @@ import { normalizeInstructionValidationRule } from '../instruction-safety.mjs';
 import { normalizeOutputIssues } from '../providers/output-contract.mjs';
 import { normalizeRecoveryCounts } from './recovery-counts.mjs';
 import { normalizePipelineDecision } from '../runtime/pipeline-policy.mjs';
+import { normalizeCancellationOrigin } from '../failures.mjs';
 
 export const PIPELINE_RUN_SCHEMA = 'recursion.pipelineRun.v2';
 export const CHECKPOINT_SCHEMA = 'recursion.stageCheckpoint.v2';
@@ -305,6 +306,8 @@ export function normalizeStageRecord(value) {
           code: cleanText(value.failure.code),
           failureClass: cleanText(value.failure.failureClass),
           retryable: value.failure.retryable === true,
+          ...(value.failure.code === 'RECURSION_PROVIDER_ABORTED'
+            ? {cancellationOrigin:normalizeCancellationOrigin(value.failure.cancellationOrigin)} : {}),
           ...(value.failure.fieldIssues?.length ? { fieldIssues: normalizeOutputIssues(value.failure.fieldIssues) } : {}),
           ...(normalizeInstructionValidationRule(value.failure.validationRule)
             ? { validationRule: normalizeInstructionValidationRule(value.failure.validationRule) } : {}),

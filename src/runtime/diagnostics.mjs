@@ -9,10 +9,12 @@ import { normalizeRecoveryCounts, RECOVERY_COUNT_KEYS } from '../execution/recov
 import { normalizeBuildIdentity } from './build-identity.mjs';
 import { normalizeOperationSummaries } from '../storage/operation-history.mjs';
 import { normalizeAttemptOutcomes } from '../execution/attempt-outcomes.mjs';
+import { normalizeCancellationOrigin } from '../failures.mjs';
 
 const SECRET_TEXT_PATTERN = /(private[-_\s]*secret|\bsk-[a-z0-9_-]+|\bbearer\s+[a-z0-9._-]+)/ig;
 const RESUME_BODY_KEY_PATTERN = /(arbiter|card|reference|packet|hand|guidance|draft|prose|prompt|response|artifact).*(body|text|payload|content)|^(body|text|payload|content)$/i;
 const EXECUTION_DIAGNOSTIC_CODE_SET = new Set([
+  'operation-interrupted-after-reload',
   'operation-paused-user-stop',
   'operation-paused:chat-changed',
   'operation-paused:operation-deadline',
@@ -107,6 +109,7 @@ function executionDiagnosticCodes(manifest, stages) {
     ...stages.flatMap((stage) => asArray(stage.diagnosticCodes))
   ];
   const pauseReason = safeText(source.pauseReason, 120);
+  if (source.state === 'paused' && pauseReason === 'restored-after-reload') codes.push('operation-interrupted-after-reload');
   if (source.state === 'paused' && ['user', 'user-stop'].includes(pauseReason)) {
     codes.push('operation-paused-user-stop');
   }
@@ -155,6 +158,8 @@ function summarizeExecutionStage(record) {
     ...(source.timings ? { timings: safeDiagnosticValue(source.timings) } : {}),
     failureClass: safeText(source.failure?.failureClass, 80),
     failureCode: safeText(source.failure?.code, 120),
+    ...(source.failure?.code === 'RECURSION_PROVIDER_ABORTED'
+      ? {cancellationOrigin:normalizeCancellationOrigin(source.failure.cancellationOrigin)} : {}),
     ...(source.failure?.fieldIssues?.length ? { fieldIssues: normalizeOutputIssues(source.failure.fieldIssues) } : {}),
     ...(normalizeInstructionValidationRule(source.failure?.validationRule)
       ? { validationRule: normalizeInstructionValidationRule(source.failure.validationRule) } : {}),

@@ -1,5 +1,8 @@
 import { cloneJson, makeId, nowIso, redact, truncate } from './core.mjs';
 import { failureFrom } from './failures.mjs';
+import { normalizeDiagnosticExplanation } from './diagnostic-reasons.mjs';
+
+const EXPLANATION_FIELDS = ['reason','statusReason','cautionReason','decision','fallbackReason'];
 
 const HISTORY_LIMIT = 100;
 const VALID_MODES = new Set(['foreground', 'background', 'review']);
@@ -46,7 +49,13 @@ function cleanText(value, limit) {
 
 function cleanStructured(value, maxString = 500) {
   if (value === undefined || value === null) return undefined;
-  return scrubPrivateProse(scrubSecretText(redact(cloneSafe(value, undefined), { maxString })));
+  const cloned = cloneSafe(value, undefined);
+  if (cloned && typeof cloned === 'object' && !Array.isArray(cloned)) {
+    for (const field of EXPLANATION_FIELDS) {
+      if (typeof cloned[field] === 'string') cloned[field] = normalizeDiagnosticExplanation(cloned[field], maxString);
+    }
+  }
+  return scrubPrivateProse(scrubSecretText(redact(cloned, { maxString })));
 }
 
 function scrubSecretText(value) {
@@ -90,11 +99,10 @@ function ensureUnhealthyFailure(event) {
   const cause = detail.failure
     || detail.error
     || detail.compactError
-    || detail.reason
-    || detail.statusReason
-    || detail.cautionReason
-    || detail.decision
-    || event.fallbackReason;
+    || (detail.code && detail.message ? detail : null);
+  const explained = [...EXPLANATION_FIELDS.map(field => detail[field]), event.fallbackReason]
+    .some(value => typeof value === 'string' && value.trim() && value !== '[redacted]');
+  if (!cause && explained) return event;
   const failure = failureFrom(cause, {
     code: 'RECURSION_ACTIVITY_REASON_MISSING',
     stage: event.logicalStage || event.phase || 'activity',
@@ -125,7 +133,7 @@ function normalizeEvent(input = {}, defaults = {}) {
     providerLane: cleanChoice(input.providerLane ?? defaults.providerLane, VALID_PROVIDER_LANES) ?? null,
     composerLane: cleanChoice(input.composerLane ?? defaults.composerLane, VALID_COMPOSER_LANES) ?? null,
     cardCounts: cleanStructured(input.cardCounts ?? defaults.cardCounts) ?? null,
-    fallbackReason: cleanText(input.fallbackReason ?? defaults.fallbackReason, 240) ?? null,
+    fallbackReason: cleanText(normalizeDiagnosticExplanation(input.fallbackReason ?? defaults.fallbackReason), 240) ?? null,
     recordedAt: nowIso()
   });
 

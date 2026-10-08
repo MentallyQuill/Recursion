@@ -1378,8 +1378,9 @@ function finalizeProgress(progress, options = {}) {
   const rawSubtitle = safeDisplayText(progress.subtitle, '', 120);
   return {
     runId: progress.runId || null,
-    title: SAFE_PROGRESS_TITLES.has(rawTitle) ? rawTitle : progressTitle(steps),
-    subtitle: /^\d{1,2} model calls running$/.test(rawSubtitle) ? rawSubtitle : fallbackSubtitle,
+    title: rawTitle === 'Interrupted' || SAFE_PROGRESS_TITLES.has(rawTitle) ? rawTitle : progressTitle(steps),
+    subtitle: (rawTitle === 'Interrupted' && rawSubtitle === 'Resume available') || /^\d{1,2} model calls running$/.test(rawSubtitle)
+      ? rawSubtitle : fallbackSubtitle,
     activeCount,
     heroPixelState: heroPixelState(steps),
     currentStepText: currentStepText(steps),
@@ -1460,7 +1461,9 @@ function operationForProgress(execution, stages) {
 function progressStateForExecutionStage(stage, operation) {
   const state = cleanText(asObject(stage).state, 'pending').toLowerCase();
   if (operation.state === 'paused' && ['pending', 'running'].includes(state)
-      && operation.frontierStageIds.includes(executionStageId(stage))) return 'warning';
+      && operation.frontierStageIds.includes(executionStageId(stage))) {
+    return operation.pauseReason === 'restored-after-reload' ? 'pending' : 'warning';
+  }
   if (state === 'completed') {
     if (stage.summary?.status === 'fallback-raw-only') return 'warning';
     return operation.state === 'completed' ? 'done' : 'cached';
@@ -1638,11 +1641,12 @@ function authoredHandSteps(stage, operation) {
 export function progressFromExecution(execution, queuedReprocess = null) {
   const source = asObject(execution);
   const stages = executionStages(source);
+  const interrupted = source.state === 'paused' && source.pauseReason === 'restored-after-reload';
   if (!cleanText(source.operationId) || stages.length === 0) {
     return finalizeProgress({
       runId: cleanText(source.operationId) || null,
-      title: 'Ready',
-      subtitle: '',
+      title: interrupted ? 'Interrupted' : 'Ready',
+      subtitle: interrupted ? 'Resume available' : '',
       steps: []
     }, { sort: false });
   }
@@ -1764,7 +1768,7 @@ export function progressFromExecution(execution, queuedReprocess = null) {
   topLevel.sort((left, right) => left.order - right.order);
   const completedWithFailures = operation.state === 'completed'
     && topLevel.some((step) => ['failed', 'warning'].includes(step.state));
-  const title = operation.state === 'running'
+  const title = interrupted ? 'Interrupted' : operation.state === 'running'
     ? 'Generating'
     : (operation.state === 'completed'
         ? (completedWithFailures ? 'Needs attention' : 'Ready')
@@ -1772,7 +1776,7 @@ export function progressFromExecution(execution, queuedReprocess = null) {
   return finalizeProgress({
     runId: cleanText(operation.operationId) || null,
     title,
-    subtitle: '',
+    subtitle: interrupted ? 'Resume available' : '',
     steps: topLevel
   }, { sort: false });
 }

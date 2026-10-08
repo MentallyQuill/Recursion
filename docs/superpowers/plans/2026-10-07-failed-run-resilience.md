@@ -171,18 +171,18 @@ assert.throws(() => parseLiveBenchmarkOptions(['--live'], {RECURSION_SILLYTAVERN
 
 - [x] Implement finite nonnegative measurement validation, grouping by build/configuration, median/range, observed call/correction/omission/required-block counts, and explicit unavailable statistics. Ignore arbitrary input fields; output no private prose or identifiers from stories.
 - [x] The analysis CLI reads explicitly provided local export paths and writes a workspace report. It makes no network calls and requires no Playwright. Validate paid mode before loading browser/session code; accept explicit sample/profile inputs and retain dedicated-user guard.
-- [x] Document a reproducible 6/9-card × Auto/Always comparison using the same dedicated fixture/model/profile; include quality/required coverage gates and distinguish measured versus unmeasured effects. Execute only synthetic/read-only analysis for this goal.
+- [x] Document a reproducible 6/9-card × actual Low/Medium comparison using the same dedicated fixture/model/profile; explain that isolated Auto/Always is unavailable because Reasoner use is derived, include quality/required coverage gates, and distinguish measured versus unmeasured effects. Execute only synthetic/read-only analysis for this goal.
 - [x] Run preparation-analysis, benchmark CLI guard, turn-timing, diagnostics and model-eval harness tests. Commit `feat: analyze preparation without live model calls`.
 
 ### Task 8: Clear cost helpers, current docs, and synthetic UI proof
 
 **Files:** Modify `src/ui.mjs`, `DESIGN.md`, `docs/design/UI_SPEC.md`, `docs/design/BEHAVIOR_SETTINGS_POLICY_SPEC.md`, `docs/architecture/STORAGE_AND_DIAGNOSTICS.md`, `docs/technical/MODEL_CALLS_AND_PROVIDER_ROUTING.md`, `docs/user/RECURSION_OPERATOR_MANUAL.md`, and relevant documentation index. Extend `tools/scripts/prove-card-selection-settings-ui.mjs` and rendered UI tests. Add `docs/verification/2026-10-07-failed-run-resilience.md`.
 
-- [ ] Add rendered assertions for the spec's exact target/routing/recovery helper copy, queue countdown, interrupted/canceled outcomes, and unchanged saved card target/routing/disclosures. No tests solely grepping source strings.
-- [ ] Implement helpers and compact status in the existing rows, preserving current settings values and autosave behavior. No new preset silently changes the user configuration; no model price/latency estimate is invented.
-- [ ] Update docs with declared versus verified builds, fixed history limits, clear-journal semantics, Continue receipt basis, cancellation origin, and live benchmark opt-in. Keep the original audit as dated evidence; do not rewrite its observed failure counts to include new synthetic findings.
-- [ ] Run desktop 1360×820 and narrow 390×844 synthetic proofs, inspect screenshots, verify tooltips-off copy, disclosure/draft persistence, keyboard usability and no horizontal overflow. Add current screenshots/results and explicit live-measurement limits to the verification report.
-- [ ] Commit `docs: explain recovery status and measurement` with UI changes after behavior tests pass.
+- [x] Add rendered assertions for the spec's exact target/routing/recovery helper copy, queue countdown, interrupted/canceled outcomes, and unchanged saved card target/routing/disclosures. No tests solely grepping source strings.
+- [x] Implement helpers and compact status in the existing rows, preserving current settings values and autosave behavior. No new preset silently changes the user configuration; no model price/latency estimate is invented.
+- [x] Update docs with declared versus verified builds, fixed history limits, clear-journal semantics, Continue receipt basis, cancellation origin, and live benchmark opt-in. Keep the original audit as dated evidence; do not rewrite its observed failure counts to include new synthetic findings.
+- [x] Run desktop 1360×820 and narrow 390×844 synthetic proofs, inspect screenshots, verify tooltips-off copy, disclosure/draft persistence, keyboard usability and no horizontal overflow. Add current screenshots/results and explicit live-measurement limits to the verification report.
+- [x] Commit `docs: explain recovery status and measurement` with UI changes after behavior tests pass.
 
 ### Task 9: Review, verified installation package, and main integration
 

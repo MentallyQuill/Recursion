@@ -153,6 +153,10 @@ Paused repairs use amber `paused` rows, retaining the current provider cause ins
 
 Execution details stay in the existing Progress footer and Last Brief: show the actual pipeline and selected lane. An explicit Fused request runs Fused; actual bundle failures may trigger recorded segmented recovery. Provider settings show configured and effective concurrency; time limits remain under Advanced → Execution. These use existing compact control rows and helper text without additional bar badges or notifications.
 
+Active or paused progress can show two subdued header lines: the observed provider cooldown (`Waiting for provider · retry in Ns`) and the actual remaining recovery allowance. Update them through the existing refresh loop without changing drafts/disclosures. Reloaded unfinished work reads `Interrupted` / `Resume available` with neutral pending rows; explicit failures keep their failure treatment. Canceled work is neutral, and provider aborts use `Provider request was canceled.` with unknown initiator unless a trusted origin was supplied.
+
+Visible settings help explains card-request/repair cost, eligible Reasoner routing, and additional recovery calls. Reasoner use follows the bar's Reasoning Level: Low is Off; Medium, High, and Ultra are Always. Keep this derivation readable when tooltips are disabled and preserve the current settings values.
+
 Recursion is a SillyTavern extension, so its interface should feel native to SillyTavern before it feels branded. The visual identity is compact, graphite-dark, technical, and restrained. It should sit close to the chat surface as quiet operational chrome: useful when inspected, mostly invisible during normal play.
 
 The product should never read as a standalone SaaS dashboard, landing page, or decorative web app. Recursion's UI exists to answer what is active, what the last response used, and which broad behavior settings are available without asking the user to micromanage cards.
@@ -264,7 +268,7 @@ Each completed Refinement target keeps its outcome and revision count in the exi
 - Do keep Recursion chrome compact, stable, and readable at toolbar density.
 - Do use cyan only for active system identity, running work, selection, or focus.
 - Do use amber for repairable attention, green for success, purple for cached, and red only for blocked or failed states.
-- Do reconcile Fused family rows with individual repair stages. Successful repairs and retries read as normal completion (or cached reuse), without recovery labels, historical rejection text, retry suggestions, or recovery counters in the progress menu. Keep recovery accounting and allowlisted rejection codes in diagnostics. Unresolved failures, pending repairs, and degraded results retain their relevant state and explanation; successful recovery must not leave the parent or Hero Pixel Array amber or red.
+- Do reconcile Fused family rows with individual repair stages. Successful repairs and retries read as normal completion (or cached reuse), without historical rejection text, retry suggestions, or recovery counters on successful rows. Active/paused operations may show their remaining allowance in the header; completed operations hide it. Keep historical accounting and allowlisted rejection codes in diagnostics. Unresolved failures, pending repairs, and degraded results retain their relevant state and explanation; successful recovery must not leave the parent or Hero Pixel Array amber or red.
 - Do keep progress, packet, and card inspection surfaces privacy-safe and free of raw provider output, secrets, hidden reasoning, stack traces, and unrelated diagnostics.
 - Do make every icon-only control keyboard reachable and ARIA-labeled.
 - Do preserve reduced-motion behavior for all progress and block animations.

@@ -25,6 +25,9 @@ This is the canonical map for Recursion documentation. Undated manuals and specs
 - [User Guides](user/README.md) - Operator-facing table of contents.
 - [First Run Workflow](user/FIRST_RUN_WORKFLOW.md) - First-session path from install through Segmented Auto, Tense & PoV Auto, Manual, Fused trial, inspection, and power-toggle cleanup.
 - [Recursion Operator Manual](user/RECURSION_OPERATOR_MANUAL.md) - Complete practical manual for Pre-process and Post-process Cards, UI surfaces, Segmented/Fused pipelines, resumable stage actions, modes, Tense & PoV, settings, operation, diagnostics, storage, mobile behavior, and smoke checks.
+- [Build Installation](user/BUILD_INSTALLATION.md) - Stage a production package, verify account/public copies, identify declared builds, reload and roll back.
+- [Failed-run Resilience Design](superpowers/specs/2026-10-07-failed-run-resilience-design.md) and [implementation plan](superpowers/plans/2026-10-07-failed-run-resilience.md) - Current decision record and code examples for the evidence-based failed-run improvements.
+- [Failed-run Resilience Verification](verification/2026-10-07-failed-run-resilience.md) - Synthetic regression/UI evidence, final gates, staged build, and live-measurement limits.
 
 ## Provider, Privacy, And Safety Docs
 

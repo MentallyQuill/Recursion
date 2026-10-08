@@ -27,6 +27,10 @@ This document describes the implementation of the profile-only provider boundary
 
 ## Route Invariant
 
+The existing profile queue also exposes a pure current-lane snapshot: availability, active/pending counts, effective concurrency, and cooldown remaining. Utility and Reasoner selecting the same profile share that queue and cooldown. Retry, Stop/Resume, and UI refresh cannot bypass a live cooldown; Stop cancels queued dispatch. Unknown queue state is unavailable rather than invented idle status. Provider/progress countdowns use the existing UI refresh loop.
+
+Recent stage attempt outcomes preserve fixed parse/shape/semantic/provider causes after successful correction, with bounded canonical issues and observed timings/usage. Active failure still clears on success. Abort is cancellation with fixed copy and trusted/unknown origin. No parser, second queue, or alternative provider route is added by diagnostics. Historical operation configuration is captured at creation; analysis never assigns current settings to old runs. See [read-only measurements](../testing/LIVE_SMOKE_TEST_PLAN.md#preparation-measurements).
+
 Every Utility or Reasoner request must resolve to a selected SillyTavern Connection Profile.
 
 ```text

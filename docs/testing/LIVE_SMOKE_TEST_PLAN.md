@@ -21,14 +21,16 @@ Qualification also makes model calls; sample count is not a total paid-call cap.
 
 For an authorized comparison, use the same dedicated synthetic fixture, model/profile, output ceiling, and
 primary streaming settings. Run four configurations with `--cards 6` / `--cards 9` and
-`--reasoning-level medium` / `--reasoning-level high`, for example:
+`--reasoning-level low` / `--reasoning-level medium`, for example:
 
 ```powershell
 node tools/scripts/benchmark-preprocess-latency.mjs --live --profile 'Explicit dedicated test profile' --samples 2 --cards 6 --reasoning-level medium
 ```
 
-Medium currently derives Reasoner use **Auto**; High derives **Always**. These are coupled settings, so this
-comparison does not isolate a routing-only effect. Both eligible lanes use the explicit profile in High.
+Low currently derives Reasoner use **Off**; Medium, High, and Ultra derive **Always**. The current operator
+surface has no independently selectable Auto value, so an Auto/Always-only experiment is unavailable.
+Compare the actual Low/Medium settings and report their coupled routing/reasoning changes. Both eligible
+lanes use the explicit profile when the selected level uses Reasoner.
 Each configuration includes Segmented concurrency 1/2 and Fused concurrency 2 arms; qualification must pass
 before an arm runs. Preserve each configuration's results before the next run; resume only the same inputs.
 Keep failed samples, correction counts, omitted cards, required coverage, prompt installation, and actual

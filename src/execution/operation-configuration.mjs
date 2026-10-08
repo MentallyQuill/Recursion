@@ -6,7 +6,7 @@ export function normalizeOperationConfiguration(value = {}) {
     cardsPerTurn:Number.isInteger(value?.cardsPerTurn) && value.cardsPerTurn >= 0 && value.cardsPerTurn <= 20
       ? value.cardsPerTurn : null,
     reasoningLevel:['low','medium','high','ultra'].includes(value?.reasoningLevel) ? value.reasoningLevel : null,
-    reasonerUse:['auto','always'].includes(value?.reasonerUse) ? value.reasonerUse : null,
+    reasonerUse:['off','auto','always'].includes(value?.reasonerUse) ? value.reasonerUse : null,
     settingsHash:hash(value?.settingsHash),providerHash:hash(value?.providerHash)
   };
 }

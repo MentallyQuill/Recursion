@@ -362,6 +362,8 @@ Advanced settings label the numeric attempt control `Attempts per step`. Values 
 
 Changing pipeline or attempt settings invalidates incompatible active work through the normal provenance rules. It does not start generation. Resume continues a paused compatible operation with its existing recovery budget. Deliberate Retry or Reprocess opens a new active window without bypassing inherited cooldown; Reprocess is `Queued` for the next generation and invalidates that stage plus dependents. Full fresh is also a one-shot queued action.
 
+Visible helpers explain that larger card targets can enlarge structured requests and add individual repair calls. Required cards may exceed the target. Reasoner use is derived by current normalization: Low → Off; Medium/High/Ultra → Always, with actual eligible categories and provider checks still governing dispatch. Auto is not an independently selectable operator control. Recovery calls spend the displayed bounded allowance; these helpers do not change saved values, output limits, or routing defaults.
+
 ## Implementation Status
 
 The deterministic V1 policy surface is implemented in `src/settings-policy.mjs` and covered by focused settings-policy, runtime, prompt, card-scope, and UI tests.

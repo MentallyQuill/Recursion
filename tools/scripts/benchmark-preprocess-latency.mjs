@@ -109,7 +109,7 @@ try {
       await runtime.updateProviderConfig('utility', { connectionProfileId: profileId, maxConcurrentRequests: concurrency, outputTokenCeiling: 16000 });
       const result = await runtime.testProvider('utility');
       let reasoner=null;
-      if(reasoningLevel === 'high') {
+      if(reasoningLevel !== 'low') {
         await runtime.updateProviderConfig('reasoner',{connectionProfileId:profileId,maxConcurrentRequests:concurrency,outputTokenCeiling:16000});
         reasoner=await runtime.testProvider('reasoner');
       }

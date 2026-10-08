@@ -64,6 +64,11 @@ configured.configuration.cardsPerTurn=0;
 await repository.savePipelineRun('synthetic-chat',configured);
 assert.equal((await repository.loadRunJournal('synthetic-chat')).operationSummaries.at(-1).configuration.cardsPerTurn,0,
   'zero is a valid saved card target');
+configured.configuration.reasoningLevel='low';
+configured.configuration.reasonerUse='off';
+await repository.savePipelineRun('synthetic-chat',configured);
+assert.equal((await repository.loadRunJournal('synthetic-chat')).operationSummaries.at(-1).configuration.reasonerUse,'off',
+  'capture the actual Low routing policy');
 // Bounds preserve aggregate counts and drop arbitrary provider fields/codes.
 const many = {...manifest('many'),state:'completed',stageRecords:Object.fromEntries(Array.from({length:33}, (_,i) => [
   `stage-${i}`, {stageId:`stage-${i}`,state:'completed',kind:'model',attempts:{total:6},recoveryCounts:{parseFailures:6},

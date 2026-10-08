@@ -3790,6 +3790,13 @@ try {
   const playText = fakeDocument.textTree(root.querySelector('[data-recursion-settings-play]'));
   assert(playText.includes('Guidance strength') && playText.includes('Guidance detail'), 'Play labels describe guidance behavior');
   assert(playText.includes('Mandatory cards can exceed the target'), 'mandatory overflow help is visible without hover');
+  assertEqual(root.querySelector('[data-recursion-card-cost-help]')?.textContent,
+    'More cards can enlarge model requests and add individual repairs. Required cards may exceed this target.',
+    'card target explains its cost in visible helper copy');
+  assertEqual(root.querySelector('[data-recursion-routing-cost-help]')?.textContent,
+    'Always routes eligible work through the Reasoner. Auto follows the selected reasoning level and provider checks.',
+    'routing explains eligible work in visible helper copy');
+  assert(playText.includes('Low is Off; Medium, High, and Ultra are Always'),'derived routing names its actual controlling setting');
   assert(root.querySelector('[data-recursion-card-target-summary]'), 'Play shows computed target and available routing');
   assert(root.querySelector('[data-recursion-settings-panel]').querySelector('[data-recursion-viewer-toggle]'), 'settings menu renders visible Full Viewer entry point');
   assert(!root.querySelector('[data-recursion-settings-save]'), 'settings menu does not render a Save Settings button');
@@ -4005,6 +4012,9 @@ try {
     'Attempts per step visibly explains the initial call'
   );
   const executionHelp = fakeDocument.textTree(root.querySelector('[data-recursion-settings-section-execution]'));
+  assertEqual(root.querySelector('[data-recursion-recovery-cost-help]')?.textContent,
+    'Corrections and capacity retries add calls within the displayed recovery allowance.',
+    'recovery cost help is visible without tooltips');
   assert(root.querySelector('[data-recursion-execution-help]'), 'execution helper uses the visible help surface instead of hidden row notes');
   assert(executionHelp.includes('Capacity retries are separately bounded') && executionHelp.includes('operation allowance can stop recovery earlier'), 'visible attempts help explains separate retry and operation bounds');
   assert(executionHelp.includes('Resume keeps the current budget') && executionHelp.includes('Retry or Reprocess opens a new window'), 'visible attempts help explains deliberate recovery controls');

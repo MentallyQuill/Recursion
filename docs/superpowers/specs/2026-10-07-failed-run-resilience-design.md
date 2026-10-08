@@ -102,11 +102,11 @@ Add visible helper copy near the current controls:
 - Reasoner use: `Always routes eligible work through the Reasoner. Auto follows the selected reasoning level and provider checks.`
 - Recovery: `Corrections and capacity retries add calls within the displayed recovery allowance.`
 
-Keep saved choices, six-card default, independent target/routing, and existing disclosures intact. Add no guessed dollar prices, latency predictor, dashboard, or automatic setting changes.
+Keep saved choices, six-card default, independent target/routing, and existing disclosures intact. Explain that current normalization derives Reasoner use: Low is Off, while Medium/High/Ultra are Always; Auto is a policy value, not a separately selectable operator control. Add no guessed dollar prices, latency predictor, dashboard, or automatic setting changes.
 
 The benchmark path gains a read-only analysis mode over sanitized diagnostic exports. It reports sample count, median/range preparation, primary reply, known queue time, call counts, correction causes, omissions, and required blocks, grouped by build and routing/target configuration. Partial/absent measurements remain explicit and are excluded from the corresponding calculation.
 
-A paid live experiment requires explicit `--live`, an explicitly selected dedicated non-default user, explicit profile and sample count, and an existing safe live harness. Preserve the current benchmark's `--live` plus `validateSoakUserHandle()` guard; replace its default profile name with explicit selection and add an explicit sample bound. The planned comparison is target 6 versus 9 and Auto versus Always Reasoner, retaining the same fixture/model/profile and measuring output quality/required coverage alongside latency. The implementation acceptance criterion is correct measurement and preserved coverage, not an unmeasured percentage speedup.
+A paid live experiment requires explicit `--live`, an explicitly selected dedicated non-default user, explicit profile and sample count, and an existing safe live harness. Preserve the current benchmark's `--live` plus `validateSoakUserHandle()` guard; replace its default profile name with explicit selection and add an explicit sample bound. Compare target 6 versus 9 and the actual Low/Medium reasoning settings with the same fixture/model/profile, reporting their coupled routing/reasoning changes and output quality/required coverage alongside latency. An isolated Auto/Always comparison is unavailable in the current operator contract; do not invent that control or relabel Medium. The implementation acceptance criterion is correct measurement and preserved coverage, not an unmeasured percentage speedup.
 
 ## 4. Failure-focused operation history
 

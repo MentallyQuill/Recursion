@@ -118,6 +118,9 @@ for (const pipelineMode of ['segmented','fused']) {
     if(turn===2)store.update({cardsPerTurn: 2});
     const prepared=await runtime.prepareForGeneration({hostGeneration:true,userMessage:chat.chat.at(-1).mes});
     assert.equal(prepared.ok,true,`${pipelineMode} turn ${turn} prepares`);
+    const recordedConfiguration=(await storage.loadRunJournal(chat.chatId)).operationSummaries.at(-1).configuration;
+    assert.equal(recordedConfiguration.cardsPerTurn,store.get().cardsPerTurn,'retain the target used by this operation');
+    assert.equal(recordedConfiguration.reasonerUse,'off','retain actual Low routing, not current export settings');
     assert.equal(prepared.hand.cards.length,1,`${pipelineMode} exactly selected card, no fabricated fallback`);
     if(turn<2)assert.deepEqual(prepared.hand.cards[0].sourceCardIds,[normalizedSources[turn].id]);
     else {

@@ -18,13 +18,15 @@ import { resolveProviderCapability } from '/src/provider-capability.mjs';
 const saved = JSON.parse(localStorage.getItem('selection-proof') || '{}');
 const store = createSettingsStore({ root: saved, save() { localStorage.setItem('selection-proof', JSON.stringify(saved)); } });
 window.proofStore = store;
+window.proofState = {};
 const capability = (lane, operation = 'prompt-packet') => resolveProviderCapability({ settings: store.get(), lane, operation, host: { connectionProfiles: [] } });
 window.proofUi = mountRecursionUi({ mountPoint: document.querySelector('#mount'), runtime: {
-view: () => ({ settings: { ...store.get(), providerCapabilities: { utility: { promptPacket: capability('utility') }, reasoner: { promptPacket: capability('reasoner') } } }, activity: { phase: 'idle' } }),
+view: () => ({ settings: { ...store.get(), providerCapabilities: { utility: { promptPacket: capability('utility') }, reasoner: { promptPacket: capability('reasoner') } } }, activity: { phase: 'idle' }, ...window.proofState }),
 providerCapability: capability,
 updateSettings: patch => store.update(patch),
 updateProviderConfig: (lane, patch, options) => store.updateProviderConfig(lane, patch, options),
-listProviderConnectionProfiles: () => []
+listProviderConnectionProfiles: () => [],
+resumeOperation:async()=>({ok:true})
 } });
 window.proofReady = true;
 </script></body></html>`;
@@ -72,6 +74,10 @@ try {
     await page.locator('[data-recursion-reasoning-level-ultra]').click();
     if (!(await page.locator('[data-recursion-settings-panel]').isVisible())) await page.locator('[data-recursion-actions]').click();
     assert.equal(await target.inputValue(), '9');
+    assert.equal(await page.locator('[data-recursion-card-cost-help]').innerText(),
+      'More cards can enlarge model requests and add individual repairs. Required cards may exceed this target.');
+    assert.equal(await page.locator('[data-recursion-routing-cost-help]').innerText(),
+      'Always routes eligible work through the Reasoner. Auto follows the selected reasoning level and provider checks.');
     await page.waitForFunction(() => document.querySelector('[data-recursion-card-target-summary]').textContent.includes('Target: 9 cards per turn.'));
     assert((await page.locator('[data-recursion-settings-play]').innerText()).includes('Mandatory cards can exceed the target'));
     assert.equal(await variety.inputValue(), 'low');
@@ -107,6 +113,20 @@ try {
     await tuningToggle.focus();
     await tuningToggle.press('Space');
     assert.equal(await tuning.isVisible(), true);
+    await page.locator('[data-recursion-provider-sampler-mode-utility]').selectOption('recursion');
+    const draft=page.locator('[data-recursion-provider-temperature-utility]');
+    await draft.fill('0.37'); // Leave this value uncommitted during status updates.
+    await page.evaluate(()=>{
+      window.proofState={providerOperations:{queues:{utility:{available:true,active:0,pending:1,concurrency:1,cooldownRemainingMs:1001}}}};
+      window.proofUi.update();
+    });
+    assert.equal(await page.locator('[data-recursion-provider-queue-utility]').innerText(),'Waiting for provider · retry in 2s');
+    await page.evaluate(()=>{window.proofState.providerOperations.queues.utility.cooldownRemainingMs=500;window.proofUi.update();});
+    assert.equal(await page.locator('[data-recursion-provider-queue-utility]').innerText(),'Waiting for provider · retry in 1s');
+    assert.equal(await draft.inputValue(),'0.37');
+    assert.equal(await tuning.isVisible(),true);
+    await draft.press('Tab');
+    await page.waitForFunction(()=>window.proofStore.get().providers.utility.samplerOverrides.temperature === 0.37);
     await page.locator('[data-recursion-provider-output-token-ceiling-utility]').fill('4096');
     await page.locator('[data-recursion-provider-output-token-ceiling-utility]').press('Tab');
     await page.waitForFunction(() => window.proofStore.get().providers.utility.outputTokenCeiling === 4096);
@@ -126,12 +146,37 @@ try {
     await page.locator('[data-recursion-setting-tooltips-enabled]').uncheck();
     await page.waitForFunction(() => window.proofStore.get().ui.tooltipsEnabled === false);
     assert((await page.locator('[data-recursion-settings-section-execution]').innerText()).includes('Retry or Reprocess opens a new window'));
+    assert.equal(await page.locator('[data-recursion-recovery-cost-help]').innerText(),
+      'Corrections and capacity retries add calls within the displayed recovery allowance.');
     await page.screenshot({ path: resolve(output, `${viewport.name}-advanced.png`), fullPage: true });
     await page.locator('[data-recursion-settings-tab-providers]').click();
     assert.equal(await tuning.isVisible(), true);
     await page.screenshot({ path: resolve(output, `${viewport.name}-providers.png`), fullPage: true });
+    await page.locator('[data-recursion-settings-tab-play]').click();
+    assert((await page.locator('[data-recursion-settings-play]').innerText()).includes('Required cards may exceed this target.'));
+    await page.screenshot({path:resolve(output,`${viewport.name}-tooltips-off.png`),fullPage:true});
+    await page.evaluate(()=>{
+      window.proofState.execution={operationId:'synthetic-interrupted',phase:'preprocess',state:'paused',pauseReason:'restored-after-reload',
+        pipelineMode:'segmented',recoveryBudget:{recoveryLimit:3,recoveryUsed:2},frontierStageIds:['preprocess.guidance'],
+        stageRecords:{'preprocess.guidance':{stageId:'preprocess.guidance',state:'pending',kind:'model',executable:true,
+          label:'Guidance',attempts:{total:1},failure:null}}};
+      window.proofUi.update();
+    });
+    await page.locator('[data-recursion-status-trigger]').click();
+    assert.equal(await page.locator('[data-recursion-progress-title]').innerText(),'Interrupted');
+    assert.equal(await page.locator('[data-recursion-progress-subtitle]').innerText(),'Resume available');
+    assert.equal(await page.locator('[data-recursion-progress-recovery]').innerText(),'Recovery allowance · 1 of 3 additional calls remaining');
+    const resume=page.locator('[aria-label="Resume from saved checkpoint"]');
+    await resume.focus();
+    assert(await resume.evaluate(node=>node === document.activeElement),'Resume is keyboard reachable');
+    await page.waitForFunction(()=>[...document.querySelectorAll('[data-recursion-progress-row]')]
+      .every(node=>Number(getComputedStyle(node).opacity)>=0.98));
+    const progressGeometry=await page.locator('[data-recursion-status-popover]').evaluate(node=>({width:node.clientWidth,scrollWidth:node.scrollWidth}));
+    assert(progressGeometry.scrollWidth<=progressGeometry.width,`${viewport.name}: progress horizontal overflow`);
+    await page.screenshot({path:resolve(output,`${viewport.name}-interrupted.png`),fullPage:true});
     assert.deepEqual(errors, []);
-    reports.push({ viewport, geometry, persisted: { cardsPerTurn: 9, variety: 'medium', cooldownTurns: 2 }, disclosures: 'keyboard, autosave and tab changes preserved', tooltipsOffHelp: true });
+    reports.push({ viewport, geometry, progressGeometry, persisted: { cardsPerTurn: 9, variety: 'medium', cooldownTurns: 2 },
+      disclosures: 'keyboard, autosave and tab changes preserved',unsavedDraftPreserved:true,queueCountdown:true,interruptedResume:true,tooltipsOffHelp: true });
     await context.close();
   }
   await writeFile(resolve(output, 'report.json'), JSON.stringify({ classification: 'isolated-production-ui-fixture', reports }, null, 2));

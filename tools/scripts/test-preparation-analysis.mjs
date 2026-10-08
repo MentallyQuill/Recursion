@@ -56,6 +56,7 @@ assert.throws(()=>parseLiveBenchmarkOptions(['--live'],environment),'profile and
 const options=parseLiveBenchmarkOptions(['--live','--profile','Explicit test profile','--samples','2'],environment);
 assert.equal(options.samples,2);
 assert.equal(options.profileName,'Explicit test profile');
+assert.equal(parseLiveBenchmarkOptions(['--live','--profile','Test','--samples','1','--reasoning-level','low'],environment).reasoningLevel,'low');
 for(const samples of ['0','11','1.5','abc','']) assert.throws(()=>parseLiveBenchmarkOptions(
   ['--live','--profile','Test','--samples',samples],environment));
 assert.throws(()=>parseLiveBenchmarkOptions(['--profile','Test','--samples','1'],environment),'paid mode must be explicit');

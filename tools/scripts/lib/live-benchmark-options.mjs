@@ -24,8 +24,8 @@ export function parseLiveBenchmarkOptions(argv = [], environment = {}) {
   const rawSamples=values['--samples'] ?? environment.RECURSION_BENCHMARK_SAMPLES;
   if(typeof rawSamples !== 'string' || !/^(?:[1-9]|10)$/.test(rawSamples)) throw new Error('Select --samples 1..10 explicitly.');
   const cards=values['--cards'] ?? '6';
-  const reasoningLevel=values['--reasoning-level'] ?? 'medium';
-  if(!['6','9'].includes(cards) || !['medium','high'].includes(reasoningLevel)) throw new Error('Use --cards 6 or 9 and --reasoning-level medium or high.');
+  const reasoningLevel=values['--reasoning-level'] ?? (argv.includes('--reasoning-off') ? 'low' : 'medium');
+  if(!['6','9'].includes(cards) || !['low','medium','high'].includes(reasoningLevel)) throw new Error('Use --cards 6 or 9 and --reasoning-level low, medium or high.');
   return Object.freeze({baseUrl,user:environment.RECURSION_SILLYTAVERN_USER,profileName:profileName.trim(),
     samples:Number(rawSamples),cards:Number(cards),reasoningLevel});
 }

@@ -1,0 +1,157 @@
+{
+  "classification": "isolated-production-ui-fixture",
+  "reports": [
+    {
+      "viewport": {
+        "name": "desktop",
+        "width": 1360,
+        "height": 820
+      },
+      "geometry": {
+        "width": 1360,
+        "panel": {
+          "x": 200,
+          "y": 76,
+          "width": 960,
+          "height": 614.5,
+          "top": 76,
+          "right": 1160,
+          "bottom": 690.5,
+          "left": 200
+        },
+        "controls": [
+          {
+            "label": "Cards per turn",
+            "rect": {
+              "x": 340,
+              "y": 233,
+              "width": 801,
+              "height": 24,
+              "top": 233,
+              "right": 1141,
+              "bottom": 257,
+              "left": 340
+            }
+          },
+          {
+            "label": "Selection variety",
+            "rect": {
+              "x": 340,
+              "y": 368.5,
+              "width": 801,
+              "height": 24,
+              "top": 368.5,
+              "right": 1141,
+              "bottom": 392.5,
+              "left": 340
+            }
+          },
+          {
+            "label": "Card cooldown (turns)",
+            "rect": {
+              "x": 340,
+              "y": 400.5,
+              "width": 801,
+              "height": 24,
+              "top": 400.5,
+              "right": 1141,
+              "bottom": 424.5,
+              "left": 340
+            }
+          }
+        ],
+        "overflow": false
+      },
+      "progressGeometry": {
+        "width": 350,
+        "scrollWidth": 350
+      },
+      "persisted": {
+        "cardsPerTurn": 9,
+        "variety": "medium",
+        "cooldownTurns": 2
+      },
+      "disclosures": "keyboard, autosave and tab changes preserved",
+      "unsavedDraftPreserved": true,
+      "queueCountdown": true,
+      "interruptedResume": true,
+      "tooltipsOffHelp": true
+    },
+    {
+      "viewport": {
+        "name": "narrow",
+        "width": 390,
+        "height": 844
+      },
+      "geometry": {
+        "width": 390,
+        "panel": {
+          "x": 0,
+          "y": 76,
+          "width": 390,
+          "height": 687.5,
+          "top": 76,
+          "right": 390,
+          "bottom": 763.5,
+          "left": 0
+        },
+        "controls": [
+          {
+            "label": "Cards per turn",
+            "rect": {
+              "x": 140,
+              "y": 233,
+              "width": 231,
+              "height": 24,
+              "top": 233,
+              "right": 371,
+              "bottom": 257,
+              "left": 140
+            }
+          },
+          {
+            "label": "Selection variety",
+            "rect": {
+              "x": 140,
+              "y": 384.5,
+              "width": 231,
+              "height": 24,
+              "top": 384.5,
+              "right": 371,
+              "bottom": 408.5,
+              "left": 140
+            }
+          },
+          {
+            "label": "Card cooldown (turns)",
+            "rect": {
+              "x": 140,
+              "y": 416.5,
+              "width": 231,
+              "height": 24,
+              "top": 416.5,
+              "right": 371,
+              "bottom": 440.5,
+              "left": 140
+            }
+          }
+        ],
+        "overflow": false
+      },
+      "progressGeometry": {
+        "width": 388,
+        "scrollWidth": 388
+      },
+      "persisted": {
+        "cardsPerTurn": 9,
+        "variety": "medium",
+        "cooldownTurns": 2
+      },
+      "disclosures": "keyboard, autosave and tab changes preserved",
+      "unsavedDraftPreserved": true,
+      "queueCountdown": true,
+      "interruptedResume": true,
+      "tooltipsOffHelp": true
+    }
+  ]
+}

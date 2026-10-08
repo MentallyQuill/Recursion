@@ -21,7 +21,7 @@ Complete items salvaged from eligible parsing/shape failures or completion-token
 | `recursion-settings.v1.json` | Normalized extension settings without session-only keys. | Durable. |
 | `recursion-system-index.v1.json` | Bounded index of known journals, operations, and artifacts. | Durable but rebuildable. |
 | `recursion-last-brief-{chatKey}.v1.json` | Display-only packet and hand summary for the UI. | Historical; never read for generation. |
-| `recursion-run-journal-{chatKey}.v1.json` | Sanitized lifecycle events and retained Post-process outcomes. | Events bounded by `runJournalEntries`; latest 12 terminal outcomes retained independently. |
+| `recursion-run-journal-{chatKey}.v1.json` | Sanitized lifecycle events, operation summaries and retained Post-process outcomes. | Events bounded by `runJournalEntries`; latest 20 operations and 12 terminal Post-process outcomes retained independently. |
 | `recursion-pipeline-run-{chatKey}.v2.json` | One active or latest V2 operation manifest for a chat. | Turn-scoped. |
 | `recursion-pipeline-artifact-{chatKey}-{operationId}-{artifactId}.v2.json` | Isolated stage output required for Resume or validated same-turn reuse. | Protected only while referenced and authoritative. |
 | `recursion-queued-reprocess-{chatKey}.v2.json` | One-shot Pre-process or Post-process next-swipe intent. | Consumed once, canceled, or revoked with the turn. |
@@ -53,6 +53,7 @@ A manifest records:
 - chat key, turn-key hash, source-band hash, and safe source identity;
 - native generation type and whether the operation is host-owned;
 - normalized provenance hashes;
+- captured allowlisted operation configuration (mode, card target, reasoning level/use, settings/provider hashes), with nulls for unavailable observations;
 - queued stage ids and frontier ids;
 - per-stage state, attempts, failure class, diagnostic codes, and checkpoint metadata.
 
@@ -139,6 +140,14 @@ Diagnostics export normalized settings, provider capability summaries, safe acti
 Current normalized settings persist `cardsPerTurn` (0..20, default 6), with no Min/Max operator fields. Provider capability summaries compare the current settings hash and the live `profileIdentityHash`; stale saved checks are reported as untested, not current native/concurrency qualification. The fingerprint uses only profile ID, model, API, completion mode, preset, and instruct descriptors. Display names, raw endpoints, and secrets are excluded, and status reads launch no generation probes.
 
 Recovery summaries derive from actual durable stage attempts and outcomes, using only the fixed counter keys `parseFailures`, `shapeFailures`, `correctionRequests`, `budgetAdjustments`, `rateLimitRetries`, `transientRetries`, `salvagedItems`, `segmentedRepairCalls`, `optionalOmissions`, and `requiredBlocks`. Salvaged counts describe accepted validated items; optional omissions describe exhausted generated work, not composer omissions or narration quality. Counts and fixed causes survive diagnostics export without rejected output, correction prompts, private reasoning, or credentials. Unavailable timing/usage measurements remain explicit; offline fixtures do not establish live success rates or latency improvements.
+
+`operationSummaries` retains the latest 20 per chat, each with at most 32 stage summaries and five recent allowlisted attempt outcomes per stage. Total attempts/recovery counters aggregate all stages before truncation. A successful correction clears the active failure but retains its prior rejection code, canonical field issues (at most eight, paths at most 160 characters), fixed semantic rule, observed timing and token counts. No provider prose or unknown metadata is retained. Operation IDs/stage IDs are bounded to 180 characters and counts to 100,000. Timing events join an existing summary by current chat and operation ID; an evicted operation is not resurrected by a late event. Clear Run Journal removes ordinary entries, operation summaries, and retained Post-process outcomes.
+
+First-observed and latest build identities stay separate. An unavailable first observation remains unavailable after a later declared build. Runtime `build` is either unavailable or a validated `recursion.buildInfo.v1` declaration (bounded to 2,048 characters, lowercase SHA-256, optional actual 40-character source revision). It is loaded once with a two-second timeout. The installation verifier establishes actual file agreement; a stamp never replaces byte checks. See [build installation](../user/BUILD_INSTALLATION.md).
+
+Provider aborts retain `RECURSION_PROVIDER_ABORTED`, category `cancellation`, `retryable:false`, and fixed text. The trusted origin enum is `recursion-stop|host-stop|operation-deadline|profile-changed|chat-changed|unknown`; absence remains unknown. Reloaded running work becomes paused with `operation-interrupted-after-reload`, accepted checkpoints intact and unfinished execution tokens revoked. App-closed time is excluded. Optional summary-write failure warns once without undoing a verified manifest or recursively journaling its storage failure.
+
+Host card-history receipts capture an immutable pre-generation chat/prefix/raw-index/target/swipe binding. Continue excludes only its mutable reply from the receipt prefix while keeping that reply in model context. It merges captured valid prior IDs only for the same deck and target. Normal append/placeholder, Swipe, and Regenerate use their actual native layout. Completion and incomplete writes revalidate current identity and prefix; stale receipts never move to another target. Rejection details contain fixed reasons and hashes/numeric IDs, never message text. Receipt persistence failure does not retroactively fail completed narration.
 
 Actual failures expose a structured code, stage, category, readable message, retryability, attempted recovery, and suggested action. Host-stop warnings without an underlying error retain cancellation/unknown-cause metadata rather than an invented failure. Secret-bearing thrown errors are converted to fixed safe copy before reaching activity, journal, or caller surfaces.
 

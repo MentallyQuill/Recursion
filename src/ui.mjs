@@ -3004,13 +3004,18 @@ function renderHighLevelSettings(panel, settings, route) {
   group.appendChild(settingsDisclosureSection('play-behavior', 'Behavior', [
     settingsSelectRow('Guidance strength', 'recursionSettingStrength', cleanText(settings.strength, 'balanced'), STRENGTH_OPTIONS, SETTINGS_TOOLTIPS.strength, tooltipsEnabled),
     settingsNumberRow('Cards per turn', 'recursionSettingCardsPerTurn', normalizeCardBudgetSettings(settings).targetCards, { tooltip: SETTINGS_TOOLTIPS.cardsPerTurn, tooltipsEnabled }),
+    el('p', { className:'recursion-help',dataset:{recursionCardCostHelp:''},
+      text:'More cards can enlarge model requests and add individual repairs. Required cards may exceed this target.' }),
     el('p', { className: 'recursion-help', text: 'Authored cards and generated families each count toward the target. Mandatory cards can exceed the target; fewer eligible cards or omitted optional work can produce a smaller hand.' }),
     settingsSelectRow('Selection variety', 'recursionSettingSelectionVariety', selection.variety, [['off', 'Off'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], SETTINGS_TOOLTIPS.selectionVariety, tooltipsEnabled),
     settingsNumberRow('Card cooldown (turns)', 'recursionSettingCardCooldown', selection.cooldownTurns, { min: 0, max: 10, tooltip: SETTINGS_TOOLTIPS.cardCooldown, tooltipsEnabled }),
     el('p', { className: 'recursion-help', text: 'Auto only; Manual ignores these settings. Priority and Refinement cards are exempt. 0 turns disables cooldown. Fewer eligible cards means a smaller hand.' }),
     settingsSelectRow('Focus', 'recursionSettingFocus', cleanText(settings.focus, 'balanced'), FOCUS_OPTIONS, SETTINGS_TOOLTIPS.focus, tooltipsEnabled),
     settingsSelectRow('Guidance detail', 'recursionSettingFootprint', cleanText(settings.promptFootprint, 'normal'), FOOTPRINT_OPTIONS, SETTINGS_TOOLTIPS.footprint, tooltipsEnabled),
-    el('p', { className: 'recursion-help', text: cardTargetSummary(settings, route), dataset: { recursionCardTargetSummary: '' } })
+    el('p', { className: 'recursion-help', text: cardTargetSummary(settings, route), dataset: { recursionCardTargetSummary: '' } }),
+    el('p', { className:'recursion-help',dataset:{recursionRoutingCostHelp:''},
+      text:'Always routes eligible work through the Reasoner. Auto follows the selected reasoning level and provider checks.' }),
+    el('p', { className:'recursion-help',text:'Reasoner use follows the bar’s Reasoning Level: Low is Off; Medium, High, and Ultra are Always.' })
   ], { tooltip: SETTINGS_TOOLTIPS.behavior, tooltipsEnabled }));
   panel.appendChild(group);
 }
@@ -3055,7 +3060,9 @@ function renderAdvancedSettings(panel, settings, capabilities = {}) {
       dataset: { recursionSettingOperationDeadlineSeconds: '' }, ariaLabel: 'Operation time limit in seconds'
     }), 'Maximum active time for Recursion preparation, including queueing and recovery. Paused time is excluded.'),
     controlRow('Attempts per step', modelAttemptsPerStepControl),
-    el('p', { className: 'recursion-help', text: SETTINGS_TOOLTIPS.modelAttemptsPerStep, dataset: { recursionExecutionHelp: '' } })
+    el('p', { className: 'recursion-help', text: SETTINGS_TOOLTIPS.modelAttemptsPerStep, dataset: { recursionExecutionHelp: '' } }),
+    el('p', { className:'recursion-help',dataset:{recursionRecoveryCostHelp:''},
+      text:'Corrections and capacity retries add calls within the displayed recovery allowance.' })
   ], { tooltip: SETTINGS_TOOLTIPS.modelAttemptsPerStep, tooltipsEnabled }));
   const resetTurnCache = button('Reset Turn Cache', 'recursionResetTurnCache', 'Reset Turn Cache');
   if (asObject(capabilities).resetTurnCache !== true) {

@@ -35,6 +35,7 @@ import {
   REDIRECT_VERIFICATION_CHECKS
 } from './editorial-transform.mjs';
 import { providerFailure } from './failures.mjs';
+import { normalizeAttemptMeasurements } from './execution/attempt-outcomes.mjs';
 import {
   POST_PROCESS_GUIDANCE_JSON_SCHEMA,
   POST_PROCESS_GUIDANCE_SCHEMA,
@@ -1872,6 +1873,11 @@ function sanitizedError(error, request = {}) {
   }, 300);
 }
 
+function attemptMeasurements(diagnostics = {}) {
+  return normalizeAttemptMeasurements({timings:{...diagnostics.timings,queueMs:diagnostics.timings?.queueWaitMs},
+    usage:diagnostics});
+}
+
 function responseIdentityDiagnostics(response = {}) {
   const source = plainObject(response) ? response : {};
   const providerSource = String(source.providerSource || '').trim();
@@ -2536,7 +2542,8 @@ export function createGenerationRouter({ client, activity = null, journal = null
         lane,
         data,
         text: JSON.stringify(data),
-        diagnostics
+        diagnostics,
+        ...attemptMeasurements(diagnostics)
       };
     } catch (error) {
       const safeError = sanitizedError(error, request);
@@ -2573,6 +2580,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         lane,
         error: safeError,
         diagnostics,
+        ...attemptMeasurements(diagnostics),
         recoverableItems: recoverableProviderItems(roleId, raw, error, request)
       };
     } finally {
@@ -2627,6 +2635,8 @@ export function createGenerationRouter({ client, activity = null, journal = null
       const failure = providerFailure(safeError, { stage: failureStageForRole(entry.roleId) });
       const diagnostics = sanitize({
         ...entry.diagnostics,
+        ...providerFailureDiagnostics(error),
+        ...responseIdentityDiagnostics(raw),
         retryCount,
         latencyMs: Date.now() - entry.started,
         error: safeError,
@@ -2646,6 +2656,7 @@ export function createGenerationRouter({ client, activity = null, journal = null
         lane: entry.lane,
         error: safeError,
         diagnostics,
+        ...attemptMeasurements(diagnostics),
         recoverableItems: recoverableProviderItems(entry.roleId, raw, error, entry.request)
       };
     }
@@ -2732,7 +2743,8 @@ export function createGenerationRouter({ client, activity = null, journal = null
         lane: entry.lane,
         data,
         text: JSON.stringify(data),
-        diagnostics
+        diagnostics,
+        ...attemptMeasurements(diagnostics)
       };
     }
 

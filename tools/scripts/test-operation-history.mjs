@@ -8,6 +8,7 @@ import { buildOperationSummary, normalizeOperationSummaries } from '../../src/st
 import { normalizeAttemptOutcomes } from '../../src/execution/attempt-outcomes.mjs';
 import { createActivityReporter } from '../../src/activity.mjs';
 import { CARD_SCOPE_CATALOG } from '../../src/card-scope.mjs';
+import { createGenerationRouter } from '../../src/providers.mjs';
 
 const repository = createStorageRepository({ storage:createMemoryStorageAdapter(), maxJournalEntries:10 });
 const provenance = { chatKey:'synthetic-chat', sourceIdentity:{sourceRevisionHash:'synthetic-source'},
@@ -41,6 +42,30 @@ assert.equal(outcomes[0].fieldIssues[0].rule, 'type');
 assert.equal(outcomes[1].outcome, 'accepted');
 assert.equal(outcomes[1].timings.queueMs, 12, 'actual provider timing survives accepted attempt settlement');
 assert(!JSON.stringify(outcomes).includes('PRIVATE_CANARY'));
+for (const api of ['generate','batch']) {
+  const routedRepository=createStorageRepository({storage:createMemoryStorageAdapter()});
+  let routedCalls=0;
+  const rawResponse=() => ({text:++routedCalls === 1 ? '{broken' : JSON.stringify({schema:'recursion.providerTest.v1',ok:true}),
+    timings:{queueWaitMs:5000,providerMs:25,normalizationMs:2,private:'PRIVATE_CANARY'},
+    usage:{promptTokens:10,completionTokens:5,totalTokens:15,private:'PRIVATE_CANARY'}});
+  const router=createGenerationRouter({client:{generate:async () => rawResponse(),batch:async () => [rawResponse()]}});
+  const routedGraph=createExecutionGraph({stages:[{...graph.stages[0],
+    run:async ({request}) => api === 'generate' ? router.generate('providerTest',request)
+      : (await router.batch([{roleId:'providerTest',...request}]))[0],
+    validate:response => response.ok ? {ok:true,value:response.data} : {ok:false,error:response.error}
+  }]});
+  const routed=await createExecutionScheduler({repository:routedRepository,attemptsPerStep:2})
+    .start({manifest:manifest('routed-'+api),graph:routedGraph});
+  assert.equal(routed.state,'completed');
+  const retained=(await routedRepository.loadRunJournal('synthetic-chat')).operationSummaries[0].stages[0].attempts;
+  assert.equal(retained.length,2);
+  for (const attempt of retained) {
+    assert.deepEqual(attempt.timings,{queueMs:5000,providerMs:25,normalizationMs:2},
+      api+' maps actual provider measurements into rejected and accepted history');
+    assert.deepEqual(attempt.usage,{promptTokens:10,completionTokens:5,totalTokens:15});
+    assert(!JSON.stringify(attempt).includes('PRIVATE_CANARY'));
+  }
+}
 for (let i = 0; i < 500; i++) await repository.appendJournal('synthetic-chat', {
   severity:'info',event:'prompt.cleared',summary:'Synthetic cleanup',details:{}});
 const journal = await repository.loadRunJournal('synthetic-chat');
@@ -88,6 +113,10 @@ const unsafe = normalizeAttemptOutcomes([{outcome:'rejected',action:'PRIVATE_CAN
 assert.equal(unsafe.code,'RECURSION_ATTEMPT_FAILURE_UNKNOWN');
 assert.equal(unsafe.validationRule,undefined);
 assert(!JSON.stringify(unsafe).includes('PRIVATE_CANARY'));
+const invalidMeasurements=normalizeAttemptOutcomes([{outcome:'accepted',timings:{queueMs:-1,providerMs:null},
+  usage:{totalTokens:-1}}])[0];
+assert.deepEqual(invalidMeasurements.timings,{providerMs:null},'negative durations stay unavailable instead of becoming zero samples');
+assert.deepEqual(invalidMeasurements.usage,{});
 const all = Array.from({length:21}, (_,i) => ({...bounded,operationId:`operation-${i}`}));
 const evicted = normalizeOperationSummaries(all);
 assert.equal(evicted.length,20);

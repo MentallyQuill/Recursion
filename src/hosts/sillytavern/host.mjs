@@ -2010,13 +2010,13 @@ export function createSillyTavernHost({
       || !/^[a-f0-9]{8}$/.test(basis.chatIdentityHash || '') || !/^[a-f0-9]{8}$/.test(basis.sourcePrefixHash || '')
       || !Number.isInteger(basis.targetIndex) || basis.targetIndex < 0
       || !(basis.targetMessageId === null || Number.isInteger(basis.targetMessageId) && basis.targetMessageId >= 0)
-      || !(basis.targetSwipeId === null || Number.isInteger(basis.targetSwipeId) && basis.targetSwipeId >= 0)) {
+      || !(Number.isInteger(basis.targetSwipeId) && basis.targetSwipeId >= 0)) {
       return {ok:false,reason:'card-selection-receipt-invalid'};
     }
     if (basis.chatIdentityHash !== identity.chatIdentityHash) return {ok:false,reason:'card-selection-chat-changed'};
     if (!found || found.index !== basis.targetIndex
       || (basis.targetMessageId !== null && basis.targetMessageId !== found.normalized.mesid)
-      || (basis.targetSwipeId !== null && basis.targetSwipeId !== Number(identity.swipeId ?? 0))) {
+      || basis.targetSwipeId !== Number(identity.swipeId ?? 0)) {
       return {ok:false,reason:'card-selection-target-changed',details:{expectedTargetMessageId:basis.targetMessageId,
         observedTargetMessageId:found?.normalized.mesid ?? null}};
     }
@@ -2050,8 +2050,8 @@ export function createSillyTavernHost({
       const branch = cardSelectionHistoryForChat(chat.slice(0,targetIndex));
       return Object.freeze({ok:true,generationType,chatIdentityHash:hashJson(chatId),
         sourcePrefixHash:branch.cardSelectionSourcePrefixHash,targetIndex,
-        targetMessageId:mutable ? target.normalized.mesid : null,
-        targetSwipeId:mutable ? finiteNonNegativeInteger(target.raw.swipe_id) ?? 0 : null,
+        targetMessageId:mutable || placeholder ? target.normalized.mesid : null,
+        targetSwipeId:mutable || placeholder ? finiteNonNegativeInteger(target.raw.swipe_id) ?? 0 : 0,
         previousReceipt:generationType === 'continue'
           ? immutableCardSelectionReceipt(currentCardSelectionReceipt(context,target)) : null});
     },

@@ -69,7 +69,7 @@ for (const pipelineMode of ['segmented','fused']) {
     requests.push({roleId,request,turn});
     if(roleId==='utilityArbiter') return {ok:true,data:{schema:'recursion.utilityArbiter.v1',snapshotHash:request.snapshotHash,action:'refresh-cards',budgets:{maxCards:turn===2?2:1},cardJobs:turn===2?[{cardId:'authored',reason:'A distinct authored reminder'}]:[{family:'Scene Frame',sourceCardIds:[normalizedSources[turn].id],reason:turn?'React to the new answer':'Clarify the current question',coverageKey:'current-exchange'}]}};
     if(roleId==='guidanceComposer')return {ok:true,data:{schema:'recursion.guidanceComposer.v1',snapshotHash:request.snapshotHash,guidanceText:'Respond to the current request.'}};
-    if(roleId==='fusedCardBundle')return {ok:true,data:{items:request.requestedCards.map(c=>({family:c.family,promptText:'Current exchange guidance.',evidenceRefs:['message:0'],coveredSourceCardIds:c.sourceCardIds}))}};
+    if(roleId==='fusedCardBundle')return {ok:true,timings:{queueMs:7,providerMs:21},usage:{totalTokens:15},data:{items:request.requestedCards.map(c=>({family:c.family,promptText:'Current exchange guidance.',evidenceRefs:['message:0'],coveredSourceCardIds:c.sourceCardIds}))}};
     const catalog=CARD_CATALOG.find(c=>c.role===roleId);
     return {ok:true,data:{schema:'recursion.card.v1',snapshotHash:request.snapshotHash,role:roleId,family:catalog.family,items:[{promptText:'Current exchange guidance.',evidenceRefs:['message:0']}]}};
   }};
@@ -79,6 +79,12 @@ for (const pipelineMode of ['segmented','fused']) {
   let runtime = newRuntime();
   const continued = await runtime.prepareForGeneration({hostGeneration:true,generationType:'continue'});
   assert.equal(continued.ok,true);
+  if (pipelineMode === 'fused') {
+    const fusedAttempt=(await storage.loadRunJournal(chat.chatId)).operationSummaries.at(-1)
+      .stages.find(stage=>stage.stageId === 'preprocess.cards.fused').attempts[0];
+    assert.deepEqual(fusedAttempt.timings,{queueMs:7,providerMs:21},'the runtime Fused wrapper retains provider measurements');
+    assert.deepEqual(fusedAttempt.usage,{totalTokens:15});
+  }
   assert(requests.some(({request})=>request.prompt.includes('Initial narration remains in the model source.')),
     'Continue preserves the prior narration in actual model requests');
   chat.chat[1].mes += ' Continued narration.';

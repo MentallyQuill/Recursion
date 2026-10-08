@@ -69,7 +69,7 @@ for (const generationType of ['normal','swipe','regenerate','regenerate-appended
   const type = generationType === 'regenerate-appended' ? 'regenerate' : generationType;
   const receiptBasis = await mutable.host.messages.cardSelectionReceiptBasis({generationType:type});
   assert.equal(receiptBasis.targetIndex,1);
-  assert.equal(receiptBasis.targetMessageId,['normal','regenerate-appended'].includes(generationType) ? null : 1);
+  assert.equal(receiptBasis.targetMessageId,generationType === 'regenerate-appended' ? null : 1);
   if (generationType === 'regenerate-appended') mutable.context.chat.push({is_user:false,mes:'New reply'});
   else mutable.context.chat[1].mes = 'New reply';
   if (generationType === 'swipe') mutable.context.chat[1].swipes.push('New reply');
@@ -85,6 +85,26 @@ for (const generationType of ['continue','swipe']) {
   assert.deepEqual(await missing.host.messages.cardSelectionReceiptBasis({generationType}),
     {ok:false,reason:'card-selection-target-changed'});
   assert.equal(missing.writes(),0);
+}
+for (const layout of ['normal-placeholder','normal-appended','regenerate-appended']) {
+  const changed=fixture();
+  const generationType=layout.startsWith('normal') ? 'normal' : 'regenerate';
+  if (layout === 'normal-placeholder') changed.context.chat.push({is_user:false,mes:''});
+  const receiptBasis=await changed.host.messages.cardSelectionReceiptBasis({generationType});
+  if (layout !== 'normal-placeholder') changed.context.chat.push({is_user:false,mes:'Generated reply'});
+  const target=changed.context.chat[1];
+  Object.assign(target,{mes:'Other selected reply',swipe_id:1,swipes:['Generated reply','Other selected reply'],
+    swipe_info:[{extra:{}},{extra:{}}]});
+  const expectedSourceIdentity=await changed.host.messages.postProcessSourceIdentity();
+  const usage={turnKeyHash:'guard-turn',deckId:'deck-one',generationType,
+    sourcePrefixHash:receiptBasis.sourcePrefixHash,cards:[{cardId:'original-output-card'}]};
+  assert.equal((await changed.host.messages.saveCardSelectionUsage({expectedSourceIdentity,receiptBasis,usage})).reason,
+    'card-selection-target-changed',layout+' cannot redirect completed usage to another swipe');
+  assert.equal((await changed.host.messages.markCardSelectionIncomplete({expectedSourceIdentity,receiptBasis,
+    sourcePrefixHash:receiptBasis.sourcePrefixHash})).reason,'card-selection-target-changed',
+    layout+' cannot mark another swipe incomplete');
+  assert.equal(changed.writes(),0);
+  assert.equal(target.swipe_info[1].extra.recursion,undefined);
 }
 for (const change of ['source','distant-source','target-id','target-index','swipe','turn-id','deck-id','basis']) {
   const guarded = fixture(change === 'distant-source'
@@ -214,10 +234,12 @@ for (const kind of ['editorial', 'postProcess']) {
 }
 {
   const active = fixture();
-  const source = await active.host.snapshot();
-  const receiptBasis = await active.host.messages.cardSelectionReceiptBasis();
-  active.context.chat.push({ is_user: false, mes: 'Active response', swipe_id: 1, swipes: ['Old response', 'Active response'], swipe_info: [{ extra: {} }, { extra: {} }] });
-  const usage = { ...request.usage, sourcePrefixHash: source.cardSelectionSourcePrefixHash };
+  active.context.chat.push({is_user:false,mes:'Old response',swipe_id:1,swipes:['Old response'],
+    swipe_info:[{extra:{}},{extra:{}}]});
+  const receiptBasis = await active.host.messages.cardSelectionReceiptBasis({generationType:'swipe'});
+  active.context.chat[1].mes='Active response';
+  active.context.chat[1].swipes.push('Active response');
+  const usage = { ...request.usage, generationType:'swipe',sourcePrefixHash:receiptBasis.sourcePrefixHash };
   const expectedSourceIdentity = await active.host.messages.postProcessSourceIdentity();
   const results = await Promise.all([active.host.messages.saveCardSelectionUsage({ expectedSourceIdentity, usage, receiptBasis }), active.host.messages.saveCardSelectionUsage({ expectedSourceIdentity, usage, receiptBasis })]);
   assert.equal(results[0].ok, true); assert.equal(results[1].skipped, true, 'concurrent duplicate events remain idempotent');
@@ -230,9 +252,12 @@ for (const kind of ['editorial', 'postProcess']) {
 }
 {
   const stopped = fixture();
-  const receiptBasis = await stopped.host.messages.cardSelectionReceiptBasis();
+  stopped.context.chat.push({is_user:false,mes:'Prior complete response',swipes:['Prior complete response'],
+    swipe_id:1,swipe_info:[{extra:{}},{extra:{}}]});
+  const receiptBasis = await stopped.host.messages.cardSelectionReceiptBasis({generationType:'swipe'});
   const prefix = receiptBasis.sourcePrefixHash;
-  stopped.context.chat.push({ is_user: false, mes: 'Partial response', swipes: ['Prior complete response', 'Partial response'], swipe_id: 1, swipe_info: [{ extra: {} }, { extra: {} }] });
+  stopped.context.chat[1].mes='Partial response';
+  stopped.context.chat[1].swipes.push('Partial response');
   const expectedSourceIdentity = await stopped.host.messages.postProcessSourceIdentity();
   assert.equal(typeof stopped.host.messages.markCardSelectionIncomplete, 'function', 'incomplete responses can persist their completion state');
   assert.equal((await stopped.host.messages.markCardSelectionIncomplete({ expectedSourceIdentity, receiptBasis, sourcePrefixHash: 'stale' })).ok, false);
@@ -242,7 +267,7 @@ for (const kind of ['editorial', 'postProcess']) {
   assert.equal((await reloaded.host.snapshot()).cardSelectionHistory.length, 0, 'incomplete response cannot age cooldown after reload');
   reloaded.context.chat[1].swipe_id = 0; reloaded.context.chat[1].mes = 'Prior complete response';
   assert.equal((await reloaded.host.snapshot()).cardSelectionHistory.length, 1, 'other complete swipe still counts');
-  const success = await stopped.host.messages.saveCardSelectionUsage({ expectedSourceIdentity, receiptBasis, usage: { ...request.usage, sourcePrefixHash: prefix } });
+  const success = await stopped.host.messages.saveCardSelectionUsage({ expectedSourceIdentity, receiptBasis, usage: { ...request.usage, generationType:'swipe',sourcePrefixHash: prefix } });
   assert.equal(success.ok, true);
   assert.equal((await stopped.host.snapshot()).cardSelectionHistory.length, 1, 'successful completion supersedes incomplete marker');
   assert.equal(stopped.context.chat[1].extra.recursion.cardSelectionIncomplete, undefined);

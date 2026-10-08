@@ -41,8 +41,12 @@ export function normalizeAttemptFailureCode(value) {
   return FAILURE_CODES.has(value) ? value : 'RECURSION_ATTEMPT_FAILURE_UNKNOWN';
 }
 function observedNumbers(value, keys, limit) {
-  return Object.fromEntries(keys.filter(key => value?.[key] === null || Number.isFinite(value?.[key]))
+  return Object.fromEntries(keys.filter(key => value?.[key] === null || Number.isFinite(value?.[key]) && value[key] >= 0)
     .map(key => [key, value[key] === null ? null : Math.max(0, Math.min(limit, value[key]))]));
+}
+export function normalizeAttemptMeasurements({timings,usage} = {}) {
+  return {timings:observedNumbers(timings,TIMING_KEYS,2147483647),
+    usage:observedNumbers(usage,USAGE_KEYS,100000)};
 }
 function normalizeOutcome(value) {
   if (!value || !['accepted', 'rejected', 'failed', 'canceled'].includes(value.outcome)) return null;
@@ -56,8 +60,7 @@ function normalizeOutcome(value) {
     ...(CHECKPOINT_DIAGNOSTIC_CODES.includes(value.diagnosticCode) ? {diagnosticCode:value.diagnosticCode} : {}),
     ...(fieldIssues.length ? {fieldIssues} : {}), ...(validationRule ? {validationRule} : {}),
     delayMs: Number.isFinite(value.delayMs) ? Math.max(0, Math.min(2147483647, Math.trunc(value.delayMs))) : 0,
-    timings:observedNumbers(value.timings, TIMING_KEYS, 2147483647),
-    usage:observedNumbers(value.usage, USAGE_KEYS, 100000) };
+    ...normalizeAttemptMeasurements(value) };
 }
 export function normalizeAttemptOutcomes(values) {
   return (Array.isArray(values) ? values : []).map(normalizeOutcome).filter(Boolean).slice(-5);

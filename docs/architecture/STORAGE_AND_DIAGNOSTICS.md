@@ -55,7 +55,8 @@ A manifest records:
 - normalized provenance hashes;
 - captured allowlisted operation configuration (mode, card target, reasoning level/use, settings/provider hashes), with nulls for unavailable observations;
 - queued stage ids and frontier ids;
-- per-stage state, attempts, failure class, diagnostic codes, and checkpoint metadata.
+- per-stage state, attempts, failure class, diagnostic codes, and checkpoint metadata;
+- the actual dispatched model stage's provider lane and SHA-256 provider key, retained independently of a cleared failure so reload can present the matching persisted cooldown.
 
 It does not contain prompt text, card bodies, provider JSON, hidden reasoning, transcript text, Post-process drafts, or final prose.
 
@@ -144,6 +145,8 @@ Recovery summaries derive from actual durable stage attempts and outcomes, using
 `operationSummaries` retains the latest 20 per chat, each with at most 32 stage summaries and five recent allowlisted attempt outcomes per stage. Total attempts/recovery counters aggregate all stages before truncation. A successful correction clears the active failure but retains its prior rejection code, canonical field issues (at most eight, paths at most 160 characters), fixed semantic rule, observed timing and token counts. No provider prose or unknown metadata is retained. Operation IDs/stage IDs are bounded to 180 characters and counts to 100,000. Timing events join an existing summary by current chat and operation ID; an evicted operation is not resurrected by a late event. Clear Run Journal removes ordinary entries, operation summaries, and retained Post-process outcomes.
 
 First-observed and latest build identities stay separate. An unavailable first observation remains unavailable after a later declared build. Runtime `build` is either unavailable or a validated `recursion.buildInfo.v1` declaration (bounded to 2,048 characters, lowercase SHA-256, optional actual 40-character source revision). It is loaded once with a two-second timeout. The installation verifier establishes actual file agreement; a stamp never replaces byte checks. See [build installation](../user/BUILD_INSTALLATION.md).
+
+The router exposes bounded canonical attempt `timings`/`usage` from observed diagnostics, including `queueWaitMs` mapped to `queueMs`. Rejected output and Fused wrapping preserve those observations; absent or negative durations stay unavailable. The read-only preparation analyzer deduplicates actual exports by `storage.chatKey` and operation ID, retaining independent report scopes when the chat key is unavailable.
 
 Provider aborts retain `RECURSION_PROVIDER_ABORTED`, category `cancellation`, `retryable:false`, and fixed text. The trusted origin enum is `recursion-stop|host-stop|operation-deadline|profile-changed|chat-changed|unknown`; absence remains unknown. Reloaded running work becomes paused with `operation-interrupted-after-reload`, accepted checkpoints intact and unfinished execution tokens revoked. App-closed time is excluded. Optional summary-write failure warns once without undoing a verified manifest or recursively journaling its storage failure.
 

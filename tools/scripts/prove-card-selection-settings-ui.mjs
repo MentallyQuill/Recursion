@@ -159,6 +159,7 @@ try {
       window.proofState.execution={operationId:'synthetic-interrupted',phase:'preprocess',state:'paused',pauseReason:'restored-after-reload',
         pipelineMode:'segmented',recoveryBudget:{recoveryLimit:3,recoveryUsed:2},frontierStageIds:['preprocess.guidance'],
         stageRecords:{'preprocess.guidance':{stageId:'preprocess.guidance',state:'pending',kind:'model',executable:true,
+          providerLane:'utility',providerKey:'a'.repeat(64),
           label:'Guidance',attempts:{total:1},failure:null}}};
       window.proofUi.update();
     });

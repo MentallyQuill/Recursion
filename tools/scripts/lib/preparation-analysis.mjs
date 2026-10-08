@@ -27,8 +27,9 @@ export function analyzePreparationReports(reports = []) {
     for(const summary of normalizeOperationSummaries(raw)) {
       if(summary.phase !== 'preprocess') continue;
       const original=raw.findLast(value=>value?.operationId === summary.operationId) || {};
-      const scope=typeof report.chatKey === 'string' ? report.chatKey : `report-${reportIndex}`;
-      const key=JSON.stringify([scope,summary.operationId]);
+      const chatKey=typeof report?.storage?.chatKey === 'string' ? report.storage.chatKey : '';
+      const key=JSON.stringify(chatKey ? ['chat',chatKey,summary.operationId]
+        : ['report',reportIndex,summary.operationId]);
       const prior=operations.get(key);
       if(prior?.summary.updatedAt && summary.updatedAt && prior.summary.updatedAt > summary.updatedAt) continue;
       operations.set(key,{summary,original});

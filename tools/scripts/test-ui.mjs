@@ -3838,7 +3838,8 @@ try {
     const previousDraft = draft.value;
     draft.value = '0.37';
     view = {...view,providerOperations:{queues:{utility:{available:true,active:0,pending:1,concurrency:1,cooldownRemainingMs:1001}}},
-      execution:{operationId:'synthetic-wait',state:'paused',recoveryBudget:{recoveryLimit:3,recoveryUsed:2},stageRecords:{}}};
+      execution:{operationId:'synthetic-wait',state:'paused',recoveryBudget:{recoveryLimit:3,recoveryUsed:2},
+        stageRecords:{guidance:{kind:'model',state:'running',providerLane:'utility',providerKey:'a'.repeat(64)}}}};
     const timerCount = timers.length;
     ui.update();
     assertEqual(root.querySelector('[data-recursion-provider-queue-utility]')?.textContent,
@@ -3855,6 +3856,23 @@ try {
     assertEqual(root.querySelector('[data-recursion-settings-section-body-compatibility-reasoner]').hidden,false,
       'countdown preserves disclosed tuning');
     assertEqual(timers.length,timerCount,'status refresh adds no timer');
+    view.providerOperations.queues.utility.cooldownRemainingMs=0;
+    view.providerOperations.queues.reasoner={available:true,cooldownRemainingMs:60000};
+    ui.update();
+    assertEqual(root.querySelector('[data-recursion-progress-wait]').hidden,true,
+      'an independent Reasoner cooldown is not presented as an active Utility wait');
+    const currentTime=Date.now();
+    view.execution.stageRecords.guidance.state='pending';
+    view.execution.stageRecords.guidance.failure=null;
+    view.execution.recoveryBudget.providerCooldowns={['a'.repeat(64)]:currentTime+60000,['b'.repeat(64)]:currentTime+120000};
+    view.execution.pauseReason='restored-after-reload';
+    ui.update();
+    assertEqual(root.querySelector('[data-recursion-progress-wait]').textContent,
+      'Waiting for provider · retry in 60s','restored pending work uses only its matching preserved provider cooldown');
+    view.execution.stageRecords.guidance.state='completed';
+    ui.update();
+    assertEqual(root.querySelector('[data-recursion-progress-wait]').hidden,true,
+      'completed stages cannot keep a provider wait visible');
     draft.value = previousDraft;
     view = {...view,providerOperations:{queues:{}},execution:previousExecution};
     ui.update();

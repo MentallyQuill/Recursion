@@ -7199,7 +7199,7 @@ export function createRecursionRuntime({
           { ...request, signal },
           { runId: context.runId, signal }
         );
-        return { providerResult, attempt };
+        return { providerResult, attempt, timings:providerResult.timings, usage:providerResult.usage };
       },
       validateBundle(artifact, validationContext = {}) {
         if (

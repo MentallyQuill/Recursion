@@ -46,6 +46,10 @@ try {
   symlinkSync(join(lf, 'src'), join(linked, 'src'), 'junction');
   assert.throws(() => productionTreeIdentity(linked), /symbolic link/,
     'a symlink at the production-tree root cannot bypass inventory checks');
+  const linkedAssets=tree('linked-assets');
+  symlinkSync(join(lf,'assets'),join(linkedAssets,'assets'),'junction');
+  assert.throws(() => productionTreeIdentity(linkedAssets),/symbolic link/,
+    'a linked assets ancestor cannot redirect the icons inventory outside the repository');
   const valid = { schema: 'recursion.buildInfo.v1', version: '0.3.0-beta.1',
     sourceRevision: 'a'.repeat(40), dirty: false, productionHash: original,
     createdAt: '2026-10-07T12:00:00.000Z', secret: 'PRIVATE_CANARY' };
@@ -85,6 +89,10 @@ try {
   symlinkSync(outputRoot, linkedOutput, 'junction');
   assert.throws(() => staging.prepareRecursionInstall({repositoryRoot:crlf, outputRoot:linkedOutput}), /symbolic links/);
   assert.throws(() => staging.prepareRecursionInstall({repositoryRoot:crlf, outputRoot:join(crlf, 'src', 'output')}), /production/);
+  for (const name of ['Src','STYLES','Assets','.GIT']) {
+    assert.throws(() => staging.prepareRecursionInstall({repositoryRoot:crlf,outputRoot:join(crlf,name,'output')}),
+      /production/,name+' cannot bypass a protected staging root');
+  }
   assert.throws(() => staging.prepareRecursionInstall({ repositoryRoot:crlf, outputRoot }), /empty/);
   assert.throws(() => staging.prepareRecursionInstall({ repositoryRoot:crlf, outputRoot:crlf }), /repository/);
   assert.equal(verifyInstalledCopies({ repositoryRoot:crlf, installedRoot:outputRoot, accountOnly:true }).ok, true);

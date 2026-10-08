@@ -18,7 +18,8 @@ const runtime = createRecursionRuntime({host:{providerClient:{queueState:()=>({a
   concurrency:1,cooldownRemainingMs:1001})}}});
 assertEqual(runtime.providerOperationState().queues?.utility?.cooldownRemainingMs,1001,
   'runtime exposes selected-profile queue snapshots');
-assertEqual(progressRecoveryLines({execution:{state:'paused',stageRecords:{fused:{failure:{
+assertEqual(progressRecoveryLines({execution:{state:'paused',stageRecords:{fused:{kind:'model',state:'failed',
+  providerLane:'utility',providerKey:'a'.repeat(64),failure:{
   code:'RECURSION_PROVIDER_RATE_LIMIT',retryNotBefore:6001}}}}},{now:()=>5000}).wait,
   'Waiting for provider · retry in 2s','restored operation explains its persisted Retry wait');
 

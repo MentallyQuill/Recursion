@@ -167,6 +167,8 @@ assertDeepEqual(stageRecord, {
   stageId: 'preprocess.arbiter',
   stageVersion: 3,
   kind: 'model',
+  providerLane: null,
+  providerKey: null,
   state: 'pending',
   attemptOutcomes: [],
   checkpoint: null,
@@ -188,6 +190,11 @@ assertDeepEqual(
   stageRecord,
   'normalizeStageRecord drops unknown response fields'
 );
+assertEqual(normalizeStageRecord({...stageRecord,providerLane:'reasoner',providerKey:'a'.repeat(64)}).providerKey,
+  'a'.repeat(64),'stage normalization retains a valid hashed dispatch identity');
+const invalidProvider=normalizeStageRecord({...stageRecord,providerLane:'private-lane',providerKey:'PRIVATE_CANARY'});
+assertEqual(invalidProvider.providerLane,null,'unknown stage lanes remain unavailable');
+assertEqual(invalidProvider.providerKey,null,'provider keys cannot retain arbitrary strings');
 
 const checkpoint = createCheckpoint({
   operationId: 'run-a',

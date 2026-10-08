@@ -724,11 +724,16 @@ for (const pipelineMode of ['fused', 'segmented']) {
 
   const saved = await storage.loadPipelineRun('chat-preprocess');
   const stageId = 'preprocess.cards.segmented.scene-frame';
+  assertEqual(saved.stageRecords[stageId].providerLane,'utility','dispatch retains the actual stage lane for reload status');
+  const providerKey=saved.stageRecords[stageId].providerKey;
+  assert(/^[a-f0-9]{64}$/.test(providerKey),'dispatch retains a hashed provider identity');
+  const cooldownUntil=Date.now()+60000;
   await storage.savePipelineRun('chat-preprocess', {
     ...saved,
     state: 'running',
     frontierStageIds: [],
-    recoveryBudget:{...saved.recoveryBudget,elapsedActiveMs:1200,activeSince:Date.parse('2026-10-07T12:00:00.000Z')},
+    recoveryBudget:{...saved.recoveryBudget,elapsedActiveMs:1200,activeSince:Date.parse('2026-10-07T12:00:00.000Z'),
+      providerCooldowns:{[providerKey]:cooldownUntil}},
     updatedAt:'2026-10-07T12:00:02.000Z',
     stageRecords: {
       ...saved.stageRecords,
@@ -771,6 +776,13 @@ for (const pipelineMode of ['fused', 'segmented']) {
   assert(diagnostic.runtime.execution.diagnosticCodes.includes('operation-interrupted-after-reload'),
     'interruption has a fixed export code');
   assertEqual(diagnostic.operationSummaries.at(-1).outcome,'interrupted');
+  const {progressRecoveryLines}=await import('../../src/ui/progress-panel.mjs');
+  assertEqual(restoredStored.stageRecords[stageId].failure,null,'reload clears the interrupted running-stage failure');
+  assertEqual(progressRecoveryLines(restoredRuntime.getView(),{now:()=>cooldownUntil-1234}).wait,
+    'Waiting for provider · retry in 2s','actual reload status still explains its preserved budget cooldown');
+  await storage.savePipelineRun('chat-preprocess',{...restoredStored,recoveryBudget:{...restoredStored.recoveryBudget,
+    providerCooldowns:{[providerKey]:Date.now()-1}}});
+  await restoredRuntime.restoreExecutionState();
   const started = await restoredRuntime.resumeOperation({
     operationId: restored.operationId
   });

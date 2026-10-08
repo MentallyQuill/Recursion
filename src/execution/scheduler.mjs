@@ -508,6 +508,13 @@ export function createExecutionScheduler({
       const profileId = providerRequest?.providerConfig?.connectionProfileId
         || providerRequest?.connectionProfileId || runtime.context.settings?.providers?.[lane]?.connectionProfileId;
       const providerKey = await stableHash(profileId ? { profileId } : { lane });
+      if (modelStage) await queueMutation(runtime, (draft) => {
+        const record=draft.stageRecords[stage.id];
+        if (record?.executionToken !== executionToken || record.state !== 'running') return null;
+        record.providerLane=lane === 'reasoner' ? 'reasoner' : 'utility';
+        record.providerKey=providerKey;
+        return draft;
+      });
       const invokeStage = (attemptRequest, attempt = 0) => raceAbort(
         () => stage.run({
           request: attemptRequest,

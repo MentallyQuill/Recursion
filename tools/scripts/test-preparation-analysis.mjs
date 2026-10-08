@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { analyzePreparationReports } from './lib/preparation-analysis.mjs';
+import { buildDiagnosticsPayload } from '../../src/runtime/diagnostics.mjs';
 
 const build = {status:'declared',schema:'recursion.buildInfo.v1',version:'0.3.0-beta.1',sourceRevision:'a'.repeat(40),
   dirty:false,productionHash:'b'.repeat(64),createdAt:'2026-10-07T12:00:00.000Z'};
@@ -36,10 +37,16 @@ assert(grouped.groups.some(group=>group.build.status==='unavailable'));
 const unknown=grouped.groups.find(group=>group.configuration.cardsPerTurn===null);
 assert.equal(unknown.preparation.samples,0);
 assert.equal(unknown.firstVisibleToken.samples,0);
-assert.equal(analyzePreparationReports([{chatKey:'synthetic',operationSummaries:[sample]},
-  {chatKey:'synthetic',operationSummaries:[sample]}]).operations,1,'overlapping same-chat exports are deduplicated');
-assert.equal(analyzePreparationReports([{chatKey:'first',operationSummaries:[sample]},
-  {chatKey:'second',operationSummaries:[sample]}]).operations,2,'different chats do not deduplicate');
+const diagnostics = chatKey => buildDiagnosticsPayload({journal:{chatKey,operationSummaries:[sample]}});
+const sameChat = analyzePreparationReports([diagnostics('synthetic'),diagnostics('synthetic')]);
+assert.equal(sameChat.operations,1,'overlapping actual diagnostics exports are deduplicated');
+assert.equal(sameChat.groups[0].preparation.samples,1,'re-exporting one operation cannot increase the sample count');
+assert.equal(analyzePreparationReports([diagnostics('first'),diagnostics('second')]).operations,2,
+  'different chats do not deduplicate');
+assert.equal(analyzePreparationReports([diagnostics(''),diagnostics('')]).operations,2,
+  'unavailable chat scopes cannot merge independent exports');
+assert.equal(analyzePreparationReports([diagnostics('report-1'),diagnostics('')]).operations,2,
+  'an actual chat key cannot collide with an unavailable scope');
 const truncated=analyzePreparationReports([{operationSummaries:[{...sample,stageCount:33,
   recoveryCounts:undefined,counts:undefined,stages:[{...sample.stages[0],payload:'PRIVATE_CANARY',
     attempts:[{attempt:1,outcome:'rejected',code:'PRIVATE_CANARY',timings:{providerMs:null},message:'PRIVATE_CANARY'}]}]}]}]).groups[0];
@@ -70,12 +77,19 @@ const {fileURLToPath}=await import('node:url');
 const {runPreparationAnalysis}=await import('./analyze-preparation.mjs');
 const workspace=await mkdtemp(join(tmpdir(),'recursion-preparation-analysis-'));
 try {
-  await writeFile(join(workspace,'export.json'),JSON.stringify({chatKey:'PRIVATE_CANARY',operationSummaries:[sample]}));
+  await writeFile(join(workspace,'export.json'),JSON.stringify(diagnostics('PRIVATE_CANARY')));
   const result=await runPreparationAnalysis(['export.json'],{workspaceRoot:workspace});
   assert.equal(result.analysis.operations,1);
   assert(!String(await readFile(result.output)).includes('PRIVATE_CANARY'));
   await assert.rejects(runPreparationAnalysis(['export.json','--output','../outside.json'],{workspaceRoot:workspace}));
   await assert.rejects(runPreparationAnalysis(['export.json','--output','src/report.json'],{workspaceRoot:workspace}));
+  await writeFile(join(workspace,'package.json'),'production-sentinel');
+  for (const output of ['PACKAGE.JSON','Manifest.JSON','Package-Lock.Json','Src/report.json','Styles/report.json',
+    'Assets/report.json','.GIT/report.json']) {
+    await assert.rejects(runPreparationAnalysis(['export.json','--output',output],{workspaceRoot:workspace}),
+      /outside production files/,output+' cannot bypass protected output paths');
+  }
+  assert.equal(await readFile(join(workspace,'package.json'),'utf8'),'production-sentinel');
   await writeFile(join(workspace,'broken.json'),'private invalid input');
   await assert.rejects(runPreparationAnalysis(['broken.json'],{workspaceRoot:workspace}),/bounded JSON diagnostics export/);
 } finally {

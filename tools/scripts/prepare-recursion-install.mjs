@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { productionTreeIdentity } from './lib/production-build.mjs';
 import { BUILD_INFO_SCHEMA, normalizeBuildIdentity } from '../../src/runtime/build-identity.mjs';
@@ -19,11 +19,12 @@ export function prepareRecursionInstall({ repositoryRoot, outputRoot, sourceRevi
   if (!repositoryRoot || !outputRoot) throw new Error('An explicit repository and empty output directory are required.');
   const repository = resolve(repositoryRoot);
   const output = resolve(outputRoot);
-  if (dirname(output) === output || repository === output
-    || !relative(output, repository).startsWith(`..${sep}`) && relative(output, repository) !== '..') {
+  const repositoryFromOutput=relative(output,repository);
+  if (dirname(output) === output || !repositoryFromOutput
+    || !isAbsolute(repositoryFromOutput) && !repositoryFromOutput.startsWith(`..${sep}`) && repositoryFromOutput !== '..') {
     throw new Error('Output must not be the repository or an ancestor of the repository.');
   }
-  const inside = relative(repository, output).split(sep);
+  const inside = relative(repository, output).split(sep).map(part=>part.toLowerCase());
   if (inside[0] === 'src' || inside[0] === 'styles' || inside[0] === 'assets' || inside[0] === '.git') {
     throw new Error('Output must not be inside repository production files or Git state.');
   }

@@ -15,7 +15,7 @@ export async function runPreparationAnalysis(argv, {workspaceRoot=repositoryRoot
   if(!inputs.length || inputs.length > 64) throw new Error('Provide 1..64 diagnostics export paths. This command makes no model calls.');
   const root=resolve(workspaceRoot),target=resolve(root,output),rel=relative(root,target);
   if(!rel || rel.startsWith('..'+sep) || rel === '..' || /^[a-z]:/i.test(rel)
-    || /^(?:src|styles|assets|\.git)(?:[\\/]|$)/.test(rel) || /^(?:manifest|package(?:-lock)?)\.json$/.test(rel)) {
+    || /^(?:src|styles|assets|\.git)(?:[\\/]|$)/i.test(rel) || /^(?:manifest|package(?:-lock)?)\.json$/i.test(rel)) {
     throw new Error('Analysis output must be a report path inside the workspace, outside production files.');
   }
   let cursor=root;

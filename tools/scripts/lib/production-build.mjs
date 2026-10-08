@@ -32,11 +32,15 @@ function ensureRoot(root, label) {
 }
 
 function walkProductionTree(root, tree, files, symlinks) {
-  const absoluteTree = join(root, ...tree.split('/'));
-  if (!existsSync(absoluteTree)) return;
-  if (lstatSync(absoluteTree).isSymbolicLink()) {
-    symlinks.add(tree);
-    return;
+  let absoluteTree=root;
+  for (const part of tree.split('/')) {
+    absoluteTree=join(absoluteTree,part);
+    let entry;
+    try {entry=lstatSync(absoluteTree);} catch (error) {if (error.code === 'ENOENT') return;throw error;}
+    if (entry.isSymbolicLink()) {
+      symlinks.add(forwardSlashes(relative(root,absoluteTree)));
+      return;
+    }
   }
   const pending = [absoluteTree];
   while (pending.length > 0) {

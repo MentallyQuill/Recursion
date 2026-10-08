@@ -45,6 +45,7 @@ const INDEX_KINDS = new Set([
   'postProcessComparisons'
 ]);
 const DEFAULT_JOURNAL_EVENT = 'activity.stage_changed';
+const JOURNAL_REASON_FIELDS = ['reason', 'statusReason', 'cautionReason'];
 const UNSAFE_JOURNAL_TEXT_PATTERN = /\b(raw[-_\s]*prompt|rawPrompt|raw[-_\s]*response|rawResponse|provider[-_\s]*prompt|providerPrompt|provider[-_\s]*response|providerResponse|hidden[-_\s]*reasoning|hiddenReasoning|reasoning[-_\s]*(?:content|details)|reasoningContent|reasoningDetails|private[-_\s]*story[-_\s]*plan|privateStoryPlan|private[-_\s]*plan|privatePlan|session[-_\s]*id|sessionId|session[-_\s]*key\s*[:=]|sessionKey\s*[:=]|session[-_\s]*token|credentials?|password\s*[:=]|token\s*[:=]|api[-_\s]*key\s*[:=]|apiKey\s*[:=]|authorization\s*[:=]|set-cookie\s*[:=]|cookie\s*[:=]|bearer\s+[A-Za-z0-9._-]+|sk-[A-Za-z0-9_-]+)/i;
 const OBJECT_COERCION_TEXT_PATTERN = /\[object Object\]|object-Object/i;
 const PATH_LIKE_TEXT_PATTERN = /(^|[\s"'`=:(\[])(?:[A-Za-z]:[\\/]|\\\\|\/\/|\.{1,2}[\\/]|\/[A-Za-z0-9_.-]+(?:[\\/][A-Za-z0-9_.-]+)+|[A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.\\/-]*|[A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.\\/-]*\.(?:jsonl?|mjs|js|css|md|txt|png|jpe?g|webp|db|sqlite)\b)/i;
@@ -94,6 +95,7 @@ const JOURNAL_EVENTS = new Set([
   'cache.invalidated',
   'card.generated',
   'card.rejected',
+  'card-selection.history-not-saved',
   'editorial.preflight.skipped',
   'editorial.run.settled',
   'hand.selected',
@@ -107,7 +109,11 @@ const JOURNAL_EVENTS = new Set([
   'provider.call.failed',
   'provider.capability.changed',
   'storage.repaired',
-  'storage.pruned'
+  'storage.pruned',
+  'turn.timing.prepared',
+  'turn.timing.host-request-ready',
+  'turn.timing.first-visible-token',
+  'turn.timing.completed'
 ]);
 
 export const SYSTEM_INDEX_KEY = 'recursion-system-index.v1.json';
@@ -438,7 +444,12 @@ function normalizeJournalDetails(event, details) {
   if (details === undefined) return undefined;
   if (event === 'hand.selected') return normalizeHandSelectedDetails(details);
   if (event === 'postprocess.outcome') return summarizePostProcessOutcome(details);
-  return sanitizedJsonValue(details, undefined);
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return sanitizedJsonValue(details, undefined);
+  const normalized = { ...details };
+  for (const field of JOURNAL_REASON_FIELDS) {
+    if (typeof normalized[field] === 'string') normalized[field] = normalized[field].trim();
+  }
+  return sanitizedJsonValue(normalized, undefined);
 }
 
 function normalizeJournalEntry(entry = {}) {
@@ -454,22 +465,24 @@ function normalizeJournalEntry(entry = {}) {
       || structuredDetails.error
       || structuredDetails.compactError
       || (structuredDetails.code && structuredDetails.message ? structuredDetails : null);
-    const cause = explicitFailure
-      || structuredDetails.reason
-      || structuredDetails.statusReason
-      || structuredDetails.cautionReason;
-    details = event === 'host.generation_stopped' && !explicitFailure ? {
-      ...structuredDetails,
-      reason: structuredDetails.reason || (structuredDetails.recursionRequested === true
-        ? 'recursion-requested-stop' : 'host-stop-cause-unavailable')
-    } : {
-      ...structuredDetails,
-      failure: failureFrom(cause, {
-        code: 'RECURSION_JOURNAL_REASON_MISSING',
-        stage: event,
-        category: 'internal'
-      })
-    };
+    const explained = JOURNAL_REASON_FIELDS.some((field) => typeof structuredDetails[field] === 'string'
+      && safeJournalText(structuredDetails[field]).trim());
+    if (event === 'host.generation_stopped' && !explicitFailure) {
+      details = {
+        ...structuredDetails,
+        reason: structuredDetails.reason || (structuredDetails.recursionRequested === true
+          ? 'recursion-requested-stop' : 'host-stop-cause-unavailable')
+      };
+    } else if (explicitFailure || !explained) {
+      details = {
+        ...structuredDetails,
+        failure: failureFrom(explicitFailure, {
+          code: 'RECURSION_JOURNAL_REASON_MISSING',
+          stage: event,
+          category: 'internal'
+        })
+      };
+    }
   }
   return redact({
     id: safeJournalId(source.id),

@@ -82,11 +82,107 @@ assertEqual(runJournalKey('Chat One'), 'recursion-run-journal-Chat-One.v1.json',
     'Recursion hit an unexpected internal error.',
     'unexplained error journal entries receive a readable internal descriptor'
   );
+  assertEqual(journal.entries[0].details.failure.code, 'RECURSION_JOURNAL_REASON_MISSING',
+    'unexplained journal entries retain the missing-reason code');
   assertEqual(
     journal.entries[1].details.failure.message,
     'Host turn changed before prompt installation.',
     'explicit warning journal failure descriptor remains authoritative'
   );
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  await repo.appendJournal('History Warning Chat', {
+    event: 'card-selection.history-not-saved',
+    severity: 'warn',
+    summary: 'Card selection history could not be saved.',
+    details: { reason: 'card-selection-source-stale' }
+  });
+  const reloaded = createStorageRepository({ storage: adapter });
+  const [entry] = (await reloaded.loadRunJournal('History Warning Chat')).entries;
+  assertEqual(entry.event, 'card-selection.history-not-saved', 'history warning retains its event after reload');
+  assertEqual(entry.details.reason, 'card-selection-source-stale', 'history warning retains its source-stale explanation');
+  assertNoOwnField(entry.details, 'failure', 'explained history warning does not invent a missing-reason failure');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  for (const event of ['prepared', 'host-request-ready', 'first-visible-token', 'completed']) {
+    await repo.appendJournal('Timing Events Chat', {
+      event: `turn.timing.${event}`,
+      runId: 'timing-synthetic-attempt',
+      summary: 'Turn latency measured.',
+      details: { preprocessMs: 111509, totalReplyMs: event === 'completed' ? 133497 : null }
+    });
+  }
+  const reloaded = createStorageRepository({ storage: adapter });
+  const entries = (await reloaded.loadRunJournal('Timing Events Chat')).entries;
+  assertDeepEqual(entries.map(entry => entry.event), [
+    'turn.timing.prepared', 'turn.timing.host-request-ready',
+    'turn.timing.first-visible-token', 'turn.timing.completed'
+  ], 'timing milestones remain distinguishable after reload');
+  assert(entries.every(entry => entry.runId === 'timing-synthetic-attempt'), 'timing milestones retain correlation IDs');
+  assertEqual(entries[0].details.totalReplyMs, null, 'unavailable reply timing remains null');
+  assertEqual(entries[3].details.preprocessMs, 111509, 'preparation timing survives reload');
+  assertEqual(entries[3].details.totalReplyMs, 133497, 'completed reply timing survives reload');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  for (const field of ['reason', 'statusReason', 'cautionReason']) {
+    await repo.appendJournal('Reason Contract Chat', {
+      event: 'prompt.install_skipped', severity: 'warn', details: { [field]: 'turn-changed' }
+    });
+  }
+  for (const reason of ['', '   ', { unexpected: true }, 'raw response body']) {
+    await repo.appendJournal('Reason Contract Chat', {
+      event: 'prompt.install_skipped', severity: 'warn', details: { reason }
+    });
+  }
+  await repo.appendJournal('Reason Contract Chat', {
+    event: 'prompt.install_skipped', severity: 'error',
+    details: { reason: 'turn-changed', failure: {
+      code: 'RECURSION_PROMPT_STALE', stage: 'prompt-install', category: 'stale-state',
+      message: 'Host turn changed before prompt installation.', retryable: true
+    } }
+  });
+  const entries = (await createStorageRepository({ storage: adapter }).loadRunJournal('Reason Contract Chat')).entries;
+  for (const entry of entries.slice(0, 3)) {
+    assertNoOwnField(entry.details, 'failure', 'a safe reason alias explains the warning without a fabricated failure');
+  }
+  for (const entry of entries.slice(3, 7)) {
+    assertEqual(entry.details.failure.code, 'RECURSION_JOURNAL_REASON_MISSING', 'unusable reasons receive the fallback descriptor');
+  }
+  assertEqual(entries[7].details.failure.code, 'RECURSION_PROMPT_STALE', 'explicit failure remains authoritative over a reason');
+  assertEqual(entries[7].details.failure.category, 'stale-state', 'explicit failure category remains authoritative');
+  assertNoForbiddenDiagnosticText(adapter.dump(), 'warning reason persistence remains sanitized');
+}
+
+{
+  const adapter = createMemoryStorageAdapter();
+  const repo = createStorageRepository({ storage: adapter });
+  for (const field of ['reason', 'statusReason', 'cautionReason']) {
+    for (const length of [121, 501]) {
+      await repo.appendJournal('Whitespace Reason Chat', {
+        event: 'prompt.install_skipped', severity: 'warn', details: { [field]: ' '.repeat(length) }
+      });
+    }
+  }
+  await repo.appendJournal('Whitespace Reason Chat', {
+    event: 'prompt.install_skipped', severity: 'warn',
+    details: { reason: `${' '.repeat(501)}turn-changed` }
+  });
+  const entries = (await createStorageRepository({ storage: adapter }).loadRunJournal('Whitespace Reason Chat')).entries;
+  for (const entry of entries.slice(0, 6)) {
+    assertEqual(entry.details.failure?.code, 'RECURSION_JOURNAL_REASON_MISSING',
+      'long whitespace-only reasons remain unexplained after reload');
+  }
+  assertEqual(entries[6].details.reason, 'turn-changed', 'trimming before bounds preserves a real padded explanation');
+  assertNoOwnField(entries[6].details, 'failure', 'a real padded explanation does not invent a failure');
 }
 
 {

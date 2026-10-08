@@ -1,17 +1,16 @@
-import { chromium } from 'playwright';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { resolve, relative, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createSillyTavernHttpSession, validateSoakUserHandle } from './lib/sillytavern-live-harness.mjs';
-import { configureSoakDeckFixture, sendAndWait } from './prove-live-pipelines.mjs';
+import { createSillyTavernHttpSession } from './lib/sillytavern-live-harness.mjs';
+import { parseLiveBenchmarkOptions } from './lib/live-benchmark-options.mjs';
 
 const repo = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const output = resolve(repo, 'artifacts', process.argv.includes('--reasoning-off') ? 'latency-benchmark-reasoning-off' : 'latency-benchmark');
-const user = process.env.RECURSION_SILLYTAVERN_USER;
-const baseUrl = process.env.SILLYTAVERN_BASE_URL;
-if (!process.argv.includes('--live') || !validateSoakUserHandle(user).ok || !baseUrl) {
-  throw new Error('Use --live with SILLYTAVERN_BASE_URL and a dedicated RECURSION_SILLYTAVERN_USER (recursion-soak-*).');
-}
+// Validate paid/dedicated inputs before loading any browser or live proof code.
+const options=parseLiveBenchmarkOptions(process.argv.slice(2),process.env);
+const {user,baseUrl,profileName,samples,cards,reasoningLevel}=options;
+const {chromium}=await import('playwright');
+const {configureSoakDeckFixture,sendAndWait}=await import('./prove-live-pipelines.mjs');
 const session = createSillyTavernHttpSession({ baseUrl, user, password: process.env.RECURSION_SILLYTAVERN_PASSWORD || '' });
 await session.login();
 await mkdir(output, { recursive: true });
@@ -86,7 +85,6 @@ try {
   } else if (process.argv.includes('--inspect')) {
     console.log(JSON.stringify({ ...inspection, profiles: inspection.profiles.filter((profile) => /Provider/.test(profile.name)) }, null, 2));
   } else {
-    const profileName = process.env.RECURSION_BENCHMARK_PROFILE || 'nanogpt deepseek/deepseek-v4-flash:thinking - Provider';
     const profile = inspection.profiles.find((entry) => entry.name === profileName);
     if (!profile) throw new Error('Dedicated benchmark profile is unavailable.');
     console.log(`Qualifying ${profile.name}`);
@@ -106,44 +104,50 @@ try {
         }
       };
     });
-    const qualify = async (concurrency) => page.evaluate(async ({ profileId, concurrency }) => {
+    const qualify = async (concurrency) => page.evaluate(async ({ profileId, concurrency, reasoningLevel }) => {
       const runtime = globalThis.__recursionLiveHarnessRuntime;
       await runtime.updateProviderConfig('utility', { connectionProfileId: profileId, maxConcurrentRequests: concurrency, outputTokenCeiling: 16000 });
       const result = await runtime.testProvider('utility');
-      return { ok: result.ok, provider: runtime.view().settings.providers.utility, transportErrors: globalThis.__latencyTransportErrors };
-    }, { profileId: profile.id, concurrency });
+      let reasoner=null;
+      if(reasoningLevel === 'high') {
+        await runtime.updateProviderConfig('reasoner',{connectionProfileId:profileId,maxConcurrentRequests:concurrency,outputTokenCeiling:16000});
+        reasoner=await runtime.testProvider('reasoner');
+      }
+      return { ok: result.ok && (!reasoner || reasoner.ok), reasonerOk:reasoner?.ok ?? null,
+        provider: runtime.view().settings.providers.utility, transportErrors: globalThis.__latencyTransportErrors };
+    }, { profileId: profile.id, concurrency, reasoningLevel });
     if (process.argv.includes('--certify')) {
       const qualification = await qualify(2);
       await writeFile(resolve(output, 'qualification.json'), JSON.stringify(qualification, null, 2));
       console.log(JSON.stringify(qualification));
       if (!qualification.ok) process.exitCode = 1;
     } else {
-      const families = ['Scene Frame', 'Scene Constraints', 'Active Cast', 'Character Motivation', 'Environment', 'Open Threads'];
+      const families = ['Scene Frame', 'Scene Constraints', 'Active Cast', 'Character Motivation', 'Environment', 'Open Threads',
+        'Knowledge','Consequences','Relationship'].slice(0,cards);
       const decks = configureSoakDeckFixture(await page.evaluate(() => globalThis.__recursionLiveHarnessRuntime.view().settings.preProcessDecks), { mode: 'manual', families });
-      await page.evaluate(async ({ decks, profileName }) => {
+      await page.evaluate(async ({ decks, profileName, cards, reasoningLevel }) => {
         const runtime = globalThis.__recursionLiveHarnessRuntime;
-        await runtime.updateSettings({ enabled: true, mode: 'manual', cardsPerTurn: 6,
-          reasoningLevel: 'medium', preProcessDecks: decks, postProcess: { enabled: false } });
+        await runtime.updateSettings({ enabled: true, mode: 'manual', cardsPerTurn: cards,
+          reasoningLevel, preProcessDecks: decks, postProcess: { enabled: false } });
         const context = SillyTavern.getContext();
         await context.selectCharacterById(0);
         await context.executeSlashCommandsWithOptions('/profile <None>');
         await context.executeSlashCommandsWithOptions(`/profile await=true timeout=10000 ${profileName}`);
-      }, { decks, profileName });
-      await page.locator('#model_nanogpt_select').selectOption(profile.model, { force: true });
+      }, { decks, profileName, cards, reasoningLevel });
       const primarySetup = await page.evaluate(async () => {
-        const { oai_settings } = await import('/scripts/openai.js');
-        return { source: oai_settings.chat_completion_source, model: oai_settings.nanogpt_model, streaming: oai_settings.stream_openai };
+        const { oai_settings, getChatCompletionModel } = await import('/scripts/openai.js');
+        return { source: oai_settings.chat_completion_source, model: getChatCompletionModel(), streaming: oai_settings.stream_openai };
       });
       console.log(JSON.stringify({ primarySetup }));
       const report = process.argv.includes('--resume')
         ? JSON.parse(await readFile(resolve(output, 'results.json'), 'utf8'))
-        : { profile: { model: profile.model, name: profile.name }, families, qualification: [], samples: [],
-          order: 'Three identical-source samples per arm; arms grouped to avoid repeated qualification calls.' };
+        : { profile: { model: profile.model, name: profile.name }, families, cards, reasoningLevel, qualification: [], samples: [],
+          order: `${samples} identical-source samples per arm; arms grouped to avoid repeated qualification calls.` };
       const persist = () => writeFile(resolve(output, 'results.json'), JSON.stringify(report, null, 2));
       const arms = [{ mode: 'segmented', concurrency: 1 }, { mode: 'segmented', concurrency: 2 }, { mode: 'fused', concurrency: 2 }];
       for (const arm of arms.filter((arm) => !process.argv.includes('--reasoning-off') || arm.concurrency === 2)) {
         const completed = report.samples.filter((sample) => sample.mode === arm.mode && sample.concurrency === arm.concurrency).length;
-        if (completed >= 3) continue;
+        if (completed >= samples) continue;
         if (arm.mode === 'segmented' || process.argv.includes('--resume')) {
           const qualification = await qualify(arm.concurrency);
           report.qualification.push({ ...arm, ...qualification });
@@ -153,8 +157,8 @@ try {
             throw new Error('Live qualification failed; failed qualification is recorded, and no benchmark arm was silently substituted.');
           }
         }
-        for (let sample = completed + 1; sample <= 3; sample += 1) {
-          console.log(`Running ${arm.mode}, concurrency ${arm.concurrency}, sample ${sample}/3`);
+        for (let sample = completed + 1; sample <= samples; sample += 1) {
+          console.log(`Running ${arm.mode}, concurrency ${arm.concurrency}, sample ${sample}/${samples}`);
           const chatName = `Recursion-Latency-${Date.now()}-${arm.mode}-${sample}`;
           await page.evaluate(async ({ mode, chatName }) => {
             await SillyTavern.getContext().openCharacterChat(chatName);

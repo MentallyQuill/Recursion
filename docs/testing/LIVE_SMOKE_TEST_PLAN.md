@@ -4,6 +4,38 @@ The live smoke plan proves Recursion inside a real SillyTavern browser session. 
 
 It is not a long-form story soak or campaign certification run.
 
+## Preparation measurements
+
+Use `node tools/scripts/analyze-preparation.mjs export-a.json export-b.json --output artifacts/preparation-analysis.json`
+for read-only analysis of sanitized diagnostics exports. No browser, provider, host session, or model call is used.
+The report groups operations by declared production fingerprint, captured configuration, pipeline, and lane;
+unavailable or mixed builds stay separate. Older summaries without configuration remain unknown rather than
+receiving current settings. Overlapping exports from the same chat are deduplicated. Latency uses observed
+completed preparation elapsed time; overlapping provider durations are reported separately and never summed
+as a preparation estimate. Missing first-visible-token timings and truncated call counts stay unavailable.
+
+The paid benchmark requires `--live`, a dedicated `recursion-soak-*` user, an explicit connection-profile name,
+and `--samples 1..10` (per arm). `RECURSION_BENCHMARK_PROFILE` and `RECURSION_BENCHMARK_SAMPLES` can provide
+those explicit values. It rejects Default User and validates inputs before loading browser/session code.
+Qualification also makes model calls; sample count is not a total paid-call cap.
+
+For an authorized comparison, use the same dedicated synthetic fixture, model/profile, output ceiling, and
+primary streaming settings. Run four configurations with `--cards 6` / `--cards 9` and
+`--reasoning-level medium` / `--reasoning-level high`, for example:
+
+```powershell
+node tools/scripts/benchmark-preprocess-latency.mjs --live --profile 'Explicit dedicated test profile' --samples 2 --cards 6 --reasoning-level medium
+```
+
+Medium currently derives Reasoner use **Auto**; High derives **Always**. These are coupled settings, so this
+comparison does not isolate a routing-only effect. Both eligible lanes use the explicit profile in High.
+Each configuration includes Segmented concurrency 1/2 and Fused concurrency 2 arms; qualification must pass
+before an arm runs. Preserve each configuration's results before the next run; resume only the same inputs.
+Keep failed samples, correction counts, omitted cards, required coverage, prompt installation, and actual
+first-visible-token measurements alongside median/range and sample size. A faster arm is acceptable only
+when required coverage and quality gates pass. This goal executes synthetic/read-only evidence only;
+no live speedup has been measured or claimed.
+
 Post-process smoke uses the same dedicated-user gate after the assistant response lands. It freezes the source and bounded evidence, verifies Unified and Progressive guidance/rewrite progress, checks native host quiet-generation settlement, and proves that As Swipe and Replace produce the documented marker and mutation shape. The event fixture must use SillyTavern's real scalar `GENERATION_ENDED` payload (`chat.length`) and prove it binds to the latest assistant. The Hero Pixel Array must show running and terminal Post-process blocks. Stop during guidance or rewrite must pause the Recursion operation without a late mutation, preserve accepted checkpoints, and expose Resume or Retry Stage. Post-process Off must not extend native Stop ownership. A Progressive category failure must retain the latest valid draft and settle only as a swipe; no failed or stale run may mutate the host message.
 
 Every enabled Post-process certification run uses **As Swipe**. It is a failed

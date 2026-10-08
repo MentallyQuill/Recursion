@@ -125,6 +125,7 @@ assertDeepEqual(run, {
   chatKey: 'chat-a',
   turnKeyHash: 'turn-a',
   sourceBandHash: 'source-band-a',
+  configuration:{mode:null,cardsPerTurn:null,reasoningLevel:null,reasonerUse:null,settingsHash:null,providerHash:null},
   hostOwned: true,
   nativeGenerationType: 'swipe',
   sourceIdentity: provenance.sourceIdentity,

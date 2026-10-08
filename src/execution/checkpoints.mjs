@@ -7,6 +7,7 @@ import { normalizeInstructionValidationRule } from '../instruction-safety.mjs';
 import { normalizeOutputIssues } from '../providers/output-contract.mjs';
 import { normalizeRecoveryCounts } from './recovery-counts.mjs';
 import { normalizePipelineDecision } from '../runtime/pipeline-policy.mjs';
+import { normalizeOperationConfiguration } from './operation-configuration.mjs';
 import { normalizeCancellationOrigin } from '../failures.mjs';
 
 export const PIPELINE_RUN_SCHEMA = 'recursion.pipelineRun.v2';
@@ -353,6 +354,7 @@ export function createPipelineRun({
   provenance,
   turnKeyHash,
   sourceBandHash,
+  configuration,
   hostOwned = false,
   nativeGenerationType = 'normal'
 }) {
@@ -365,6 +367,7 @@ export function createPipelineRun({
     chatKey: cleanText(chatKey),
     turnKeyHash: cleanText(turnKeyHash),
     sourceBandHash: cleanText(sourceBandHash),
+    configuration:normalizeOperationConfiguration(configuration),
     hostOwned: hostOwned === true,
     nativeGenerationType: ['normal', 'swipe', 'regenerate'].includes(nativeGenerationType)
       ? nativeGenerationType
@@ -400,6 +403,7 @@ export function normalizePipelineRun(value) {
     chatKey: cleanText(value.chatKey),
     turnKeyHash: cleanText(value.turnKeyHash),
     sourceBandHash: cleanText(value.sourceBandHash),
+    configuration:normalizeOperationConfiguration(value.configuration),
     hostOwned: value.hostOwned === true,
     nativeGenerationType: ['normal', 'swipe', 'regenerate'].includes(value.nativeGenerationType)
       ? value.nativeGenerationType

@@ -53,6 +53,17 @@ const exported = buildDiagnosticsPayload({journal,chatKey:'synthetic-chat'});
 assert.equal(exported.operationSummaries?.length, 1, 'sanitized exports retain operation explanations');
 assert.equal(exported.operationSummaries[0].stages[0].attempts[0].code, 'RECURSION_JSON_PARSE_FAILED');
 assert(!JSON.stringify(exported.operationSummaries).includes('PRIVATE_CANARY'));
+const configured = manifest('configured');
+configured.configuration = {mode:'auto',cardsPerTurn:6,reasoningLevel:'medium',reasonerUse:'auto',
+  settingsHash:'abcdef01',providerHash:'12345678',prompt:'PRIVATE_CANARY'};
+await repository.savePipelineRun('synthetic-chat',configured);
+const captured = (await repository.loadRunJournal('synthetic-chat')).operationSummaries.at(-1).configuration;
+assert.deepEqual(captured,{mode:'auto',cardsPerTurn:6,reasoningLevel:'medium',reasonerUse:'auto',
+  settingsHash:'abcdef01',providerHash:'12345678'},'history preserves the operation configuration, without private extras');
+configured.configuration.cardsPerTurn=0;
+await repository.savePipelineRun('synthetic-chat',configured);
+assert.equal((await repository.loadRunJournal('synthetic-chat')).operationSummaries.at(-1).configuration.cardsPerTurn,0,
+  'zero is a valid saved card target');
 // Bounds preserve aggregate counts and drop arbitrary provider fields/codes.
 const many = {...manifest('many'),state:'completed',stageRecords:Object.fromEntries(Array.from({length:33}, (_,i) => [
   `stage-${i}`, {stageId:`stage-${i}`,state:'completed',kind:'model',attempts:{total:6},recoveryCounts:{parseFailures:6},

@@ -2,6 +2,7 @@ import { normalizeBuildIdentity } from '../runtime/build-identity.mjs';
 import { boundedCount, normalizeAttemptOutcomes, normalizeAttemptFailureCode, CHECKPOINT_DIAGNOSTIC_CODES } from '../execution/attempt-outcomes.mjs';
 import { normalizeRecoveryCounts, RECOVERY_COUNT_KEYS } from '../execution/recovery-counts.mjs';
 import { summarizeFusedOutcome } from '../fused-recovery.mjs';
+import { normalizeOperationConfiguration } from '../execution/operation-configuration.mjs';
 
 const STATES = new Set(['running', 'paused', 'completed', 'stale', 'abandoned']);
 const OUTCOMES = new Set([...STATES, 'completed-with-omissions', 'canceled', 'interrupted', 'failed']);
@@ -44,6 +45,7 @@ function normalizeSummary(value) {
     createdAt:timestamp(value.createdAt), updatedAt:timestamp(value.updatedAt),
     firstObservedBuild:normalizeBuildIdentity(value.firstObservedBuild), latestBuild:normalizeBuildIdentity(value.latestBuild),
     pipelineMode:['segmented','fused'].includes(value.pipelineMode) ? value.pipelineMode : 'unknown',
+    configuration:normalizeOperationConfiguration(value.configuration),
     lane:['utility','reasoner'].includes(value.lane) ? value.lane : 'unknown',
     stageCount:boundedCount(value.stageCount), totalAttempts:boundedCount(value.totalAttempts),
     recoveryCounts:normalizeRecoveryCounts(value.recoveryCounts),
@@ -81,6 +83,7 @@ export function buildOperationSummary(manifest, {build, previous} = {}) {
     outcome:operationOutcome(manifest || {}, recoveryCounts), createdAt:manifest?.createdAt,updatedAt:manifest?.updatedAt,
     firstObservedBuild:previous?.operationId === manifest?.operationId ? previous.firstObservedBuild : build,
     latestBuild:build, pipelineMode:manifest?.pipelineMode,lane:manifest?.pipelineDecision?.selectedLane,
+    configuration:manifest?.configuration,
     stageCount:records.length,totalAttempts:records.reduce((sum, record) => sum + boundedCount(record.attempts?.total), 0),
     recoveryCounts, counts:{targetCards:hand?.targetCount, deliveredCards:hand?.cardCount,
       selectedCards:hand?.selectedCount, omittedCards:hand?.omittedCount, requiredBlocks:recoveryCounts.requiredBlocks},

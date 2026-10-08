@@ -8305,6 +8305,8 @@ export function createRecursionRuntime({
       provenance,
       turnKeyHash: turnIdentity.turnKeyHash,
       sourceBandHash: turnIdentity.sourceBandHash,
+      configuration:{mode:settings.mode,cardsPerTurn:settings.cardsPerTurn,reasoningLevel:settings.reasoningLevel,
+        reasonerUse:settings.reasonerUse,settingsHash:provenance.settingsHash,providerHash:hashJson(provenance.provider)},
       hostOwned: hostGeneration === true,
       nativeGenerationType
     });

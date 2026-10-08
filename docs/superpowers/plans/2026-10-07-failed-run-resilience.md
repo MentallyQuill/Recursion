@@ -155,11 +155,11 @@ assert.equal((await host.messages.saveCardSelectionUsage({expectedSourceIdentity
 
 ### Task 7: Read-only benchmark analysis and explicit live inputs
 
-**Files:** Create `tools/scripts/lib/preparation-analysis.mjs`, `tools/scripts/analyze-preparation.mjs`, and `tools/scripts/test-preparation-analysis.mjs`. Modify `tools/scripts/benchmark-preprocess-latency.mjs` and `docs/testing/LIVE_SMOKE_TEST_PLAN.md`.
+**Files:** Create `tools/scripts/lib/preparation-analysis.mjs`, `tools/scripts/lib/live-benchmark-options.mjs`, `tools/scripts/analyze-preparation.mjs`, `tools/scripts/test-preparation-analysis.mjs`, and `src/execution/operation-configuration.mjs`. Modify the current manifest/runtime/operation-history contracts to capture allowlisted operation settings, `tools/scripts/benchmark-preprocess-latency.mjs`, and `docs/testing/LIVE_SMOKE_TEST_PLAN.md`.
 
 **Interfaces:** `analyzePreparationReports(reports) -> groups` uses sanitized exports only; `parseLiveBenchmarkOptions(argv,environment) -> explicitDedicatedConfiguration`. Live samples are integer 1..10; profile is explicitly selected; no hardcoded profile fallback. Existing `--live`/`validateSoakUserHandle()` protection remains.
 
-- [ ] Write RED for missing measurements incorrectly becoming zero, failed/paused operations counted as completed latency samples, mixed build/routing groups, overlapping provider durations mistaken for preparation elapsed, unsafe extra fields, unknown primary-first-token timing, and missing/invalid live inputs.
+- [x] Write RED for missing measurements incorrectly becoming zero, failed/paused operations counted as completed latency samples, mixed build/routing groups, overlapping provider durations mistaken for preparation elapsed, unsafe extra fields, unknown primary-first-token timing, and missing/invalid live inputs.
 
 ```js
 const report = analyzePreparationReports([completeSample, interruptedSample, missingTimingSample]);
@@ -169,10 +169,10 @@ assert.equal(report.groups[0].firstVisibleToken.samples, 0);
 assert.throws(() => parseLiveBenchmarkOptions(['--live'], {RECURSION_SILLYTAVERN_USER:'default-user'}));
 ```
 
-- [ ] Implement finite nonnegative measurement validation, grouping by build/configuration, median/range, observed call/correction/omission/required-block counts, and explicit unavailable statistics. Ignore arbitrary input fields; output no private prose or identifiers from stories.
-- [ ] The analysis CLI reads explicitly provided local export paths and writes a workspace report. It makes no network calls and requires no Playwright. Validate paid mode before loading browser/session code; accept explicit sample/profile inputs and retain dedicated-user guard.
-- [ ] Document a reproducible 6/9-card × Auto/Always comparison using the same dedicated fixture/model/profile; include quality/required coverage gates and distinguish measured versus unmeasured effects. Execute only synthetic/read-only analysis for this goal.
-- [ ] Run preparation-analysis, benchmark CLI guard, turn-timing, diagnostics and model-eval harness tests. Commit `feat: analyze preparation without live model calls`.
+- [x] Implement finite nonnegative measurement validation, grouping by build/configuration, median/range, observed call/correction/omission/required-block counts, and explicit unavailable statistics. Ignore arbitrary input fields; output no private prose or identifiers from stories.
+- [x] The analysis CLI reads explicitly provided local export paths and writes a workspace report. It makes no network calls and requires no Playwright. Validate paid mode before loading browser/session code; accept explicit sample/profile inputs and retain dedicated-user guard.
+- [x] Document a reproducible 6/9-card × Auto/Always comparison using the same dedicated fixture/model/profile; include quality/required coverage gates and distinguish measured versus unmeasured effects. Execute only synthetic/read-only analysis for this goal.
+- [x] Run preparation-analysis, benchmark CLI guard, turn-timing, diagnostics and model-eval harness tests. Commit `feat: analyze preparation without live model calls`.
 
 ### Task 8: Clear cost helpers, current docs, and synthetic UI proof
 

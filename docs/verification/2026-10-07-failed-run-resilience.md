@@ -17,7 +17,7 @@ Continue defect is synthetic and does not establish the cause of the two audited
 | Honest measurements/settings | Configuration is captured per operation, including zero-card targets and Low/Off. Read-only analysis excludes unknown timing and non-completed latency samples, separates mixed/unavailable build/config groups, deduplicates overlapping same-chat exports, and uses elapsed preparation rather than summing parallel provider durations. Unsafe paid inputs are rejected before browser imports. |
 
 Focused host, runtime, scheduler/storage/privacy/diagnostics, provider queue/budget, UI and analysis suites pass.
-Whole-repository gates and independent review are recorded during final integration below.
+Whole-repository gates, independent review and the verified installation package are recorded below.
 
 ## Synthetic production UI
 
@@ -42,8 +42,46 @@ routing/reasoning changes. No separate Auto switch or routing default was introd
 
 ## Final gates and review
 
-Pending final Task 9 verification and independent whole-branch review. The execution plan remains active
-until these gates, staging verification, main integration and remote-SHA verification pass.
+The final production implementation is commit `e8d0f7454f55a5d6038c6c8a30efe346a8406d36`.
+
+| Gate | Result |
+| --- | --- |
+| `npm.cmd test` | PASS — 121 offline test scripts. |
+| `npm.cmd run test:alpha` | PASS — 121 offline scripts, current documentation contract and offline Playwright readiness. |
+| `npm.cmd run test:browser` | PASS — four Playwright-dependent synthetic scripts. |
+| Changed JavaScript syntax | PASS — 47 modules checked with `node --check`. |
+| Documentation and whitespace | PASS — maintained local links and `git diff --check`. |
+| Production UI proof | PASS — desktop/narrow geometry, keyboard actions, drafts, disclosures and visible helper copy; four screenshots inspected. |
+| Independent review | PASS — whole-branch review followed by a read-only fix review; no remaining Critical, Important or Minor findings. |
+
+The first review found five Important defects that earlier synthetic fixtures missed: production timing/usage
+did not reach retained attempts, appended receipts could credit another swipe, actual exports were not deduplicated,
+Windows case aliases bypassed protected outputs, and a linked `assets` parent could redirect inventory traversal.
+Each now has an observed failing regression and a passing fix. Measurements cover actual single/batch router →
+scheduler → history, with a separate actual Fused runtime wrapper regression. Receipt tests reject both complete
+and incomplete late-slot writes. Analyzer tests use the real diagnostics exporter and independent unknown scopes.
+Filesystem tests use isolated case-alias and junction fixtures. The real stager also reproduces and fixes the
+different-drive output check. Negative observations remain unavailable, and actual dispatched provider ownership
+survives reload so Progress shows only matching unfinished-work cooldowns.
+
+Two full-suite failures were stale fixture expectations in `test-execution-contracts.mjs` and
+`test-provider-panel-v1.mjs`; both now use the current stage contract. Final full reruns passed.
+
+## Verified installation package
+
+Staged from the clean implementation commit above with `dirty:false`, copying **116 production files** plus
+generated metadata. The package directory is `artifacts/failed-run-resilience/production-install-e8d0f745`;
+the delivery archive is `artifacts/failed-run-resilience/recursion-failed-run-resilience-e8d0f745.zip`.
+Both an isolated copied installation and an extracted ZIP passed the account-only verifier with zero differences
+and a `verified` build descriptor. Production fingerprint:
+
+```text
+72f1708fa0ebd3b7ad36db2e2f0977ad28cf99c6f2eb5072d0b95c8476b48d51
+```
+
+The package is preserved in the primary workspace's ignored artifacts directory. Subsequent verification/report
+commits change documentation only; they do not change this production fingerprint. Main publication requires
+the remote commit to equal the integrated local commit; the final delivery records that verified revision.
 
 ## Installation and live limits
 

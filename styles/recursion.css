@@ -795,8 +795,16 @@
 }
 
 .recursion-status-head {
+  flex-wrap: wrap;
   min-height: 34px;
   padding: 7px 9px;
+}
+
+.recursion-status-head > [data-recursion-progress-wait],
+.recursion-status-head > [data-recursion-progress-recovery] {
+  flex: 0 1 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .recursion-status-head {

@@ -3825,6 +3825,33 @@ try {
   assert(root.querySelector('[data-recursion-provider-checks-reasoner]'), 'plain check results remain visible outside tuning');
   root.querySelector('[data-recursion-settings-section-toggle-compatibility-reasoner]').click();
   assertEqual(root.querySelector('[data-recursion-settings-section-body-compatibility-reasoner]').hidden, false, 'operator can disclose tuning');
+  {
+    const previousExecution = view.execution;
+    const draft = root.querySelector('[data-recursion-provider-temperature-utility]');
+    const previousDraft = draft.value;
+    draft.value = '0.37';
+    view = {...view,providerOperations:{queues:{utility:{available:true,active:0,pending:1,concurrency:1,cooldownRemainingMs:1001}}},
+      execution:{operationId:'synthetic-wait',state:'paused',recoveryBudget:{recoveryLimit:3,recoveryUsed:2},stageRecords:{}}};
+    const timerCount = timers.length;
+    ui.update();
+    assertEqual(root.querySelector('[data-recursion-provider-queue-utility]')?.textContent,
+      'Waiting for provider · retry in 2s','provider countdown renders from queue state');
+    assertEqual(root.querySelector('[data-recursion-progress-wait]')?.textContent,
+      'Waiting for provider · retry in 2s','progress countdown explains blocked Retry/Resume');
+    assertEqual(root.querySelector('[data-recursion-progress-recovery]')?.textContent,
+      'Recovery allowance · 1 of 3 additional calls remaining','progress shows actual remaining allowance');
+    view.providerOperations.queues.utility.cooldownRemainingMs = 500;
+    timers.find(entry => entry.kind === 'interval' && entry.delay === 500 && entry.active).callback();
+    assertEqual(root.querySelector('[data-recursion-provider-queue-utility]')?.textContent,
+      'Waiting for provider · retry in 1s','existing refresh loop updates the countdown');
+    assertEqual(draft.value,'0.37','countdown preserves an unsaved provider control');
+    assertEqual(root.querySelector('[data-recursion-settings-section-body-compatibility-reasoner]').hidden,false,
+      'countdown preserves disclosed tuning');
+    assertEqual(timers.length,timerCount,'status refresh adds no timer');
+    draft.value = previousDraft;
+    view = {...view,providerOperations:{queues:{}},execution:previousExecution};
+    ui.update();
+  }
   assert(root.querySelector('[data-recursion-provider-preset-mode-reasoner]'), 'Reasoner provider exposes behavioral preset policy');
   assert(root.querySelector('[data-recursion-provider-instruct-mode-reasoner]'), 'Reasoner provider exposes instruct formatting policy');
   assert(root.querySelector('[data-recursion-provider-sampler-mode-reasoner]'), 'Reasoner provider exposes sampler policy');

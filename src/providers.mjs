@@ -2405,7 +2405,14 @@ export function createProviderClient({
     return providerModelStatus(config, { ...options, host });
   }
 
-  return Object.freeze({ generate, batch, listProfiles, status, dispatchTiming: true });
+  function queueState(lane = 'utility') {
+    const { config } = providerConfigFor(settingsStore, laneName(lane));
+    if (!config.connectionProfileId || typeof requestQueue?.stats !== 'function') return Object.freeze({available:false});
+    const state = requestQueue.stats(config.connectionProfileId);
+    return Object.freeze({available:true,active:state.active,pending:state.pending,
+      concurrency:state.concurrency,cooldownRemainingMs:state.cooldownRemainingMs});
+  }
+  return Object.freeze({ generate, batch, listProfiles, status, queueState, dispatchTiming: true });
 }
 
 export function createGenerationRouter({ client, activity = null, journal = null, timeoutMs = 180000 } = {}) {

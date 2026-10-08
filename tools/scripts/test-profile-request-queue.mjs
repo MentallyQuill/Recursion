@@ -184,3 +184,28 @@ await Promise.all([...probeWork, ordinary]);
 }
 
 console.log('[pass] profile request queue');
+
+{
+  let clock = 0, nextTimer = 0, dispatched = 0;
+  const timers = new Map();
+  const shared = createProfileRequestQueue({now:()=>clock,
+    setTimer:(callback)=>{timers.set(++nextTimer,callback);return nextTimer;},clearTimer:id=>timers.delete(id)});
+  shared.rateLimited('shared',5000);
+  const oldTimer = [...timers.values()][0];
+  const controllers = Array.from({length:3},()=>new AbortController());
+  const retryWindows = controllers.map(controller=>shared.run('shared',async()=>{dispatched++;},
+    {signal:controller.signal}).catch(error=>error));
+  assertEqual(shared.stats('shared').pending,3,'repeated Retry windows queue behind the same profile cooldown');
+  await shared.run('independent',async()=>{});
+  controllers.forEach(controller=>controller.abort());
+  await Promise.all(retryWindows);
+  assertEqual(shared.stats('shared').pending,0,'Stop removes all queued windows immediately');
+  const resumed = shared.run('shared',async()=>{dispatched++;});
+  clock = 4999;
+  oldTimer?.();
+  assertEqual(dispatched,0,'an old timer cannot dispatch Resume before cooldown expiry');
+  clock = 5000;
+  for (const [id,callback] of [...timers]) {timers.delete(id);callback();}
+  await resumed;
+  assertEqual(dispatched,1,'only the uncanceled resumed window dispatches after cooldown');
+}

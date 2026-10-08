@@ -9,6 +9,7 @@ import { getActivePostProcessDeck, normalizePostProcessDeckSettings } from '../p
 import { createHeroPixelBlocks, createProgressRunModel } from '../progress.mjs';
 import { DEFAULT_RECURSION_SETTINGS } from '../settings.mjs';
 import { providerCapabilityDetail, providerCapabilityLabel } from './provider-panel.mjs';
+import { progressRecoveryLines } from './progress-panel.mjs';
 
 const PHASE_LABELS = Object.freeze({
   idle: '',
@@ -330,6 +331,7 @@ export function createRecursionViewModel(view = {}) {
     statusSeverity: statusSeverity(activity, progressRun),
     activityChips,
     progressRun,
+    recoveryLines: progressRecoveryLines(source),
     generationStopVisible,
     freshNextGenerationVisible,
     freshNextGenerationPending,

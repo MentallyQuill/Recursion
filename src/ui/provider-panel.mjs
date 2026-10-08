@@ -2,6 +2,11 @@ export function providerSelector(name, lane) {
   return `[data-recursion-provider-${name}-${lane}]`;
 }
 
+export function providerQueueLine(queue) {
+  if (queue?.available !== true || !Number.isFinite(queue.cooldownRemainingMs) || queue.cooldownRemainingMs <= 0) return null;
+  return `Waiting for provider · retry in ${Math.ceil(queue.cooldownRemainingMs / 1000)}s`;
+}
+
 const CAPABILITY_LABELS = Object.freeze({
   unconfigured: 'Configure',
   uncertified: 'Untested',

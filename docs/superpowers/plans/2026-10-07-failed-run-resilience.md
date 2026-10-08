@@ -82,7 +82,7 @@ assert.equal(history[0].recoveryCounts.correctionRequests, 1);
 
 **Interfaces:** Provider client exposes `queueState(lane) -> {available,active,pending,concurrency,cooldownRemainingMs}` using the existing queue and current selected profile. Runtime `providerOperationState()` includes lane queue snapshots. `providerQueueLine(queue) -> string|null` renders fixed ordinary copy with rounded-up seconds; unavailable queue state is hidden/explicit, not a fake idle queue.
 
-- [ ] Write fake-clock tests for Utility/Reasoner sharing one profile, an independent profile, repeated Retry during cooldown, queued Stop cancellation, Resume after serialized cooldown, and old timer expiry after cancellation. Pin dispatch counts, times, budget use, and absence of segmented fan-out after a capacity failure.
+- [x] Write fake-clock tests for Utility/Reasoner sharing one profile, an independent profile, repeated Retry during cooldown, queued Stop cancellation, Resume after serialized cooldown, and old timer expiry after cancellation. Pin dispatch counts, times, budget use, and absence of segmented fan-out after a capacity failure.
 
 ```js
 const controller = new AbortController();
@@ -94,10 +94,10 @@ await assert.rejects(waiting);
 assert.equal(dispatches, 0);
 ```
 
-- [ ] Add real rendered UI tests: a 1,001-ms cooldown displays `retry in 2s`; refresh changes only the queue/progress text and preserves unsaved provider controls and disclosures. Status reads never invoke generation.
-- [ ] Observe RED for missing status APIs/visible copy; retain passing existing ownership tests as baseline evidence.
-- [ ] Expose queue state, render `Waiting for provider · retry in Ns` in the existing provider/progress surfaces, and show actual remaining operation recovery allowance. Reuse the existing UI 500-ms timer; add no poller or provider probing. Preserve Stop/Resume/Retry dispatch through the native host seam.
-- [ ] Run queue, attempt-policy, operation-budget, provider-panel, runtime-preprocess, UI-render/UI suites. Commit `feat: explain provider cooldown and retry waits`.
+- [x] Add real rendered UI tests: a 1,001-ms cooldown displays `retry in 2s`; refresh changes only the queue/progress text and preserves unsaved provider controls and disclosures. Status reads never invoke generation.
+- [x] Observe RED for missing status APIs/visible copy; retain passing existing ownership tests as baseline evidence.
+- [x] Expose queue state, render `Waiting for provider · retry in Ns` in the existing provider/progress surfaces, and show actual remaining operation recovery allowance. Reuse the existing UI 500-ms timer; add no poller or provider probing. Preserve Stop/Resume/Retry dispatch through the native host seam.
+- [x] Run queue, attempt-policy, operation-budget, provider-panel, runtime-preprocess, UI-render/UI suites. Commit `feat: explain provider cooldown and retry waits`.
 
 ### Task 4: Cancellation descriptors, explained activity, and interrupted reload
 

@@ -5,6 +5,22 @@ import {
   readProviderDraftFromControls
 } from '../../src/ui/provider-panel.mjs';
 import { assertDeepEqual, assertEqual } from '../../tests/helpers/assert.mjs';
+import * as providerPanel from '../../src/ui/provider-panel.mjs';
+import { createRecursionRuntime } from '../../src/runtime.mjs';
+import { progressRecoveryLines } from '../../src/ui/progress-panel.mjs';
+
+assertEqual(typeof providerPanel.providerQueueLine, 'function', 'queue wait has a pure presenter');
+assertEqual(providerPanel.providerQueueLine({available:true,cooldownRemainingMs:1001}),
+  'Waiting for provider · retry in 2s', 'remaining seconds round upward');
+assertEqual(providerPanel.providerQueueLine({available:false,cooldownRemainingMs:1001}),null);
+assertEqual(providerPanel.providerQueueLine({available:true,cooldownRemainingMs:0}),null);
+const runtime = createRecursionRuntime({host:{providerClient:{queueState:()=>({available:true,active:0,pending:1,
+  concurrency:1,cooldownRemainingMs:1001})}}});
+assertEqual(runtime.providerOperationState().queues?.utility?.cooldownRemainingMs,1001,
+  'runtime exposes selected-profile queue snapshots');
+assertEqual(progressRecoveryLines({execution:{state:'paused',stageRecords:{fused:{failure:{
+  code:'RECURSION_PROVIDER_RATE_LIMIT',retryNotBefore:6001}}}}},{now:()=>5000}).wait,
+  'Waiting for provider · retry in 2s','restored operation explains its persisted Retry wait');
 
 for (const [state, label, detail] of [
   ['unconfigured', 'Configure', ''],

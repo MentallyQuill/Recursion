@@ -50,6 +50,22 @@ const client = createProviderClient({
   }
 });
 
+{
+  let clock = 0;
+  const sharedQueue = createProfileRequestQueue({now:()=>clock,setTimer:()=>1,clearTimer:()=>{}});
+  sharedQueue.rateLimited('profile-a', 5000);
+  const waitingClient = createProviderClient({host,settingsStore,requestQueue:sharedQueue});
+  assertEqual(typeof waitingClient.queueState, 'function', 'provider exposes pure queue status');
+  const callsBefore = calls.length;
+  assertEqual(waitingClient.queueState('utility').cooldownRemainingMs,5000,'Utility reports selected-profile wait');
+  assertEqual(waitingClient.queueState('reasoner').cooldownRemainingMs,5000,'Reasoner shares the selected-profile wait');
+  clock = 3999;
+  assertEqual(waitingClient.queueState('utility').cooldownRemainingMs,1001);
+  assertEqual(calls.length,callsBefore,'queue status never invokes a provider');
+  const unconfigured = createProviderClient();
+  assertEqual(unconfigured.queueState('utility').available,false,'missing configuration is unavailable rather than fabricated idle');
+}
+
 const result = await client.generate('providerTest', {
   lane: 'utility',
   prompt: 'Return the test object.'

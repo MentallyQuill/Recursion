@@ -3586,6 +3586,7 @@ export function createRecursionRuntime({
       activityHistory: safeActivityHistory(activity),
       editorialResult: lastEditorialResult ? { ...lastEditorialResult } : null,
       providerProfiles: listProviderConnectionProfilesForUi(),
+      providerOperations: providerOperationState(),
       settings: safeSettingsView(settingsStore.get(), runtimeProviderCapability),
       contextContract: buildContextContract(lastSnapshot || {}, settingsStore.get()),
       updatedAt: nowIso()
@@ -8934,7 +8935,12 @@ export function createRecursionRuntime({
   }
 
   function providerOperationState() {
+    const queues = Object.fromEntries(['utility','reasoner'].map(lane => {
+      try { return [lane, host?.providerClient?.queueState?.(lane) || {available:false}]; }
+      catch { return [lane, {available:false}]; }
+    }));
     return {
+      queues,
       operations: Object.fromEntries(
         [...activeProviderOperations.entries()].map(([lane, count]) => [lane, count])
       ),

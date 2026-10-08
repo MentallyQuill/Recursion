@@ -82,6 +82,7 @@ import {
 import {
   providerCapabilityDetail,
   providerCheckLines,
+  providerQueueLine,
   providerCapabilityLabel,
   providerSelector,
   providerStatusClass,
@@ -1716,7 +1717,9 @@ function ensureProgressPopoverShell(panel) {
 
   head = el('div', { className: 'recursion-status-head', dataset: { recursionProgressHead: '' } }, [
     el('span', { className: 'recursion-status-title', dataset: { recursionProgressTitle: '' } }),
-    el('span', { className: 'recursion-status-subtitle', dataset: { recursionProgressSubtitle: '' } })
+    el('span', { className: 'recursion-status-subtitle', dataset: { recursionProgressSubtitle: '' } }),
+    el('span', { className: 'recursion-help', dataset: { recursionProgressWait: '' }, attrs:{hidden:'hidden'} }),
+    el('span', { className: 'recursion-help', dataset: { recursionProgressRecovery: '' }, attrs:{hidden:'hidden'} })
   ]);
   list = el('div', {
     className: 'recursion-status-list',
@@ -1742,6 +1745,10 @@ function renderProgressPopover(panel, progressRun, model) {
   setText(panel, '[data-recursion-progress-title]', progressRun.title || 'Generating');
   setText(panel, '[data-recursion-progress-subtitle]', progressRun.subtitle || model.currentStepText || '');
   setText(panel, '[data-recursion-progress-foot-text]', model.progressFooterLabel);
+  for (const [field, text] of [['wait',model.recoveryLines?.wait], ['recovery',model.recoveryLines?.allowance]]) {
+    const node = panel.querySelector(`[data-recursion-progress-${field}]`);
+    if (node) { node.textContent = text || ''; node.hidden = !text; }
+  }
   list.style = list.style || {};
   list.style.setProperty?.('--recursion-progress-list-limit', String(model.progressListVisibleLimit || 15));
 
@@ -3551,6 +3558,7 @@ function renderProviderSettings(panel, lane, provider, tooltipsEnabled = true, o
   ]));
   body.appendChild(el('div', { className: 'recursion-help', dataset: providerDataset('Checks', lane) },
     providerCheckLines(source, capability).map(text => el('p', { text }))));
+  body.appendChild(el('p', {className:'recursion-help',dataset:providerDataset('Queue',lane),attrs:{hidden:'hidden'}}));
   body.appendChild(settingsDisclosureSection(`compatibility-${lane}`, 'Compatibility and tuning', [grid], {
     defaultOpen: false, tooltipsEnabled, tooltip: 'Profile formatting, structured output, sampling, and request limits.'
   }));
@@ -3566,6 +3574,9 @@ function syncProviderSettingsForView(panel, view, uiState) {
   for (const lane of ['utility', 'reasoner']) {
     const body = panel.querySelector(providerSelector('body', lane));
     if (!body) continue;
+    const queue = panel.querySelector(providerSelector('queue',lane));
+    const wait = providerQueueLine(view.providerOperations?.queues?.[lane]);
+    if (queue) { queue.textContent = wait || ''; queue.hidden = !wait; }
     const source = asObject(settings.providers?.[lane]);
     const capability = asObject(settings.providerCapabilities?.[lane]?.promptPacket || source.capability);
     const displayKey = JSON.stringify({ source, capability, profiles, tooltipsEnabled });

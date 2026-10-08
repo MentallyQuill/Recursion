@@ -192,8 +192,9 @@ assert.throws(() => parseLiveBenchmarkOptions(['--live'], {RECURSION_SILLYTAVERN
 - [x] Request a fresh-context read-only whole-branch review against the spec/plan. Give exact SHAs/files and do not pass private user logs. Resolve Critical/Important findings with observed RED/GREEN regressions and rerun affected gates.
 - [x] After code is committed and clean, stage a production installation package using its actual commit/build fingerprint. Verify package contents and generated metadata in a temporary synthetic installed copy. Provide exact Default User account-only verification/rollback/reload instructions; live code deployment and paid generation are not implied by staging.
 - [x] Check maintained doc links, `git diff --check`, exact branch state, and plan coverage. Mark implementation steps only when verified; record unmeasured live performance separately.
-- [ ] Use network-enabled GitHub CLI to confirm remote main/authentication, integrate current main without discarding other edits, verify integrated tests, and push under standing authorization. Verify remote SHA equals the tested local commit. Do not change branch protections or force-push.
-- [ ] Mark the goal complete only after all scoped implementation/verification/publication steps are satisfied, and deliver spec, plan, report, install package location, and explicit live-measurement limits.
+- [x] Use network-enabled GitHub CLI to confirm remote main/authentication, integrate current main without discarding other edits, verify integrated tests, and push under standing authorization. Verify remote SHA equals the tested local commit. Do not change branch protections or force-push.
+
+Completion rule: mark the goal complete only after the final documentation publication is also verified. Deliver the spec, plan, report, install package location, and explicit live-measurement limits.
 
 ## Self-review record
 

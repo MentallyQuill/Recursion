@@ -83,6 +83,13 @@ The package is preserved in the primary workspace's ignored artifacts directory.
 commits change documentation only; they do not change this production fingerprint. Main publication requires
 the remote commit to equal the integrated local commit; the final delivery records that verified revision.
 
+Main was fast-forwarded from `452f35c9` and published at `79b8af7d8aa33998b24c782187ed4fb9c7683ffd`;
+network-enabled GitHub CLI confirmed that exact remote/local agreement. Main's production fingerprint also
+matches the package above. A direct byte comparison against a different Git checkout reported 24 LF/CRLF
+differences; normalized production hashes agree. The installation verifier remains strict: compare installed
+files against the staged package, not another checkout's line-ending conversion. The copied and ZIP-extracted
+installations both passed that exact-byte check. This closing publication record changes documentation only.
+
 ## Installation and live limits
 
 Use [build staging, account-only verification, reload and rollback instructions](../user/BUILD_INSTALLATION.md).

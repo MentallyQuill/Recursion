@@ -123,10 +123,10 @@ assert.equal(stopped.retryable, false);
 
 **Files:** Modify `src/hosts/sillytavern/host.mjs`, `src/hosts/sillytavern/card-selection-history.mjs`, and `tools/scripts/test-card-selection-history.mjs`.
 
-**Interfaces:** `messages.cardSelectionReceiptBasis({generationType}) -> {ok,chatIdentityHash,sourcePrefixHash,targetMessageId,previousReceipt}`; `targetMessageId` is null for appended Normal and numeric for a mutable existing target. Save/incomplete APIs consume that binding along with the existing expected current identity. Previous receipt is immutable, valid at capture, and merged only for the same deck/target during Continue.
+**Interfaces:** `messages.cardSelectionReceiptBasis({generationType}) -> {ok,generationType,chatIdentityHash,sourcePrefixHash,targetIndex,targetMessageId,targetSwipeId,previousReceipt}`; `targetMessageId` is null for appended Normal and numeric for a mutable existing target. The raw target index also binds an append or blank placeholder; mutable targets bind the active swipe, including a native provisional Swipe slot. Save/incomplete APIs consume that binding along with the existing expected current identity. Previous receipt is deeply immutable, valid at capture, and merged only for the same deck/target during Continue.
 
-- [ ] Add the exact synthetic Continue from the spec as RED: request source basis captured before a valid continuation must save successfully. Extend the actual host fixture to assert one history position and preserved same-deck prior + current card IDs after completion/reload.
-- [ ] Add Normal appended response, empty placeholder, Swipe, Regenerate, missing Continue target, missing turn/deck IDs, source edit, distant source edit, active swipe switch, changed target ID, chat switch during async validation, duplicate completion, disk failure rollback, and incomplete streaming cases. Assert every stale case performs zero metadata writes.
+- [x] Add the exact synthetic Continue from the spec as RED: request source basis captured before a valid continuation must save successfully. Extend the actual host fixture to assert one history position and preserved same-deck prior + current card IDs after completion/reload.
+- [x] Add Normal appended response, empty placeholder, Swipe, Regenerate, missing Continue target, missing turn/deck IDs, source edit, distant source edit, active swipe switch, changed target ID, chat switch during async validation, duplicate completion, disk failure rollback, and incomplete streaming cases. Assert every stale case performs zero metadata writes.
 
 ```js
 const basis = await host.messages.cardSelectionReceiptBasis({generationType:'continue'});
@@ -137,9 +137,9 @@ assert.equal((await host.messages.saveCardSelectionUsage({expectedSourceIdentity
   usage:{...usage,sourcePrefixHash:basis.sourcePrefixHash}, receiptBasis:basis})).ok, true);
 ```
 
-- [ ] Implement basis capture using current raw host chat and active assistant lookup; exclude only the mutable output target from receipt prefix. Do not change model-visible story snapshot or accept alternate prefix hashes as fallback. Bind exact target/chat and recheck all source/handoff/completion guards before persistence.
-- [ ] Split invalid receipt identity, changed prefix, and changed target reasons into the fixed codes in the spec. Return only safe hash/target metadata useful for journal diagnosis. Preserve existing host mutation validation and rollback.
-- [ ] Run `node tools/scripts/test-card-selection-history.mjs`, `node tools/scripts/test-host.mjs`, `node tools/scripts/test-post-process-host-writer.mjs`, and `node tools/scripts/test-post-process-host-restore.mjs`; expected PASS. Commit `fix: bind continuation history to its source prefix`.
+- [x] Implement basis capture using current raw host chat and active assistant lookup; exclude only the mutable output target from receipt prefix. Do not change model-visible story snapshot or accept alternate prefix hashes as fallback. Bind exact target/chat and recheck all source/handoff/completion guards before persistence.
+- [x] Split invalid receipt identity, changed prefix, and changed target reasons into the fixed codes in the spec. Return only safe hash/target metadata useful for journal diagnosis. Preserve existing host mutation validation and rollback.
+- [x] Run `node tools/scripts/test-card-selection-history.mjs`, `node tools/scripts/test-host.mjs`, `node tools/scripts/test-post-process-host-writer.mjs`, and `node tools/scripts/test-post-process-host-restore.mjs`; expected PASS. Commit `fix: bind continuation history to its source prefix`.
 
 ### Task 6: Integrate immutable receipt basis with runtime completion
 

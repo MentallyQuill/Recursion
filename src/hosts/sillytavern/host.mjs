@@ -1,5 +1,6 @@
 import { hashJson, safeId } from '../../core.mjs';
 import { cardSelectionHistoryForChat, cardSelectionCompletionStatus, normalizeCardSelectionReceipt, setCardSelectionReceipt, setCardSelectionIncomplete, cardSelectionGenerationStartedAt, validCardSelectionReceipt } from './card-selection-history.mjs';
+import { cardSelectionMessageText, immutableCardSelectionReceipt, mergeContinuedCardSelectionReceipt } from './card-selection-history.mjs';
 import { packetToPromptBlocks } from '../../prompt.mjs';
 import { createProviderClient, jsonSchemaForRequest } from '../../providers.mjs';
 import { requestMessages } from '../../providers/request-payload.mjs';
@@ -2004,13 +2005,62 @@ export function createSillyTavernHost({
   }
 
   let cardSelectionSaveTail = Promise.resolve();
+  function validateCardSelectionBasis(basis, context, found, identity, suppliedPrefixHash) {
+    if (basis?.ok !== true || !['normal','continue','swipe','regenerate'].includes(basis.generationType)
+      || !/^[a-f0-9]{8}$/.test(basis.chatIdentityHash || '') || !/^[a-f0-9]{8}$/.test(basis.sourcePrefixHash || '')
+      || !Number.isInteger(basis.targetIndex) || basis.targetIndex < 0
+      || !(basis.targetMessageId === null || Number.isInteger(basis.targetMessageId) && basis.targetMessageId >= 0)
+      || !(basis.targetSwipeId === null || Number.isInteger(basis.targetSwipeId) && basis.targetSwipeId >= 0)) {
+      return {ok:false,reason:'card-selection-receipt-invalid'};
+    }
+    if (basis.chatIdentityHash !== identity.chatIdentityHash) return {ok:false,reason:'card-selection-chat-changed'};
+    if (!found || found.index !== basis.targetIndex
+      || (basis.targetMessageId !== null && basis.targetMessageId !== found.normalized.mesid)
+      || (basis.targetSwipeId !== null && basis.targetSwipeId !== Number(identity.swipeId ?? 0))) {
+      return {ok:false,reason:'card-selection-target-changed',details:{expectedTargetMessageId:basis.targetMessageId,
+        observedTargetMessageId:found?.normalized.mesid ?? null}};
+    }
+    const branch = cardSelectionHistoryForChat(rawChatMessages(context).slice(0, found.index));
+    if (branch.cardSelectionSourcePrefixHash !== basis.sourcePrefixHash) {
+      return {ok:false,reason:'card-selection-prefix-changed',details:{expectedPrefixHash:basis.sourcePrefixHash,
+        observedPrefixHash:branch.cardSelectionSourcePrefixHash,targetMessageId:found.normalized.mesid}};
+    }
+    if (suppliedPrefixHash !== basis.sourcePrefixHash) return {ok:false,reason:'card-selection-receipt-invalid'};
+    return {ok:true};
+  }
   const messagesApi = {
+    async cardSelectionReceiptBasis({generationType = 'normal'} = {}) {
+      if (!['normal','continue','swipe','regenerate'].includes(generationType)) return {ok:false,reason:'card-selection-receipt-invalid'};
+      const context = currentContext(contextFactory);
+      const chat = rawChatMessages(context);
+      const chatId = await readChatId(context);
+      if (rawChatMessages(currentContext(contextFactory)) !== chat) return {ok:false,reason:'card-selection-chat-changed'};
+      let latest = null;
+      for (let index = chat.length - 1; index >= 0; index--) {
+        const normalized = normalizeMessage(chat[index], index);
+        if (normalized.visible === false || normalized.isSystem) continue;
+        latest = {raw:chat[index],normalized,index};
+        break;
+      }
+      const target = latest && !latest.normalized.isUser ? latest : null;
+      if (['continue','swipe'].includes(generationType) && !target) return {ok:false,reason:'card-selection-target-changed'};
+      const mutable = generationType !== 'normal' && Boolean(target);
+      const placeholder = target && !cardSelectionMessageText(target.raw).trim();
+      const targetIndex = mutable || placeholder ? target.index : chat.length;
+      const branch = cardSelectionHistoryForChat(chat.slice(0,targetIndex));
+      return Object.freeze({ok:true,generationType,chatIdentityHash:hashJson(chatId),
+        sourcePrefixHash:branch.cardSelectionSourcePrefixHash,targetIndex,
+        targetMessageId:mutable ? target.normalized.mesid : null,
+        targetSwipeId:mutable ? finiteNonNegativeInteger(target.raw.swipe_id) ?? 0 : null,
+        previousReceipt:generationType === 'continue'
+          ? immutableCardSelectionReceipt(currentCardSelectionReceipt(context,target)) : null});
+    },
     cardSelectionCompletionStatus() {
       const context = currentContext(contextFactory);
       const found = findRawAssistantMessage(context);
       return found ? cardSelectionCompletionStatus(context, found.index) : { completed: false, reason: 'assistant-missing' };
     },
-    saveCardSelectionUsage({ expectedSourceIdentity, usage } = {}) {
+    saveCardSelectionUsage({ expectedSourceIdentity, usage, receiptBasis } = {}) {
       const operation = async () => {
         const context = currentContext(contextFactory);
         const validation = await validatePostProcessCommitSource(context, { expectedSourceIdentity });
@@ -2020,13 +2070,15 @@ export function createSillyTavernHost({
           return { ok: false, reason: 'card-selection-chat-changed' };
         }
         const found = findRawAssistantMessage(context, expectedSourceIdentity.messageId);
+        const binding = validateCardSelectionBasis(receiptBasis,context,found,validation.current,usage?.sourcePrefixHash);
+        if (!binding.ok) return binding;
         const completion = cardSelectionCompletionStatus(context, found.index);
         if (!completion.completed) return { ok: false, reason: completion.reason };
-        const { cardSelectionSourcePrefixHash } = cardSelectionHistoryForChat(rawChatMessages(context).slice(0, found.index));
-        const receipt = normalizeCardSelectionReceipt({ ...usage, textHash: validation.current.originalHash });
-        if (!receipt.turnKeyHash || !receipt.deckId || receipt.sourcePrefixHash !== cardSelectionSourcePrefixHash) {
-          return { ok: false, reason: 'card-selection-source-stale' };
+        let receipt = normalizeCardSelectionReceipt({ ...usage, textHash: validation.current.originalHash });
+        if (!receipt.turnKeyHash || !receipt.deckId || receipt.generationType !== receiptBasis.generationType) {
+          return { ok: false, reason: 'card-selection-receipt-invalid' };
         }
+        receipt = mergeContinuedCardSelectionReceipt(receipt,receiptBasis.previousReceipt);
         const handoff = validatePostProcessMutationHandoff(current, { expectedSourceIdentity }, validation);
         if (!handoff.ok) return handoff;
         const existing = currentCardSelectionReceipt(context, found);
@@ -2048,7 +2100,7 @@ export function createSillyTavernHost({
       cardSelectionSaveTail = pending.catch(() => {});
       return pending;
     },
-    markCardSelectionIncomplete({ expectedSourceIdentity, sourcePrefixHash } = {}) {
+    markCardSelectionIncomplete({ expectedSourceIdentity, sourcePrefixHash, receiptBasis } = {}) {
       const operation = async () => {
         const context = currentContext(contextFactory);
         const validation = await validatePostProcessCommitSource(context, { expectedSourceIdentity });
@@ -2056,8 +2108,8 @@ export function createSillyTavernHost({
         const current = currentContext(contextFactory);
         if (rawChatMessages(current) !== rawChatMessages(context)) return { ok: false, reason: 'card-selection-chat-changed' };
         const found = findRawAssistantMessage(context, expectedSourceIdentity.messageId);
-        const branch = cardSelectionHistoryForChat(rawChatMessages(context).slice(0, found.index));
-        if (sourcePrefixHash !== branch.cardSelectionSourcePrefixHash) return { ok: false, reason: 'card-selection-source-stale' };
+        const binding = validateCardSelectionBasis(receiptBasis,context,found,validation.current,sourcePrefixHash);
+        if (!binding.ok) return binding;
         const handoff = validatePostProcessMutationHandoff(current, { expectedSourceIdentity }, validation);
         if (!handoff.ok) return handoff;
         const marker = { sourcePrefixHash, textHash: validation.current.originalHash, generationStartedAt: cardSelectionGenerationStartedAt(found.raw) };

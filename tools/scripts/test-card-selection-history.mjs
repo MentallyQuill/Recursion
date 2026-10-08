@@ -4,20 +4,114 @@ import { hashJson } from '../../src/core.mjs';
 
 function fixture(chat = [{ is_user: true, mes: 'Original source' }]) {
   let persisted = null;
-  const context = { chatId: 'history-chat', chat, async saveChat() { persisted = structuredClone(context.chat); } };
+  let writes = 0;
+  const context = { chatId: 'history-chat', chat, async saveChat() { writes++; persisted = structuredClone(context.chat); } };
   const host = createSillyTavernHost({ contextFactory: () => context, settingsRoot: {} });
-  return { context, host, persisted: () => persisted };
+  return { context, host, persisted: () => persisted, writes: () => writes };
 }
 async function complete(f, text = 'Completed response', cardId = 'card-one') {
   const source = await f.host.snapshot();
+  const receiptBasis = await f.host.messages.cardSelectionReceiptBasis();
   f.context.chat.push({ is_user: false, mes: text });
   const expectedSourceIdentity = await f.host.messages.postProcessSourceIdentity();
-  const request = { expectedSourceIdentity, usage: {
+  const request = { expectedSourceIdentity, receiptBasis, usage: {
     turnKeyHash: 'turn-key', sourcePrefixHash: source.cardSelectionSourcePrefixHash,
     deckId: 'deck-one', generationType: 'normal', cards: [{ cardId, categoryId: 'story', reason: 'Advance the immediate request' }]
   } };
   assert.equal((await f.host.messages.saveCardSelectionUsage(request)).ok, true);
   return request;
+}
+
+{
+  const continued = fixture([{is_user:true,mes:'Input'},{is_user:false,mes:'Initial reply'}]);
+  assert.equal(typeof continued.host.messages.cardSelectionReceiptBasis,'function','host owns the pre-generation receipt basis');
+  const before = await continued.host.snapshot();
+  const basis = await continued.host.messages.cardSelectionReceiptBasis({generationType:'continue'});
+  assert.equal(basis.targetMessageId,1);
+  assert(Object.isFrozen(basis));
+  assert.notEqual(basis.sourcePrefixHash,before.cardSelectionSourcePrefixHash,
+    'Continue excludes the mutable reply only from receipt basis');
+  assert(before.messages.some(message=>message.text === 'Initial reply'),'story source still contains the reply');
+  continued.context.chat[1].mes += ' continued';
+  let expectedSourceIdentity = await continued.host.messages.postProcessSourceIdentity();
+  const usage = {turnKeyHash:'continued-turn',deckId:'deck-one',generationType:'continue',
+    sourcePrefixHash:basis.sourcePrefixHash,cards:[{cardId:'card-one'}]};
+  assert.equal((await continued.host.messages.saveCardSelectionUsage({expectedSourceIdentity,usage,receiptBasis:basis})).ok,true,
+    'valid continuation saves its history receipt');
+  const next = await continued.host.messages.cardSelectionReceiptBasis({generationType:'continue'});
+  assert(Object.isFrozen(next.previousReceipt) && Object.isFrozen(next.previousReceipt.cards)
+    && Object.isFrozen(next.previousReceipt.cards[0]),'captured prior receipt is deeply immutable');
+  continued.context.chat[1].mes += ' again';
+  expectedSourceIdentity = await continued.host.messages.postProcessSourceIdentity();
+  assert.equal((await continued.host.messages.saveCardSelectionUsage({expectedSourceIdentity,receiptBasis:next,
+    usage:{...usage,cards:[{cardId:'card-two'}]}})).ok,true);
+  const history = (await continued.host.snapshot()).cardSelectionHistory;
+  assert.equal(history.length,1,'Continue retains one response position');
+  assert.deepEqual(history[0].cards.map(card=>card.cardId),['card-one','card-two'],'same-deck continuation preserves prior IDs');
+  assert.deepEqual((await fixture(continued.persisted()).host.snapshot()).cardSelectionHistory[0].cards.map(card=>card.cardId),
+    ['card-one','card-two'],'continued receipt survives reload');
+  const otherDeck = await continued.host.messages.cardSelectionReceiptBasis({generationType:'continue'});
+  continued.context.chat[1].mes += ' with another deck';
+  expectedSourceIdentity = await continued.host.messages.postProcessSourceIdentity();
+  assert.equal((await continued.host.messages.saveCardSelectionUsage({expectedSourceIdentity,receiptBasis:otherDeck,
+    usage:{...usage,deckId:'deck-two',cards:[{cardId:'other-card'}]}})).ok,true);
+  assert.deepEqual((await continued.host.snapshot()).cardSelectionHistory[0].cards.map(card=>card.cardId),['other-card'],
+    'another deck does not inherit prior card IDs');
+}
+// Capture the actual target layout presented by the native interceptor: a blank
+// Normal placeholder, a provisional Swipe slot, or either Regenerate layout.
+for (const generationType of ['normal','swipe','regenerate','regenerate-appended']) {
+  const mutable = fixture();
+  if (generationType !== 'regenerate-appended') mutable.context.chat.push({is_user:false,
+    mes:generationType === 'normal' ? '' : 'Prior reply'});
+  if (generationType === 'swipe') Object.assign(mutable.context.chat[1],{
+    swipe_id:1,swipes:['Prior reply'],swipe_info:[{extra:{}}]});
+  const type = generationType === 'regenerate-appended' ? 'regenerate' : generationType;
+  const receiptBasis = await mutable.host.messages.cardSelectionReceiptBasis({generationType:type});
+  assert.equal(receiptBasis.targetIndex,1);
+  assert.equal(receiptBasis.targetMessageId,['normal','regenerate-appended'].includes(generationType) ? null : 1);
+  if (generationType === 'regenerate-appended') mutable.context.chat.push({is_user:false,mes:'New reply'});
+  else mutable.context.chat[1].mes = 'New reply';
+  if (generationType === 'swipe') mutable.context.chat[1].swipes.push('New reply');
+  const expectedSourceIdentity = await mutable.host.messages.postProcessSourceIdentity();
+  assert.equal((await mutable.host.messages.saveCardSelectionUsage({expectedSourceIdentity,receiptBasis,
+    usage:{turnKeyHash:'layout-turn',deckId:'deck-one',generationType:type,sourcePrefixHash:receiptBasis.sourcePrefixHash,
+      cards:[{cardId:'layout-card'}]}})).ok,true,generationType + ' uses its captured layout');
+  assert.equal((await mutable.host.snapshot()).cardSelectionHistory.length,1);
+  if (generationType === 'swipe') assert.equal(mutable.context.chat[1].swipe_info[0].extra.recursion,undefined);
+}
+for (const generationType of ['continue','swipe']) {
+  const missing = fixture();
+  assert.deepEqual(await missing.host.messages.cardSelectionReceiptBasis({generationType}),
+    {ok:false,reason:'card-selection-target-changed'});
+  assert.equal(missing.writes(),0);
+}
+for (const change of ['source','distant-source','target-id','target-index','swipe','turn-id','deck-id','basis']) {
+  const guarded = fixture(change === 'distant-source'
+    ? Array.from({length:162},(_,index)=>({is_user:index % 2 === 0,mes:'Earlier ' + index})) : undefined);
+  if (change === 'distant-source') guarded.context.chat.push({is_user:true,mes:'Latest input'});
+  await complete(guarded);
+  const target = guarded.context.chat.at(-1);
+  Object.assign(target,{swipe_id:0,swipes:[target.mes,'Other swipe'],swipe_info:[{extra:structuredClone(target.extra)},{extra:{}}]});
+  const receiptBasis = await guarded.host.messages.cardSelectionReceiptBasis({generationType:'continue'});
+  if (change.endsWith('source')) guarded.context.chat[0].mes = 'Changed branch';
+  if (change === 'target-id') target.mesid = 900;
+  if (change === 'target-index') guarded.context.chat.push({is_user:false,mes:'Later assistant'});
+  if (change === 'swipe') { target.swipe_id = 1; target.mes = target.swipes[1]; }
+  const expectedSourceIdentity = await guarded.host.messages.postProcessSourceIdentity();
+  const writes = guarded.writes();
+  const result = await guarded.host.messages.saveCardSelectionUsage({expectedSourceIdentity,
+    receiptBasis:change === 'basis' ? undefined : receiptBasis,
+    usage:{turnKeyHash:change === 'turn-id' ? '' : 'guard-turn',deckId:change === 'deck-id' ? '' : 'deck-one',
+      generationType:'continue',sourcePrefixHash:receiptBasis.sourcePrefixHash,cards:[{cardId:'new-card'}]}});
+  const reason = change.endsWith('source') ? 'card-selection-prefix-changed'
+    : ['target-id','target-index','swipe'].includes(change) ? 'card-selection-target-changed' : 'card-selection-receipt-invalid';
+  assert.equal(result.reason,reason,change + ' has a precise guard failure');
+  assert.equal(guarded.writes(),writes,change + ' must not write metadata');
+  if (change.endsWith('source')) {
+    assert.notEqual(result.details.expectedPrefixHash,result.details.observedPrefixHash);
+    assert(!JSON.stringify(result).includes('Changed branch'),'guard details contain hashes and numeric targets only');
+  }
 }
 const f = fixture();
 assert.equal(typeof f.host.messages.saveCardSelectionUsage, 'function', 'host can persist completed-response selection usage');
@@ -60,9 +154,10 @@ assert.notEqual((await long.host.snapshot()).cardSelectionSourcePrefixHash, long
 
 const failed = fixture();
 const basis = await failed.host.snapshot();
+const failedReceiptBasis = await failed.host.messages.cardSelectionReceiptBasis();
 failed.context.chat.push({ is_user: false, mes: 'Response' });
 const identity = await failed.host.messages.postProcessSourceIdentity();
-const failRequest = { expectedSourceIdentity: identity, usage: { ...request.usage, sourcePrefixHash: basis.cardSelectionSourcePrefixHash } };
+const failRequest = { expectedSourceIdentity: identity, receiptBasis:failedReceiptBasis, usage: { ...request.usage, sourcePrefixHash: basis.cardSelectionSourcePrefixHash } };
 failed.context.saveChat = async () => { throw new Error('disk full'); };
 assert.equal((await failed.host.messages.saveCardSelectionUsage(failRequest)).ok, false);
 assert.equal(failed.context.chat[1].extra, undefined, 'failed save rolls back metadata');
@@ -96,7 +191,8 @@ for (const kind of ['editorial', 'postProcess']) {
   const oldContext = { chatId: 'before-switch', chat: [{ is_user: true, mes: 'Input' }], saveChat: async () => {} };
   let activeContext = oldContext;
   const host = createSillyTavernHost({ contextFactory: () => activeContext, settingsRoot: {} });
-  const prefix = (await host.snapshot()).cardSelectionSourcePrefixHash;
+  const receiptBasis = await host.messages.cardSelectionReceiptBasis();
+  const prefix = receiptBasis.sourcePrefixHash;
   oldContext.chat.push({ is_user: false, mes: 'Response' });
   const target = await host.messages.postProcessSourceIdentity();
   delete oldContext.chatId;
@@ -104,7 +200,7 @@ for (const kind of ['editorial', 'postProcess']) {
     activeContext = { chatId: 'after-switch', chat: [], saveChat: async () => {} };
     return 'before-switch';
   };
-  const result = await host.messages.saveCardSelectionUsage({ expectedSourceIdentity: target, usage: { ...request.usage, sourcePrefixHash: prefix } });
+  const result = await host.messages.saveCardSelectionUsage({ expectedSourceIdentity: target, receiptBasis, usage: { ...request.usage, sourcePrefixHash: prefix } });
   assert.equal(result.ok, false, 'chat switch during validation must reject stale write');
   assert.equal(oldContext.chat[1].extra, undefined);
 }
@@ -119,10 +215,11 @@ for (const kind of ['editorial', 'postProcess']) {
 {
   const active = fixture();
   const source = await active.host.snapshot();
+  const receiptBasis = await active.host.messages.cardSelectionReceiptBasis();
   active.context.chat.push({ is_user: false, mes: 'Active response', swipe_id: 1, swipes: ['Old response', 'Active response'], swipe_info: [{ extra: {} }, { extra: {} }] });
   const usage = { ...request.usage, sourcePrefixHash: source.cardSelectionSourcePrefixHash };
   const expectedSourceIdentity = await active.host.messages.postProcessSourceIdentity();
-  const results = await Promise.all([active.host.messages.saveCardSelectionUsage({ expectedSourceIdentity, usage }), active.host.messages.saveCardSelectionUsage({ expectedSourceIdentity, usage })]);
+  const results = await Promise.all([active.host.messages.saveCardSelectionUsage({ expectedSourceIdentity, usage, receiptBasis }), active.host.messages.saveCardSelectionUsage({ expectedSourceIdentity, usage, receiptBasis })]);
   assert.equal(results[0].ok, true); assert.equal(results[1].skipped, true, 'concurrent duplicate events remain idempotent');
   const saved = active.persisted()[1];
   assert.deepEqual(saved.extra.recursion.cardSelection, saved.swipe_info[1].extra.recursion.cardSelection);
@@ -133,36 +230,38 @@ for (const kind of ['editorial', 'postProcess']) {
 }
 {
   const stopped = fixture();
-  const prefix = (await stopped.host.snapshot()).cardSelectionSourcePrefixHash;
+  const receiptBasis = await stopped.host.messages.cardSelectionReceiptBasis();
+  const prefix = receiptBasis.sourcePrefixHash;
   stopped.context.chat.push({ is_user: false, mes: 'Partial response', swipes: ['Prior complete response', 'Partial response'], swipe_id: 1, swipe_info: [{ extra: {} }, { extra: {} }] });
   const expectedSourceIdentity = await stopped.host.messages.postProcessSourceIdentity();
   assert.equal(typeof stopped.host.messages.markCardSelectionIncomplete, 'function', 'incomplete responses can persist their completion state');
-  assert.equal((await stopped.host.messages.markCardSelectionIncomplete({ expectedSourceIdentity, sourcePrefixHash: 'stale' })).ok, false);
-  assert.equal((await stopped.host.messages.markCardSelectionIncomplete({ expectedSourceIdentity, sourcePrefixHash: prefix })).ok, true);
+  assert.equal((await stopped.host.messages.markCardSelectionIncomplete({ expectedSourceIdentity, receiptBasis, sourcePrefixHash: 'stale' })).ok, false);
+  assert.equal((await stopped.host.messages.markCardSelectionIncomplete({ expectedSourceIdentity, receiptBasis, sourcePrefixHash: prefix })).ok, true);
   const persisted = stopped.persisted();
   const reloaded = fixture(persisted);
   assert.equal((await reloaded.host.snapshot()).cardSelectionHistory.length, 0, 'incomplete response cannot age cooldown after reload');
   reloaded.context.chat[1].swipe_id = 0; reloaded.context.chat[1].mes = 'Prior complete response';
   assert.equal((await reloaded.host.snapshot()).cardSelectionHistory.length, 1, 'other complete swipe still counts');
-  const success = await stopped.host.messages.saveCardSelectionUsage({ expectedSourceIdentity, usage: { ...request.usage, sourcePrefixHash: prefix } });
+  const success = await stopped.host.messages.saveCardSelectionUsage({ expectedSourceIdentity, receiptBasis, usage: { ...request.usage, sourcePrefixHash: prefix } });
   assert.equal(success.ok, true);
   assert.equal((await stopped.host.snapshot()).cardSelectionHistory.length, 1, 'successful completion supersedes incomplete marker');
   assert.equal(stopped.context.chat[1].extra.recursion.cardSelectionIncomplete, undefined);
   stopped.context.saveChat = async () => { throw new Error('disk unavailable'); };
-  assert.equal((await stopped.host.messages.markCardSelectionIncomplete({ expectedSourceIdentity, sourcePrefixHash: prefix })).ok, false);
+  assert.equal((await stopped.host.messages.markCardSelectionIncomplete({ expectedSourceIdentity, receiptBasis, sourcePrefixHash: prefix })).ok, false);
   assert.equal((await stopped.host.snapshot()).cardSelectionHistory.length, 1, 'failed incomplete save rolls back');
 }
 // Native Stop emits completion before onFinishStreaming cleans the partial text
 // and reconstructs swipe metadata by cloning the root extra.
 for (const withSwipes of [false, true]) {
   const stopped = fixture();
-  const sourcePrefixHash = (await stopped.host.snapshot()).cardSelectionSourcePrefixHash;
+  const receiptBasis = await stopped.host.messages.cardSelectionReceiptBasis();
+  const sourcePrefixHash = receiptBasis.sourcePrefixHash;
   const started = new Date('2026-09-24T10:00:00.000Z');
   const message = { is_user: false, mes: 'Partial *unfinished', gen_started: started, gen_finished: new Date('2026-09-24T10:00:01.000Z') };
   if (withSwipes) Object.assign(message, { swipe_id: 0, swipes: [message.mes], swipe_info: [{ gen_started: started, extra: {} }] });
   stopped.context.chat.push(message);
   const expectedSourceIdentity = await stopped.host.messages.postProcessSourceIdentity();
-  assert.equal((await stopped.host.messages.markCardSelectionIncomplete({ expectedSourceIdentity, sourcePrefixHash })).ok, true);
+  assert.equal((await stopped.host.messages.markCardSelectionIncomplete({ expectedSourceIdentity, receiptBasis, sourcePrefixHash })).ok, true);
   message.mes = 'Partial *unfinished*';
   message.gen_finished = new Date('2026-09-24T10:00:02.000Z');
   if (withSwipes) {

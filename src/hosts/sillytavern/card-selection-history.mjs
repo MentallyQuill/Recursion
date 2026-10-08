@@ -34,6 +34,21 @@ export function normalizeCardSelectionReceipt(value = {}) {
     generationType: clean(source.generationType, 40), cards
   };
 }
+
+export function immutableCardSelectionReceipt(value) {
+  if (!value) return null;
+  const receipt = normalizeCardSelectionReceipt(value);
+  receipt.cards = Object.freeze(receipt.cards.map(card => Object.freeze(card)));
+  return Object.freeze(receipt);
+}
+
+export function mergeContinuedCardSelectionReceipt(receipt, previous) {
+  if (!previous || receipt.generationType !== 'continue' || previous.deckId !== receipt.deckId
+    || previous.sourcePrefixHash !== receipt.sourcePrefixHash) return receipt;
+  const cards = new Map(previous.cards.map(card => [card.cardId,card]));
+  for (const card of receipt.cards) cards.set(card.cardId,card);
+  return normalizeCardSelectionReceipt({...receipt,cards:[...cards.values()]});
+}
 export function validCardSelectionReceipt(message, sourcePrefixHash) {
   const value = activeExtra(message)?.recursion?.cardSelection;
   if (value?.schema !== SCHEMA) return null;
